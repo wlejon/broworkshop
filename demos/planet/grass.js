@@ -5,10 +5,12 @@
 // The field is a grid of points on the gnomonic plane of the eye's cube
 // face (as the clouds' clipmap, clouds.js), spaced about a metre (a power of
 // two of the plane's units, so the lattice holds still), produced again when
-// the eye has moved SNAP points or the sun has turned. Each point holds its
-// place, how much of the ground there grows grass (ground.bk grass_cover:
-// grassland past the beach, less rock and snow), its albedo, and how much of
-// the sun's disc it sees over the terrain.
+// the eye has moved SNAP points. Each point holds its place, how much of the
+// ground there grows grass (ground.bk grass_cover: grassland past the beach,
+// less rock and snow) and its albedo. How much of the sun's disc the ground
+// sees over the terrain is a grid SUN_STRIDE times coarser (k_grass_sun; a
+// terrain's shadow is soft over a few metres), produced the frame after the
+// field or when the sun has turned, so the two do not land in one frame.
 //
 // The blades are drawn in cells, one instance per field cell, many blades
 // each (Ghost of Tsushima's grass, Sucker Punch 2021: the GPU builds every
@@ -69,13 +71,19 @@ function cellRing(r0, r1) {
     return new Int32Array(out);
 }
 
+const SUN_STRIDE = 4;      // field points between the sun grid's
+const SUN_P = N / SUN_STRIDE + 1;
+const SUN_STEPS = 28;      // ground.bk SUN_STEPS
+
 const vertex = `buffer float u_field[];
+    buffer float u_sun[];
     buffer int u_cells[];
     uniform vec3 u_camHi;
     uniform vec3 u_camLo;
     uniform vec3 u_oHi;
     uniform vec3 u_oLo;
     uniform vec2 u_lattice;   // the field's point 0 on the world's lattice
+    uniform vec2 u_sunLattice;   // and the sun grid's
     uniform float u_time;
     uniform float u_blades;   // this cell's blades
     uniform vec2 u_band;      // the distances this node draws over: blades from r0, none past r1
@@ -88,12 +96,19 @@ const vertex = `buffer float u_field[];
         return (w >> 22u) ^ w;
     }
     float rnd(inout uint s) { s = pcg(s); return float(s) * (1.0 / 4294967296.0); }
-    void fieldPoint(int x, int y, out vec3 p, out float cover, out vec3 albedo, out float lit) {
-        int k = (y * ${P} + x) * 8;
+    void fieldPoint(int x, int y, out vec3 p, out float cover, out vec3 albedo) {
+        int k = (y * ${P} + x) * 7;
         p = vec3(u_field[k], u_field[k + 1], u_field[k + 2]);
         cover = u_field[k + 3];
         albedo = vec3(u_field[k + 4], u_field[k + 5], u_field[k + 6]);
-        lit = u_field[k + 7];
+    }
+    // The sun grid between its points, at field point f.
+    float sunAt(vec2 f) {
+        vec2 s = clamp(f / ${SUN_STRIDE}.0, vec2(0.0), vec2(${SUN_P - 1}.0 - 1e-3));
+        ivec2 i = ivec2(s);
+        vec2 t = s - vec2(i);
+        int k = i.y * ${SUN_P} + i.x;
+        return mix(mix(u_sun[k], u_sun[k + 1], t.x), mix(u_sun[k + ${SUN_P}], u_sun[k + ${SUN_P + 1}], t.x), t.y);
     }
     void userVertex(inout vec3 pos, inout vec3 normal, inout vec2 uv) {
         ivec2 cell = ivec2(u_cells[2 * gl_InstanceIndex], u_cells[2 * gl_InstanceIndex + 1]) + ivec2(${N / 2});
@@ -104,15 +119,15 @@ const vertex = `buffer float u_field[];
         vec2 at = vec2(rnd(seed), rnd(seed));
         cell = clamp(cell, ivec2(0), ivec2(${N - 1}));
         vec3 p00, p10, p01, p11, a00, a10, a01, a11;
-        float c00, c10, c01, c11, l00, l10, l01, l11;
-        fieldPoint(cell.x, cell.y, p00, c00, a00, l00);
-        fieldPoint(cell.x + 1, cell.y, p10, c10, a10, l10);
-        fieldPoint(cell.x, cell.y + 1, p01, c01, a01, l01);
-        fieldPoint(cell.x + 1, cell.y + 1, p11, c11, a11, l11);
+        float c00, c10, c01, c11;
+        fieldPoint(cell.x, cell.y, p00, c00, a00);
+        fieldPoint(cell.x + 1, cell.y, p10, c10, a10);
+        fieldPoint(cell.x, cell.y + 1, p01, c01, a01);
+        fieldPoint(cell.x + 1, cell.y + 1, p11, c11, a11);
         vec3 base = mix(mix(p00, p10, at.x), mix(p01, p11, at.x), at.y);
         float cover = mix(mix(c00, c10, at.x), mix(c01, c11, at.x), at.y);
         vec3 albedo = mix(mix(a00, a10, at.x), mix(a01, a11, at.x), at.y);
-        v_lit = mix(mix(l00, l10, at.x), mix(l01, l11, at.x), at.y);
+        v_lit = sunAt(vec2(cell) + at + (u_lattice - u_sunLattice));
         vec3 rel = (u_oHi - u_camHi) + (u_oLo - u_camLo) + base;
         vec3 up = normalize(u_oHi + (u_oLo + base));
         float d = length(rel);
@@ -191,8 +206,12 @@ const fragment = (radius) => `in vec3 v_col;
 // k_grass_field) at `octaves` of the ground's. Its nodes read the clouds'
 // field (createClouds' readers). update() each frame with the eye about the
 // planet's centre (f64), its altitude and the unit direction to the sun.
-export function createGrass(scene, radius, kernel, octaves, seed) {
-    const field = bro.kernel.createBuffer(P * P * 8 * 4);
+export function createGrass(scene, radius, module, octaves, seed) {
+    const fieldKernel = module.kernel('k_grass_field');
+    const stepsKernel = module.kernel('k_grass_sun_steps'), sunKernel = module.kernel('k_grass_sun');
+    const field = bro.kernel.createBuffer(P * P * 7 * 4);
+    const sunSteps = bro.kernel.createBuffer(SUN_P * SUN_P * SUN_STEPS * 4);
+    const sunGrid = bro.kernel.createBuffer(SUN_P * SUN_P * 4);
     const bands = [
         { blades: DENSE, band: [0, NEAR], cells: cellRing(0, NEAR) },
         { blades: SPARSE, band: [NEAR, FAR], cells: cellRing(NEAR, FAR) },
@@ -203,6 +222,7 @@ export function createGrass(scene, radius, kernel, octaves, seed) {
         node.setShader({ vertex, fragment: fragment(radius) });
         node.cullMargin = 4 * radius;   // the shader places the blades
         node.setShaderBuffer('u_field', field);
+        node.setShaderBuffer('u_sun', sunGrid);
         node.setShaderBuffer('u_cells', bro.kernel.createBuffer(cells));
         node.setShaderUniform('u_blades', blades);
         node.setShaderUniform('u_band', band);
@@ -211,7 +231,7 @@ export function createGrass(scene, radius, kernel, octaves, seed) {
         return node;
     });
 
-    let face = -1, delta = 0, ui = NaN, vi = NaN, shown = false;
+    let face = -1, delta = 0, ui = NaN, vi = NaN, shown = false, sunDue = -1;
     const sun = [0, 0, 0];
     const hi = [0, 0, 0], lo = [0, 0, 0];
 
@@ -232,30 +252,44 @@ export function createGrass(scene, radius, kernel, octaves, seed) {
         const dl = 2 ** Math.round(Math.log2(SPACING / (radius * stretch)));
         const step = SNAP * dl;
         const nu = Math.round(u / step) * SNAP, nv = Math.round(v / step) * SNAP;
+        const plane = [...frame.a, ...frame.e, ...frame.f];
+        const jumped = fc !== face || dl !== delta;
+        if (jumped || nu !== ui || nv !== vi) {
+            face = fc;
+            delta = dl;
+            ui = nu;
+            vi = nv;
+            const c = [0, 0, 0];
+            for (let k = 0; k < 3; k++) c[k] = frame.a[k] + frame.e[k] * ui * dl + frame.f[k] * vi * dl;
+            const len = Math.hypot(c[0], c[1], c[2]);
+            const origin = c.map((x) => x / len * radius);
+            fieldKernel.dispatch([P, P], field, ...plane, (ui - N / 2) * dl, (vi - N / 2) * dl, dl,
+                                 ...origin, radius, octaves, seed);
+            for (let k = 0; k < 3; k++) {
+                hi[k] = Math.fround(origin[k]);
+                lo[k] = origin[k] - hi[k];
+            }
+            for (const n of nodes) {
+                n.setShaderUniform('u_oHi', hi);
+                n.setShaderUniform('u_oLo', lo);
+                n.setShaderUniform('u_lattice', [ui - N / 2, vi - N / 2]);
+            }
+            // The sun grid follows a frame later, read about its own lattice
+            // meanwhile, so the two dispatches do not land in one frame;
+            // unless the field changed face or spacing and the old grid
+            // means nothing.
+            sunDue = jumped ? 0 : 1;
+        }
         const turned = sun[0] * toSun[0] + sun[1] * toSun[1] + sun[2] * toSun[2] < 0.999999;
-        if (fc === face && dl === delta && nu === ui && nv === vi && !turned) return;
-        face = fc;
-        delta = dl;
-        ui = nu;
-        vi = nv;
+        if (turned && sunDue < 0) sunDue = 0;
+        if (sunDue > 0) { sunDue--; return; }
+        if (sunDue < 0) return;
+        sunDue = -1;
         sun.splice(0, 3, ...toSun);
-        const c = [0, 0, 0];
-        for (let k = 0; k < 3; k++) c[k] = frame.a[k] + frame.e[k] * ui * dl + frame.f[k] * vi * dl;
-        const len = Math.hypot(c[0], c[1], c[2]);
-        const origin = c.map((x) => x / len * radius);
-        const u0 = (ui - N / 2) * dl, v0 = (vi - N / 2) * dl;
-        kernel.dispatch([P, P], field,
-            frame.a[0], frame.a[1], frame.a[2], frame.e[0], frame.e[1], frame.e[2], frame.f[0], frame.f[1], frame.f[2],
-            u0, v0, dl, origin[0], origin[1], origin[2], toSun[0], toSun[1], toSun[2], radius, octaves, seed);
-        for (let k = 0; k < 3; k++) {
-            hi[k] = Math.fround(origin[k]);
-            lo[k] = origin[k] - hi[k];
-        }
-        for (const n of nodes) {
-            n.setShaderUniform('u_oHi', hi);
-            n.setShaderUniform('u_oLo', lo);
-            n.setShaderUniform('u_lattice', [ui - N / 2, vi - N / 2]);
-        }
+        const sunArgs = [...plane, (ui - N / 2) * dl, (vi - N / 2) * dl, dl * SUN_STRIDE, ...toSun, radius, octaves, seed];
+        stepsKernel.dispatch([SUN_P, SUN_P, SUN_STEPS], sunSteps, ...sunArgs);
+        sunKernel.dispatch([SUN_P, SUN_P], sunSteps, sunGrid, ...sunArgs);
+        for (const n of nodes) n.setShaderUniform('u_sunLattice', [ui - N / 2, vi - N / 2]);
     }
 
     return {
