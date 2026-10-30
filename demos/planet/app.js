@@ -559,6 +559,25 @@ const fragment = `buffer uint u_det[];
         float hiC = max(col.r, max(col.g, col.b)), loC = min(col.r, min(col.g, col.b));
         float rock = (1.0 - smoothstep(0.15, 0.45, (hiC - loC) / max(hiC, 1e-3))) * (1.0 - smoothstep(0.35, 0.6, hiC));
         float lumGain = mix(1.0, ROCK_LUM, rock), reliefGain = mix(1.0, ROCK_RELIEF, rock);
+        // Coarser, the albedo's octaves the pixel resolves and its texel
+        // does not (each at the pixel's weight less the texel's, by the same
+        // rule, so what the texel holds is not counted twice): a texel spans
+        // up to a few pixels far off, and its variation would end there.
+        // Octaves of a metre and up repeat over v_swell's 1024 m.
+        float texel = footprint / max(max(length(dFdx(v_tex)), length(dFdy(v_tex))), 1e-6);
+        float coarse = min(exp2(ceil(log2(2.0 * texel))), 32.0);
+        for (int k = 0; k < 8 && coarse > wavelength; k++) {
+            float w = clamp(coarse / footprint * 0.5 - 1.0, 0.0, 1.0) - clamp(coarse / texel * 0.5 - 1.0, 0.0, 1.0);
+            if (w > 0.0) {
+                bool far = coarse >= 1.0;
+                vec3 x = (far ? v_swell : v_q) / coarse;
+                float g = perlinGrad(x, int((far ? ${SWELL_PERIOD}.0 : ${DETAIL_PERIOD}.0) / coarse), 41 + k).x;
+                float a = VARY_LUM * lumGain * w;
+                lum += g * a;
+                lumVar += a * a * PERLIN_VAR;
+            }
+            coarse *= 0.5;
+        }
         int cells = int(${DETAIL_PERIOD}.0 / wavelength);
         for (int k = 0; k < 6; k++) {
             float w = clamp(wavelength / footprint * 0.5 - 1.0, 0.0, 1.0);
