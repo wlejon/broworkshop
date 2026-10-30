@@ -187,6 +187,7 @@ const vertex = `buffer float u_field[];
     uniform vec3 u_lattice;     // the field's site 0 on the world's lattice, and its face
     uniform vec2 u_sunLattice;  // the sun grid's point 0 on it
     uniform float u_time;
+    uniform vec3 u_toSun;
     uniform vec2 u_band;        // the distances this node draws over
     uniform vec2 u_shape;       // tiers, rim vertices
     out vec3 v_col;
@@ -299,6 +300,19 @@ const vertex = `buffer float u_field[];
         v_col = col;
         v_ao = ao;
         v_lit = sunAt(vec2(site) + vec2(0.5) + (u_lattice.xy - u_sunLattice));
+        // The neighbours' crowns between this point and the sun: the gap
+        // probability of a canopy of their cover (the share of the 8 sites
+        // about it holding a tree, times the share a crown hides from above,
+        // app.js TREE_CROWNS) over the depth of canopy above the point, along
+        // the sun's slant (Nilson 1971, as the ground's crowns from afar).
+        float around = 0.0;
+        for (int j = -1; j <= 1; j++)
+            for (int i = -1; i <= 1; i++) {
+                ivec2 o = clamp(site + ivec2(i, j), ivec2(0), ivec2(${N - 1}));
+                around += (i != 0 || j != 0) && u_field[(o.y * ${N} + o.x) * 7 + 3] > 0.0 ? 1.0 : 0.0;
+            }
+        float canopy = clamp((H - hgt) / max(H - foot, 1e-3), 0.0, 1.0);
+        v_lit *= pow(1.0 - 0.55 * around / 8.0, canopy / max(dot(u_toSun, up), 0.05));
         v_branch = branch;
         v_seed = rnd(seed);
     }`;
@@ -591,6 +605,7 @@ export function createTrees(scene, radius, module, sunModule, octaves, seed, net
                 n.setShaderUniform('u_camLo', camLo);
                 n.setShaderUniform('u_camFwd', forward);
                 n.setShaderUniform('u_time', time);
+                n.setShaderUniform('u_toSun', toSun);
             }
         },
     };
