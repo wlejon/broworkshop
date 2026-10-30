@@ -17,21 +17,21 @@ fn plane_dir(ax: f64, ay: f64, az: f64, ex: f64, ey: f64, ez: f64, fx: f64, fy: 
 fn k_sun_steps(g: grid<3>, steps: write_store<f32, 1>,
                ax: f64, ay: f64, az: f64, ex: f64, ey: f64, ez: f64, fx: f64, fy: f64, fz: f64,
                u0: f64, v0: f64, delta: f64, sx: f64, sy: f64, sz: f64, radius: f64, octaves: f64, seed: i32,
-               z0: i32) {
+               z0: i32, net: read_store<f32, 1>) {
     let dir = plane_dir(ax, ay, az, ex, ey, ez, fx, fy, fz,
                         u0 + (g.x() as f64) * delta, v0 + (g.y() as f64) * delta);
     let k = z0 + g.z();
     steps[(k * g.height() + g.y()) * g.width() + g.x()] =
-        sun_step_height(dir, normalize(vec3<f64>(sx, sy, sz)), k, radius, octaves, seed);
+        sun_step_height(dir, normalize(vec3<f64>(sx, sy, sz)), k, radius, octaves, seed, net);
 }
 
 @kernel @grid(2)
 fn k_sun(g: grid<2>, steps: read_store<f32, 1>, out: write_store<f32, 1>,
          ax: f64, ay: f64, az: f64, ex: f64, ey: f64, ez: f64, fx: f64, fy: f64, fz: f64,
-         u0: f64, v0: f64, delta: f64, sx: f64, sy: f64, sz: f64, radius: f64, octaves: f64, seed: i32) {
+         u0: f64, v0: f64, delta: f64, sx: f64, sy: f64, sz: f64, radius: f64, octaves: f64, seed: i32, net: read_store<f32, 1>) {
     let dir = plane_dir(ax, ay, az, ex, ey, ez, fx, fy, fz,
                         u0 + (g.x() as f64) * delta, v0 + (g.y() as f64) * delta);
-    let h = terrain(dir, radius, octaves, seed) as f32;
+    let h = terrain(dir, radius, octaves, seed, net) as f32;
     let points = g.width() * g.height();
     let i = g.y() * g.width() + g.x();
     var highest: f32 = -1.57;

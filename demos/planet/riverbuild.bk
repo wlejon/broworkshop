@@ -1,0 +1,161 @@
+// Building the drainage network (rivers.bk): the points' heights, the level
+// water stands at over each, their downstream neighbours and their
+// catchments, into the network's records. Each kernel runs over every
+// point, as grid (i, j, face).
+from planet::ground import terrain_base;
+from planet::rivers import RIV_N, RIV_REC, point_index, point_cell, point_dir, cell_next;
+
+// The fall from a lake's point to the next toward its outlet (m): a lake's
+// level is all but flat, and still drains one way.
+const LAKE_FALL: f32 = 0.05;
+// The deepest a lake stands over its deepest ground (m).
+const LAKE_MAX: f32 = 12.0;
+
+// Each point's height: the ground before the water cuts it, at the octaves
+// the lattice resolves; no downstream yet, a catchment of itself. And the
+// fill's start: the sea at its own height, land as high as can be.
+@kernel @grid(3)
+fn k_river_height(g: grid<3>, net: write_store<f32, 1>, level: write_store<f32, 1>,
+                  radius: f64, octaves: f64, seed: i32) {
+    let c = vec3<i32>(g.z(), g.x(), g.y());
+    let p = point_index(c);
+    let k = p * RIV_REC;
+    let h = terrain_base(point_dir(c, seed), radius, octaves, seed) as f32;
+    net[k] = h;
+    net[k + 1] = -1.0;
+    net[k + 2] = 1.0;
+    net[k + 3] = h;
+    level[p] = h <= 0.0 ? h : 1.0e9;
+}
+
+// One step of the fill (Planchon and Darboux 2001): a point's level falls
+// to its ground, or to LAKE_FALL over its lowest neighbour's level where
+// that is higher. From the sea inward the levels settle to the ground where
+// it drains and to the spill where it does not, a chain n points long in n
+// steps.
+@kernel @grid(3)
+fn k_river_fill(g: grid<3>, net: read_store<f32, 1>, src: read_store<f32, 1>, dst: write_store<f32, 1>) {
+    let c = vec3<i32>(g.z(), g.x(), g.y());
+    let p = point_index(c);
+    let h = net[p * RIV_REC];
+    var w = src[p];
+    if (w > h) {
+        var lowest: f32 = 1.0e9;
+        for (var dj: i32 = -1; dj <= 1; dj += 1) {
+            for (var di: i32 = -1; di <= 1; di += 1) {
+                if (di != 0 || dj != 0) {
+                    lowest = min(lowest, src[point_index(cell_next(c, di, dj))]);
+                }
+            }
+        }
+        w = min(w, max(h, lowest + LAKE_FALL));
+    }
+    dst[p] = w;
+}
+
+// Each point's level into its record, and its downstream neighbour: of its
+// 8, the one its level falls to most steeply; none at the sea, or where the
+// fill has not reached.
+@kernel @grid(3)
+fn k_river_down(g: grid<3>, net: rw_store<f32, 1>, level: read_store<f32, 1>, seed: i32) {
+    let c = vec3<i32>(g.z(), g.x(), g.y());
+    let p = point_index(c);
+    let k = p * RIV_REC;
+    let w = level[p];
+    net[k + 3] = w > 1.0e8 ? net[k] : w;
+    if (net[k] <= 0.0 || w > 1.0e8) { return; }
+    let dir = point_dir(c, seed);
+    var best: f32 = 0.0;
+    var down: i32 = -1;
+    for (var dj: i32 = -1; dj <= 1; dj += 1) {
+        for (var di: i32 = -1; di <= 1; di += 1) {
+            if (di != 0 || dj != 0) {
+                let nc = cell_next(c, di, dj);
+                let n = point_index(nc);
+                let fall = w - level[n];
+                if (fall > 0.0) {
+                    let slope = fall / (length(point_dir(nc, seed) - dir) as f32);
+                    if (slope > best) {
+                        best = slope;
+                        down = n;
+                    }
+                }
+            }
+        }
+    }
+    net[k + 1] = down as f32;
+}
+
+// One step of the catchments: each point's, itself and the catchments of
+// the neighbours that drain into it. A chain n points long settles in n
+// steps.
+@kernel @grid(3)
+fn k_river_catchment(g: grid<3>, net: read_store<f32, 1>, src: read_store<f32, 1>, dst: write_store<f32, 1>) {
+    let c = vec3<i32>(g.z(), g.x(), g.y());
+    let k = point_index(c);
+    var sum: f32 = 1.0;
+    for (var dj: i32 = -1; dj <= 1; dj += 1) {
+        for (var di: i32 = -1; di <= 1; di += 1) {
+            if (di != 0 || dj != 0) {
+                let n = point_index(cell_next(c, di, dj));
+                if ((net[n * RIV_REC + 1] as i32) == k) { sum += src[n]; }
+            }
+        }
+    }
+    dst[k] = sum;
+}
+
+// The start of the breach: each point's level no more than LAKE_MAX over its
+// ground.
+@kernel @grid(3)
+fn k_river_breach_start(g: grid<3>, net: read_store<f32, 1>, dst: write_store<f32, 1>) {
+    let k = point_index(vec3<i32>(g.z(), g.x(), g.y()));
+    dst[k] = min(net[k * RIV_REC + 3], net[k * RIV_REC] + LAKE_MAX);
+}
+
+// One step of the breach (Lindsay 2016, filling and breaching together): a
+// point's level is no higher than the levels of the points draining into
+// it, so water falls all along its way to the sea. A hollow's lake stands
+// no more than LAKE_MAX over its deepest ground, and its outlet's channel
+// cuts through the spill at that level, where filling it to the spill would
+// drown a basin; a chain n points long settles in n steps.
+@kernel @grid(3)
+fn k_river_breach(g: grid<3>, net: read_store<f32, 1>, src: read_store<f32, 1>, dst: write_store<f32, 1>) {
+    let c = vec3<i32>(g.z(), g.x(), g.y());
+    let k = point_index(c);
+    var w = src[k];
+    for (var dj: i32 = -1; dj <= 1; dj += 1) {
+        for (var di: i32 = -1; di <= 1; di += 1) {
+            if (di != 0 || dj != 0) {
+                let n = point_index(cell_next(c, di, dj));
+                if ((net[n * RIV_REC + 1] as i32) == k) { w = min(w, src[n]); }
+            }
+        }
+    }
+    dst[k] = w;
+}
+
+// One step of a lake's fall to its breached outlet: a point the fill put
+// under water stands LAKE_FALL over the point it drains to, where that is
+// lower than it stands now, but no lower than its ground. A
+// lake's level is its outlet's, back up its chains, a chain n points long
+// in n steps; levels still fall all along each chain.
+@kernel @grid(3)
+fn k_river_lake(g: grid<3>, net: read_store<f32, 1>, src: read_store<f32, 1>, dst: write_store<f32, 1>) {
+    let k = point_index(vec3<i32>(g.z(), g.x(), g.y()));
+    let h = net[k * RIV_REC];
+    let down = net[k * RIV_REC + 1] as i32;
+    var w = src[k];
+    if (net[k * RIV_REC + 3] > h && down >= 0) {
+        w = min(w, max(h, src[down] + LAKE_FALL));
+    }
+    dst[k] = w;
+}
+
+// The catchments and the breached levels into the records.
+@kernel @grid(3)
+fn k_river_store(g: grid<3>, net: rw_store<f32, 1>, catchment: read_store<f32, 1>, level: read_store<f32, 1>) {
+    let k = point_index(vec3<i32>(g.z(), g.x(), g.y()));
+    net[k * RIV_REC + 2] = catchment[k];
+    net[k * RIV_REC + 3] = level[k];
+}

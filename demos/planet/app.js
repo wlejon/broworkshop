@@ -10,6 +10,7 @@ import { bindControl, logMap } from "/lib/kit/params.js";
 import { cloudGlsl, createClouds } from "/app/clouds.js";
 import { createGrass } from "/app/grass.js";
 import { createTrees } from "/app/trees.js";
+import { createRivers } from "/app/rivers.js";
 
 boot();
 
@@ -63,7 +64,9 @@ const WAVES = (() => {
 const glslFloat = (x) => (Number.isInteger(x) ? x.toFixed(1) : String(x));
 
 const readApp = (path) => fs.readFileSync(bro.resolvePath('/app/' + path), 'utf-8');
-const mod = bro.kernel.compile(readApp('planet.bk'), { file: 'planet.bk', modules: { 'planet::ground': readApp('ground.bk') } });
+const MODULES = { 'planet::ground': readApp('ground.bk'), 'planet::rivers': readApp('rivers.bk') };
+const mod = bro.kernel.compile(readApp('planet.bk'), { file: 'planet.bk', modules: MODULES });
+const rivers = createRivers(bro.kernel.compile(readApp('riverbuild.bk'), { file: 'riverbuild.bk', modules: MODULES }), RADIUS, SEED);
 const kTile = mod.kernel('k_tile');
 const kHeight = mod.kernel('k_height');
 const kRange = mod.kernel('k_range');
@@ -130,12 +133,12 @@ function makeCache(pixelsPerTexel) {
         // batch's cells together, where a tile's own were a few warps.
         produce(batch) {
             const grid = [CELLS, CELLS, batch.count], pos = this.layer('position');
-            kTile.dispatch(grid, batch.table, pos, span, RADIUS, BORDER, 1 / TILE, TRUTH, SEED);
-            kHorizonHeights.dispatch([HZ_GRID, HZ_GRID, batch.count], batch.table, horizonHeights, RADIUS, 1 / TILE, SEED);
+            kTile.dispatch(grid, batch.table, pos, span, RADIUS, BORDER, 1 / TILE, TRUTH, SEED, rivers.net);
+            kHorizonHeights.dispatch([HZ_GRID, HZ_GRID, batch.count], batch.table, horizonHeights, RADIUS, 1 / TILE, SEED, rivers.net);
             kHorizon.dispatch([HZ, HZ, batch.count], batch.table, horizonHeights, this.layer('horizon'), HZ_GRID, RADIUS, BORDER, 1 / TILE);
             const texels = [TEXELS, TEXELS, batch.count];
-            kDetailHeight.dispatch(texels, batch.table, texelHeights, RADIUS, BORDER, 1 / TILE, DETAIL, SEED);
-            kDetail.dispatch(texels, batch.table, texelHeights, this.layer('detail'), RADIUS, BORDER, 1 / TILE, DETAIL, TRUTH, SEED);
+            kDetailHeight.dispatch(texels, batch.table, texelHeights, RADIUS, BORDER, 1 / TILE, DETAIL, SEED, rivers.net);
+            kDetail.dispatch(texels, batch.table, texelHeights, this.layer('detail'), RADIUS, BORDER, 1 / TILE, DETAIL, TRUTH, SEED, rivers.net);
             kRange.dispatch([batch.count], batch.table, span, this.ranges, 1 / TILE, MAX_HEIGHT);
         },
     });
@@ -503,12 +506,12 @@ ground = scene.createInstancedMesh({ mesh: patchMesh(), color: [1, 1, 1], castsS
 ground.setShader({ vertex, fragment });
 ground.cullMargin = 4 * RADIUS;   // the shader places tiles; the cache culls them
 makeCache(4);
-const cloudMod = bro.kernel.compile(readApp('clouds.bk'), { file: 'clouds.bk', modules: { 'planet::ground': readApp('ground.bk') } });
-const sunMod = bro.kernel.compile(readApp('sun.bk'), { file: 'sun.bk', modules: { 'planet::ground': readApp('ground.bk') } });
-const grassMod = bro.kernel.compile(readApp('grass.bk'), { file: 'grass.bk', modules: { 'planet::ground': readApp('ground.bk') } });
-const grass = createGrass(scene, RADIUS, grassMod, sunMod, TRUTH, SEED);
-const treeMod = bro.kernel.compile(readApp('trees.bk'), { file: 'trees.bk', modules: { 'planet::ground': readApp('ground.bk') } });
-const trees = createTrees(scene, RADIUS, treeMod, sunMod, TRUTH, SEED);
+const cloudMod = bro.kernel.compile(readApp('clouds.bk'), { file: 'clouds.bk', modules: MODULES });
+const sunMod = bro.kernel.compile(readApp('sun.bk'), { file: 'sun.bk', modules: MODULES });
+const grassMod = bro.kernel.compile(readApp('grass.bk'), { file: 'grass.bk', modules: MODULES });
+const grass = createGrass(scene, RADIUS, grassMod, sunMod, TRUTH, SEED, rivers.net);
+const treeMod = bro.kernel.compile(readApp('trees.bk'), { file: 'trees.bk', modules: MODULES });
+const trees = createTrees(scene, RADIUS, treeMod, sunMod, TRUTH, SEED, rivers.net);
 const clouds = createClouds(scene, RADIUS, cloudMod.kernel('k_cloud_level'), [ground, ...grass.nodes, ...trees.nodes]);
 
 // ── Camera: doubles about the planet's center ───────────────────────────────
@@ -523,7 +526,7 @@ const v3 = {
     cross: (a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]],
     norm: (a) => { const l = Math.hypot(a[0], a[1], a[2]) || 1; return [a[0] / l, a[1] / l, a[2] / l]; },
 };
-const groundHeight = (dir) => kHeight.eval(dir[0], dir[1], dir[2], RADIUS, 18, SEED);
+const groundHeight = (dir) => kHeight.run(1, dir[0], dir[1], dir[2], RADIUS, 18, SEED, rivers.cpu)[0];
 
 function cameraFrame() {
     const up = [Math.cos(cam.lat) * Math.sin(cam.lon), Math.sin(cam.lat), Math.cos(cam.lat) * Math.cos(cam.lon)];
@@ -648,4 +651,4 @@ function loop() {
 requestAnimationFrame(loop);
 
 // For tests and tools.
-globalThis.planet = { cam, setHour, get cache() { return cache; }, clouds, grass, trees, groundHeight, get stats() { return lastStats; }, get lastView() { return lastView; }, frame };
+globalThis.planet = { cam, setHour, get cache() { return cache; }, clouds, grass, trees, rivers, groundHeight, get stats() { return lastStats; }, get lastView() { return lastView; }, frame };

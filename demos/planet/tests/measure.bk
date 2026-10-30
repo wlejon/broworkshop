@@ -3,17 +3,17 @@
 from planet::ground import cell_height, spread, expected_surface, gradient, variation, terrain, octaves_for;
 
 // The cell's height.
-@kernel
-fn k_cell(cx: f64, cy: f64, cz: f64, ux: f64, uy: f64, uz: f64, vx: f64, vy: f64, vz: f64,
-          cell: f64, radius: f64, octaves: f64, seed: i32) -> f64 {
+@kernel @grid(1)
+fn k_cell(g: grid<1>, cx: f64, cy: f64, cz: f64, ux: f64, uy: f64, uz: f64, vx: f64, vy: f64, vz: f64,
+          cell: f64, radius: f64, octaves: f64, seed: i32, net: read_store<f32, 1>) -> f64 {
     return cell_height(vec3<f64>(cx, cy, cz), vec3<f64>(ux, uy, uz), vec3<f64>(vx, vy, vz),
-                       0.0, 0.0, cell, radius, octaves, seed);
+                       0.0, 0.0, cell, radius, octaves, seed, net);
 }
 
 // The cell's surface point at (s, t) of the frame.
 fn point(c: vec3<f64>, u: vec3<f64>, v: vec3<f64>, s: f64, t: f64, cell: f64,
-         radius: f64, octaves: f64, seed: i32) -> vec3<f64> {
-    let h = cell_height(c, u, v, s, t, cell, radius, octaves, seed);
+         radius: f64, octaves: f64, seed: i32, net: read_store<f32, 1>) -> vec3<f64> {
+    let h = cell_height(c, u, v, s, t, cell, radius, octaves, seed, net);
     return normalize(c + u * s + v * t) * (radius + max(h, 0.0));
 }
 
@@ -23,16 +23,16 @@ fn point(c: vec3<f64>, u: vec3<f64>, v: vec3<f64>, s: f64, t: f64, cell: f64,
 // the variation's luminance factor alone (it refines on its own). `naive` 1
 // drops the spreads, the colour of the cell's mean instead of the mean
 // colour under it.
-@kernel
-fn k_cell_color(cx: f64, cy: f64, cz: f64, ux: f64, uy: f64, uz: f64, vx: f64, vy: f64, vz: f64,
-                cell: f64, radius: f64, octaves: f64, truth: f32, seed: i32, ch: i32, naive: i32) -> f64 {
+@kernel @grid(1)
+fn k_cell_color(g: grid<1>, cx: f64, cy: f64, cz: f64, ux: f64, uy: f64, uz: f64, vx: f64, vy: f64, vz: f64,
+                cell: f64, radius: f64, octaves: f64, truth: f32, seed: i32, ch: i32, naive: i32, net: read_store<f32, 1>) -> f64 {
     let c = vec3<f64>(cx, cy, cz);
     let u = vec3<f64>(ux, uy, uz);
     let v = vec3<f64>(vx, vy, vz);
-    let h = cell_height(c, u, v, 0.0, 0.0, cell, radius, octaves, seed);
-    let o = point(c, u, v, 0.0, 0.0, cell, radius, octaves, seed);
-    let du = point(c, u, v, cell, 0.0, cell, radius, octaves, seed) - point(c, u, v, -cell, 0.0, cell, radius, octaves, seed);
-    let dv = point(c, u, v, 0.0, cell, cell, radius, octaves, seed) - point(c, u, v, 0.0, -cell, cell, radius, octaves, seed);
+    let h = cell_height(c, u, v, 0.0, 0.0, cell, radius, octaves, seed, net);
+    let o = point(c, u, v, 0.0, 0.0, cell, radius, octaves, seed, net);
+    let du = point(c, u, v, cell, 0.0, cell, radius, octaves, seed, net) - point(c, u, v, -cell, 0.0, cell, radius, octaves, seed, net);
+    let dv = point(c, u, v, 0.0, cell, cell, radius, octaves, seed, net) - point(c, u, v, 0.0, -cell, cell, radius, octaves, seed, net);
     let up = normalize(o);
     let grad = gradient(vec3<f32>(du.x as f32, du.y as f32, du.z as f32),
                         vec3<f32>(dv.x as f32, dv.y as f32, dv.z as f32),
@@ -52,19 +52,19 @@ fn k_cell_color(cx: f64, cy: f64, cz: f64, ux: f64, uy: f64, uz: f64, vx: f64, v
 // tangent `t`: the ground marched from a cell out to `reach` metres, steps 5%
 // apart, each at the octaves its spacing resolves and at most `octaves`, seen
 // from the point's own height at `octaves`. The horizon layer's reference.
-@kernel
-fn k_horizon_truth(x: f64, y: f64, z: f64, tx: f64, ty: f64, tz: f64, cell: f64, reach: f64, ratio: f64, filter: f64,
-                   radius: f64, octaves: f64, seed: i32) -> f64 {
+@kernel @grid(1)
+fn k_horizon_truth(g: grid<1>, x: f64, y: f64, z: f64, tx: f64, ty: f64, tz: f64, cell: f64, reach: f64, ratio: f64, filter: f64,
+                   radius: f64, octaves: f64, seed: i32, net: read_store<f32, 1>) -> f64 {
     let dir = normalize(vec3<f64>(x, y, z));
     let t = normalize(vec3<f64>(tx, ty, tz));
-    let h = max(terrain(dir, radius, octaves, seed), 0.0);
+    let h = max(terrain(dir, radius, octaves, seed, net), 0.0);
     var best: f64 = -1.0;
     var d = cell;
     while (d < reach) {
         let ang = d / radius;
         let q = normalize(dir * cos(ang) + t * sin(ang));
         let oct = min(octaves_for(d * filter, 1.0), octaves);
-        let hq = max(terrain(q, radius, oct, seed), 0.0);
+        let hq = max(terrain(q, radius, oct, seed, net), 0.0);
         best = max(best, dot(normalize(q * (radius + hq) - dir * (radius + h)), dir));
         d = d * ratio;
     }

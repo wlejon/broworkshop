@@ -3,7 +3,8 @@
 // grid z is the tile's record in the batch table (tiles-api.js), whose slot
 // says where in the pools, viewed as [cells, cells, capacity], it goes.
 from planet::ground import terrain, cell_height, spread, expected_surface, expected_cover, gradient, variation,
-                           octaves_for, range_margin;
+                           octaves_for, range_margin, fresh_water;
+from planet::rivers import water_near, water_share;
 
 // A batch table record's float64s.
 const RECORD: i32 = 24;
@@ -25,7 +26,7 @@ fn record_vec(table: read_store<f64, 1>, at: i32) -> vec3<f64> {
 // their bits).
 @kernel @grid(3)
 fn k_tile(g: grid<3>, table: read_store<f64, 1>, out: write_store<vec4<f32>, 3>, span: rw_store<i32, 1>,
-          radius: f64, border: f64, inv_size: f64, truth: f64, seed: i32) {
+          radius: f64, border: f64, inv_size: f64, truth: f64, seed: i32, net: read_store<f32, 1>) {
     let r = g.z() * RECORD;
     let slot = table[r] as i32;
     let c = record_vec(table, r + 8);
@@ -35,7 +36,7 @@ fn k_tile(g: grid<3>, table: read_store<f64, 1>, out: write_store<vec4<f32>, 3>,
     let s = (g.x() as f64 - border) * inv_size;
     let t = (g.y() as f64 - border) * inv_size;
     let dir = normalize(c + u * s + v * t);
-    let h = terrain(dir, radius, truth, seed);
+    let h = terrain(dir, radius, truth, seed, net);
     let p = dir * (radius + max(h, 0.0)) - center;
     out[g.x(), g.y(), slot] = vec4<f32>(p.x as f32, p.y as f32, p.z as f32, h as f32);
     let bits = bitcast<i32>(max(h as f32, 0.0));
@@ -66,7 +67,7 @@ fn texel_dir(table: read_store<f64, 1>, r: i32, tx: i32, ty: i32, border: f64, i
 // tiles one after another, (n * d)^2 each.
 @kernel @grid(3)
 fn k_detail_height(g: grid<3>, table: read_store<f64, 1>, heights: write_store<f32, 1>,
-                   radius: f64, border: f64, inv_size: f64, d: f64, seed: i32) {
+                   radius: f64, border: f64, inv_size: f64, d: f64, seed: i32, net: read_store<f32, 1>) {
     let r = g.z() * RECORD;
     let w = g.width();
     let tx = g.x();
@@ -78,7 +79,7 @@ fn k_detail_height(g: grid<3>, table: read_store<f64, 1>, heights: write_store<f
     let s = ((tx as f64 + 0.5) / d - 0.5 - border) * inv_size;
     let t = ((ty as f64 + 0.5) / d - 0.5 - border) * inv_size;
     let octaves = octaves_for(table[r + 20], cell);
-    heights[(g.z() * w + ty) * w + tx] = cell_height(c, u, v, s, t, cell, radius, octaves, seed) as f32;
+    heights[(g.z() * w + ty) * w + tx] = cell_height(c, u, v, s, t, cell, radius, octaves, seed, net) as f32;
 }
 
 // Texel (tx, ty)'s point of the mean surface, relative to the tile's center.
@@ -103,7 +104,7 @@ fn unorm(x: f32, bits: i32) -> i32 {
 // normal.
 @kernel @grid(3)
 fn k_detail(g: grid<3>, table: read_store<f64, 1>, heights: read_store<f32, 1>, out: write_store<i32, 1>,
-            radius: f64, border: f64, inv_size: f64, d: f64, truth: f32, seed: i32) {
+            radius: f64, border: f64, inv_size: f64, d: f64, truth: f32, seed: i32, net: read_store<f32, 1>) {
     let r = g.z() * RECORD;
     let z = g.z();
     let w = g.width();
@@ -122,8 +123,14 @@ fn k_detail(g: grid<3>, table: read_store<f64, 1>, heights: read_store<f32, 1>, 
     let h = heights[(z * w + ty) * w + tx];
     // du and dv span two texels.
     let grad = gradient(du, dv, up);
-    let col = expected_surface(h, grad, length(du) * 0.5, sp.x, sp.y, variation(dir, radius, octaves, seed));
-    let cover = expected_cover(h, grad, length(du) * 0.5, sp.x, sp.y);
+    var col = expected_surface(h, grad, length(du) * 0.5, sp.x, sp.y, variation(dir, radius, octaves, seed));
+    // The rivers and lakes: the share of the texel under their water, a
+    // river a metre or two deep over its bed, a lake as deep as the lattice
+    // holds it.
+    let wn = water_near(dir, radius, length(du) * 0.5, net, seed);
+    let water = water_share(h, wn);
+    col = vec4<f32>(mix(col.xyz, fresh_water(max(wn.w, 1.5)), water), max(col.w, water));
+    let cover = expected_cover(h, grad, length(du) * 0.5, sp.x, sp.y) * (1.0 - water);
     var n = normalize(cross(du, dv));
     if (dot(n, up) < 0.0) { n = -n; }
     // Octahedral: the normal onto the octahedron |x| + |y| + |z| = 1, its
@@ -183,13 +190,13 @@ fn cell_dir(table: read_store<f64, 1>, r: i32, cx: f64, cy: f64, inv_size: f64) 
 // at cell (x, y) - HZ_MARGIN, the surface at the tile's octaves plus one.
 @kernel @grid(3)
 fn k_horizon_heights(g: grid<3>, table: read_store<f64, 1>, heights: write_store<f32, 1>,
-                     radius: f64, inv_size: f64, seed: i32) {
+                     radius: f64, inv_size: f64, seed: i32, net: read_store<f32, 1>) {
     let r = g.z() * RECORD;
     let e = g.width();
     let m = HZ_MARGIN as f64;
     let dir = cell_dir(table, r, g.x() as f64 - m, g.y() as f64 - m, inv_size);
     let octaves = octaves_for(table[r + 20], inv_size) + 2.0;
-    heights[(g.z() * e + g.y()) * e + g.x()] = max(terrain(dir, radius, octaves, seed), 0.0) as f32;
+    heights[(g.z() * e + g.y()) * e + g.x()] = max(terrain(dir, radius, octaves, seed, net), 0.0) as f32;
 }
 
 // The height grid bilinearly at cell coordinate (cx, cy).
@@ -338,8 +345,9 @@ fn k_range(g: grid<1>, table: read_store<f64, 1>, span: rw_store<i32, 1>, ranges
     ranges[2 * slot + 1] = min(hi + margin, top);
 }
 
-// The ground height under a point, for the camera (CPU eval).
-@kernel
-fn k_height(x: f64, y: f64, z: f64, radius: f64, octaves: f64, seed: i32) -> f64 {
-    return max(terrain(normalize(vec3<f64>(x, y, z)), radius, octaves, seed), 0.0);
+// The ground height under a point, for the camera (on the CPU: run over a
+// grid of one).
+@kernel @grid(1)
+fn k_height(g: grid<1>, x: f64, y: f64, z: f64, radius: f64, octaves: f64, seed: i32, net: read_store<f32, 1>) -> f64 {
+    return max(terrain(normalize(vec3<f64>(x, y, z)), radius, octaves, seed, net), 0.0);
 }

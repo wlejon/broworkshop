@@ -4,6 +4,7 @@
 // and its albedo; and on a coarser grid how much of the sun's disc it sees.
 // The blades stand on the field, between its points.
 from planet::ground import terrain, surface, grass_cover, variation;
+from planet::rivers import water_near, water_share;
 
 // Point (x, y) of the field at plane point (u0 + x delta, v0 + y delta),
 // seven floats at `out` (y * width + x) * 7: its position about `origin`
@@ -11,20 +12,20 @@ from planet::ground import terrain, surface, grass_cover, variation;
 @kernel @grid(2)
 fn k_grass_field(g: grid<2>, out: write_store<f32, 1>,
                  ax: f64, ay: f64, az: f64, ex: f64, ey: f64, ez: f64, fx: f64, fy: f64, fz: f64,
-                 u0: f64, v0: f64, delta: f64, ox: f64, oy: f64, oz: f64, radius: f64, octaves: f64, seed: i32) {
+                 u0: f64, v0: f64, delta: f64, ox: f64, oy: f64, oz: f64, radius: f64, octaves: f64, seed: i32, net: read_store<f32, 1>) {
     let a = vec3<f64>(ax, ay, az);
     let e = vec3<f64>(ex, ey, ez);
     let f = vec3<f64>(fx, fy, fz);
     let u = u0 + (g.x() as f64) * delta;
     let v = v0 + (g.y() as f64) * delta;
     let dir = normalize(a + e * u + f * v);
-    let h = terrain(dir, radius, octaves, seed);
+    let h = terrain(dir, radius, octaves, seed, net);
     let p = dir * (radius + max(h, 0.0));
     // The gradient across a tenth of the spacing.
     let du = normalize(a + e * (u + 0.1 * delta) + f * v);
     let dv = normalize(a + e * u + f * (v + 0.1 * delta));
-    let pu = du * (radius + max(terrain(du, radius, octaves, seed), 0.0)) - p;
-    let pv = dv * (radius + max(terrain(dv, radius, octaves, seed), 0.0)) - p;
+    let pu = du * (radius + max(terrain(du, radius, octaves, seed, net), 0.0)) - p;
+    let pv = dv * (radius + max(terrain(dv, radius, octaves, seed, net), 0.0)) - p;
     var n = normalize(cross(pu, pv));
     if (dot(n, dir) < 0.0) { n = -n; }
     let cosine = clamp(dot(n, dir) as f32, 1e-3, 1.0);
@@ -36,7 +37,8 @@ fn k_grass_field(g: grid<2>, out: write_store<f32, 1>,
     out[i] = rel.x as f32;
     out[i + 1] = rel.y as f32;
     out[i + 2] = rel.z as f32;
-    out[i + 3] = grass_cover(h as f32, grad);
+    // None in the rivers and lakes.
+    out[i + 3] = grass_cover(h as f32, grad) * (1.0 - water_share(h as f32, water_near(dir, radius, 1.0, net, seed)));
     out[i + 4] = albedo.x;
     out[i + 5] = albedo.y;
     out[i + 6] = albedo.z;

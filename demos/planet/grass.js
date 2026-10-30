@@ -240,9 +240,9 @@ const fragment = (radius) => `in vec3 v_col;
 // the ground's. Its nodes read the clouds'
 // field (createClouds' readers). update() each frame with the eye about the
 // planet's centre (f64), its altitude and the unit direction to the sun.
-export function createGrass(scene, radius, module, sunModule, octaves, seed) {
+export function createGrass(scene, radius, module, sunModule, octaves, seed, net) {
     const fieldKernel = module.kernel('k_grass_field');
-    const sunGrid = createSunGrid(sunModule, SUN_P);
+    const sunGrid = createSunGrid(sunModule, SUN_P, net);
     const field = bro.kernel.createBuffer(P * P * 7 * 4);
     const bands = [
         { blades: DENSE, band: [0, NEAR], ring: cellRing(0, NEAR) },
@@ -347,7 +347,7 @@ export function createGrass(scene, radius, module, sunModule, octaves, seed) {
             const len = Math.hypot(c[0], c[1], c[2]);
             const origin = c.map((x) => x / len * radius);
             fieldKernel.dispatch([P, P], field, ...plane, (ui - N / 2) * dl, (vi - N / 2) * dl, dl,
-                                 ...origin, radius, octaves, seed);
+                                 ...origin, radius, octaves, seed, net);
             for (let k = 0; k < 3; k++) {
                 hi[k] = Math.fround(origin[k]);
                 lo[k] = origin[k] - hi[k];

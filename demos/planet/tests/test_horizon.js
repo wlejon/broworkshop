@@ -11,7 +11,9 @@ import { check, frames, test, done } from "/lib/kit/test.js";
 const fs = require('fs');
 const readApp = (path) => fs.readFileSync(bro.resolvePath('/app/' + path), 'utf-8');
 const mod = bro.kernel.compile(readApp('tests/measure.bk'),
-                               { file: 'measure.bk', modules: { 'planet::ground': readApp('ground.bk') } });
+                               { file: 'measure.bk', modules: { 'planet::ground': readApp('ground.bk'), 'planet::rivers': readApp('rivers.bk') } });
+// The drainage network the app built (rivers.js), which the ground carves.
+const NET = planet.rivers.cpu;
 const kTruth = mod.kernel('k_horizon_truth');
 const RADIUS = 6371000, SEED = 7, BASE_WAVELENGTH = 2400000;
 const TILE = 32, BORDER = 2, C = TILE + 2 * BORDER, N = C / 2;
@@ -76,13 +78,13 @@ test('horizons follow the ground', () => {
                     const tk = [gu[0] * c + gv[0] * s, gu[1] * c + gv[1] * s, gu[2] * c + gv[2] * s];
                     const word = hz[at + (d >> 1)];
                     const stored = ((d & 1 ? word >>> 16 : word & 65535) / 65535) * 2 - 1;
-                    const truth = kTruth.eval(dir[0], dir[1], dir[2], tk[0], tk[1], tk[2], cell, REACH, RATIO, FILTER,
-                                              RADIUS, octaves, SEED);
+                    const truth = kTruth.run(1, dir[0], dir[1], dir[2], tk[0], tk[1], tk[2], cell, REACH, RATIO, FILTER,
+                                              RADIUS, octaves, SEED, NET)[0];
                     const e = (Math.asin(stored) - Math.asin(truth)) * DEG;
                     errs.push(e);
                     const fw = hz[at + 4 + d];
                     const storedFar = ((fw & 65535) / 65535) * 2 - 1;
-                    const truthFar = kTruth.eval(dir[0], dir[1], dir[2], tk[0], tk[1], tk[2], cell * 8, REACH, RATIO, FILTER, RADIUS, octaves, SEED);
+                    const truthFar = kTruth.run(1, dir[0], dir[1], dir[2], tk[0], tk[1], tk[2], cell * 8, REACH, RATIO, FILTER, RADIUS, octaves, SEED, NET)[0];
                     farErrs.push((Math.asin(storedFar) - Math.asin(truthFar)) * DEG);
                     const sun = Math.sin(LOW / DEG);
                     if ((stored < sun) !== (truth < sun)) flips++;

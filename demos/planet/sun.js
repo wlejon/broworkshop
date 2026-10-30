@@ -5,7 +5,8 @@
 // then the gather), so no frame takes it all.
 export const SUN_STEPS = 28;   // ground.bk SUN_STEPS
 
-export function createSunGrid(module, P, slices = 1) {
+// net: the rivers' network (rivers.js), which the ground's height reads.
+export function createSunGrid(module, P, net, slices = 1) {
     const stepsKernel = module.kernel('k_sun_steps'), sunKernel = module.kernel('k_sun');
     const steps = bro.kernel.createBuffer(P * P * SUN_STEPS * 4);
     const buffer = bro.kernel.createBuffer(P * P * 4);
@@ -18,9 +19,9 @@ export function createSunGrid(module, P, slices = 1) {
             const out = [];
             for (let s = 0; s < slices; s++) {
                 const z0 = Math.floor(s * SUN_STEPS / slices), z1 = Math.floor((s + 1) * SUN_STEPS / slices);
-                out.push(() => stepsKernel.dispatch([P, P, z1 - z0], steps, ...args, z0));
+                out.push(() => stepsKernel.dispatch([P, P, z1 - z0], steps, ...args, z0, net));
             }
-            out.push(() => sunKernel.dispatch([P, P], steps, buffer, ...args));
+            out.push(() => sunKernel.dispatch([P, P], steps, buffer, ...args, net));
             return out;
         },
     };

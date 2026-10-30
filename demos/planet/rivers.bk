@@ -1,0 +1,198 @@
+// The planet's rivers and lakes: a drainage network over the whole sphere,
+// which the ground's height carves (ground.bk terrain) and whose water the
+// ground's colour and cover take.
+//
+// The network is a lattice of points, one in each cell of an equal-angle
+// grid on each cube face (RIV_N x RIV_N cells, about 20 km apart at Earth's
+// radius), each at a spot hashed inside its cell. riverbuild.bk gives every
+// point the ground's broad height there; the level water stands at there,
+// the hollows filled up to where they spill (Planchon and Darboux 2001),
+// with a slight fall across each lake toward its outlet; its downstream
+// neighbour (the one of its 8 that level falls to most steeply, so every
+// chain reaches the sea); and its catchment, the points that drain through
+// it: a record of RIV_REC floats each, which this module reads. A river
+// runs from each point to its downstream one, as wide as its catchment
+// says, its bed falling from the one point's level to the other's; where
+// the level stands over the ground a lake lies, out to where the ground
+// rises through its level.
+module planet::rivers;
+
+import std::noise::*;
+
+pub const RIV_N: i32 = 512;
+pub const RIV_REC: i32 = 4;   // height (m), downstream point (-1 none), catchment (points), water level (m)
+// A point drains a river once at least this many points drain through it.
+const MIN_CATCHMENT: f32 = 2.0;
+const PI4: f32 = 0.78539816;
+
+// Face `face`'s frame: a its axis (outward), e and f its plane's axes
+// (clouds.js faceFrame, the same).
+pub fn face_a(face: i32) -> vec3<f64> {
+    let s: f64 = face < 3 ? 1.0 : -1.0;
+    let axis = face % 3;
+    if (axis == 0) { return vec3<f64>(s, 0.0, 0.0); }
+    if (axis == 1) { return vec3<f64>(0.0, s, 0.0); }
+    return vec3<f64>(0.0, 0.0, s);
+}
+pub fn face_e(face: i32) -> vec3<f64> {
+    let axis = face % 3;
+    if (axis == 0) { return vec3<f64>(0.0, 1.0, 0.0); }
+    if (axis == 1) { return vec3<f64>(0.0, 0.0, 1.0); }
+    return vec3<f64>(1.0, 0.0, 0.0);
+}
+pub fn face_f(face: i32) -> vec3<f64> {
+    let axis = face % 3;
+    if (axis == 0) { return vec3<f64>(0.0, 0.0, 1.0); }
+    if (axis == 1) { return vec3<f64>(1.0, 0.0, 0.0); }
+    return vec3<f64>(0.0, 1.0, 0.0);
+}
+
+// The face whose side of the cube `d` points through.
+pub fn face_of(d: vec3<f64>) -> i32 {
+    let ax = abs(d.x);
+    let ay = abs(d.y);
+    let az = abs(d.z);
+    if (ax >= ay && ax >= az) { return d.x > 0.0 ? 0 : 3; }
+    if (ay >= az) { return d.y > 0.0 ? 1 : 4; }
+    return d.z > 0.0 ? 2 : 5;
+}
+
+// The direction at equal-angle coordinates (x, y) of a face (-1 to 1 across
+// it; beyond, the plane carries on past its edge).
+pub fn alpha_dir(face: i32, x: f32, y: f32) -> vec3<f64> {
+    let u = tan(x * PI4) as f64;
+    let v = tan(y * PI4) as f64;
+    return normalize(face_a(face) + face_e(face) * u + face_f(face) * v);
+}
+
+// The cell (face, i, j) that `d` lies in.
+pub fn cell_of(d: vec3<f64>) -> vec3<i32> {
+    let face = face_of(d);
+    let z = dot(d, face_a(face));
+    let x = atan((dot(d, face_e(face)) / z) as f32) / PI4;
+    let y = atan((dot(d, face_f(face)) / z) as f32) / PI4;
+    let n = RIV_N as f32;
+    let i = clamp(floor((x + 1.0) * 0.5 * n) as i32, 0, RIV_N - 1);
+    let j = clamp(floor((y + 1.0) * 0.5 * n) as i32, 0, RIV_N - 1);
+    return vec3<i32>(face, i, j);
+}
+
+pub fn point_index(c: vec3<i32>) -> i32 {
+    return (c.x * RIV_N + c.z) * RIV_N + c.y;
+}
+pub fn point_cell(k: i32) -> vec3<i32> {
+    return vec3<i32>(k / (RIV_N * RIV_N), k % RIV_N, (k / RIV_N) % RIV_N);
+}
+
+// The point of cell c: at a spot hashed inside the middle 70% of it.
+pub fn point_dir(c: vec3<i32>, seed: i32) -> vec3<f64> {
+    let hx = hash_primes3d(seed + 5003, c.y * PRIME_X, c.z * PRIME_Y, c.x * PRIME_Z);
+    let hy = hash_primes3d(seed + 6007, c.y * PRIME_X, c.z * PRIME_Y, c.x * PRIME_Z);
+    let jx = 0.15 + 0.7 * (((hx >> 8) & 65535) as f32) / 65536.0;
+    let jy = 0.15 + 0.7 * (((hy >> 8) & 65535) as f32) / 65536.0;
+    let step = 2.0 / (RIV_N as f32);
+    return alpha_dir(c.x, -1.0 + ((c.y as f32) + jx) * step, -1.0 + ((c.z as f32) + jy) * step);
+}
+
+// The cell (di, dj) from c, across the face's edge if need be.
+pub fn cell_next(c: vec3<i32>, di: i32, dj: i32) -> vec3<i32> {
+    let i = c.y + di;
+    let j = c.z + dj;
+    if (i >= 0 && i < RIV_N && j >= 0 && j < RIV_N) { return vec3<i32>(c.x, i, j); }
+    let step = 2.0 / (RIV_N as f32);
+    return cell_of(alpha_dir(c.x, -1.0 + ((i as f32) + 0.5) * step, -1.0 + ((j as f32) + 0.5) * step));
+}
+
+// A river `catchment` points large: its width (m).
+pub fn river_width(catchment: f32) -> f32 {
+    return 6.0 * sqrt(catchment);
+}
+// A point under a lake: its level stands this far over its ground.
+const LAKE_DEPTH: f32 = 1.0;
+// How far a lake reaches from its points (m): about the lattice's spacing,
+// so a lake's points' reaches join across it, and a hollow beyond a ridge
+// takes no lake that is not its own.
+const LAKE_REACH: f32 = 16000.0;
+
+// The valley the water cuts, at `x` metres from its edge: its rise over the
+// bed, steepening outward so the cut ends within a few kilometres however
+// deep the ground stands over the bed.
+fn valley_rise(x: f32) -> f32 {
+    let o = max(x, 0.0);
+    return 0.2 * o + 1.6e-4 * o * o;
+}
+
+// The water about `dir`, for a cell `cell` metres wide: x the height the
+// rivers' valleys cut the ground down to (the lowest of a bed plus its
+// valley's rise, over every river near; 1e9 where none), y the share of the
+// cell in a river's channel, z the level of the lake there (its nearest
+// point's; -1e9 where none) and w how deep the lattice holds it here (its
+// points' depths, weighted by the inverse square of their distance): a lake
+// stands over the ground where the ground is lower than its level, but not
+// deeper than a few times that, so its water ends at its spill, where the
+// lattice's depth falls to nothing, rather than reaching over the ground
+// that falls away beyond. A cell wider than a channel spreads its valley's
+// sides over its width (the distance taken as sqrt(d^2 + cell^2 / 6), the
+// root mean square over a cell) and holds its water as the share of it the
+// channel covers.
+pub fn water_near(dir: vec3<f64>, radius: f64, cell: f32, net: read_store<f32, 1>, seed: i32) -> vec4<f32> {
+    let c = cell_of(dir);
+    var cut: f32 = 1.0e9;
+    var share: f32 = 0.0;
+    var lake: f32 = -1.0e9;
+    var lakeDist: f32 = LAKE_REACH;
+    var depthSum: f32 = 0.0;
+    var weightSum: f32 = 0.0;
+    let spread = cell * cell / 6.0;
+    for (var dj: i32 = -1; dj <= 1; dj += 1) {
+        for (var di: i32 = -1; di <= 1; di += 1) {
+            let pc = cell_next(c, di, dj);
+            let k = point_index(pc) * RIV_REC;
+            let level = net[k + 3];
+            let a = ((point_dir(pc, seed) - dir) * radius);
+            let af = vec3<f32>(a.x as f32, a.y as f32, a.z as f32);
+            let dp = length(af);
+            let depth = max(level - net[k], 0.0);
+            let wgt = 1.0 / (dp * dp + 1.0e6);
+            depthSum += depth * wgt;
+            weightSum += wgt;
+            if (level > 0.0) {
+                if (depth > LAKE_DEPTH && dp < lakeDist) {
+                    lakeDist = dp;
+                    lake = level;
+                }
+                let catchment = net[k + 2];
+                let down = net[k + 1] as i32;
+                if (catchment >= MIN_CATCHMENT && down >= 0) {
+                    let b = ((point_dir(point_cell(down), seed) - dir) * radius);
+                    let bf = vec3<f32>(b.x as f32, b.y as f32, b.z as f32);
+                    let ab = bf - af;
+                    let t = clamp(-dot(af, ab) / max(dot(ab, ab), 1.0), 0.0, 1.0);
+                    let d = length(af + ab * t);
+                    let half = 0.5 * river_width(catchment);
+                    let bed = mix(level, net[down * RIV_REC + 3], t);
+                    cut = min(cut, bed + valley_rise(sqrt(d * d + spread) - half));
+                    // The cell's share inside |d| < half, a strip against a
+                    // box: their overlap along the distance.
+                    let lo = max(d - 0.5 * cell, -half);
+                    let hi = min(d + 0.5 * cell, half);
+                    share = max(share, clamp((hi - lo) / max(cell, 1e-3), 0.0, 1.0));
+                }
+            }
+        }
+    }
+    return vec4<f32>(cut, share, lake, depthSum / weightSum);
+}
+
+// Whether the lake of `w` (water_near) stands over ground at height h.
+pub fn under_lake(h: f32, w: vec4<f32>) -> bool {
+    return h < w.z && w.z - h < 4.0 * w.w + 0.5;
+}
+
+// The share of a cell whose ground or water surface is at h under water:
+// its river channel's, or all of it under a lake (whose surface is h).
+pub fn water_share(h: f32, w: vec4<f32>) -> f32 {
+    let onLake = abs(h - w.z) < 0.25 || under_lake(h, w);
+    return max(w.y, onLake ? 1.0 : 0.0);
+}
+

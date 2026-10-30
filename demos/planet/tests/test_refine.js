@@ -11,7 +11,9 @@ import { check, test, done } from "/lib/kit/test.js";
 const fs = require('fs');
 const readApp = (path) => fs.readFileSync(bro.resolvePath('/app/' + path), 'utf-8');
 const mod = bro.kernel.compile(readApp('tests/measure.bk'),
-                               { file: 'measure.bk', modules: { 'planet::ground': readApp('ground.bk') } });
+                               { file: 'measure.bk', modules: { 'planet::ground': readApp('ground.bk'), 'planet::rivers': readApp('rivers.bk') } });
+// The drainage network the app built (rivers.js), which the ground carves.
+const NET = planet.rivers.cpu;
 const kCell = mod.kernel('k_cell');
 const kCellColor = mod.kernel('k_cell_color');
 const RADIUS = 6371000, SEED = 7, BASE_WAVELENGTH = 2400000;
@@ -22,8 +24,8 @@ const norm = (a) => { const l = Math.hypot(a[0], a[1], a[2]); return [a[0] / l, 
 
 // A cell `size` (in units of `a`) about (s, t) of the frame (dir; t, b).
 const cell = (dir, t, b, s, tt, size, octaves) =>
-    kCell.eval(dir[0] + t[0] * s + b[0] * tt, dir[1] + t[1] * s + b[1] * tt, dir[2] + t[2] * s + b[2] * tt,
-               t[0], t[1], t[2], b[0], b[1], b[2], size, RADIUS, octaves, SEED);
+    kCell.run(1, dir[0] + t[0] * s + b[0] * tt, dir[1] + t[1] * s + b[1] * tt, dir[2] + t[2] * s + b[2] * tt,
+               t[0], t[1], t[2], b[0], b[1], b[2], size, RADIUS, octaves, SEED, NET)[0];
 
 function patch(dir, coarse) {
     // The frame: tangent axes scaled to one coarse cell, so the coarse cell
@@ -65,8 +67,8 @@ for (const coarse of [1.5, 3.5, 6.5, 9.5]) {
 // The naive colour is measured the same way, to show what is gained.
 const TRUTH = Math.log2(BASE_WAVELENGTH / (2.5 * RADIUS * Math.PI / 2 / 2 ** 22 / 32));
 const colorAt = (dir, t, b, s, tt, size, octaves, ch, naive) =>
-    kCellColor.eval(dir[0] + t[0] * s + b[0] * tt, dir[1] + t[1] * s + b[1] * tt, dir[2] + t[2] * s + b[2] * tt,
-                    t[0], t[1], t[2], b[0], b[1], b[2], size, RADIUS, octaves, TRUTH, SEED, ch, naive);
+    kCellColor.run(1, dir[0] + t[0] * s + b[0] * tt, dir[1] + t[1] * s + b[1] * tt, dir[2] + t[2] * s + b[2] * tt,
+                    t[0], t[1], t[2], b[0], b[1], b[2], size, RADIUS, octaves, TRUTH, SEED, ch, naive, NET)[0];
 
 function colorPatch(dir, coarse, ch, naive) {
     const a = BASE_WAVELENGTH / (2.5 * Math.pow(2, coarse)) / RADIUS;
@@ -90,7 +92,7 @@ function places(coarse, n) {
     for (let tries = 0; out.length < n && tries < 20000; tries++) {
         const dir = norm([rnd() * 2 - 1, rnd() * 2 - 1, rnd() * 2 - 1]);
         const t = norm(Math.abs(dir[1]) < 0.9 ? [dir[2], 0, -dir[0]] : [0, -dir[2], dir[1]]).map((x) => x * a);
-        const h = kCell.eval(dir[0], dir[1], dir[2], t[0], t[1], t[2], 0, 0, 0, 1, RADIUS, coarse, SEED);
+        const h = kCell.run(1, dir[0], dir[1], dir[2], t[0], t[1], t[2], 0, 0, 0, 1, RADIUS, coarse, SEED, NET)[0];
         const coast = out.filter((p) => p.coast).length;
         if (Math.abs(h) < 150 && coast < n / 2) out.push({ dir, coast: true });
         else if (h > 2200 && out.length - coast < n / 2) out.push({ dir, coast: false });

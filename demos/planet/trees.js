@@ -269,10 +269,10 @@ const fragment = (radius) => `in vec3 v_col;
 // the ground's. Their nodes read the clouds' field (createClouds' readers).
 // update() each frame with the eye about the planet's centre (f64), its
 // altitude, the unit direction to the sun and the view's forward.
-export function createTrees(scene, radius, module, sunModule, octaves, seed) {
+export function createTrees(scene, radius, module, sunModule, octaves, seed, net) {
     const fieldKernel = module.kernel('k_tree_field');
     const fields = [bro.kernel.createBuffer(N * N * 7 * 4), bro.kernel.createBuffer(N * N * 7 * 4)];
-    const sunGrid = createSunGrid(sunModule, SUN_P, 4);
+    const sunGrid = createSunGrid(sunModule, SUN_P, net, 4);
     const bands = [
         { tiers: 7, rim: 7, trunk: true, band: [0, NEAR] },
         { tiers: 3, rim: 5, trunk: false, band: [NEAR, MID] },
@@ -352,7 +352,7 @@ export function createTrees(scene, radius, module, sunModule, octaves, seed) {
             for (let s = 0; s < SLICES; s++) {
                 const y0 = s * N / SLICES;
                 jobs.push(() => fieldKernel.dispatch([N, N / SLICES], out, ...plane, u0, v0, dl, ...origin,
-                                                     radius, octaves, seed, li, lj, fc, y0));
+                                                     radius, octaves, seed, li, lj, fc, y0, net));
             }
             jobs.push(() => {
                 front = back;
