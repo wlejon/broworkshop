@@ -157,6 +157,60 @@ fn k_river_lake(g: grid<3>, net: read_store<f32, 1>, src: read_store<f32, 1>, ds
     dst[k] = w;
 }
 
+// The start of the floors: each point's floor is its ground, or its level
+// where a lake's stands lower, and no higher than the full ground anywhere
+// along its reach to its downstream point (FLOOR_SAMPLES heights at
+// FLOOR_OCTAVES, the hollows a few tens of metres wide). The lattice's
+// broad heights pass over the hollows between its points, which lie
+// hundreds of metres lower; a river drawn at them stands in the air over a
+// hollow, and its valley cuts a shelf into the slopes on either side.
+const FLOOR_SAMPLES: i32 = 9;
+const FLOOR_OCTAVES: f64 = 12.0;
+@kernel @grid(3)
+fn k_river_floor_start(g: grid<3>, net: read_store<f32, 1>, dst: write_store<f32, 1>, radius: f64, seed: i32) {
+    let c = vec3<i32>(g.z(), g.x(), g.y());
+    let k = point_index(c);
+    var floor = min(net[k * RIV_REC + 3], net[k * RIV_REC]);
+    let down = net[k * RIV_REC + 1] as i32;
+    if (down >= 0) {
+        let a = point_dir(c, seed);
+        let b = point_dir(point_cell(down), seed);
+        for (var i: i32 = 0; i < FLOOR_SAMPLES; i += 1) {
+            let t = (i as f64) / ((FLOOR_SAMPLES - 1) as f64);
+            let h = terrain_base(normalize(a + (b - a) * t), radius, FLOOR_OCTAVES, seed) as f32;
+            floor = min(floor, max(h, 0.0));
+        }
+    }
+    dst[k] = floor;
+}
+
+// One step of the floors: a point's no higher than those of the points
+// draining into it, so a river cut down to a hollow's floor stays down
+// through the rim beyond, in a gorge, and falls all along its way to the
+// sea; a chain n points long settles in n steps.
+@kernel @grid(3)
+fn k_river_floor(g: grid<3>, net: read_store<f32, 1>, src: read_store<f32, 1>, dst: write_store<f32, 1>) {
+    let c = vec3<i32>(g.z(), g.x(), g.y());
+    let k = point_index(c);
+    var w = src[k];
+    for (var dj: i32 = -1; dj <= 1; dj += 1) {
+        for (var di: i32 = -1; di <= 1; di += 1) {
+            if (di != 0 || dj != 0) {
+                let n = point_index(cell_next(c, di, dj));
+                if ((net[n * RIV_REC + 1] as i32) == k) { w = min(w, src[n]); }
+            }
+        }
+    }
+    dst[k] = w;
+}
+
+// The floors into the records.
+@kernel @grid(3)
+fn k_river_floor_store(g: grid<3>, net: rw_store<f32, 1>, floor: read_store<f32, 1>) {
+    let k = point_index(vec3<i32>(g.z(), g.x(), g.y()));
+    net[k * RIV_REC + 7] = floor[k];
+}
+
 // The catchments and the breached levels into the records.
 @kernel @grid(3)
 fn k_river_store(g: grid<3>, net: rw_store<f32, 1>, catchment: read_store<f32, 1>, level: read_store<f32, 1>) {

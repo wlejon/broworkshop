@@ -36,6 +36,10 @@ export function createRivers(module, radius, seed) {
     const lake = module.kernel('k_river_lake');
     for (let i = 0; i < LAKE_STEPS; i++) { lake.dispatch(grid, net, a, b); [a, b] = [b, a]; }
     module.kernel('k_river_store').dispatch(grid, net, catchment, a);
+    module.kernel('k_river_floor_start').dispatch(grid, net, a, radius, seed);
+    const floor = module.kernel('k_river_floor');
+    for (let i = 0; i < STEPS; i++) { floor.dispatch(grid, net, a, b); [a, b] = [b, a]; }
+    module.kernel('k_river_floor_store').dispatch(grid, net, a);
     const cpu = net.read(new Float32Array(POINTS * REC));
     return { net, cpu };
 }

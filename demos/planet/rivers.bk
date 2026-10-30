@@ -20,7 +20,7 @@ module planet::rivers;
 import std::noise::*;
 
 pub const RIV_N: i32 = 512;
-pub const RIV_REC: i32 = 8;   // height (m), downstream point (-1 none), catchment (points), water level (m), direction (3), unused
+pub const RIV_REC: i32 = 8;   // height (m), downstream point (-1 none), catchment (points), water level (m), direction (3), floor (m; riverbuild.bk k_river_floor)
 // The octaves the lattice resolves, which its points' heights are the
 // ground at: about 20 km between points, a wavelength of 2.5 of them
 // (ground.bk octaves_for).
@@ -188,8 +188,8 @@ fn point_offset(net: read_store<f32, 1>, k: i32, hi: vec3<f32>, lo: vec3<f32>, r
 // depths, Leopold and Maddock 1953), in a parabola from its banks.
 // bed: the floor's height under the valley that cuts deepest here (-1e9
 // where none), which near.x rises from; surface: the water's there, the
-// level the river's lattice points hold (their beds, or a lake's level
-// over its floor where the valley runs through one).
+// level the river's lattice points hold (their broad ground, or a lake's
+// level where the valley runs through one).
 pub struct Water {
     near: vec4<f32>,
     channel: f32,
@@ -200,11 +200,12 @@ const CHANNEL_DEPTH: f32 = 0.04;   // of the width, at the middle
 // The reach from point k (record offset) to its downstream point, at offset
 // af from here: v.x the height its valley cuts the ground to, v.y the share
 // of the cell in its channel, v.z how deep its channel runs here, v.w its
-// floor's height; surface the level its points hold here. The floor is the
-// points' ground where a point is a lake's, its level elsewhere: through a
-// lake the valley is the lake's floor, so it holds the lake's water as wide
-// as the valley is at its depth, where a floor at the level held it only
-// as a film the width of the floor.
+// floor's height; surface the level its points hold here. The floor runs
+// between its points' floors (riverbuild.bk k_river_floor: no higher than
+// the full ground's hollows along the river, or than its floor upstream),
+// so the river lies in the ground's hollows and cuts gorges through their
+// rims, rather than standing at the lattice's broad heights over a hollow
+// with its valley cut as a shelf into the slopes either side.
 struct Reach {
     v: vec4<f32>,
     surface: f32,
@@ -225,7 +226,7 @@ fn reach(net: read_store<f32, 1>, k: i32, af: vec3<f32>, hi: vec3<f32>, lo: vec3
     let q = af + along * s;
     let d = length(vec2<f32>(dot(q, along), -dot(q, side) - meander(k / RIV_REC, s, len, 2.0 * half, seed)));
     let downLevel = net[down * RIV_REC + 3];
-    let bed = mix(min(level, net[k]), min(downLevel, net[down * RIV_REC]), t);
+    let bed = mix(net[k + 7], net[down * RIV_REC + 7], t);
     // The cell's share inside |d| < half, a strip against a box: their
     // overlap along the distance.
     let s0 = max(d - 0.5 * cell, -half);
@@ -288,9 +289,17 @@ pub fn water_at(dir: vec3<f64>, radius: f64, cell: f32, net: read_store<f32, 1>,
             depthSum += depth * wgt;
             weightSum += wgt;
             if (level > 0.0) {
+                // The nearest lake's, unless the floor through its point
+                // (k_river_floor: the full ground's hollows along its river)
+                // lies deeper under its level than the lake stands at most
+                // (lake_limit's, there): the lattice's broad heights found a
+                // rim the full ground does not, and its level held over the
+                // hollow would leave only a ring of water about its slopes.
+                // Its reach stays its own.
                 if (depth > LAKE_DEPTH && dp < lakeDist) {
                     lakeDist = dp;
-                    lake = level;
+                    lake = -1.0e9;
+                    if (level - net[k + 7] < 4.0 * (depth - LAKE_DEPTH) * (1.0 + 1.0 / BANK)) { lake = level; }
                 }
                 if (net[k + 2] >= MIN_CATCHMENT && net[k + 1] >= 0.0) {
                     let rc = reach(net, k, af, hi, lo, r, up, cell, spread, seed);
