@@ -7,6 +7,7 @@
 // doubles on the CPU, so nothing ever holds a planet-sized f32.
 import { boot } from "/lib/kit/app.js";
 import { bindControl, logMap } from "/lib/kit/params.js";
+import { cloudGlsl, createClouds } from "/app/clouds.js";
 
 boot();
 
@@ -250,6 +251,9 @@ const fragment = `buffer uint u_det[];
     in vec3 v_q;
     in vec3 v_swell;
     uniform float u_time;
+    uniform vec3 u_camHi;
+    uniform vec3 u_camLo;
+    ${cloudGlsl(RADIUS)}
 
     // Point p of this tile's horizon grid (planet.bk's horizon layer): the
     // sines of its horizon's elevation along the grid's 8 directions.
@@ -320,6 +324,11 @@ const fragment = `buffer uint u_det[];
         }
         skyVisibility *= visible * 0.25;
         if (dot(bent, bent) > 1e-12) skyNormal = normalize(bent);
+
+        // The clouds' shadow (clouds.js), at this pixel's footprint.
+        vec3 g = (u_camHi + u_camLo) + vWorldPos;
+        float w = max(length(dFdx(vWorldPos)), length(dFdy(vWorldPos)));
+        sunVisibility *= cloudShadow(g, length(g) - CLOUD_R, toSun, w);
     }
 
     // Texel (x, y) of this tile: colour (rgb, water) and the octahedral
@@ -457,6 +466,8 @@ ground = scene.createInstancedMesh({ mesh: patchMesh(), color: [1, 1, 1], castsS
 ground.setShader({ vertex, fragment });
 ground.cullMargin = 4 * RADIUS;   // the shader places tiles; the cache culls them
 makeCache(4);
+const cloudMod = bro.kernel.compile(readApp('clouds.bk'), { file: 'clouds.bk', modules: { 'planet::ground': readApp('ground.bk') } });
+const clouds = createClouds(scene, RADIUS, cloudMod.kernel('k_cloud_level'), [ground]);
 
 // ── Camera: doubles about the planet's center ───────────────────────────────
 
@@ -517,6 +528,7 @@ function frame() {
     ground.setShaderUniform('u_camHi', camHi);
     ground.setShaderUniform('u_camLo', camLo);
     ground.setShaderUniform('u_time', performance.now() / 1000 % WAVE_CLOCK);
+    clouds.update(f.pos, f.surface + cam.alt - RADIUS, 2 * Math.tan(FOV * Math.PI / 360) / height);
     for (let k = 0; k < 3; k++) atmosphere.planetCenter[k] = -f.pos[k];
     scene.setAtmosphere(atmosphere);
     lastStats.selected = cache.wanted;
@@ -588,4 +600,4 @@ function loop() {
 requestAnimationFrame(loop);
 
 // For tests and tools.
-globalThis.planet = { cam, setHour, get cache() { return cache; }, get stats() { return lastStats; }, get lastView() { return lastView; }, frame };
+globalThis.planet = { cam, setHour, get cache() { return cache; }, clouds, get stats() { return lastStats; }, get lastView() { return lastView; }, frame };
