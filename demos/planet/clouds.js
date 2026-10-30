@@ -117,7 +117,9 @@ export function faceFrame(i) {
 
 // The cloud field, for the volume and the ground. Positions are about the
 // planet's centre, in metres.
-export const cloudGlsl = (radius) => `
+// With `filtered` the levels are read through the texture u_cloudLevels
+// (bound by createClouds to the volume), else from the map's buffer.
+export const cloudGlsl = (radius, filtered = false) => `
     const float CLOUD_R = ${radius.toFixed(1)};
     const float CLOUD_BASE = ${CLOUD_BASE.toFixed(1)};
     const float CLOUD_DEPTH = ${CLOUD_DEPTH.toFixed(1)};
@@ -194,6 +196,18 @@ export const cloudGlsl = (radius) => `
 
     // Level k at the plane point uv, false outside its grid. Its grid wraps:
     // texel p of it (counted from the plane's origin) is in slot p mod n.
+${filtered ? `
+    // The levels as the slices of a texture the engine copies from the map
+    // each render: one filtered fetch, the wrap its repeat.
+    uniform sampler2DArray u_cloudLevels;
+    bool cloudLevel(int k, vec2 uv, out vec2 c) {
+        vec4 h = u_cloudHead[k];
+        vec2 t = (uv - h.xy) / h.z;
+        if (any(lessThan(t, vec2(0.0))) || any(greaterThanEqual(t, vec2(float(CLOUD_N) - 1.001)))) return false;
+        vec2 p = t + u_cloudHead[CLOUD_LEVELS + 1 + k].xy + 0.5;
+        c = textureLod(u_cloudLevels, vec3(p / float(CLOUD_N), float(k)), 0.0).rg;
+        return true;
+    }` : `
     vec2 cloudLevelTexel(int base, ivec2 p) {
         p &= ivec2(CLOUD_N - 1);
         return cloudTexel(base + p.y * CLOUD_N + p.x);
@@ -208,7 +222,7 @@ export const cloudGlsl = (radius) => `
         c = mix(mix(cloudLevelTexel(base, p), cloudLevelTexel(base, p + ivec2(1, 0)), f.x),
                 mix(cloudLevelTexel(base, p + ivec2(0, 1)), cloudLevelTexel(base, p + ivec2(1, 1)), f.x), f.y);
         return true;
-    }
+    }`}
 
     // The column's amount F at the layer point q (unit direction from the
     // centre) resolved at a footprint of w metres, and the variance of what
@@ -295,7 +309,7 @@ export const cloudGlsl = (radius) => `
     }
 `;
 
-const volumeGlsl = (radius) => cloudGlsl(radius) + `
+const volumeGlsl = (radius) => cloudGlsl(radius, true) + `
     uniform vec3 u_camHi;
     uniform vec3 u_camLo;
     uniform float u_camAlt;     // the eye's altitude over CLOUD_R
@@ -736,6 +750,7 @@ export function createClouds(scene, radius, kernel, readers) {
         n.setShaderBuffer('u_cloudMap', map);
         n.setShaderBuffer('u_cloudHead', headBuffer);
     }
+    node.setShaderTexture('u_cloudLevels', { buffer: map, width: N, height: N, layers: LEVELS, channels: 2, repeat: true });
     return {
         node,
         // The clipmap, for tests: its buffer, the level headers (u_cloudHead)
