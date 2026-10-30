@@ -8,7 +8,7 @@
 // the eye has moved SNAP points. Each point holds its place, how much of the
 // ground there grows grass (ground.bk grass_cover: grassland past the beach,
 // less rock and snow) and its albedo. How much of the sun's disc the ground
-// sees over the terrain is a grid SUN_STRIDE times coarser (k_grass_sun; a
+// sees over the terrain is a grid SUN_STRIDE times coarser (sun.js; a
 // terrain's shadow is soft over a few metres), produced the frame after the
 // field or when the sun has turned, so the two do not land in one frame.
 //
@@ -24,6 +24,7 @@
 // of three segments, bent toward its facing by its own amount and swayed by
 // a gusting breeze.
 import { cloudGlsl, faceFrame } from "/app/clouds.js";
+import { createSunGrid } from "/app/sun.js";
 
 const N = 128;             // field cells along an edge
 const P = N + 1;           // field points along an edge
@@ -73,7 +74,6 @@ function cellRing(r0, r1) {
 
 const SUN_STRIDE = 4;      // field points between the sun grid's
 const SUN_P = N / SUN_STRIDE + 1;
-const SUN_STEPS = 28;      // ground.bk SUN_STEPS
 
 const vertex = `buffer float u_field[];
     buffer float u_sun[];
@@ -202,16 +202,15 @@ const fragment = (radius) => `in vec3 v_col;
         occluderSun *= clouds;
     }`;
 
-// The grass in `scene`, its field produced by `kernel` (grass.bk
-// k_grass_field) at `octaves` of the ground's. Its nodes read the clouds'
+// The grass in `scene`, its field produced by `module` (grass.bk
+// k_grass_field) and its sun grid by `sunModule` (sun.bk) at `octaves` of
+// the ground's. Its nodes read the clouds'
 // field (createClouds' readers). update() each frame with the eye about the
 // planet's centre (f64), its altitude and the unit direction to the sun.
-export function createGrass(scene, radius, module, octaves, seed) {
+export function createGrass(scene, radius, module, sunModule, octaves, seed) {
     const fieldKernel = module.kernel('k_grass_field');
-    const stepsKernel = module.kernel('k_grass_sun_steps'), sunKernel = module.kernel('k_grass_sun');
+    const sunGrid = createSunGrid(sunModule, SUN_P);
     const field = bro.kernel.createBuffer(P * P * 7 * 4);
-    const sunSteps = bro.kernel.createBuffer(SUN_P * SUN_P * SUN_STEPS * 4);
-    const sunGrid = bro.kernel.createBuffer(SUN_P * SUN_P * 4);
     const bands = [
         { blades: DENSE, band: [0, NEAR], cells: cellRing(0, NEAR) },
         { blades: SPARSE, band: [NEAR, FAR], cells: cellRing(NEAR, FAR) },
@@ -222,7 +221,7 @@ export function createGrass(scene, radius, module, octaves, seed) {
         node.setShader({ vertex, fragment: fragment(radius) });
         node.cullMargin = 4 * radius;   // the shader places the blades
         node.setShaderBuffer('u_field', field);
-        node.setShaderBuffer('u_sun', sunGrid);
+        node.setShaderBuffer('u_sun', sunGrid.buffer);
         node.setShaderBuffer('u_cells', bro.kernel.createBuffer(cells));
         node.setShaderUniform('u_blades', blades);
         node.setShaderUniform('u_band', band);
@@ -286,9 +285,7 @@ export function createGrass(scene, radius, module, octaves, seed) {
         if (sunDue < 0) return;
         sunDue = -1;
         sun.splice(0, 3, ...toSun);
-        const sunArgs = [...plane, (ui - N / 2) * dl, (vi - N / 2) * dl, dl * SUN_STRIDE, ...toSun, radius, octaves, seed];
-        stepsKernel.dispatch([SUN_P, SUN_P, SUN_STEPS], sunSteps, ...sunArgs);
-        sunKernel.dispatch([SUN_P, SUN_P], sunSteps, sunGrid, ...sunArgs);
+        for (const job of sunGrid.jobs(plane, (ui - N / 2) * dl, (vi - N / 2) * dl, dl * SUN_STRIDE, toSun, radius, octaves, seed)) job();
         for (const n of nodes) n.setShaderUniform('u_sunLattice', [ui - N / 2, vi - N / 2]);
     }
 

@@ -3,7 +3,7 @@
 // sphere), each the ground's true surface there, how much of it grows grass,
 // and its albedo; and on a coarser grid how much of the sun's disc it sees.
 // The blades stand on the field, between its points.
-from planet::ground import terrain, surface, grass_cover, variation, sun_step_height, sun_step_angle, sun_elevation_seen, SUN_STEPS;
+from planet::ground import terrain, surface, grass_cover, variation;
 
 // Point (x, y) of the field at plane point (u0 + x delta, v0 + y delta),
 // seven floats at `out` (y * width + x) * 7: its position about `origin`
@@ -40,41 +40,4 @@ fn k_grass_field(g: grid<2>, out: write_store<f32, 1>,
     out[i + 4] = albedo.x;
     out[i + 5] = albedo.y;
     out[i + 6] = albedo.z;
-}
-
-// The share of the sun's disc point (x, y) sees over the terrain, at plane
-// point (u0 + x delta, v0 + y delta), into `out` y * width + x: a grid
-// coarser than the field's (terrain shadows are soft at a few metres), read
-// between its points.
-// Two kernels: the ground's height at every step toward the sun of every
-// point, in parallel, into `steps` (z * points + y * width + x), then each
-// point's share from its steps.
-@kernel @grid(3)
-fn k_grass_sun_steps(g: grid<3>, steps: write_store<f32, 1>,
-                     ax: f64, ay: f64, az: f64, ex: f64, ey: f64, ez: f64, fx: f64, fy: f64, fz: f64,
-                     u0: f64, v0: f64, delta: f64, sx: f64, sy: f64, sz: f64, radius: f64, octaves: f64, seed: i32) {
-    let a = vec3<f64>(ax, ay, az);
-    let e = vec3<f64>(ex, ey, ez);
-    let f = vec3<f64>(fx, fy, fz);
-    let dir = normalize(a + e * (u0 + (g.x() as f64) * delta) + f * (v0 + (g.y() as f64) * delta));
-    let at = (g.z() * g.height() + g.y()) * g.width() + g.x();
-    steps[at] = sun_step_height(dir, normalize(vec3<f64>(sx, sy, sz)), g.z(), radius, octaves, seed);
-}
-
-@kernel @grid(2)
-fn k_grass_sun(g: grid<2>, steps: read_store<f32, 1>, out: write_store<f32, 1>,
-               ax: f64, ay: f64, az: f64, ex: f64, ey: f64, ez: f64, fx: f64, fy: f64, fz: f64,
-               u0: f64, v0: f64, delta: f64, sx: f64, sy: f64, sz: f64, radius: f64, octaves: f64, seed: i32) {
-    let a = vec3<f64>(ax, ay, az);
-    let e = vec3<f64>(ex, ey, ez);
-    let f = vec3<f64>(fx, fy, fz);
-    let dir = normalize(a + e * (u0 + (g.x() as f64) * delta) + f * (v0 + (g.y() as f64) * delta));
-    let h = terrain(dir, radius, octaves, seed) as f32;
-    let points = g.width() * g.height();
-    let i = g.y() * g.width() + g.x();
-    var highest: f32 = -1.57;
-    for (var k: i32 = 0; k < SUN_STEPS; k += 1) {
-        highest = max(highest, sun_step_angle(h, steps[k * points + i], k, radius));
-    }
-    out[i] = sun_elevation_seen(dir, normalize(vec3<f64>(sx, sy, sz)), highest);
 }

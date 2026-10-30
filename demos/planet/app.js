@@ -476,8 +476,9 @@ ground.setShader({ vertex, fragment });
 ground.cullMargin = 4 * RADIUS;   // the shader places tiles; the cache culls them
 makeCache(4);
 const cloudMod = bro.kernel.compile(readApp('clouds.bk'), { file: 'clouds.bk', modules: { 'planet::ground': readApp('ground.bk') } });
+const sunMod = bro.kernel.compile(readApp('sun.bk'), { file: 'sun.bk', modules: { 'planet::ground': readApp('ground.bk') } });
 const grassMod = bro.kernel.compile(readApp('grass.bk'), { file: 'grass.bk', modules: { 'planet::ground': readApp('ground.bk') } });
-const grass = createGrass(scene, RADIUS, grassMod, TRUTH, SEED);
+const grass = createGrass(scene, RADIUS, grassMod, sunMod, TRUTH, SEED);
 const clouds = createClouds(scene, RADIUS, cloudMod.kernel('k_cloud_level'), [ground, ...grass.nodes]);
 
 // ── Camera: doubles about the planet's center ───────────────────────────────

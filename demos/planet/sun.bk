@@ -1,0 +1,42 @@
+// How much of the sun's disc the ground sees over the terrain, on a grid of
+// points on the gnomonic plane of a cube face (the points a + e u + f v
+// projected onto the sphere, u = u0 + x delta, v = v0 + y delta): the grass's
+// and the trees' terrain shadow (sun.js). Two kernels: the ground's height at
+// every step toward the sun of every point, in parallel (a point's steps in
+// one thread underfill the GPU), into `steps` (z * points + y * width + x),
+// then each point's share from its steps.
+from planet::ground import terrain, sun_step_height, sun_step_angle, sun_elevation_seen, SUN_STEPS;
+
+fn plane_dir(ax: f64, ay: f64, az: f64, ex: f64, ey: f64, ez: f64, fx: f64, fy: f64, fz: f64,
+             u: f64, v: f64) -> vec3<f64> {
+    return normalize(vec3<f64>(ax, ay, az) + vec3<f64>(ex, ey, ez) * u + vec3<f64>(fx, fy, fz) * v);
+}
+
+// Steps z0 + z of every point.
+@kernel @grid(3)
+fn k_sun_steps(g: grid<3>, steps: write_store<f32, 1>,
+               ax: f64, ay: f64, az: f64, ex: f64, ey: f64, ez: f64, fx: f64, fy: f64, fz: f64,
+               u0: f64, v0: f64, delta: f64, sx: f64, sy: f64, sz: f64, radius: f64, octaves: f64, seed: i32,
+               z0: i32) {
+    let dir = plane_dir(ax, ay, az, ex, ey, ez, fx, fy, fz,
+                        u0 + (g.x() as f64) * delta, v0 + (g.y() as f64) * delta);
+    let k = z0 + g.z();
+    steps[(k * g.height() + g.y()) * g.width() + g.x()] =
+        sun_step_height(dir, normalize(vec3<f64>(sx, sy, sz)), k, radius, octaves, seed);
+}
+
+@kernel @grid(2)
+fn k_sun(g: grid<2>, steps: read_store<f32, 1>, out: write_store<f32, 1>,
+         ax: f64, ay: f64, az: f64, ex: f64, ey: f64, ez: f64, fx: f64, fy: f64, fz: f64,
+         u0: f64, v0: f64, delta: f64, sx: f64, sy: f64, sz: f64, radius: f64, octaves: f64, seed: i32) {
+    let dir = plane_dir(ax, ay, az, ex, ey, ez, fx, fy, fz,
+                        u0 + (g.x() as f64) * delta, v0 + (g.y() as f64) * delta);
+    let h = terrain(dir, radius, octaves, seed) as f32;
+    let points = g.width() * g.height();
+    let i = g.y() * g.width() + g.x();
+    var highest: f32 = -1.57;
+    for (var k: i32 = 0; k < SUN_STEPS; k += 1) {
+        highest = max(highest, sun_step_angle(h, steps[k * points + i], k, radius));
+    }
+    out[i] = sun_elevation_seen(dir, normalize(vec3<f64>(sx, sy, sz)), highest);
+}
