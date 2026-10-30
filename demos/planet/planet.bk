@@ -3,7 +3,7 @@
 // grid z is the tile's record in the batch table (tiles-api.js), whose slot
 // says where in the pools, viewed as [cells, cells, capacity], it goes.
 from planet::ground import terrain, cell_height, spread, expected_surface, expected_cover, gradient, variation,
-                           octaves_for, range_margin, fresh_water;
+                           strata, octaves_for, range_margin, fresh_water;
 from planet::rivers import water_at, water_share;
 
 // A batch table record's float64s.
@@ -123,14 +123,16 @@ fn k_detail(g: grid<3>, table: read_store<f64, 1>, heights: read_store<f32, 1>, 
     let h = heights[(z * w + ty) * w + tx];
     // du and dv span two texels.
     let grad = gradient(du, dv, up);
-    var col = expected_surface(h, grad, length(du) * 0.5, sp.x, sp.y, variation(dir, radius, octaves, seed));
+    let trend = grad * length(du) * 0.5;
+    let sd = sqrt(sp.x * sp.x + trend * trend / 12.0);
+    var col = expected_surface(h, grad, length(du) * 0.5, sp.x, sp.y, variation(dir, radius, octaves, seed),
+                               strata(dir, radius, h, sd, seed));
     // The rivers and lakes: the share of the texel under their water, a
     // river as deep as its channel runs there (shallow at its banks, its bed
     // showing through), a lake as deep as its water stands over its
     // valley's bed (rivers.bk lake_surface).
     let wa = water_at(dir, radius, length(du) * 0.5, net, seed);
-    let trend = grad * length(du) * 0.5;
-    let water = water_share(h, wa, sqrt(sp.x * sp.x + trend * trend / 12.0));
+    let water = water_share(h, wa, sd);
     col = vec4<f32>(mix(col.xyz, fresh_water(max(max(wa.near.w, wa.channel), 0.3)), water), max(col.w, water));
     let cover = expected_cover(h, grad, length(du) * 0.5, sp.x, sp.y) * (1.0 - water);
     var n = normalize(cross(du, dv));

@@ -561,6 +561,43 @@ pub fn fresh_water(depth: f32) -> vec3<f32> {
 // The ground at one height and gradient (tan of the angle from up): its
 // albedo, and w = 1 for water.
 pub fn surface(h: f32, grad: f32) -> vec4<f32> {
+    return bedded_surface(h, grad, 0.0);
+}
+
+// Bedded rock: a cliff's face shows its beds as bands, lighter and warmer
+// ones (sandstone, limestone) between darker ones (shale), each bed level
+// along a surface folded by low-frequency noise, so the bands follow the
+// strata rather than the contours. Three thicknesses, each a cosine of the
+// height along the fold, in log-luminance. Over a texel whose heights spread
+// by sd a cosine of wavelength L averages to itself times
+// exp(-(2 pi sd / L)^2 / 2) (its mean under a normal), so a band fades out
+// where the texel spans it, and the far ground keeps the beds' mean.
+const STRATA_FOLD: f64 = 3500.0;          // the folds' wavelength, metres
+const STRATA_FOLD_HEIGHT: f64 = 1600.0;   // their height, per unit of noise
+const STRATA_L0: f32 = 9.0;
+const STRATA_L1: f32 = 41.0;
+const STRATA_L2: f32 = 130.0;
+const STRATA_A0: f32 = 0.10;
+const STRATA_A1: f32 = 0.16;
+const STRATA_A2: f32 = 0.18;
+
+fn strata_band(level: f64, length: f32, phase: f32, sd: f32) -> f32 {
+    let x = level / (length as f64) + (phase as f64);
+    let f = (x - floor(x)) as f32;
+    let t = 6.2831853 * sd / length;
+    return cos(6.2831853 * f) * exp(-0.5 * t * t);
+}
+
+pub fn strata(dir: vec3<f64>, radius: f64, h: f32, sd: f32, seed: i32) -> f32 {
+    let fold = perlin_split(dir * (radius / STRATA_FOLD), seed + 307) as f64 * STRATA_FOLD_HEIGHT;
+    let level = (h as f64) + fold;
+    return STRATA_A0 * strata_band(level, STRATA_L0, 0.13, sd)
+         + STRATA_A1 * strata_band(level, STRATA_L1, 0.61, sd)
+         + STRATA_A2 * strata_band(level, STRATA_L2, 0.37, sd);
+}
+
+// surface with the rock's beds at `bed` (strata, log-luminance).
+pub fn bedded_surface(h: f32, grad: f32, bed: f32) -> vec4<f32> {
     if (h <= 0.0) {
         let through = exp(WATER_ATTENUATION * (2.0 * h));
         return vec4<f32>(mix(DEEP_WATER, SEA_BED, through), 1.0);
@@ -578,7 +615,7 @@ pub fn surface(h: f32, grad: f32) -> vec4<f32> {
     // ground shader the forest's average where they are not drawn).
     let forest = vec3<f32>(0.11, 0.19, 0.06);
     let alpine = vec3<f32>(0.13, 0.17, 0.08);
-    let rock = vec3<f32>(0.20, 0.20, 0.205);
+    let rock = vec3<f32>(0.20, 0.20, 0.205) * exp(bed) + vec3<f32>(0.03, 0.012, -0.012) * bed;
     let snow = vec3<f32>(0.92, 0.94, 0.97);
     var c = mix(sand, grass, smoothstep(1.0, 4.0, h));
     c = mix(c, forest, smoothstep(150.0, 600.0, h) * (1.0 - smoothstep(2300.0, 2900.0, h)));
@@ -786,8 +823,9 @@ pub fn variation(dir: vec3<f64>, radius: f64, octaves: f64, seed: i32) -> vec3<f
 // 4 m up read a quarter water), so the height splits there: the water takes
 // its share P(h < 0) by quadrature over the water's quantiles (5 nodes), the
 // land its share the same over the land's, each with 3 x 3 in the gradient.
-// The land's albedo takes the cell's variation factor.
-pub fn expected_surface(h: f32, grad: f32, cell: f32, sh: f32, sg: f32, vary: vec3<f32>) -> vec4<f32> {
+// The land's albedo takes the cell's variation factor, its rock the beds'
+// mean over the cell (`bed`, strata).
+pub fn expected_surface(h: f32, grad: f32, cell: f32, sh: f32, sg: f32, vary: vec3<f32>, bed: f32) -> vec4<f32> {
     var sum = vec4<f32>(0.0, 0.0, 0.0, 0.0);
     let trend = grad * cell;
     let sd = max(sqrt(sh * sh + trend * trend / 12.0), 1e-6);
@@ -811,7 +849,7 @@ pub fn expected_surface(h: f32, grad: f32, cell: f32, sh: f32, sg: f32, vary: ve
                     let gy = gh3(k);
                     let ex = grad + sg * gx.x;
                     let ey = sg * gy.x;
-                    let s = surface(height, sqrt(ex * ex + ey * ey));
+                    let s = bedded_surface(height, sqrt(ex * ex + ey * ey), bed);
                     sum += vec4<f32>(s.xyz * vary, 0.0) * (dry * nh.y * gx.y * gy.y);
                 }
             }

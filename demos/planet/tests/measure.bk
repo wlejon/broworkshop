@@ -1,6 +1,6 @@
 // Kernels for measuring the ground (CPU eval): one cell as the tile kernels
 // compute it, at (0, 0) of a frame (corner c, axes u, v), `cell` wide.
-from planet::ground import cell_height, spread, expected_surface, gradient, variation, terrain, octaves_for;
+from planet::ground import cell_height, spread, expected_surface, gradient, variation, strata, terrain, octaves_for;
 
 // The cell's height.
 @kernel @grid(1)
@@ -43,7 +43,9 @@ fn k_cell_color(g: grid<1>, cx: f64, cy: f64, cz: f64, ux: f64, uy: f64, uz: f64
     if (naive == 1) { sp = vec2<f32>(0.0, 0.0); width = 0.0; }
     let vary = variation(normalize(c), radius, octaves, seed);
     if (ch == 2) { return (vary.x * 0.2126 + vary.y * 0.7152 + vary.z * 0.0722) as f64; }
-    let e = expected_surface(h as f32, grad, width, sp.x, sp.y, vec3<f32>(1.0, 1.0, 1.0));
+    let trend = grad * width;
+    let bed = strata(normalize(c), radius, h as f32, sqrt(sp.x * sp.x + trend * trend / 12.0), seed);
+    let e = expected_surface(h as f32, grad, width, sp.x, sp.y, vec3<f32>(1.0, 1.0, 1.0), bed);
     if (ch == 0) { return (e.x * 0.2126 + e.y * 0.7152 + e.z * 0.0722) as f64; }
     return e.w as f64;
 }
