@@ -273,7 +273,8 @@ const fragment = `buffer uint u_det[];
     // over four slices through the up axis, each bounded by the horizons on
     // its two sides and taken about the normal's projection on it, and the
     // mean direction of the sky seen, along which its light is taken.
-    void userLight(vec3 toSun, inout float sunVisibility, inout float skyVisibility, inout vec3 skyNormal) {
+    void userLight(vec3 toSun, inout float sunVisibility, inout float skyVisibility, inout vec3 skyNormal,
+                   inout float occluderSun) {
         vec2 f = v_hz - floor(v_hz);
         ivec2 p = ivec2(floor(v_hz));
         vec4 al, ah, bl, bh, cl, ch, dl, dh;
@@ -331,7 +332,10 @@ const fragment = `buffer uint u_det[];
         vec3 g = (u_camHi + u_camLo) + vWorldPos;
         float w = max(length(dFdx(vWorldPos)), length(dFdy(vWorldPos)));
         float h = length(g) - CLOUD_R;
-        sunVisibility *= cloudShadow(g, h, toSun, w);
+        float clouds = cloudShadow(g, h, toSun, w);
+        sunVisibility *= clouds;
+        // The slopes around share the clouds' shadow.
+        occluderSun *= clouds;
         skyVisibility *= cloudShadow(g, h, up, w);
     }
 
