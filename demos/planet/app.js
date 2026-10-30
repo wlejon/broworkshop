@@ -13,8 +13,10 @@ boot();
 const fs = require('fs');
 const RADIUS = 6371000;
 const TILE = 32;            // cells along a tile's drawn edge
-const BORDER = 2;           // cells beyond it, for the vertex shader's normals
+const BORDER = 2;           // cells beyond it: the skirts' bottoms, and the detail layer's gradients at the edge
 const CELLS = TILE + 2 * BORDER;
+const DETAIL = 2;           // detail texels along a cell's edge (planet.bk's detail layer)
+const TEXELS = CELLS * DETAIL;
 const CAPACITY = 4096;
 const SEED = 7;
 const BASE_WAVELENGTH = 2400000;   // ground.bk's first octave
@@ -25,7 +27,8 @@ const mod = bro.kernel.compile(readApp('planet.bk'), { file: 'planet.bk', module
 const kTile = mod.kernel('k_tile');
 const kHeight = mod.kernel('k_height');
 const kRange = mod.kernel('k_range');
-const kColor = mod.kernel('k_color');
+const kDetailHeight = mod.kernel('k_detail_height');
+const kDetail = mod.kernel('k_detail');
 
 // The octaves a tile's cells can carry: down to a wavelength of 2.5 cells
 // (the tile kernels take theirs from ground.bk octaves_for, the same).
@@ -40,6 +43,8 @@ const PRODUCE_PER_UPDATE = 24;
 // batches by k_range itself.
 const span = bro.kernel.createBuffer(PRODUCE_PER_UPDATE * 2 * 4);
 span.write(new Int32Array(PRODUCE_PER_UPDATE * 2));
+// The batch's texel mean heights, k_detail_height to k_detail.
+const texelHeights = bro.kernel.createBuffer(PRODUCE_PER_UPDATE * TEXELS * TEXELS * 4);
 
 const canvas = document.querySelector('#stage');
 const scene = canvas.getContext('scene');
@@ -56,25 +61,30 @@ const atmosphere = { planetRadius: RADIUS, turbidity: 10, groundAlbedo: [0.08, 0
 // ── The tile cache ──────────────────────────────────────────────────────────
 
 let cache = null;
-function makeCache(pixelsPerCell) {
+// `pixelsPerTexel`: how large a detail texel may project, what the ground
+// shades at; a tile's vertices are DETAIL texels apart.
+function makeCache(pixelsPerTexel) {
+    const pixelsPerCell = pixelsPerTexel * DETAIL;
     cache = bro.tiles.createCache({
         domain: { type: 'cubeSphere', radius: RADIUS, center: [0, 0, 0] },
         tileSize: TILE, border: BORDER, capacity: CAPACITY, maxLevel: MAX_LEVEL,
         minHeight: 0, maxHeight: MAX_HEIGHT, pixelsPerCell, producePerUpdate: PRODUCE_PER_UPDATE,
-        layers: { position: 16, color: 16 },
+        layers: { position: 16, detail: DETAIL * DETAIL * 8 },
         ranges: true,
-        // The whole batch in three dispatches: the GPU fills up on the
+        // The whole batch in four dispatches: the GPU fills up on the
         // batch's cells together, where a tile's own were a few warps.
         produce(batch) {
             const grid = [CELLS, CELLS, batch.count], pos = this.layer('position');
-            kTile.dispatch(grid, batch.table, pos, span, RADIUS, BORDER, 1 / TILE, SEED);
-            kColor.dispatch(grid, batch.table, pos, this.layer('color'), RADIUS, BORDER, 1 / TILE, TRUTH, SEED, CELLS);
+            kTile.dispatch(grid, batch.table, pos, span, RADIUS, BORDER, 1 / TILE, TRUTH, SEED);
+            const texels = [TEXELS, TEXELS, batch.count];
+            kDetailHeight.dispatch(texels, batch.table, texelHeights, RADIUS, BORDER, 1 / TILE, DETAIL, SEED);
+            kDetail.dispatch(texels, batch.table, texelHeights, this.layer('detail'), RADIUS, BORDER, 1 / TILE, DETAIL, TRUTH, SEED);
             kRange.dispatch([batch.count], batch.table, span, this.ranges, 1 / TILE, MAX_HEIGHT);
         },
     });
     if (ground) {
         ground.setShaderBuffer('u_pos', cache.layer('position'));
-        ground.setShaderBuffer('u_col', cache.layer('color'));
+        ground.setShaderBuffer('u_det', cache.layer('detail'));
         ground.setShaderBuffer('u_tiles', cache.drawList);
     }
 }
@@ -113,11 +123,11 @@ function patchMesh() {
 // level, and center as hi + lo floats, from which the camera (split the same
 // way) is subtracted for a camera-relative placement good to f64.
 const vertex = `buffer vec4 u_pos[];
-    buffer vec4 u_col[];
     buffer ivec4 u_tiles[];
     uniform vec3 u_camHi;
     uniform vec3 u_camLo;
-    out vec4 v_col;
+    out vec2 v_tex;
+    flat out int v_slot;
     out vec3 v_up;
     out vec3 v_q;
     void userVertex(inout vec3 pos, inout vec3 normal, inout vec2 uv) {
@@ -128,9 +138,10 @@ const vertex = `buffer vec4 u_pos[];
         int i = int(pos.x + 0.5), j = int(pos.z + 0.5);
         int k = ids.x * C * C + (j + B) * C + (i + B);
         vec4 c = u_pos[k];
-        vec3 du = u_pos[k + 1].xyz - u_pos[k - 1].xyz;
-        vec3 dv = u_pos[k + C].xyz - u_pos[k - C].xyz;
-        normal = normalize(cross(du, dv));
+        // The vertex in the detail layer's texels (planet.bk): texel t is
+        // centred at cell (t + 0.5) / D - 0.5.
+        v_tex = (vec2(i + B, j + B) + 0.5) * ${DETAIL}.0 - 0.5;
+        v_slot = ids.x;
         // A skirt's bottom sits under the border cell beyond the edge, so the
         // skirts of neighbouring tiles cross beneath their seam instead of
         // sharing a plane: f32 rounding differs tile to tile, and coplanar
@@ -146,7 +157,7 @@ const vertex = `buffer vec4 u_pos[];
         float extent = ${RADIUS * Math.PI / 2} / float(1 << ids.w);
         vec3 rel = (hi.xyz - u_camHi) + (lo.xyz - u_camLo);
         pos = rel + c.xyz - up * (pos.y * extent * 0.0625);
-        v_col = u_col[k];
+        normal = up;   // the fragment shades with the detail layer's normal
         v_up = up;
         // The ground's fine detail is periodic over ${DETAIL_PERIOD} m: the tile's
         // center modulo that (exact in f32, the period a power of two) plus
@@ -155,15 +166,32 @@ const vertex = `buffer vec4 u_pos[];
         v_q = mod(hi.xyz, ${DETAIL_PERIOD}.0) + mod(lo.xyz, ${DETAIL_PERIOD}.0) + c.xyz;
     }`;
 
-// The colour layer (planet.bk k_color) is the mean of the ground under each
-// cell: albedo, and how much of it is water. Per pixel, the land carries on
-// past the finest tile's cells: octaves of wavelength 1/8 m down to 2 mm, of
-// albedo variation (ground.bk variation, the same contrast per octave) and of
-// relief (the same slope per octave), each faded out as its wavelength nears
-// a pixel. Both are zero-mean, so what a pixel averages to is the cell's.
-const fragment = `in vec4 v_col;
+// The detail layer (planet.bk) holds, finer than the vertices, the mean of
+// the ground under each texel: albedo, how much of it is water, and the
+// normal of its mean surface, read here bilinearly. Per pixel, the land
+// carries on past the finest tile's texels: octaves of wavelength 1/8 m down
+// to 2 mm, of albedo variation (ground.bk variation, the same contrast per
+// octave) and of relief (the same slope per octave), each faded out as its
+// wavelength nears a pixel. Both are zero-mean, so what a pixel averages to
+// is the texel's.
+const fragment = `buffer uint u_det[];
+    in vec2 v_tex;
+    flat in int v_slot;
     in vec3 v_up;
     in vec3 v_q;
+
+    // Texel (x, y) of this tile: colour (rgb, water) and the octahedral
+    // normal unfolded.
+    void detailTexel(ivec2 t, out vec4 col, out vec3 nrm) {
+        const int W = ${TEXELS};
+        t = clamp(t, ivec2(0), ivec2(W - 1));
+        int k = ((v_slot * W + t.y) * W + t.x) * 2;
+        col = unpackUnorm4x8(u_det[k]);
+        vec2 o = unpackUnorm2x16(u_det[k + 1]) * 2.0 - 1.0;
+        vec3 n = vec3(o, 1.0 - abs(o.x) - abs(o.y));
+        if (n.z < 0.0) n.xy = (1.0 - abs(n.yx)) * vec2(n.x >= 0.0 ? 1.0 : -1.0, n.y >= 0.0 ? 1.0 : -1.0);
+        nrm = normalize(n);
+    }
     const float VARY_LUM = 0.11;      // ground.bk VARY_LUM
     const float PERLIN_VAR = 0.0728;  // ground.bk PERLIN_VAR
     const float RELIEF = 0.08;        // slope per octave, per unit of the noise's gradient
@@ -205,12 +233,19 @@ const fragment = `in vec4 v_col;
     void userFragment(inout vec3 baseColor, inout vec3 normal,
                       inout float metallic, inout float roughness,
                       inout vec3 emissive, inout float alpha) {
-        float water = clamp(v_col.a, 0.0, 1.0);
-        // A skirt filling a crack is seen from either side, and its back face
-        // gets the flipped normal: the ground never faces down, so shade the
-        // side facing up.
-        vec3 n = normalize(normal);
-        if (dot(n, v_up) < 0.0) n = -n;
+        // Bilinear over the four texels about this point. The layer's normals
+        // face up, so a skirt seen from behind shades as the ground does.
+        vec2 f = v_tex - floor(v_tex);
+        ivec2 t0 = ivec2(floor(v_tex));
+        vec4 c00, c10, c01, c11;
+        vec3 n00, n10, n01, n11;
+        detailTexel(t0, c00, n00);
+        detailTexel(t0 + ivec2(1, 0), c10, n10);
+        detailTexel(t0 + ivec2(0, 1), c01, n01);
+        detailTexel(t0 + ivec2(1, 1), c11, n11);
+        vec4 col = mix(mix(c00, c10, f.x), mix(c01, c11, f.x), f.y);
+        vec3 n = normalize(mix(mix(n00, n10, f.x), mix(n01, n11, f.x), f.y));
+        float water = col.a;
 
         // The octaves a pixel resolves: full weight from 4 pixels a
         // wavelength, none at 2.
@@ -232,7 +267,7 @@ const fragment = `in vec4 v_col;
             cells *= 2;
         }
         float land = 1.0 - water;
-        baseColor = v_col.rgb * mix(1.0, exp(lum - 0.5 * lumVar), land);
+        baseColor = col.rgb * mix(1.0, exp(lum - 0.5 * lumVar), land);
         // The relief's gradient along the surface tilts the normal against it.
         n = normalize(n - (slope - dot(slope, n) * n) * land);
         normal = normalize(mix(n, normalize(v_up), water));
@@ -326,7 +361,7 @@ const altCtl = bindControl('#alt', {
 });
 altCtl.value = cam.alt;
 bindControl('#pitch', { out: '#pitchVal', fmt: (v) => v.toFixed(0) + '°', onChange: (v) => { cam.pitch = v; } });
-bindControl('#detail', { out: '#detailVal', fmt: (v) => v.toFixed(1) + ' px/cell', onChange: (v) => makeCache(v) });
+bindControl('#detail', { out: '#detailVal', fmt: (v) => v.toFixed(1) + ' px/texel', onChange: (v) => makeCache(v) });
 
 function paintStats() {
     const s = cache.stats;

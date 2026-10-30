@@ -17,8 +17,8 @@ fn point(c: vec3<f64>, u: vec3<f64>, v: vec3<f64>, s: f64, t: f64, cell: f64,
     return normalize(c + u * s + v * t) * (radius + max(h, 0.0));
 }
 
-// The cell's colour as k_color computes it, its gradient from the
-// neighbouring cells as k_color takes it from the position layer: `ch` 0
+// The cell's colour as k_detail computes a texel's, its gradient from the
+// neighbouring cells as k_detail takes it from their mean heights: `ch` 0
 // its luminance, 1 how much is water, both without the albedo variation, 2
 // the variation's luminance factor alone (it refines on its own). `naive` 1
 // drops the spreads, the colour of the cell's mean instead of the mean
