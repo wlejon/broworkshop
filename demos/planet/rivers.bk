@@ -191,7 +191,11 @@ const CHANNEL_DEPTH: f32 = 0.04;   // of the width, at the middle
 // The reach from point k (record offset) to its downstream point, at offset
 // af from here: v.x the height its valley cuts the ground to, v.y the share
 // of the cell in its channel, v.z how deep its channel runs here, v.w its
-// floor's height; surface its water's here. Both run between its points'
+// floor's height; surface the level its water stands at where it holds a
+// lake: its downstream point's, as a lake stands flat at its outlet's (a
+// surface run between its points' sloped from a tributary's level down to
+// the lake it joins, a sheet of water over the lake's floor ending in a cut
+// across the shore). The floor runs between its points'. A point's
 // (riverbuild.bk): the water filled over the floors and breached, the
 // floor the full ground's lowest along the reach, or the water where an
 // outlet's gorge cuts through a rim under it. So the river lies in the
@@ -228,7 +232,7 @@ fn reach(net: read_store<f32, 1>, k: i32, af: vec3<f32>, hi: vec3<f32>, lo: vec3
     out.v = vec4<f32>(bed + valley_rise(sqrt(d * d + spread) - half),
                       clamp((s1 - s0) / max(cell, 1e-3), 0.0, 1.0),
                       CHANNEL_DEPTH * 2.0 * half * max(1.0 - across * across, 0.0), bed);
-    out.surface = mix(level, downLevel, t);
+    out.surface = downLevel;
     return out;
 }
 
