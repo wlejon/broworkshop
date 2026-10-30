@@ -1,0 +1,70 @@
+// The grass's ground (grass.js): a field of points about the eye, on the
+// gnomonic plane of a cube face (the points a + e u + f v projected onto the
+// sphere), each the ground's true surface there, how much of it grows grass,
+// its albedo, and how much of the sun's disc it sees. The blades stand on
+// the field, between its points.
+from planet::ground import terrain, surface, grass_cover, variation;
+
+// Point (x, y) of the field at plane point (u0 + x delta, v0 + y delta),
+// eight floats at `out` (y * width + x) * 8: its position about `origin`
+// (xyz), its grass cover, its albedo (rgb), and its sun visibility.
+@kernel @grid(2)
+fn k_grass_field(g: grid<2>, out: write_store<f32, 1>,
+                 ax: f64, ay: f64, az: f64, ex: f64, ey: f64, ez: f64, fx: f64, fy: f64, fz: f64,
+                 u0: f64, v0: f64, delta: f64, ox: f64, oy: f64, oz: f64,
+                 sx: f64, sy: f64, sz: f64, radius: f64, octaves: f64, seed: i32) {
+    let a = vec3<f64>(ax, ay, az);
+    let e = vec3<f64>(ex, ey, ez);
+    let f = vec3<f64>(fx, fy, fz);
+    let u = u0 + (g.x() as f64) * delta;
+    let v = v0 + (g.y() as f64) * delta;
+    let dir = normalize(a + e * u + f * v);
+    let h = terrain(dir, radius, octaves, seed);
+    let p = dir * (radius + max(h, 0.0));
+    // The gradient across a tenth of the spacing.
+    let du = normalize(a + e * (u + 0.1 * delta) + f * v);
+    let dv = normalize(a + e * u + f * (v + 0.1 * delta));
+    let pu = du * (radius + max(terrain(du, radius, octaves, seed), 0.0)) - p;
+    let pv = dv * (radius + max(terrain(dv, radius, octaves, seed), 0.0)) - p;
+    var n = normalize(cross(pu, pv));
+    if (dot(n, dir) < 0.0) { n = -n; }
+    let cosine = clamp(dot(n, dir) as f32, 1e-3, 1.0);
+    let grad = sqrt(1.0 / (cosine * cosine) - 1.0);
+    let albedo = surface(h as f32, grad).xyz * variation(dir, radius, octaves, seed);
+
+    // The sun's disc over the horizon toward it: the highest the ground rises
+    // along the way, out to 1.8 km at steps 1.3 apart, against the sun's
+    // elevation, over the disc's 0.53 degrees. Far steps read coarser
+    // octaves: what is finer than the step does not cast its shadow.
+    let toSun = normalize(vec3<f64>(sx, sy, sz));
+    let sunUp = dot(toSun, dir);
+    var lit: f32 = 0.0;
+    if (sunUp > -0.01) {
+        let level = normalize(toSun - dir * sunUp);
+        let sunElev = asin(clamp(sunUp as f32, -1.0, 1.0));
+        var highest: f32 = -1.57;
+        var dist: f64 = 1.5;
+        let base = radius + max(h, 0.0);
+        for (var k: i32 = 0; k < 28; k += 1) {
+            let q = normalize(dir + level * (dist / radius));
+            let o = max(octaves - (log2(max(dist as f32, 1.0)) * 0.7) as f64, 8.0);
+            let hq = radius + max(terrain(q, radius, o, seed), 0.0);
+            // Above the point's tangent plane, the sphere's fall included.
+            let rise = (hq - base - dist * dist / (2.0 * radius)) as f32;
+            highest = max(highest, atan(rise / (dist as f32)));
+            dist *= 1.3;
+        }
+        lit = clamp((sunElev - highest) / 0.0093 + 0.5, 0.0, 1.0);
+    }
+
+    let i = (g.y() * g.width() + g.x()) * 8;
+    let rel = p - vec3<f64>(ox, oy, oz);
+    out[i] = rel.x as f32;
+    out[i + 1] = rel.y as f32;
+    out[i + 2] = rel.z as f32;
+    out[i + 3] = grass_cover(h as f32, grad);
+    out[i + 4] = albedo.x;
+    out[i + 5] = albedo.y;
+    out[i + 6] = albedo.z;
+    out[i + 7] = lit;
+}

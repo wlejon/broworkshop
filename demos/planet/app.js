@@ -8,6 +8,7 @@
 import { boot } from "/lib/kit/app.js";
 import { bindControl, logMap } from "/lib/kit/params.js";
 import { cloudGlsl, createClouds } from "/app/clouds.js";
+import { createGrass } from "/app/grass.js";
 
 boot();
 
@@ -475,7 +476,9 @@ ground.setShader({ vertex, fragment });
 ground.cullMargin = 4 * RADIUS;   // the shader places tiles; the cache culls them
 makeCache(4);
 const cloudMod = bro.kernel.compile(readApp('clouds.bk'), { file: 'clouds.bk', modules: { 'planet::ground': readApp('ground.bk') } });
-const clouds = createClouds(scene, RADIUS, cloudMod.kernel('k_cloud_level'), [ground]);
+const grassMod = bro.kernel.compile(readApp('grass.bk'), { file: 'grass.bk', modules: { 'planet::ground': readApp('ground.bk') } });
+const grass = createGrass(scene, RADIUS, grassMod.kernel('k_grass_field'), TRUTH, SEED);
+const clouds = createClouds(scene, RADIUS, cloudMod.kernel('k_cloud_level'), [ground, ...grass.nodes]);
 
 // ── Camera: doubles about the planet's center ───────────────────────────────
 
@@ -500,7 +503,8 @@ function cameraFrame() {
     const right = v3.sub(v3.scale(east, Math.cos(hd)), v3.scale(north, Math.sin(hd)));
     const fwd = v3.add(v3.scale(level, Math.cos(pt)), v3.scale(up, Math.sin(pt)));
     const camUp = v3.cross(right, fwd);
-    const surface = RADIUS + groundHeight(up);
+    // The altitude is over the ground, or over the sea where the ground is below it.
+    const surface = RADIUS + Math.max(groundHeight(up), 0);
     return { up, east, north, fwd, camUp, right, pos: v3.scale(up, surface + cam.alt), surface };
 }
 
@@ -537,6 +541,8 @@ function frame() {
     ground.setShaderUniform('u_camLo', camLo);
     ground.setShaderUniform('u_time', performance.now() / 1000 % WAVE_CLOCK);
     clouds.update(f.pos, f.surface + cam.alt - RADIUS, 2 * Math.tan(FOV * Math.PI / 360) / height);
+    const d = sun.direction, dl = Math.hypot(d[0], d[1], d[2]);
+    grass.update(f.pos, cam.alt, [-d[0] / dl, -d[1] / dl, -d[2] / dl], camHi, camLo, performance.now() / 1000 % WAVE_CLOCK);
     for (let k = 0; k < 3; k++) atmosphere.planetCenter[k] = -f.pos[k];
     scene.setAtmosphere(atmosphere);
     lastStats.selected = cache.wanted;
@@ -608,4 +614,4 @@ function loop() {
 requestAnimationFrame(loop);
 
 // For tests and tools.
-globalThis.planet = { cam, setHour, get cache() { return cache; }, clouds, get stats() { return lastStats; }, get lastView() { return lastView; }, frame };
+globalThis.planet = { cam, setHour, get cache() { return cache; }, clouds, grass, get stats() { return lastStats; }, get lastView() { return lastView; }, frame };

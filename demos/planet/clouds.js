@@ -63,7 +63,7 @@ function gradientBound(w) {
 
 // Cube face i (0..5): axis i % 3, its sign, and the plane's axes, the same
 // in the kernel's dispatch and the shader.
-function faceFrame(i) {
+export function faceFrame(i) {
     const axis = i % 3, sign = i < 3 ? 1 : -1;
     const a = [0, 0, 0], e = [0, 0, 0], f = [0, 0, 0];
     a[axis] = sign;

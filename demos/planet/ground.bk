@@ -493,7 +493,7 @@ const WATER_ATTENUATION = vec3<f32>(0.40, 0.065, 0.032);   // per metre
 
 // The ground at one height and gradient (tan of the angle from up): its
 // albedo, and w = 1 for water.
-fn surface(h: f32, grad: f32) -> vec4<f32> {
+pub fn surface(h: f32, grad: f32) -> vec4<f32> {
     if (h <= 0.0) {
         let through = exp(WATER_ATTENUATION * (2.0 * h));
         return vec4<f32>(mix(DEEP_WATER, SEA_BED, through), 1.0);
@@ -515,6 +515,18 @@ fn surface(h: f32, grad: f32) -> vec4<f32> {
     c = mix(c, rock, max(smoothstep(0.2, 0.4, slope), smoothstep(3600.0, 4300.0, h)));
     c = mix(c, snow, smoothstep(4200.0, 4800.0, h) * (1.0 - smoothstep(0.35, 0.6, slope)));
     return vec4<f32>(c, 0.0);
+}
+
+// The share of the ground at one height and gradient that grows grass (the
+// grass blades' density, demos/planet/grass.js): surface's land past the
+// beach, less the rock and the snow it lays over it.
+pub fn grass_cover(h: f32, grad: f32) -> f32 {
+    if (h <= 0.0) { return 0.0; }
+    let slope = 1.0 - 1.0 / sqrt(1.0 + grad * grad);
+    var c = smoothstep(1.0, 4.0, h);
+    c *= 1.0 - max(smoothstep(0.2, 0.4, slope), smoothstep(3600.0, 4300.0, h));
+    c *= 1.0 - smoothstep(4200.0, 4800.0, h) * (1.0 - smoothstep(0.35, 0.6, slope));
+    return c;
 }
 
 // The z with normal_cdf(z) = u: normal_cdf's tanh inverted, then its cubic
