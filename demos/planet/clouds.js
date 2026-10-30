@@ -29,6 +29,8 @@ export const CLOUD_BASE = 1500;       // m above the broad ground under it (clou
 const LIFT_SLOPE = 0.05;              // a bound on the broad ground's gradient (m/m)
 export const CLOUD_DEPTH = 2600;      // m from the base to the tallest tops
 const CLOUD_SIGMA = 0.03;             // extinction inside a cloud, 1/m
+const NEAR_RANGE = 1500;              // m from the eye the engine's near grid integrates (userMedium)
+const NEAR_MARGIN = 300;              // m about the layer's heights the eye uses the grid within
 const NOISE_VAR = 0.0728;             // the Perlin noise's variance (ground.bk PERLIN_VAR)
 const NOISE_SLOPE = 2.5;              // a bound on its gradient, per lattice unit
 
@@ -508,6 +510,55 @@ const volumeGlsl = (radius) => cloudGlsl(radius, true) + `
         float k = 1.0 + g * g - 2.0 * g * c;
         return (1.0 - g * g) / (12.566 * k * sqrt(k));
     }
+    // Single scattering's forward and back lobes (the silver lining; the
+    // dimmer glow away from the sun).
+    float cloudPhase(float cosSun) { return mix(hgPhase(-0.25, cosSun), hgPhase(0.8, cosSun), 0.7); }
+
+    // The sub-columns' ranks (userVolume), the cloudiest first to fill.
+    const vec4 CLOUD_RANK = vec4(3.0, 2.0, 1.0, 0.0);
+    // Each sub-column's amount about the column's, at its rank's quantile
+    // of the occupancy's logistic, in deviations: ln(p / (1 - p)) / 1.7
+    // at p = 1/8, 3/8, 5/8, 7/8.
+    const vec4 CLOUD_QUANTILE = vec4(-1.1446, -0.3011, 0.3011, 1.1446);
+
+    // The sun's light scattered many times toward the eye, per unit of the
+    // sun's and of the light scattered, at a depth tauSun toward a sun at muS
+    // over the horizon, and the sky's through the depth above (userVolume
+    // says how).
+    vec4 cloudSunMany(vec4 tauSun, float muS) {
+        return (0.85 * muS / 3.14159) * (0.55 * exp(-0.6 * tauSun) + 0.45 / (1.0 + 0.1125 * tauSun));
+    }
+    vec4 cloudSkyMany(vec4 tauSun, float muS) { return 1.0 / (1.0 + 0.1125 * muS * tauSun); }
+
+    // The sub-columns' tops at the layer point upP, height share s, of a
+    // column (F, v) at a footprint of w metres, and the depth of cloud toward
+    // the sun from there: through the column up to each top (bright tops,
+    // dark bases), then through the column the sun's ray reaches 200 m over
+    // the highest (a top's far side shaded behind the bumps toward it), read
+    // at Pl's (tapTop, when tap is false: the march takes it once a cloud).
+    vec4 cloudSunDepth(vec3 P, vec3 upP, float s, float F, float v, float w, vec3 toSun, float muS,
+                       bool tap, inout vec4 tapTop, out vec4 above) {
+        float dev = sqrt(v);
+        vec4 top = vec4(cloudTop(F + dev * CLOUD_QUANTILE.x), cloudTop(F + dev * CLOUD_QUANTILE.y),
+                        cloudTop(F + dev * CLOUD_QUANTILE.z), cloudTop(F + dev * CLOUD_QUANTILE.w));
+        vec4 over = top - s;
+        top = s + 0.5 * (over + sqrt(over * over + CLOUD_TOP_SOFT * CLOUD_TOP_SOFT));
+        above = max(top - s, 0.0) * CLOUD_DEPTH;
+        float rise = max(top.w - s, 0.0) * CLOUD_DEPTH + 200.0;
+        float sMid = s + 0.5 * rise / CLOUD_DEPTH, sOut = s + rise / CLOUD_DEPTH;
+        if (tap) {
+            vec3 Pl = P + toSun * (rise / muS);
+            float Fl, vl, cl;
+            tapTop = vec4(0.0);
+            if (cloudColumn(normalize(Pl), max(w, 0.25 * rise / muS), CLOUD_FLOOR, 0.0, Fl, vl, cl)) {
+                float devL = sqrt(vl);
+                tapTop = vec4(cloudTop(Fl + devL * CLOUD_QUANTILE.x), cloudTop(Fl + devL * CLOUD_QUANTILE.y),
+                              cloudTop(Fl + devL * CLOUD_QUANTILE.z), cloudTop(Fl + devL * CLOUD_QUANTILE.w));
+            }
+        }
+        vec4 path = (clamp(top, s, sMid) - s) + (clamp(tapTop, sMid, sOut) - sMid);
+        return CLOUD_SIGMA * path * CLOUD_DEPTH / muS;
+    }
 
     void userVolume(vec3 dir, float sceneDist, inout vec3 radiance, inout float transmittance, inout float depth) {
         vec3 up = normalize(u_camHi + u_camLo);
@@ -531,13 +582,12 @@ const volumeGlsl = (radius) => cloudGlsl(radius, true) + `
             t1 = tf;
         }
         t1 = min(t1, min(sceneDist, t0 + 6.0e5));
+        // On from the near grid's far end (userMedium below).
+        t0 = max(t0, volumeNearEnd());
         if (t1 <= t0) return;
 
         vec3 toSun = sceneToSun();
-        float cosSun = dot(dir, toSun);
-        // Single scattering's forward and back lobes (the silver lining; the
-        // dimmer glow away from the sun).
-        float phase = mix(hgPhase(-0.25, cosSun), hgPhase(0.8, cosSun), 0.7);
+        float phase = cloudPhase(dot(dir, toSun));
         vec3 eye = u_camHi + u_camLo;
         vec3 sun = vec3(0.0), sky = vec3(0.0);
         float litAt = -1.0e9;
@@ -566,12 +616,8 @@ const volumeGlsl = (radius) => cloudGlsl(radius, true) + `
         // as the occupancy rises: sub-column j is cloud, in full density,
         // where the occupancy passes its rank,
         // with its own transmittance and its own depth into the cloud. A
-        // resolved field (occupancy 0 or 1) marches as one.
-        const vec4 RANK = vec4(3.0, 2.0, 1.0, 0.0);
-        // Each sub-column's amount about the column's, at its rank's quantile
-        // of the occupancy's logistic, in deviations: ln(p / (1 - p)) / 1.7
-        // at p = 1/8, 3/8, 5/8, 7/8.
-        const vec4 QUANTILE = vec4(-1.1446, -0.3011, 0.3011, 1.1446);
+        // resolved field (occupancy 0 or 1) marches as one (CLOUD_RANK,
+        // CLOUD_QUANTILE).
         float t = t0;
         float sumT = 0.0, sumW = 0.0;
         vec3 L = vec3(0.0);
@@ -671,7 +717,7 @@ const volumeGlsl = (radius) => cloudGlsl(radius, true) + `
                         dt = min(dt, CLOUD_STEP) * (0.5 + jitter);
                     }
                     inCloud = true;
-                    vec4 fill = clamp(occ * 4.0 - RANK, 0.0, 1.0);
+                    vec4 fill = clamp(occ * 4.0 - CLOUD_RANK, 0.0, 1.0);
                     // A sub-column out of cloud again folds its mixture.
                     vec4 gone = vec4(equal(fill, vec4(0.0))) * vec4(greaterThan(cover, vec4(0.0)));
                     T *= mix(vec4(1.0), 1.0 - cover + cover * Tc, gone);
@@ -696,36 +742,11 @@ const volumeGlsl = (radius) => cloudGlsl(radius, true) + `
                     // CLOUD_TOP_SOFT of the height: at a hard one, every
                     // such patch had a hard edge across the bases.
                     float descent = -dot(dir, upP);
-                    float dev = sqrt(v);
-                    vec4 top = vec4(cloudTop(F + dev * QUANTILE.x), cloudTop(F + dev * QUANTILE.y),
-                                    cloudTop(F + dev * QUANTILE.z), cloudTop(F + dev * QUANTILE.w));
-                    vec4 over = top - s;
-                    top = s + 0.5 * (over + sqrt(over * over + CLOUD_TOP_SOFT * CLOUD_TOP_SOFT));
-                    vec4 above = max(top - s, 0.0) * CLOUD_DEPTH;
-                    // And the cloud the sun's ray meets on its way out, which
-                    // shades a top's far side behind the bumps toward the
-                    // sun: one tap where the ray has climbed 200 m over
-                    // this column's highest top. The ray's first half
-                    // passes through this column, its second through that
-                    // one, each up to its own tops.
-                    float rise = max(top.w - s, 0.0) * CLOUD_DEPTH + 200.0;
-                    float sMid = s + 0.5 * rise / CLOUD_DEPTH, sOut = s + rise / CLOUD_DEPTH;
-                    vec3 Pl = P + toSun * (rise / muS);
-                    // Taken where the ray enters a cloud and kept while it
-                    // stays in it: the steps after are seen through the
-                    // cloud in front.
-                    if (inside == vec4(0.0)) {
-                        float Fl, vl, cl;
-                        tapTop = vec4(0.0);
-                        if (cloudColumn(normalize(Pl), max(w, 0.25 * rise / muS), CLOUD_FLOOR, 0.0, Fl, vl, cl)) {
-                            float devL = sqrt(vl);
-                            tapTop = vec4(cloudTop(Fl + devL * QUANTILE.x), cloudTop(Fl + devL * QUANTILE.y),
-                                          cloudTop(Fl + devL * QUANTILE.z), cloudTop(Fl + devL * QUANTILE.w));
-                        }
-                    }
-                    vec4 topL = tapTop;
-                    vec4 path = (clamp(top, s, sMid) - s) + (clamp(topL, sMid, sOut) - sMid);
-                    vec4 tauSun = CLOUD_SIGMA * path * CLOUD_DEPTH / muS;
+                    // The sun's tap is taken where the ray enters a cloud
+                    // and kept while it stays in it: the steps after are
+                    // seen through the cloud in front.
+                    vec4 above;
+                    vec4 tauSun = cloudSunDepth(P, upP, s, F, v, w, toSun, muS, inside == vec4(0.0), tapTop, above);
                     vec4 rate = mix(vec4(0.0), vec4(CLOUD_SIGMA * descent / muS), greaterThan(above, vec4(0.0)));
                     // A sub-column the ray came down into since the last
                     // sample is integrated from the top it crossed, where
@@ -762,9 +783,8 @@ const volumeGlsl = (radius) => cloudGlsl(radius, true) + `
                     // the same, through the depth straight up.
                     vec4 stepT = exp(-sigma * len);
                     vec4 fillStep = cloudStep(sigma, vec4(0.0), len);
-                    vec4 bySun = phase * cloudSunStep(sigma, tauSun, rate, len)
-                               + (0.85 * muS / 3.14159) * (0.55 * exp(-0.6 * tauSun) + 0.45 / (1.0 + 0.1125 * tauSun)) * fillStep;
-                    vec4 bySky = fillStep / (1.0 + 0.1125 * muS * tauSun);
+                    vec4 bySun = phase * cloudSunStep(sigma, tauSun, rate, len) + cloudSunMany(tauSun, muS) * fillStep;
+                    vec4 bySky = cloudSkyMany(tauSun, muS) * fillStep;
                     vec4 W = T * cover * Tc;
                     L += 0.25 * (sun * dot(W, bySun) + sky * dot(W, bySky));
                     float wgt = 0.25 * dot(W, 1.0 - stepT);
@@ -824,6 +844,56 @@ const volumeGlsl = (radius) => cloudGlsl(radius, true) + `
         // sampled clear, blue in cloud; the rest (dark) outside the layer's
         // heights there.
         if (SCENE_DEBUG(cloudStepKinds)) sceneDebugOut(kinds / max(float(marched), 1.0));
+    }
+
+    // The near field, to u_cloudNear from the eye (update: none while the
+    // layer is out of its reach), integrated by the engine over its grid:
+    // the march's integrand at one point, its four sub-columns the grid's
+    // four parts, each filled as the march fills it and lit through its
+    // own depth toward the sun.
+    uniform float u_cloudNear;
+    float userMediumRange() { return u_cloudNear; }
+    void userMedium(vec3 pos, vec3 dir, float w, out mat4x3 scatter, out vec4 extinction, out float clear) {
+        scatter = mat4x3(0.0);
+        extinction = vec4(0.0);
+        clear = 0.0;
+        vec3 eye = u_camHi + u_camLo;
+        float hc = u_camAlt;
+        float t = length(pos);
+        float mu = dot(dir, normalize(eye));
+        vec3 P = eye + pos;
+        float rp = length(P);
+        vec3 upP = P / rp;
+        float h = hc + (2.0 * (CLOUD_R + hc) * mu * t + t * t) / (rp + CLOUD_R + hc);
+        float s = (h - CLOUD_BASE - cloudLift(upP)) / CLOUD_DEPTH;
+        float climb = dot(dir, upP);
+        if (s < 0.0 || s > 1.0) {
+            // As far as the ray can first meet the layer's heights again
+            // (userVolume's skip).
+            float gap = s < 0.0 ? -s * CLOUD_DEPTH : (s - 1.0) * CLOUD_DEPTH;
+            float a = (s < 0.0 ? -climb : climb) - CLOUD_LIFT_SLOPE;
+            clear = s < 0.0 ? 2.0 * gap / (sqrt(a * a + 2.0 * gap / CLOUD_R) - a) : (a < 0.0 ? gap / -a : 1.0e9);
+            return;
+        }
+        float F, v;
+        // As far as the column provably stays short of cloud (userVolume's).
+        float drop = cloudNeedSlope(s) * (max(-climb, 0.0) + CLOUD_LIFT_SLOPE) / CLOUD_DEPTH;
+        if (!cloudColumn(upP, max(w, 1.0), cloudNeed(s), drop, F, v, clear)) return;
+        clear = 0.0;
+        vec2 fd = cloudDetailed(P, max(w, 1.0), F, v);
+        float occ = cloudOccupancy(fd.x, fd.y, s);
+        if (occ <= 0.003) return;
+        vec4 fill = clamp(occ * 4.0 - CLOUD_RANK, 0.0, 1.0);
+        extinction = CLOUD_SIGMA * fill;
+        vec3 toSun = sceneToSun();
+        float muS = max(dot(toSun, upP), 0.04);
+        vec4 tapTop = vec4(0.0), above;
+        vec4 tauSun = cloudSunDepth(P, upP, s, F, v, max(w, 1.0), toSun, muS, true, tapTop, above);
+        vec4 bySun = cloudPhase(dot(dir, toSun)) * exp(-tauSun) + cloudSunMany(tauSun, muS);
+        vec4 bySky = cloudSkyMany(tauSun, muS);
+        vec3 sun = volumeSunLight(pos), sky = 0.5 * volumeSkyLight(pos, upP);
+        vec4 a = extinction * bySun, b = extinction * bySky;
+        scatter = mat4x3(sun * a.x + sky * b.x, sun * a.y + sky * b.y, sun * a.z + sky * b.z, sun * a.w + sky * b.w);
     }
 `;
 
@@ -1027,6 +1097,12 @@ export function createClouds(scene, radius, module, readers, seed) {
             node.setShaderUniform('u_camHi', hi);
             node.setShaderUniform('u_camLo', lo);
             node.setShaderUniform('u_camAlt', altitude);
+            // The near grid while the eye is in the layer's heights or about
+            // them, where a march takes its many steps close by; further
+            // off, it crosses the air to the layer in one.
+            const near = altitude > CLOUD_BASE + liftRange[0] - NEAR_MARGIN &&
+                         altitude < CLOUD_BASE + CLOUD_DEPTH + liftRange[1] + NEAR_MARGIN;
+            node.setShaderUniform('u_cloudNear', near ? NEAR_RANGE : 0);
         },
     };
 }
