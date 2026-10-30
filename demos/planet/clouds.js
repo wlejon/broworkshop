@@ -432,6 +432,8 @@ const volumeGlsl = (radius) => cloudGlsl(radius, true) + `
         return lit + exp(-sigma * x0) - exp(-sigma * dt);
     }
 
+    const float CLOUD_TOP_SOFT = 0.04;   // of the layer's height, about 100 m
+
     // How far the column's amount passes what the height needs, in
     // deviations of what the footprint leaves unresolved (the occupancy's
     // logistic argument over 1.7), at distance t along the ray from the eye
@@ -622,13 +624,19 @@ const volumeGlsl = (radius) => cloudGlsl(radius, true) + `
                     // above it up to the sub-column's own top (bright tops,
                     // dark bases), at the sun's slant, deepening along the
                     // step as the ray descends and thinning as it rises.
-                    // Of the amount with the detail resolved here: the
-                    // column's alone put the top below cloud the detail
-                    // lifts over it, lit in full in a hard-edged patch.
+                    // Of the column's amount: the detail at this point
+                    // says nothing of the cloud above it, and taken as if
+                    // it did, the light drew its contours on every top.
+                    // Cloud the detail lifts over the column's top is in
+                    // the sun, reached through a smooth maximum over
+                    // CLOUD_TOP_SOFT of the height: at a hard one, every
+                    // such patch had a hard edge across the bases.
                     float descent = -dot(dir, upP);
-                    float dev = sqrt(fd.y);
-                    vec4 top = vec4(cloudTop(fd.x + dev * QUANTILE.x), cloudTop(fd.x + dev * QUANTILE.y),
-                                    cloudTop(fd.x + dev * QUANTILE.z), cloudTop(fd.x + dev * QUANTILE.w));
+                    float dev = sqrt(v);
+                    vec4 top = vec4(cloudTop(F + dev * QUANTILE.x), cloudTop(F + dev * QUANTILE.y),
+                                    cloudTop(F + dev * QUANTILE.z), cloudTop(F + dev * QUANTILE.w));
+                    vec4 over = top - s;
+                    top = s + 0.5 * (over + sqrt(over * over + CLOUD_TOP_SOFT * CLOUD_TOP_SOFT));
                     vec4 above = max(top - s, 0.0) * CLOUD_DEPTH;
                     // And the cloud the sun's ray meets on its way out, which
                     // shades a top's far side behind the bumps toward the
