@@ -48,7 +48,10 @@ function makeCache(pixelsPerCell) {
                 c[0], c[1], c[2], RADIUS, BORDER, 1 / TILE, octavesFor(tile.extent), SEED);
         },
     });
-    if (ground) ground.setShaderBuffer('u_pos', cache.layer('position'));
+    if (ground) {
+        ground.setShaderBuffer('u_pos', cache.layer('position'));
+        ground.setShaderBuffer('u_tiles', cache.drawList);
+    }
 }
 
 // ── The drawn tiles: one instanced patch ────────────────────────────────────
@@ -81,25 +84,32 @@ function patchMesh() {
     return new Mesh({ positions: new Float32Array(pos), normals, indices: new Uint32Array(idx) });
 }
 
+// Instance i draws the cache's draw-list record i (tiles-api.js): its slot,
+// level, and center as hi + lo floats, from which the camera (split the same
+// way) is subtracted for a camera-relative placement good to f64.
 const vertex = `buffer vec4 u_pos[];
-    buffer vec4 u_inst[];
+    buffer ivec4 u_tiles[];
+    uniform vec3 u_camHi;
+    uniform vec3 u_camLo;
     out float v_h;
     out vec3 v_up;
     void userVertex(inout vec3 pos, inout vec3 normal, inout vec2 uv) {
-        vec4 inst0 = u_inst[gl_InstanceIndex * 2];
-        vec4 inst1 = u_inst[gl_InstanceIndex * 2 + 1];
+        ivec4 ids = u_tiles[gl_InstanceIndex * 4];   // slot, parentSlot, root, level
+        vec4 hi = intBitsToFloat(u_tiles[gl_InstanceIndex * 4 + 2]);
+        vec4 lo = intBitsToFloat(u_tiles[gl_InstanceIndex * 4 + 3]);
         const int C = ${CELLS}, B = ${BORDER};
         int i = int(pos.x + 0.5), j = int(pos.z + 0.5);
-        int k = int(inst0.x) * C * C + (j + B) * C + (i + B);
+        int k = ids.x * C * C + (j + B) * C + (i + B);
         vec4 c = u_pos[k];
         vec3 du = u_pos[k + 1].xyz - u_pos[k - 1].xyz;
         vec3 dv = u_pos[k + C].xyz - u_pos[k - C].xyz;
         normal = normalize(cross(du, dv));
-        // Up at this vertex: from the planet's center, which sits at
-        // -up * dist from the tile's center.
-        vec3 up = normalize(c.xyz + inst1.xyz * inst1.w);
-        // Skirts hang a sixteenth of the tile below the surface.
-        pos = c.xyz - up * (pos.y * inst0.y * 0.0625);
+        // Up at this vertex: away from the planet's center at the origin.
+        vec3 up = normalize(c.xyz + hi.xyz);
+        // Skirts hang a sixteenth of the tile's edge below the surface.
+        float extent = ${RADIUS * Math.PI / 2} / float(1 << ids.w);
+        vec3 rel = (hi.xyz - u_camHi) + (lo.xyz - u_camLo);
+        pos = rel + c.xyz - up * (pos.y * extent * 0.0625);
         v_h = c.w;
         v_up = up;
     }`;
@@ -131,9 +141,7 @@ const fragment = `in float v_h;
 let ground = null;
 ground = scene.createInstancedMesh({ mesh: patchMesh(), color: [1, 1, 1], castsShadow: false, receivesShadow: false, doubleSided: true });
 ground.setShader({ vertex, fragment });
-ground.cullMargin = 4 * RADIUS;   // tiles are placed by the shader; the CPU culls them below
-const instBuf = bro.kernel.createBuffer(CAPACITY * 8 * 4);
-ground.setShaderBuffer('u_inst', instBuf);
+ground.cullMargin = 4 * RADIUS;   // the shader places tiles; the cache culls them
 makeCache(2);
 
 // ── Camera: doubles about the planet's center ───────────────────────────────
@@ -165,9 +173,9 @@ function cameraFrame() {
 
 // ── Per frame ───────────────────────────────────────────────────────────────
 
-const inst = new Float32Array(CAPACITY * 16);
-const instData = new Float32Array(CAPACITY * 8);
+const camHi = [0, 0, 0], camLo = [0, 0, 0];
 let lastStats = { drawn: 0, visible: 0, ms: 0 };
+let lastView = null;
 
 function frame() {
     const t0 = performance.now();
@@ -179,32 +187,28 @@ function frame() {
     scene.setCamera({ eye: [0, 0, 0], target: f.fwd, up: f.camUp, fov: FOV, near, far: horizon + 1e5 });
 
     // The cache culls to the frustum and the horizon: what it draws is seen.
-    cache.update({ position: f.pos, forward: f.fwd, up: f.camUp, fov: FOV,
-                   viewportWidth: height * aspect, viewportHeight: height });
+    lastView = { position: f.pos, forward: f.fwd, up: f.camUp, fov: FOV,
+                 viewportWidth: height * aspect, viewportHeight: height };
+    cache.update(lastView);
 
-    const drawn = cache.drawn;
-    let n = 0;
-    for (const t of drawn) {
-        if (n === CAPACITY) break;
-        const rel = v3.sub(t.center, f.pos);
-        const o = n * 16;
-        inst[o] = 1; inst[o + 1] = 0; inst[o + 2] = 0; inst[o + 3] = rel[0];
-        inst[o + 4] = 0; inst[o + 5] = 1; inst[o + 6] = 0; inst[o + 7] = rel[1];
-        inst[o + 8] = 0; inst[o + 9] = 0; inst[o + 10] = 1; inst[o + 11] = rel[2];
-        inst[o + 12] = 1; inst[o + 13] = 1; inst[o + 14] = 1; inst[o + 15] = 1;
-        const dist = Math.hypot(t.center[0], t.center[1], t.center[2]);
-        const extent = RADIUS * Math.PI / 2 / (1 << t.level);
-        const p = n * 8;
-        instData[p] = t.slot; instData[p + 1] = extent; instData[p + 2] = t.level; instData[p + 3] = 0;
-        instData[p + 4] = t.center[0] / dist; instData[p + 5] = t.center[1] / dist; instData[p + 6] = t.center[2] / dist;
-        instData[p + 7] = dist;
-        n++;
+    // The draw list on the GPU is what the shader reads: one instance per
+    // record, and the camera split hi + lo as the records' centers are.
+    const n = cache.drawCount;
+    if (n !== ground.instanceCount) ground.setInstanceCount(n);
+    for (let k = 0; k < 3; k++) {
+        camHi[k] = Math.fround(f.pos[k]);
+        camLo[k] = f.pos[k] - camHi[k];
     }
-    if (n) instBuf.write(instData.subarray(0, n * 8));
-    ground.setInstances(inst.subarray(0, n * 16));
+    ground.setShaderUniform('u_camHi', camHi);
+    ground.setShaderUniform('u_camLo', camLo);
     lastStats = { selected: cache.wanted, visible: n, ms: performance.now() - t0 };
-    paintStats();
+    // Text changes cost the page a layout and raster: a few times a second.
+    if (t0 - lastPaint > 250) {
+        lastPaint = t0;
+        paintStats();
+    }
 }
+let lastPaint = -1e9;
 
 // ── Controls ────────────────────────────────────────────────────────────────
 
@@ -263,4 +267,4 @@ function loop() {
 requestAnimationFrame(loop);
 
 // For tests and tools.
-globalThis.planet = { cam, get cache() { return cache; }, get stats() { return lastStats; }, frame };
+globalThis.planet = { cam, get cache() { return cache; }, get stats() { return lastStats; }, get lastView() { return lastView; }, frame };
