@@ -190,3 +190,42 @@ fn k_river_store(g: grid<3>, net: rw_store<f32, 1>, catchment: read_store<f32, 1
     net[k * RIV_REC + 3] = water[k];
     net[k * RIV_REC + 7] = floor[k];
 }
+
+// Each point's tangent, the way its water runs through it, into its record
+// (rivers.bk RIV_REC 8-10): halfway between the way it comes in from its
+// main tributary (the neighbour of the largest catchment draining into it)
+// and the way it leaves toward its downstream point; a source's the way it
+// leaves, a mouth's the way it comes in. The reaches on either side bend to
+// it, so a river runs smoothly through its points instead of turning there.
+@kernel @grid(3)
+fn k_river_tangent(g: grid<3>, net: rw_store<f32, 1>) {
+    let c = vec3<i32>(g.z(), g.x(), g.y());
+    let k = point_index(c);
+    let here = vec3<f32>(net[k * RIV_REC + 4], net[k * RIV_REC + 5], net[k * RIV_REC + 6]);
+    var into = vec3<f32>(0.0, 0.0, 0.0);
+    var most: f32 = 0.0;
+    for (var dj: i32 = -1; dj <= 1; dj += 1) {
+        for (var di: i32 = -1; di <= 1; di += 1) {
+            if (di != 0 || dj != 0) {
+                let n = point_index(cell_next(c, di, dj));
+                let m = net[n * RIV_REC + 2];
+                if ((net[n * RIV_REC + 1] as i32) == k && m > most) {
+                    most = m;
+                    into = normalize(here - vec3<f32>(net[n * RIV_REC + 4], net[n * RIV_REC + 5], net[n * RIV_REC + 6]));
+                }
+            }
+        }
+    }
+    let down = net[k * RIV_REC + 1] as i32;
+    var out = vec3<f32>(0.0, 0.0, 0.0);
+    if (down >= 0) {
+        out = normalize(vec3<f32>(net[down * RIV_REC + 4], net[down * RIV_REC + 5], net[down * RIV_REC + 6]) - here);
+    }
+    let t = into + out;
+    let l = length(t);
+    var tangent = vec3<f32>(0.0, 0.0, 0.0);
+    if (l > 1e-6) { tangent = t / l; }
+    net[k * RIV_REC + 8] = tangent.x;
+    net[k * RIV_REC + 9] = tangent.y;
+    net[k * RIV_REC + 10] = tangent.z;
+}

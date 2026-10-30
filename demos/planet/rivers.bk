@@ -20,7 +20,7 @@ module planet::rivers;
 import std::noise::*;
 
 pub const RIV_N: i32 = 512;
-pub const RIV_REC: i32 = 8;   // height (m), downstream point (-1 none), catchment (points), water level (m), direction (3), floor (m; riverbuild.bk k_river_floor)
+pub const RIV_REC: i32 = 11;   // height (m), downstream point (-1 none), catchment (points), water level (m), direction (3), floor (m; riverbuild.bk k_river_floor), tangent (3; k_river_tangent, 0 for a lone point)
 // The octaves the lattice resolves, which its points' heights are the
 // ground at: about 20 km between points, a wavelength of 2.5 of them
 // (ground.bk octaves_for).
@@ -215,6 +215,23 @@ struct Reach {
     v: vec4<f32>,
     surface: f32,
 }
+// The reach's bend: its channel's offset across its line (m) at t (0 to 1)
+// of a reach `len` long, a cubic Hermite from nothing at either point whose
+// slopes there are the points' tangents' in the reach's frame (riverbuild.bk
+// k_river_tangent: across over along), so a reach leaves its point the way
+// the reach into it arrived and a river runs smoothly through the lattice's
+// points rather than turning at them; a tributary meets its river leaning
+// downstream. The slopes held under BEND_SLOPE keep the distance across the
+// reach to the bend the distance to the channel (meander's).
+const BEND_SLOPE: f32 = 0.6;
+fn tangent_slope(net: read_store<f32, 1>, k: i32, along: vec3<f32>, side: vec3<f32>) -> f32 {
+    let tg = vec3<f32>(net[k + 8], net[k + 9], net[k + 10]);
+    return clamp(dot(tg, side) / max(dot(tg, along), 0.3), -BEND_SLOPE, BEND_SLOPE);
+}
+fn bend(net: read_store<f32, 1>, k: i32, down: i32, along: vec3<f32>, side: vec3<f32>, t: f32, len: f32) -> f32 {
+    let t2 = t * t;
+    return len * ((t2 * t - 2.0 * t2 + t) * tangent_slope(net, k, along, side) + (t2 * t - t2) * tangent_slope(net, down, along, side));
+}
 fn reach(net: read_store<f32, 1>, k: i32, af: vec3<f32>, hi: vec3<f32>, lo: vec3<f32>, r: f32, up: vec3<f32>,
          cell: f32, spread: f32, seed: i32) -> Reach {
     let level = net[k + 3];
@@ -227,9 +244,11 @@ fn reach(net: read_store<f32, 1>, k: i32, af: vec3<f32>, hi: vec3<f32>, lo: vec3
     let s = clamp(-dot(af, along), 0.0, len);
     let t = s / len;
     let half = 0.5 * river_width(catchment);
-    // From here to the reach's line, and across it to the channel.
+    // From here to the reach's line, and across it to the channel: the
+    // meanders about the reach's bend to its points' tangents.
     let q = af + along * s;
-    let d = length(vec2<f32>(dot(q, along), -dot(q, side) - meander(k / RIV_REC, s, len, 2.0 * half, seed)));
+    let off = bend(net, k, down * RIV_REC, along, side, t, len) + meander(k / RIV_REC, s, len, 2.0 * half, seed);
+    let d = length(vec2<f32>(dot(q, along), -dot(q, side) - off));
     let downLevel = net[down * RIV_REC + 3];
     let bed = mix(min(net[k + 7], level), min(net[down * RIV_REC + 7], downLevel), t);
     // The cell's share inside |d| < half: the strip under a Gaussian of
