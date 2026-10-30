@@ -283,6 +283,13 @@ const fragment = `buffer uint u_det[];
     }
     float horizonAt(vec4 lo, vec4 hi, int k) { return k < 4 ? lo[k] : hi[k - 4]; }
 
+    // acos to 7e-5 rad (Abramowitz and Stegun 4.4.45).
+    float fastAcos(float x) {
+        float a = abs(x);
+        float r = sqrt(max(1.0 - a, 0.0)) * (1.5707288 + a * (-0.2121144 + a * (0.0742610 - 0.0187293 * a)));
+        return x < 0.0 ? PI - r : r;
+    }
+
     // The ground's horizons, read bilinearly, as the sun and sky it sees.
     // The sun: the share of its disc (0.53 degrees) above the horizon toward
     // it. The sky: GTAO's cosine-weighted visibility (Jimenez et al. 2016)
@@ -298,8 +305,8 @@ const fragment = `buffer uint u_det[];
         horizonPoint(p + ivec2(1, 0), bl, bh);
         horizonPoint(p + ivec2(0, 1), cl, ch);
         horizonPoint(p + ivec2(1, 1), dl, dh);
-        vec4 hl = asin(clamp(mix(mix(al, bl, f.x), mix(cl, dl, f.x), f.y), -1.0, 1.0));
-        vec4 hh = asin(clamp(mix(mix(ah, bh, f.x), mix(ch, dh, f.x), f.y), -1.0, 1.0));
+        vec4 sl = clamp(mix(mix(al, bl, f.x), mix(cl, dl, f.x), f.y), -1.0, 1.0);
+        vec4 sh = clamp(mix(mix(ah, bh, f.x), mix(ch, dh, f.x), f.y), -1.0, 1.0);
         // The grid's axes on the tangent plane: direction k is
         // cos * gu + sin * gv. The sun's azimuth is taken in those axes.
         vec3 up = normalize(v_up);
@@ -323,21 +330,33 @@ const fragment = `buffer uint u_det[];
         vec3 n = skyNormal;
         float visible = 0.0;
         vec3 bent = vec3(0.0);
+        // Without trigonometry: the horizons are kept as the cosines of their
+        // zenith angles (the sines of their elevations, as stored), clamped
+        // to the normal's hemisphere there as a max of cosines, and each
+        // angle's double-angle terms are taken from its cosine and sine.
+        const vec2 AZ[4] = vec2[4](vec2(1.0, 0.0), vec2(0.70710678, 0.70710678), vec2(0.0, 1.0), vec2(-0.70710678, 0.70710678));
         for (int s = 0; s < 4; s++) {
-            float az = float(s) * PI * 0.25;
-            vec3 t = normalize(gu * cos(az) + gv * sin(az));
+            vec3 t = normalize(gu * AZ[s].x + gv * AZ[s].y);
             vec3 across = cross(up, t);
             vec3 np = n - across * dot(n, across);
             float len = length(np);
-            float gamma = atan(dot(np, t), dot(np, up));
-            // The horizons as angles from the zenith, toward +t and -t.
-            float h2 = gamma + min(PI * 0.5 - hl[s] - gamma, PI * 0.5);
-            float h1 = gamma + max(hh[s] - PI * 0.5 - gamma, -PI * 0.5);
-            float slice = 0.25 * (-cos(2.0 * h1 - gamma) + cos(gamma) + 2.0 * h1 * sin(gamma))
-                        + 0.25 * (-cos(2.0 * h2 - gamma) + cos(gamma) + 2.0 * h2 * sin(gamma));
+            float il = 1.0 / max(len, 1e-6);
+            float cg = dot(np, up) * il, sg = dot(np, t) * il;   // cos, sin of the normal's angle gamma
+            // The horizons' zenith angles toward +t (h2) and -t (h1), no
+            // further than 90 degrees from the normal: cosines c2, c1.
+            float c2 = max(sl[s], -sg), c1 = max(sh[s], sg);
+            float h2 = fastAcos(c2), h1 = -fastAcos(c1);
+            float s2 = sqrt(max(1.0 - c2 * c2, 0.0)), s1 = -sqrt(max(1.0 - c1 * c1, 0.0));
+            // cos(2h - gamma) = cos 2h cos gamma + sin 2h sin gamma.
+            float k2 = (2.0 * c2 * c2 - 1.0) * cg + 2.0 * s2 * c2 * sg;
+            float k1 = (2.0 * c1 * c1 - 1.0) * cg + 2.0 * s1 * c1 * sg;
+            float slice = 0.25 * (-k1 + cg + 2.0 * h1 * sg) + 0.25 * (-k2 + cg + 2.0 * h2 * sg);
             visible += len * slice;
-            float mid = 0.5 * (h1 + h2);
-            bent += (up * cos(mid) + t * sin(mid)) * (len * slice);
+            // The direction halfway between the horizons: the perpendicular
+            // of their difference, which holds when they are over 180 apart.
+            vec2 b = vec2(c1 - c2, s2 - s1);
+            float bl2 = dot(b, b);
+            if (bl2 > 1e-12) bent += (t * b.x + up * b.y) * (len * slice * inversesqrt(bl2));
         }
         skyVisibility *= visible * 0.25;
         if (dot(bent, bent) > 1e-12) skyNormal = normalize(bent);
@@ -661,4 +680,4 @@ function loop() {
 requestAnimationFrame(loop);
 
 // For tests and tools.
-globalThis.planet = { cam, setHour, get cache() { return cache; }, clouds, grass, trees, rivers, groundHeight, get stats() { return lastStats; }, get lastView() { return lastView; }, frame };
+globalThis.planet = { cam, setHour, ground, get cache() { return cache; }, clouds, grass, trees, rivers, groundHeight, get stats() { return lastStats; }, get lastView() { return lastView; }, frame };
