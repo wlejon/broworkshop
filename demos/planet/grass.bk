@@ -4,7 +4,7 @@
 // and its albedo; and on a coarser grid how much of the sun's disc it sees.
 // The blades stand on the field, between its points.
 from planet::ground import terrain, surface, grass_cover, variation;
-from planet::rivers import water_near, water_share;
+from planet::rivers import water_at, water_share;
 
 // Point (x, y) of the field at plane point (u0 + x delta, v0 + y delta),
 // seven floats at `out` (y * width + x) * 7: its position about `origin`
@@ -38,7 +38,7 @@ fn k_grass_field(g: grid<2>, out: write_store<f32, 1>,
     out[i + 1] = rel.y as f32;
     out[i + 2] = rel.z as f32;
     // None in the rivers and lakes.
-    out[i + 3] = grass_cover(h as f32, grad) * (1.0 - water_share(h as f32, water_near(dir, radius, 1.0, net, seed), 0.0));
+    out[i + 3] = grass_cover(h as f32, grad) * (1.0 - water_share(h as f32, water_at(dir, radius, 1.0, net, seed), 0.0));
     out[i + 4] = albedo.x;
     out[i + 5] = albedo.y;
     out[i + 6] = albedo.z;

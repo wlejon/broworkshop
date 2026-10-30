@@ -443,7 +443,7 @@ pub fn terrain(dir: vec3<f64>, radius: f64, octaves: f64, seed: i32, net: read_s
     let valley = w.near.x + (t.y as f32) * side;
     let m = max(CUT_BLEND - abs((h as f32) - valley), 0.0) / CUT_BLEND;
     let cut = min(h, (valley - m * m * CUT_BLEND * 0.25) as f64);
-    let lake = lake_surface(cut as f32, w.near);
+    let lake = lake_surface(cut as f32, w);
     if (lake > (cut as f32)) { return lake as f64; }
     return cut;
 }
