@@ -319,7 +319,13 @@ const volumeGlsl = (radius) => cloudGlsl(radius) + `
         float t = t0;
         float sumT = 0.0, sumW = 0.0;
         vec3 L = vec3(0.0);
-        vec4 T = vec4(1.0);
+        // A sub-column part filled is part cover, not a thinner cloud: in
+        // the cloud the ray is crossing, the share of its columns that hold
+        // cloud is the most it has filled (cover, maximum overlap again), and
+        // that share is crossed at the density of the fill over the cover,
+        // its transmittance Tc; the rest is clear. Where the sub-column leaves
+        // the cloud the mixture folds into T, what is seen through before it.
+        vec4 T = vec4(1.0), cover = vec4(0.0), Tc = vec4(1.0);
         // At least a dozen steps across the layer, so its profile is sampled
         // and not hit or missed by the jitter of one step.
         float dtMax = clamp((t1 - t0) / 12.0, 20.0, 4000.0);
@@ -355,6 +361,9 @@ const volumeGlsl = (radius) => cloudGlsl(radius) + `
                     tPrev = t + clear;   // proved empty this far
                     inCloud = false;
                     inside = vec4(0.0);
+                    T *= 1.0 - cover + cover * Tc;
+                    cover = vec4(0.0);
+                    Tc = vec4(1.0);
                     t += max(dt, clear);
                     continue;
                 }
@@ -372,7 +381,16 @@ const volumeGlsl = (radius) => cloudGlsl(radius) + `
                     inCloud = true;
                     vec4 fill = clamp(occ * 4.0 - RANK, 0.0, 1.0);
                     inStep = CLOUD_STEP / max(fill.w, 0.05);
-                    vec4 sigma = CLOUD_SIGMA * fill;
+                    // A sub-column out of cloud again folds its mixture.
+                    vec4 gone = vec4(equal(fill, vec4(0.0))) * vec4(greaterThan(cover, vec4(0.0)));
+                    T *= mix(vec4(1.0), 1.0 - cover + cover * Tc, gone);
+                    cover *= 1.0 - gone;
+                    Tc = mix(Tc, vec4(1.0), gone);
+                    // More cover: the columns it adds are clear so far.
+                    vec4 grown = max(cover, fill);
+                    Tc = mix(vec4(1.0), (cover * Tc + grown - cover) / max(grown, 1e-4), greaterThan(grown, vec4(0.0)));
+                    cover = grown;
+                    vec4 sigma = CLOUD_SIGMA * fill / max(cover, 1e-4);
                     vec3 upP = P / rp;
                     float muS = max(dot(toSun, upP), 0.04);
                     // The cloud between the point and the sun: the column
@@ -408,7 +426,7 @@ const volumeGlsl = (radius) => cloudGlsl(radius) + `
                     vec4 topL = tapTop;
                     vec4 path = (clamp(top, s, sMid) - s) + (clamp(topL, sMid, sOut) - sMid);
                     vec4 tauSun = CLOUD_SIGMA * path * CLOUD_DEPTH / muS;
-                    vec4 rate = mix(vec4(0.0), sigma * (descent / muS), greaterThan(above, vec4(0.0)));
+                    vec4 rate = mix(vec4(0.0), vec4(CLOUD_SIGMA * descent / muS), greaterThan(above, vec4(0.0)));
                     // A sub-column the ray came down into since the last
                     // sample is integrated from the top it crossed, where
                     // the sun's depth is nothing: a sample lands anywhere up
@@ -447,24 +465,33 @@ const volumeGlsl = (radius) => cloudGlsl(radius) + `
                     vec4 bySun = phase * exp(-tauSun) * cloudStep(sigma, rate, len)
                                + (0.85 * muS / 3.14159) * (0.55 * exp(-0.6 * tauSun) + 0.45 / (1.0 + 0.1125 * tauSun)) * fillStep;
                     vec4 bySky = fillStep / (1.0 + 0.1125 * muS * tauSun);
-                    L += 0.25 * (sun * dot(T, bySun) + sky * dot(T, bySky));
-                    float wgt = 0.25 * dot(T, 1.0 - stepT);
+                    vec4 W = T * cover * Tc;
+                    L += 0.25 * (sun * dot(W, bySun) + sky * dot(W, bySky));
+                    float wgt = 0.25 * dot(W, 1.0 - stepT);
                     sumT += wgt * t;
                     sumW += wgt;
-                    T *= stepT;
+                    Tc *= stepT;
                     inside = vec4(greaterThan(fill, vec4(0.0)));
-                    if (max(max(T.x, T.y), max(T.z, T.w)) < 0.004) break;
+                    vec4 seen = T * (1.0 - cover + cover * Tc);
+                    if (max(max(seen.x, seen.y), max(seen.z, seen.w)) < 0.004) break;
                 } else {
                     inCloud = false;
                     inside = vec4(0.0);
+                    T *= 1.0 - cover + cover * Tc;
+                    cover = vec4(0.0);
+                    Tc = vec4(1.0);
                 }
             } else {
                 inCloud = false;
                 inside = vec4(0.0);
+                T *= 1.0 - cover + cover * Tc;
+                cover = vec4(0.0);
+                Tc = vec4(1.0);
             }
             tPrev = t;
             t += dt;
         }
+        T *= 1.0 - cover + cover * Tc;
         float Tm = 0.25 * (T.x + T.y + T.z + T.w);
         radiance = L;
         transmittance = Tm < 0.004 ? 0.0 : Tm;
