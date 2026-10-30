@@ -328,12 +328,16 @@ fn masks(p: vec3<f64>, octaves: f64, seed: i32) -> vec4<f64> {
 }
 
 // The relief reads its octaves through a warp: a smooth displacement (one
-// octave of noise per axis at octave WARP_OCTAVE, a 37 km wavelength, about
-// 2 km on average) that bends ridgelines off the noise lattice's directions,
-// which otherwise run straight and parallel. Its largest stretch stays well
+// octave of noise per axis at octave WARP_OCTAVE, a 19 km wavelength, twice
+// the relief's strongest; about 1.2 km on average, 3 km at most) that bends
+// ridgelines off the noise lattice's directions, which otherwise run straight
+// and parallel, and breaks the round basins between them into valleys. A
+// warp much broader than the relief only moves it. Its largest stretch stays
 // short of folding the ground over itself (a displacement gradient of -1).
-const WARP_OCTAVE: f64 = 6.0;
-const WARP_DISPLACE: f64 = 0.0021;   // in p units (BASE_WAVELENGTH), per unit of noise
+// Where it compresses the ground a cell spans more of an octave than its
+// size says, which the mean factors do not follow.
+const WARP_OCTAVE: f64 = 7.0;
+const WARP_DISPLACE: f64 = 0.0013;   // in p units (BASE_WAVELENGTH), per unit of noise
 
 // A ridge octave's mean over one of the tile's cells, from the noise n at
 // the centre. The ridge is (1 - |n|)^2 of a smooth noise, whose cell mean
