@@ -320,6 +320,8 @@ const vertex = `buffer vec4 u_pos[];
     uniform vec3 u_camLo;
     out vec2 v_tex;
     flat out int v_slot;
+    flat out int v_level;   // the tile's (the debug view 'level')
+    out float v_skirt;      // 0 on the surface, 1 at a skirt's bottom (the debug view 'skirt')
     out vec3 v_up;
     out vec3 v_q;
     out vec3 v_swell;
@@ -339,6 +341,8 @@ const vertex = `buffer vec4 u_pos[];
         // centred at cell (t + 0.5) / D - 0.5.
         v_tex = (vec2(i + B, j + B) + 0.5) * ${DETAIL}.0 - 0.5;
         v_slot = ids.x;
+        v_level = ids.w;
+        v_skirt = pos.y;
         // The tile grid's axes, which the horizons' directions are measured
         // along, and the surface's normal across them.
         vec3 tu = u_pos[k + 1].xyz - u_pos[k - 1].xyz;
@@ -386,6 +390,8 @@ const vertex = `buffer vec4 u_pos[];
 const fragment = `buffer uint u_det[];
     in vec2 v_tex;
     flat in int v_slot;
+    flat in int v_level;
+    in float v_skirt;
     in vec3 v_up;
     in vec3 v_q;
     in vec3 v_swell;
@@ -632,6 +638,31 @@ const fragment = `buffer uint u_det[];
         // its square root.
         roughness = mix(0.9, sqrt(sqrt(seaVariance)), water);
         metallic = 0.0;
+
+        // Debug views (scene.setDebugView): the share under water, the
+        // tile's level (a hue each of six), the base colour unlit, the light
+        // groundLight found (sun seen, sky seen, the clouds' share of the
+        // sun), and the shading normal.
+        if (SCENE_DEBUG(water)) sceneDebugOut(vec3(water));
+        if (SCENE_DEBUG(level)) {
+            float hue = float(v_level % 6) / 6.0;
+            sceneDebugOut(clamp(abs(mod(hue * 6.0 + vec3(0.0, 4.0, 2.0), 6.0) - 3.0) - 1.0, 0.0, 1.0) * 0.5);
+        }
+        if (SCENE_DEBUG(albedo)) sceneDebugOut(baseColor);
+        // The albedo's two factors: the detail layer's texels, bilinear, and
+        // the octaves' luminance over them (a half for 1).
+        if (SCENE_DEBUG(texels)) sceneDebugOut(col.rgb);
+        if (SCENE_DEBUG(octaves)) sceneDebugOut(vec3(0.5 * exp(lum - 0.5 * lumVar)));
+        if (SCENE_DEBUG(light)) sceneDebugOut(v_light.xyz);
+        if (SCENE_DEBUG(normal)) sceneDebugOut(normal * 0.5 + 0.5);
+        if (SCENE_DEBUG(skirt)) sceneDebugOut(v_skirt > 0.0 ? vec3(1.0, 0.0, 0.0) : baseColor);
+        // Where in its tile a pixel lies (0 to 1 across), its texel's edges
+        // dark over the base colour.
+        if (SCENE_DEBUG(tile)) {
+            vec2 at = (v_tex + 0.5) / ${DETAIL}.0 - ${BORDER}.0;
+            vec2 e = abs(fract(v_tex + 0.5) - 0.5);
+            sceneDebugOut(mix(vec3(at / ${TILE}.0, 0.0), baseColor, 0.5) * (max(e.x, e.y) > 0.45 ? 0.3 : 1.0));
+        }
     }`;
 
 let ground = null;

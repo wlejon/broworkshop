@@ -554,7 +554,9 @@ const volumeGlsl = (radius) => cloudGlsl(radius, true) + `
         vec4 inside = vec4(0.0);
         // The sun tap's tops (below), for the cloud the ray is in.
         vec4 tapTop = vec4(0.0);
+        int marched = 0;   // the debug view 'cloudSteps'
         for (int i = 0; i < 96 && t < t1; i++) {
+            marched = i + 1;
             float dt = clamp(t * STEP_RATIO, STEP_MIN, dtMax);
             if (inCloud) dt = min(dt, inStep);
             else if (t < fineUntil) dt = min(dt, CLOUD_STEP);
@@ -752,6 +754,8 @@ const volumeGlsl = (radius) => cloudGlsl(radius, true) + `
         radiance = L;
         transmittance = Tm < 0.004 ? 0.0 : Tm;
         depth = sumW > 0.0 ? sumT / sumW : 0.0;
+        // Debug view: the steps a pixel marched, a 96th of white each.
+        if (SCENE_DEBUG(cloudSteps)) sceneDebugOut(vec3(float(marched) / 96.0));
     }
 `;
 
