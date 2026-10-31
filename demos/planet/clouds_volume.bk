@@ -35,6 +35,9 @@ struct Params {
     cam_alt: f32,
     lift_range: vec2<f32>,
     near_range: f32,
+    // How many times finer than its own the march steps in cloud (1; the
+    // reference, clouds.reference, 16).
+    fine: f32,
 }
 @binding(4, 0) var params: uniform<Params>;
 
@@ -576,7 +579,10 @@ pub fn volume(ray: volume::Ray) -> volume::Light {
     // not hit or missed by the jitter of one step.
     let dt_max = clamp((t1 - t0) / 12.0, 20.0, 4000.0);
     var t: f32 = t0 + clamp(t0 * STEP_RATIO, STEP_MIN, dt_max) * jit;
-    var in_step: f32 = CLOUD_STEP;
+    let cloud_step = CLOUD_STEP / params.fine;
+    let in_ratio = IN_RATIO / params.fine;
+    let max_steps = MAX_STEPS * (params.fine as i32);
+    var in_step: f32 = cloud_step;
     var t_prev: f32 = t;
     var fine_until: f32 = -1.0;
     var in_cloud: bool = false;
@@ -588,16 +594,16 @@ pub fn volume(ray: volume::Ray) -> volume::Light {
     var kinds: vec3<f32> = vec3<f32>(0.0);   // 'cloudStepKinds': proved empty, sampled clear, in cloud
     var sun_seen: f32 = -1.0;                // 'cloudSun': the sun field's depth at the first cloud
     var i: i32 = 0;
-    while (i < MAX_STEPS && t < t1) {
+    while (i < max_steps && t < t1) {
         i += 1;
         marched = i;
         var dt: f32 = clamp(t * STEP_RATIO, STEP_MIN, dt_max);
         // In cloud at most IN_RATIO of the distance as well, so a far run's
         // samples follow its clouds and the gaps between them.
         if (in_cloud) {
-            dt = min(dt, min(in_step, IN_RATIO * t));
+            dt = min(dt, min(in_step, in_ratio * t));
         } else if (t < fine_until) {
-            dt = min(dt, CLOUD_STEP);
+            dt = min(dt, cloud_step);
         }
         // The field at the ray's footprint (the pixel's; the meter's, the
         // scene's scale), not the step's: a step only places samples.
@@ -694,7 +700,7 @@ pub fn volume(ray: volume::Ray) -> volume::Light {
             // by the pixel's offset, so as many samples cross the cloud
             // (stepped alike from an edge alike along rows, they drew a
             // layer's base as stripes).
-            dt = min(dt, CLOUD_STEP) * (0.5 + jit);
+            dt = min(dt, cloud_step) * (0.5 + jit);
         }
         in_cloud = true;
         let fill = clamp(occ * 4.0 - CLOUD_RANK, vec4<f32>(0.0), vec4<f32>(1.0));
@@ -797,7 +803,7 @@ pub fn volume(ray: volume::Ray) -> volume::Light {
         // The next step by the densest sub-column whose cloud is still seen:
         // one gone dark no longer needs it sampled finely.
         let dense = fill * step(vec4<f32>(0.004), tr * cover * tc);
-        in_step = CLOUD_STEP / max(max4(dense), 0.05);
+        in_step = cloud_step / max(max4(dense), 0.05);
         t_prev = t;
         t += dt;
     }

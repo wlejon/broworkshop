@@ -23,6 +23,7 @@
 export const CLOUD_BASE = 1100;       // m above the broad ground under it (clouds.bk k_cloud_lift): the layer's floor
 export const CLOUD_DEPTH = 3000;      // m from the floor to the tallest tops
 const NEAR_RANGE = 1500;              // m from the eye the engine's near grid integrates (userMedium)
+const REFERENCE_FINE = 16;            // the reference march's steps, this many times finer
 const NEAR_MARGIN = 300;              // m about the layer's heights the eye uses the grid within
 const NOISE_VAR = 0.0728;             // the Perlin noise's variance (ground.bk PERLIN_VAR)
 const NOISE_SLOPE = 2.5;              // a bound on its gradient, per lattice unit
@@ -413,6 +414,7 @@ export function createClouds(scene, radius, module, readers, seed, hook) {
                                          layers: TILE_CAPACITY, atlas: TILE_ATLAS, channels: 4, format: 'unorm16' });
 
     let face = -1;
+    let reference = false;
     // Each level's grid origin in texels, and whether it holds anything.
     const origins = new Int32Array(2 * LEVELS);
     const held = new Uint8Array(LEVELS);
@@ -519,7 +521,13 @@ export function createClouds(scene, radius, module, readers, seed, hook) {
             // off, it crosses the air to the layer in one.
             const near = altitude > CLOUD_BASE + liftNear[0] - NEAR_MARGIN &&
                          altitude < CLOUD_BASE + CLOUD_DEPTH + liftNear[1] + NEAR_MARGIN;
-            node.setShaderUniform('near_range', near ? NEAR_RANGE : 0);
+            node.setShaderUniform('near_range', near && !reference ? NEAR_RANGE : 0);
+            node.setShaderUniform('fine', reference ? REFERENCE_FINE : 1);
         },
+        // The reference: the whole march in steps 16 times finer, no near
+        // grid, at many times the cost, what the march and the grid are
+        // measured against (a look change's oracle; never shipped on).
+        get reference() { return reference; },
+        set reference(on) { reference = !!on; },
     };
 }
