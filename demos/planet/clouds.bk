@@ -4,6 +4,7 @@
 // sphere; each texel holds the column's amount there, filtered to the
 // texel's footprint, and the variance of the octaves too fine for it.
 from planet::ground import perlin_split, terrain_base, octaves_for;
+import tiles;
 
 const F0: f32 = -0.12;          // the mean amount: clear more than cloudy
 pub const NOISE_VAR: f32 = 0.0728;  // perlin_split's variance (ground.bk PERLIN_VAR)
@@ -260,6 +261,121 @@ fn k_cloud_tile(g: grid<3>, table: read_store<f64, 1>, pool: write_store<i32, 1>
     let stretch = sqrt(1.0 + max(u * u, v * v)) / (1.0 + u * u + v * v);
     let c = column(normalize(b), 2.0 * radius * (length(du) / tile) * stretch, radius);
     pool[(slot * cells + g.y()) * cells + g.x()] = pack_column(c);
+}
+
+// The sun field: for each of a tile's cells, the optical depth of cloud
+// toward the sun from four heights of the layer, from SUN_LOWEST (just over
+// the thinnest cloud's base: one under every base found its way out beneath
+// the deck, and lit the clouds' insides) SUN_SPACING apart, so a cloud's side toward a low sun is lit where its
+// sun's ray leaves the cloud, its far side dark, and a cloud in the shade of
+// another dark. A view's march and its near grid read it alike (Schneider's
+// light field for Nubis; Hillaire's shadow steps), and only with the layer's
+// own column above a point does it say less (clouds_volume.bk sun_depth).
+// The ray is sampled at SUN_STEPS lengths growing geometrically from
+// SUN_FIRST metres to where it leaves the layer's top, each reading the
+// column field at a footprint of half its length from the cache itself
+// (the coarse tiles always resident; this tile's own cells from its slot,
+// written by k_cloud_tile before), as cover: a step whose occupancy is occ
+// passes 1 - occ of the light whole and the rest through its cloud, the
+// steps at random overlap (as the march's pieces), so a long way through a
+// layer of scattered cloud finds its gaps. (At the occupancy's mean density,
+// every low sun's ray was dark: 28 km of a third's cover is a depth of 250.)
+pub const SUN_LOWEST: f32 = 0.15;
+pub const SUN_SPACING: f32 = 0.25;
+const SUN_STEPS: i32 = 10;
+const SUN_FIRST: f32 = 15.0;
+pub const SUN_TAU_MAX: f32 = 48.0;   // the depth a unorm16 channel spans
+const CELL_COLUMN_RANGE: f32 = 2.0 * COLUMN_F_RANGE / 65535.0;
+const CELL_VAR_RANGE: f32 = COLUMN_V_RANGE / 65535.0;
+
+fn unpack_column(w: i32) -> vec2<f32> {
+    return vec2<f32>(((w & 65535) as f32) * CELL_COLUMN_RANGE - COLUMN_F_RANGE,
+                     (((w >> 16) & 65535) as f32) * CELL_VAR_RANGE);
+}
+// Tile t's column at p, bilinear over its cells (tiles.bk cells).
+fn pool_column<P>(pool: P, t: tiles::Tile, p: tiles::Point, tile: i32, border: i32) -> vec2<f32> {
+    let c = tiles::cells(t, p, tile, border);
+    let a = mix(unpack_column(pool[c.i00]), unpack_column(pool[c.i10]), c.f.x);
+    let b = mix(unpack_column(pool[c.i01]), unpack_column(pool[c.i11]), c.f.x);
+    return mix(a, b, c.f.y);
+}
+
+@kernel @grid(3)
+fn k_cloud_sun(g: grid<3>, table: read_store<f64, 1>, lookup: read_store<vec4<i32>, 1>, pool: read_store<i32, 1>,
+               out: write_store<i32, 1>, cells: i32, tile: i32, border: i32, levels: i32, w0: f32,
+               radius: f64, seed: i32, sx: f32, sy: f32, sz: f32, detail_var: f32) {
+    let r = g.z() * 24;
+    let slot = table[r] as i32;
+    let root = table[r + 2] as i32;
+    let own = tiles::Tile { slot: slot, level: table[r + 3] as i32, x: table[r + 4] as i32, y: table[r + 5] as i32,
+                            parent: -1 };
+    let s = ((g.x() - border) as f64 + 0.5) / (tile as f64);
+    let t = ((g.y() - border) as f64 + 0.5) / (tile as f64);
+    let du = vec3<f64>(table[r + 11], table[r + 12], table[r + 13]);
+    let dv = vec3<f64>(table[r + 14], table[r + 15], table[r + 16]);
+    let q = normalize(vec3<f64>(table[r + 8], table[r + 9], table[r + 10]) + du * s + dv * t);
+    let base = CLOUD_BASE + max(terrain_base(q, radius, LIFT_OCTAVES, seed), 0.0) as f32;
+    let up = vec3<f32>(q.x as f32, q.y as f32, q.z as f32);
+    let to_sun = vec3<f32>(sx, sy, sz);
+    let mu = dot(to_sun, up);
+    let rf = radius as f32;
+    // The tile's footprint (two cells), at a face's centre's stretch.
+    let w_cell = w0 / exp2(own.level as f32);
+    var taus: vec4<f32> = vec4<f32>(SUN_TAU_MAX);
+    for (var k: i32 = 0; k < 4; k += 1) {
+        let sk = SUN_LOWEST + (k as f32) * SUN_SPACING;
+        // From the point, relative to the planet's centre in f32 about the
+        // point's radius (the steps are short against it).
+        let h0 = base + sk * CLOUD_DEPTH;
+        let reach = min((1.0 - sk) * CLOUD_DEPTH / max(mu, 0.02), 120000.0);
+        var tau: f32 = 0.0;
+        var e0: f32 = 0.0;
+        for (var i: i32 = 0; i < SUN_STEPS; i += 1) {
+            let e1 = SUN_FIRST * pow(max(reach / SUN_FIRST, 1.0), (i as f32) / ((SUN_STEPS - 1) as f32));
+            let len = e1 - e0;
+            let m = 0.5 * (e0 + e1);
+            e0 = e1;
+            // The sample's height over the base and its direction: the ray
+            // from (rf + h0) up along to_sun.
+            let x = up * (rf + h0) + to_sun * m;
+            let rx = length(x);
+            let qx = x / rx;
+            let si = (rx - rf - base) / CLOUD_DEPTH;
+            if (si > 1.0) {
+                break;
+            }
+            if (si >= 0.0) {
+                let p = tiles::cube_point(qx);
+                let uv = vec2<f32>(p.u, p.v) * 2.0 - 1.0;
+                let stretch = sqrt(1.0 + max(uv.x * uv.x, uv.y * uv.y)) / (1.0 + dot(uv, uv));
+                let w = max(w_cell, 0.5 * len);
+                let lk = min(tiles::level_for(w, w0 * stretch, levels) as i32, levels);
+                let at = tiles::tile_at(p, own.level);
+                var c: vec2<f32> = vec2<f32>(-COLUMN_F_RANGE, 0.0);
+                if (p.root == root && lk >= own.level && at.x == own.x && at.y == own.y) {
+                    c = pool_column(pool, own, p, tile, border);
+                } else {
+                    let found = tiles::locate(lookup, p, lk);
+                    if (found.slot >= 0) {
+                        c = pool_column(pool, found, p, tile, border);
+                    }
+                }
+                let gq = clamp(c.x / CLOUD_DETAIL_FULL, 0.0, 1.0);
+                let occ = cloud_occupancy(c.x, c.y + detail_var * gq * gq, si);
+                tau -= log(max(1.0 - occ * (1.0 - exp(-CLOUD_SIGMA * len)), 1.0e-12));
+            }
+        }
+        if (mu > -0.2) {
+            if (k == 0) { taus = vec4<f32>(tau, taus.y, taus.z, taus.w); }
+            if (k == 1) { taus = vec4<f32>(taus.x, tau, taus.z, taus.w); }
+            if (k == 2) { taus = vec4<f32>(taus.x, taus.y, tau, taus.w); }
+            if (k == 3) { taus = vec4<f32>(taus.x, taus.y, taus.z, tau); }
+        }
+    }
+    let n = clamp(taus / SUN_TAU_MAX, vec4<f32>(0.0), vec4<f32>(1.0)) * 65535.0 + 0.5;
+    let i = ((slot * cells + g.y()) * cells + g.x()) * 2;
+    out[i] = (n.x as i32) | ((n.y as i32) << 16);
+    out[i + 1] = (n.z as i32) | ((n.w as i32) << 16);
 }
 
 // 0 to 1 in 8 bits, rounded.

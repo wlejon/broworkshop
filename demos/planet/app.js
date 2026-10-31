@@ -71,7 +71,7 @@ const glslFloat = (x) => (Number.isInteger(x) ? x.toFixed(1) : String(x));
 
 const readApp = (path) => fs.readFileSync(bro.resolvePath('/app/' + path), 'utf-8');
 const MODULES = { 'planet::ground': readApp('ground.bk'), 'planet::rivers': readApp('rivers.bk'),
-                  'planet::clouds': readApp('clouds.bk') };
+                  'planet::clouds': readApp('clouds.bk'), tiles: bro.tiles.module };
 const mod = bro.kernel.compile(readApp('planet.bk'), { file: 'planet.bk', modules: MODULES });
 const rivers = createRivers(bro.kernel.compile(readApp('riverbuild.bk'), { file: 'riverbuild.bk', modules: MODULES }), RADIUS, SEED);
 const kTile = mod.kernel('k_tile');
@@ -709,7 +709,7 @@ const grass = createGrass(scene, RADIUS, grassMod, sunMod, TRUTH, SEED, rivers.n
 const treeMod = bro.kernel.compile(readApp('trees.bk'), { file: 'trees.bk', modules: MODULES });
 const trees = createTrees(scene, RADIUS, treeMod, sunMod, TRUTH, SEED, rivers.net, [ground]);
 const clouds = createClouds(scene, RADIUS, cloudMod, [ground], SEED,
-                            { source: readApp('clouds_volume.bk'), modules: { ...MODULES, tiles: bro.tiles.module } });
+                            { source: readApp('clouds_volume.bk'), modules: MODULES });
 
 // ── Camera: doubles about the planet's center ───────────────────────────────
 

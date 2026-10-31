@@ -375,17 +375,22 @@ export function createClouds(scene, radius, module, readers, seed, hook) {
     }
     const liftNear = [0, 0];
 
-    // Each tile's column field (k_cloud_tile).
-    const kTile = module.kernel('k_cloud_tile');
+    // Each tile's column field (k_cloud_tile), then its sun field from it and
+    // the tiles ready (k_cloud_sun), for the sun toward toSun: produced again
+    // (TileCache.refresh) once the sun moves.
+    const kTile = module.kernel('k_cloud_tile'), kSun = module.kernel('k_cloud_sun');
     const cache = bro.tiles.createCache({
         domain: { type: 'cubeSphere', radius, center: [0, 0, 0] },
         tileSize: TILE, border: TILE_BORDER, capacity: TILE_CAPACITY, maxLevel: TILE_LEVELS,
         minHeight: CLOUD_BASE, maxHeight: CLOUD_BASE + CLOUD_DEPTH + Math.max(...liftCpu),
         pixelsPerCell: TILE_PIXELS, producePerUpdate: 64,
-        layers: { column: 4 },
+        layers: { column: 4, sun: 8 },
         produce(batch) {
             kTile.dispatch([TILE_CELLS, TILE_CELLS, batch.count], batch.table, this.layer('column'),
                            TILE_CELLS, TILE, TILE_BORDER, radius);
+            kSun.dispatch([TILE_CELLS, TILE_CELLS, batch.count], batch.table, this.lookup, this.layer('column'),
+                          this.layer('sun'), TILE_CELLS, TILE, TILE_BORDER, TILE_LEVELS, 4 * radius / TILE,
+                          radius, seed, toSun[0], toSun[1], toSun[2], CLOUD_DETAIL_VAR);
         },
     });
     // Per tile level: its cells' footprint at a face's centre, and the
@@ -403,6 +408,9 @@ export function createClouds(scene, radius, module, readers, seed, hook) {
     node.setShaderTexture('columns', { buffer: cache.layer('column'), width: TILE_CELLS, height: TILE_CELLS,
                                        layers: TILE_CAPACITY, atlas: TILE_ATLAS, channels: 2, format: 'unorm16' });
     node.setShaderBuffer('bounds', boundsBuffer);
+    // The sun field alike: four depths a cell, 16 bits each.
+    node.setShaderTexture('sun_field', { buffer: cache.layer('sun'), width: TILE_CELLS, height: TILE_CELLS,
+                                         layers: TILE_CAPACITY, atlas: TILE_ATLAS, channels: 4, format: 'unorm16' });
 
     let face = -1;
     // Each level's grid origin in texels, and whether it holds anything.
@@ -484,15 +492,17 @@ export function createClouds(scene, radius, module, readers, seed, hook) {
         cache,
         // `view` is the camera as a tile cache takes it (TileCache.update).
         update(eye, altitude, sun, view) {
-            cache.update(view);
-            // A sun moved by a tenth of a degree lights everything anew.
+            // A sun moved by a tenth of a degree lights everything anew: the
+            // ground's light, and the tiles' sun fields, produced again.
             if (sun[0] * toSun[0] + sun[1] * toSun[1] + sun[2] * toSun[2] < Math.cos(0.1 * Math.PI / 180)) {
                 toSun[0] = sun[0];
                 toSun[1] = sun[1];
                 toSun[2] = sun[2];
                 lightQueue = [];
                 for (let k = 0; k <= LEVELS + 5; k++) queueLight(k);
+                cache.refresh();
             }
+            cache.update(view);
             produce(eye);
             if (lightQueue.length) runLight(lightQueue.shift());
             scene.setPendingWork('cloud light', lightQueue.length);
