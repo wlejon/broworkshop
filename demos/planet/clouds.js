@@ -485,6 +485,8 @@ const volumeGlsl = (radius) => cloudGlsl(radius, true) + `
     }
 
     const float CLOUD_TOP_SOFT = 0.04;   // of the layer's height, about 100 m
+    // Footprints along a ray over which its cover is one cloud's (userVolume).
+    const float CLOUD_DECORRELATE = 6.0;
 
     // How far the column's amount passes what the height needs, in
     // deviations of what the footprint leaves unresolved (the occupancy's
@@ -598,7 +600,7 @@ const volumeGlsl = (radius) => cloudGlsl(radius, true) + `
         // Started at a per-pixel offset, so a step's edge is grain, not
         // bands, and the grain averages over the renders the engine's
         // reconstruction blends, so each render takes few steps.
-        const float STEP_RATIO = 0.15, STEP_MIN = 40.0;
+        const float STEP_RATIO = 0.15, STEP_MIN = 40.0, IN_RATIO = 0.05;
         uint hp = uint(gl_FragCoord.x) * 1973u + uint(gl_FragCoord.y) * 9277u;
         hp = (hp ^ (hp >> 13)) * 0x5bd1e995u;
         // Moved on by the golden ratio each render, so a pixel's offsets
@@ -648,7 +650,10 @@ const volumeGlsl = (radius) => cloudGlsl(radius, true) + `
         for (int i = 0; i < 96 && t < t1; i++) {
             marched = i + 1;
             float dt = clamp(t * STEP_RATIO, STEP_MIN, dtMax);
-            if (inCloud) dt = min(dt, inStep);
+            // In cloud at most IN_RATIO of the distance as well, so a far
+            // run's samples follow its clouds and the gaps between them
+            // (with CLOUD_DECORRELATE below for what a step still spans).
+            if (inCloud) dt = min(dt, min(inStep, IN_RATIO * t));
             else if (t < fineUntil) dt = min(dt, CLOUD_STEP);
             // The field at the ray's footprint (the pixel's; the meter's,
             // the scene's scale), not the step's: a step only places
@@ -781,16 +786,41 @@ const volumeGlsl = (radius) => cloudGlsl(radius, true) + `
                     // deck's top glows near white (thick cloud reflects some
                     // 85%) and its base is a lit grey, not black. The sky
                     // the same, through the depth straight up.
-                    vec4 stepT = exp(-sigma * len);
-                    vec4 fillStep = cloudStep(sigma, vec4(0.0), len);
-                    vec4 bySun = phase * cloudSunStep(sigma, tauSun, rate, len) + cloudSunMany(tauSun, muS) * fillStep;
+                    //
+                    // The cover holds as one cloud's (maximum overlap) only
+                    // over what the field resolves: a few footprints on, the
+                    // ray has left one cloud and met another, and cover at
+                    // random overlaps cover, so thirty per cent over a
+                    // horizon's fifty kilometres hides it, where taken as one
+                    // cloud it passed seventy. Fine steps found the gaps
+                    // between and folded each cloud in; a step longer than
+                    // CLOUD_DECORRELATE footprints is taken as that many
+                    // pieces at random overlap, in closed form: what comes
+                    // through m^n of each piece's m, the light each piece's
+                    // through those before it, a geometric sum.
+                    float pieces = max(dt / (CLOUD_DECORRELATE * w), 1.0);
+                    if (pieces > 1.0) {
+                        T *= 1.0 - cover + cover * Tc;
+                        Tc = vec4(1.0);
+                        cover = fill;
+                        sigma = vec4(CLOUD_SIGMA);
+                    }
+                    vec4 lenP = len / pieces;
+                    vec4 stepT = exp(-sigma * lenP);
+                    vec4 fillStep = cloudStep(sigma, vec4(0.0), lenP);
+                    vec4 bySun = phase * cloudSunStep(sigma, tauSun, rate, lenP) + cloudSunMany(tauSun, muS) * fillStep;
                     vec4 bySky = cloudSkyMany(tauSun, muS) * fillStep;
-                    vec4 W = T * cover * Tc;
+                    vec4 m = 1.0 - cover + cover * stepT;
+                    vec4 mn = pow(m, vec4(pieces));
+                    vec4 geo = pieces > 1.0 ? mix(vec4(pieces), (1.0 - mn) / max(1.0 - m, 1e-6), greaterThan(1.0 - m, vec4(1e-5)))
+                                            : vec4(1.0);
+                    vec4 W = T * cover * Tc * geo;
                     L += 0.25 * (sun * dot(W, bySun) + sky * dot(W, bySky));
-                    float wgt = 0.25 * dot(W, 1.0 - stepT);
+                    float wgt = pieces > 1.0 ? 0.25 * dot(T, 1.0 - mn) : 0.25 * dot(T * cover * Tc, 1.0 - stepT);
                     sumT += wgt * t;
                     sumW += wgt;
-                    Tc *= stepT;
+                    if (pieces > 1.0) T *= mn;
+                    else Tc *= stepT;
                     inside = vec4(greaterThan(fill, vec4(0.0)));
                     vec4 seen = T * (1.0 - cover + cover * Tc);
                     if (max(max(seen.x, seen.y), max(seen.z, seen.w)) < 0.004) break;
@@ -988,16 +1018,27 @@ export function createClouds(scene, radius, module, readers, seed) {
         if (liftAt && e[0] * liftAt[0] + e[1] * liftAt[1] + e[2] * liftAt[2] > Math.cos(20000 / radius)) return;
         liftAt = e;
         const reach = Math.cos(Math.min(Math.PI, (6.5e5 + Math.sqrt(Math.max(0, r * r - radius * radius))) / radius));
-        let lo = Infinity, hi = 0;
+        // And about the eye, for the near grid's gate: the texels within
+        // the 20 km it may move and two texels more (the lift is bilinear
+        // between them).
+        const close = Math.cos(20000 / radius + 2 * DELTA_GLOBE);
+        let lo = Infinity, hi = 0, nearLo = Infinity, nearHi = -Infinity;
         for (let i = 0; i < liftCpu.length; i++) {
-            if (e[0] * liftDirs[3 * i] + e[1] * liftDirs[3 * i + 1] + e[2] * liftDirs[3 * i + 2] < reach) continue;
+            const c = e[0] * liftDirs[3 * i] + e[1] * liftDirs[3 * i + 1] + e[2] * liftDirs[3 * i + 2];
+            if (c < reach) continue;
             lo = Math.min(lo, liftCpu[i]);
             hi = Math.max(hi, liftCpu[i]);
+            if (c < close) continue;
+            nearLo = Math.min(nearLo, liftCpu[i]);
+            nearHi = Math.max(nearHi, liftCpu[i]);
         }
         liftRange[0] = Number.isFinite(lo) ? lo : 0;
         liftRange[1] = hi;
+        liftNear[0] = Number.isFinite(nearLo) ? nearLo : liftRange[0];
+        liftNear[1] = Number.isFinite(nearHi) ? nearHi : liftRange[1];
         node.setShaderUniform('u_cloudLiftRange', liftRange);
     }
+    const liftNear = [0, 0];
 
     let face = -1;
     // Each level's grid origin in texels, and whether it holds anything.
@@ -1100,8 +1141,8 @@ export function createClouds(scene, radius, module, readers, seed) {
             // The near grid while the eye is in the layer's heights or about
             // them, where a march takes its many steps close by; further
             // off, it crosses the air to the layer in one.
-            const near = altitude > CLOUD_BASE + liftRange[0] - NEAR_MARGIN &&
-                         altitude < CLOUD_BASE + CLOUD_DEPTH + liftRange[1] + NEAR_MARGIN;
+            const near = altitude > CLOUD_BASE + liftNear[0] - NEAR_MARGIN &&
+                         altitude < CLOUD_BASE + CLOUD_DEPTH + liftNear[1] + NEAR_MARGIN;
             node.setShaderUniform('u_cloudNear', near ? NEAR_RANGE : 0);
         },
     };
