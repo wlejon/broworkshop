@@ -53,7 +53,45 @@ pub fn column(q: vec3<f64>, w: f64, radius: f64) -> vec2<f32> {
         amp *= 0.62;
     }
     v += amp * amp * NOISE_VAR / (1.0 - 0.3844);
+    // Cloud streets: where the air rolls along the wind (trades, outbreaks
+    // of cold air over the sea), the cumuli line up in rows along it a few
+    // depths of the layer apart. Rows along the parallels (the winds are
+    // zonal), bent by a slow warp, as strong as a region's weather has them
+    // (none in most): resolved as an octave is, the rows' variance where
+    // unresolved. Without them the field was the same speckle everywhere,
+    // from orbit a uniform grain.
+    let qf = vec3<f32>(q.x as f32, q.y as f32, q.z as f32);
+    let rows = street_strength(q, radius, qf);
+    if (rows > 0.0) {
+        let r = clamp(STREET_SPACING * inv_w * 0.5 - 1.0, 0.0, 1.0);
+        if (r > 0.0) {
+            f += r * rows * STREET_AMP * cos(6.2831853 * fract(street_phase(q, radius, qf)));
+        }
+        v += (1.0 - r * r) * rows * rows * STREET_AMP * STREET_AMP * 0.5;
+    }
     return vec2<f32>(f, v);
+}
+
+// The streets' spacing (m), the rows' amplitude, and their regions' and
+// warp's wavelengths (m) and the warp's amplitude (rows); clouds.js's
+// gradient bound has the same numbers.
+const STREET_SPACING: f32 = 4000.0;
+const STREET_AMP: f32 = 0.09;
+const STREET_REGION: f64 = 800000.0;
+const STREET_WARP: f64 = 80000.0;
+const STREET_WARP_ROWS: f32 = 3.0;
+// How strongly a region's cumuli line up, 0 to 1, fading toward the poles
+// where the parallels close.
+fn street_strength(q: vec3<f64>, radius: f64, qf: vec3<f32>) -> f32 {
+    let s = clamp(perlin_split(q * (radius / STREET_REGION), 211) * 4.0 - 0.1, 0.0, 1.0);
+    return s * clamp((0.95 - abs(qf.y)) * 10.0, 0.0, 1.0);
+}
+// The row a point is in, counted from the equator, its fraction the place
+// across the row.
+fn street_phase(q: vec3<f64>, radius: f64, qf: vec3<f32>) -> f32 {
+    let lat = atan2(qf.y, length(vec2<f32>(qf.x, qf.z)));
+    let warp = STREET_WARP_ROWS * perlin_split(q * (radius / STREET_WARP), 223);
+    return lat * ((radius as f32) / STREET_SPACING) + warp;
 }
 
 // The layer's shape (also read by the view's volume, clouds_volume.bk, and

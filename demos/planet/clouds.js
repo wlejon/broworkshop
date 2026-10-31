@@ -123,8 +123,14 @@ function gradientBound(w) {
         const r = Math.min(Math.max(wavelength / w * 0.5 - 1, 0), 1);
         g += r * amp * NOISE_SLOPE / wavelength;
     }
+    // The streets (clouds.bk column): rows 2 pi a row across, as dense as
+    // the parallels and the warp make them, and their regions' change.
+    const r = Math.min(Math.max(STREETS.spacing / w * 0.5 - 1, 0), 1);
+    const rowsPerM = 1 / STREETS.spacing + STREETS.warpRows * NOISE_SLOPE / STREETS.warp;
+    g += r * STREETS.amp * 2 * Math.PI * rowsPerM + STREETS.amp * 4 * NOISE_SLOPE / STREETS.region;
     return g;
 }
+const STREETS = { spacing: 4000, amp: 0.09, region: 800000, warp: 80000, warpRows: 3 };
 
 // Cube face i (0..5): axis i % 3, its sign, and the plane's axes, the same
 // in the kernel's dispatch and the shader.
