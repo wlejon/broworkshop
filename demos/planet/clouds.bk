@@ -318,29 +318,37 @@ fn k_cloud_sun(g: grid<3>, table: read_store<f64, 1>, lookup: read_store<vec4<i3
     let mu = dot(to_sun, up);
     let rf = radius as f32;
     var taus: vec4<f32> = vec4<f32>(SUN_TAU_MAX);
-    for (var k: i32 = 0; k < 4; k += 1) {
-        let sk = SUN_LOWEST + (k as f32) * SUN_SPACING;
-        // From the point, relative to the planet's centre in f32 about the
-        // point's radius (the steps are short against it).
-        let h0 = base + sk * CLOUD_DEPTH;
-        let reach = min((1.0 - sk) * CLOUD_DEPTH / max(mu, 0.02), 120000.0);
-        var tau: f32 = 0.0;
+    if (mu > -0.2) {
+        // The four heights' rays, stepped alike from the lowest's: each
+        // step's four points lie over one point of the layer (their
+        // directions differ by their heights' spacing over the planet's
+        // radius, 1e-4 of the step), so one column read serves all four,
+        // each taking its own height's occupancy; a ray out of the layer's
+        // top takes nothing more.
+        let h0 = base + SUN_LOWEST * CLOUD_DEPTH;
+        let reach = min((1.0 - SUN_LOWEST) * CLOUD_DEPTH / max(mu, 0.02), 120000.0);
+        var tau4: vec4<f32> = vec4<f32>(0.0);
         var e0: f32 = 0.0;
+        var e1: f32 = SUN_FIRST;
+        let grow = pow(max(reach / SUN_FIRST, 1.0), 1.0 / ((SUN_STEPS - 1) as f32));
+        let spread = vec4<f32>(0.0, 1.0, 2.0, 3.0) * SUN_SPACING;
         for (var i: i32 = 0; i < SUN_STEPS; i += 1) {
-            let e1 = SUN_FIRST * pow(max(reach / SUN_FIRST, 1.0), (i as f32) / ((SUN_STEPS - 1) as f32));
             let len = e1 - e0;
             let m = 0.5 * (e0 + e1);
             e0 = e1;
-            // The sample's height over the base and its direction: the ray
-            // from (rf + h0) up along to_sun.
+            e1 *= grow;
+            // The lowest ray's point and direction: from (rf + h0) up along
+            // to_sun, relative to the planet's centre in f32 about the
+            // point's radius (the steps are short against it).
             let x = up * (rf + h0) + to_sun * m;
             let rx = length(x);
             let qx = x / rx;
             let si = (rx - rf - base) / CLOUD_DEPTH;
-            if (si > 1.0 || tau > SUN_TAU_MAX) {
+            if (si > 1.0 || min(min(tau4.x, tau4.y), min(tau4.z, tau4.w)) > SUN_TAU_MAX) {
                 break;
             }
-            if (si >= 0.0) {
+            let s4 = vec4<f32>(si) + spread;
+            if (s4.w >= 0.0) {
                 let p = tiles::cube_point(qx);
                 let uv = vec2<f32>(p.u, p.v) * 2.0 - 1.0;
                 let stretch = sqrt(1.0 + max(uv.x * uv.x, uv.y * uv.y)) / (1.0 + dot(uv, uv));
@@ -357,17 +365,17 @@ fn k_cloud_sun(g: grid<3>, table: read_store<f64, 1>, lookup: read_store<vec4<i3
                     }
                 }
                 let gq = clamp(c.x / CLOUD_DETAIL_FULL, 0.0, 1.0);
-                let occ = cloud_occupancy(c.x, c.y + detail_var * gq * gq, si);
+                let cv = c.y + detail_var * gq * gq;
+                let occ = vec4<f32>(cloud_occupancy(c.x, cv, s4.x), cloud_occupancy(c.x, cv, s4.y),
+                                    cloud_occupancy(c.x, cv, s4.z), cloud_occupancy(c.x, cv, s4.w));
+                // Only the heights within the layer's [0, 1].
+                let inside = step(vec4<f32>(0.0), s4) * step(s4, vec4<f32>(1.0));
                 let segs = max(len / SUN_SEGMENT, 1.0);
-                tau -= segs * log(max(1.0 - occ * (1.0 - exp(-CLOUD_SIGMA * len / segs)), 1.0e-12));
+                let pass = 1.0 - occ * inside * (1.0 - exp(-CLOUD_SIGMA * len / segs));
+                tau4 -= segs * log(max(pass, vec4<f32>(1.0e-12)));
             }
         }
-        if (mu > -0.2) {
-            if (k == 0) { taus = vec4<f32>(tau, taus.y, taus.z, taus.w); }
-            if (k == 1) { taus = vec4<f32>(taus.x, tau, taus.z, taus.w); }
-            if (k == 2) { taus = vec4<f32>(taus.x, taus.y, tau, taus.w); }
-            if (k == 3) { taus = vec4<f32>(taus.x, taus.y, taus.z, tau); }
-        }
+        taus = tau4;
     }
     let n = clamp(taus / SUN_TAU_MAX, vec4<f32>(0.0), vec4<f32>(1.0)) * 65535.0 + 0.5;
     let i = ((slot * cells + g.y()) * cells + g.x()) * 2;
