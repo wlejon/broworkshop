@@ -31,7 +31,7 @@ from planet::ground_layout import CELLS, BORDER, TILE, DETAIL, TEXELS, HZ, FACE_
     SEED, GL_TILE, GL_BORDER, GL_ATLAS, GL_LEVELS, WAVE_COUNT, WAVE_SWELL, WAVE_FRESH, WAVE_RESIDUAL,
     WAVE_FRESH_SCALE, WAVE_K, WAVE_F;
 from planet::relief import BASE_WAVELENGTH, RIDGE_LAST, RIDGE_PAST, FINE_FIRST, ridge_amp, span_at, mean_factor,
-    ridge_cell_slope, simplex_grad, simplex_past, SimplexAt;
+    ridge_cell_slope, simplex_grad, simplex_past, simplex_twice, SimplexAt;
 from planet::tree_crown import tree_shadow, TreePlace;
 from planet::grass_floor import grass_floor, GrassPlace;
 
@@ -461,9 +461,7 @@ pub fn fragment(v: mesh::Vertex, s_in: mesh::Surface) -> mesh::Surface {
             let dr = ridge_cell_slope(nq.x, mean_factor(o, oct_pix)) * fade_p
                    - ridge_cell_slope(nq.x, mean_factor(o, oct_tex)) * fade_t * kept;
             gq += nq.yzw * (ridge_amp(o) * (o < FINE_FIRST ? v.uv.x : v.uv.y) * dr * lattice);
-            let twice = at.sk * 2.0;
-            let fl = floor(twice);
-            at = SimplexAt { cell: at.cell * 2 + vec3<i32>(fl.x as i32, fl.y as i32, fl.z as i32), sk: twice - fl };
+            at = simplex_twice(at);
             lattice *= 2.0;
         }
         let gp = gq + bitcast<vec4<f32>>(anchors[a + 2]).xyz * gq.x + bitcast<vec4<f32>>(anchors[a + 3]).xyz * gq.y

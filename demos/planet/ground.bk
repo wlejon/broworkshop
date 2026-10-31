@@ -12,7 +12,8 @@ from planet::rivers import water_at, lake_surface;
 // samples; NOISE_GRAD_VAR the variance of the noise's gradient along one axis
 // per unit of input.
 from planet::relief import BASE_WAVELENGTH, RIDGE_MEAN, NOISE_VAR, NOISE_GRAD_VAR, NOISE_BOX, RIDGE_FIRST, RIDGE_LAST,
-    RIDGE_PAST, FINE_FIRST, WARP_OCTAVE, WARP_DISPLACE, ridge_amp, normal_cdf, ridge_cell_mean, span_at, mean_factor, SimplexAt;
+    RIDGE_PAST, FINE_FIRST, WARP_OCTAVE, WARP_DISPLACE, ridge_amp, normal_cdf, ridge_cell_mean, span_at, mean_factor, SimplexAt,
+    simplex_grad, simplex_twice;
 
 // Var((1 - |noise|)^2), and the variance of its gradient along one axis per
 // unit of input, measured the same way.
@@ -214,18 +215,30 @@ const NOISE_PAST: f64 = 2.5;
 // over one of the tile's cells (noise_mean_factor): a tile holds the average
 // of what its children hold plus zero-mean detail.
 fn fbm_to(p: vec3<f64>, octaves: f64, first: i32, last: i32, seed: i32) -> f64 {
-    var sum: f64 = 0.0;
-    var amp: f64 = 1.0;
-    var q: vec3<f64> = p * pow(2.0, first as f64);
-    let n = min(ceil(octaves + NOISE_PAST) as i32, last);
+    var sum: f32 = 0.0;
+    var amp: f32 = 1.0;
+    let q = p * pow(2.0, first as f64);
+    var at = simplex_anchor(q);
+    let past = (octaves + NOISE_PAST) as f32;
+    let n = min(ceil(past) as i32, last);
     for (var o: i32 = first; o < n; o += 1) {
-        let w = clamp(octaves + NOISE_PAST - (o as f64), 0.0, 1.0) * (noise_mean_factor(o, octaves) as f64);
-        sum += noise(q, seed + o) * amp * w;
+        let k = o - first;
+        if (k > 0 && (k & (ANCHOR_EVERY - 1)) == 0) { at = simplex_anchor(q * exp2(k as f64)); }
+        let w = clamp(past - (o as f32), 0.0, 1.0) * noise_mean_factor(o, octaves);
+        sum += simplex_grad(at, seed + o).x * amp * w;
         amp *= 0.5;
-        q = q * 2.0;
+        at = simplex_twice(at);
     }
-    return sum;
+    return sum as f64;
 }
+
+// The octaves past an anchor are on its lattice, a doubling each (relief.bk
+// simplex_twice), all in f32: the f64 skew and floor of noise() would be
+// most of an octave's cost at the GPU's f64 rate. The doubling keeps the
+// anchor's f32 offset, a bit less of it each octave, so a point anchors
+// again from f64 every ANCHOR_EVERY octaves: the offset is then good to
+// 2^-16 of a cell, under a millimetre of the finest octaves' relief.
+const ANCHOR_EVERY: i32 = 8;
 
 // The octaves a tile `extent` wide with cells of `inv_size` of its edge can
 // carry: down to a wavelength of 2.5 cells (app.js octavesFor, the same).
@@ -351,17 +364,21 @@ fn relief(p: vec3<f64>, octaves: f64, seed: i32) -> vec2<f64> {
     if (n <= RIDGE_FIRST) { return vec2<f64>(0.0, 0.0); }
     let wq = p * exp2(WARP_OCTAVE as f64);
     let warp = vec3<f64>(noise(wq, seed + 400), noise(wq, seed + 401), noise(wq, seed + 402));
-    var q: vec3<f64> = (p + warp * (WARP_DISPLACE as f64)) * exp2(RIDGE_FIRST as f64);
-    var broad: f64 = 0.0;
-    var fine: f64 = 0.0;
+    let q = (p + warp * (WARP_DISPLACE as f64)) * exp2(RIDGE_FIRST as f64);
+    var at = simplex_anchor(q);
+    var broad: f32 = 0.0;
+    var fine: f32 = 0.0;
+    let past = (octaves as f32) + RIDGE_PAST;
     for (var o: i32 = RIDGE_FIRST; o < n; o += 1) {
-        let fade = clamp(octaves + (RIDGE_PAST as f64) - (o as f64), 0.0, 1.0);
-        let mean = ridge_cell_mean(noise(q, seed + 100 + o) as f32, noise_mean_factor(o, octaves));
-        let v = ((mean - RIDGE_MEAN) as f64) * (ridge_amp(o) as f64) * fade;
+        let k = o - RIDGE_FIRST;
+        if (k > 0 && (k & (ANCHOR_EVERY - 1)) == 0) { at = simplex_anchor(q * exp2(k as f64)); }
+        let fade = clamp(past - (o as f32), 0.0, 1.0);
+        let mean = ridge_cell_mean(simplex_grad(at, seed + 100 + o).x, noise_mean_factor(o, octaves));
+        let v = (mean - RIDGE_MEAN) * ridge_amp(o) * fade;
         if (o < FINE_FIRST) { broad += v; } else { fine += v; }
-        q = q * 2.0;
+        at = simplex_twice(at);
     }
-    return vec2<f64>(broad, fine);
+    return vec2<f64>(broad as f64, fine as f64);
 }
 
 // The ground before the water cuts it, metres above the sphere at `dir`: x
@@ -737,13 +754,33 @@ fn tint_amp(o: i32) -> f32 {
 // rest runs in f32 on the offset inside the cell, which needs no more (the
 // GPU runs f64 at a small fraction of f32's rate).
 pub fn perlin_split(q: vec3<f64>, seed: i32) -> f32 {
+    return perlin_at(perlin_anchor(q), seed);
+}
+// q's lattice cell and the offset in it: the f64 half of perlin_split.
+pub struct PerlinAt {
+    cell: vec3<i32>,
+    f: vec3<f32>,
+}
+pub fn perlin_anchor(q: vec3<f64>) -> PerlinAt {
     let c = floor(q);
-    let xf0 = (q.x - c.x) as f32;
-    let yf0 = (q.y - c.y) as f32;
-    let zf0 = (q.z - c.z) as f32;
-    let x0: i32 = ((c.x as i64) as i32) * PRIME_X;
-    let y0: i32 = ((c.y as i64) as i32) * PRIME_Y;
-    let z0: i32 = ((c.z as i64) as i32) * PRIME_Z;
+    return PerlinAt {
+        cell: vec3<i32>((c.x as i64) as i32, (c.y as i64) as i32, (c.z as i64) as i32),
+        f: vec3<f32>((q.x - c.x) as f32, (q.y - c.y) as f32, (q.z - c.z) as f32),
+    };
+}
+// The same point an octave finer, in f32 (relief.bk simplex_twice).
+pub fn perlin_twice(at: PerlinAt) -> PerlinAt {
+    let twice = at.f * 2.0;
+    let fl = floor(twice);
+    return PerlinAt { cell: at.cell * 2 + vec3<i32>(fl.x as i32, fl.y as i32, fl.z as i32), f: twice - fl };
+}
+pub fn perlin_at(at: PerlinAt, seed: i32) -> f32 {
+    let xf0 = at.f.x;
+    let yf0 = at.f.y;
+    let zf0 = at.f.z;
+    let x0: i32 = at.cell.x * PRIME_X;
+    let y0: i32 = at.cell.y * PRIME_Y;
+    let z0: i32 = at.cell.z * PRIME_Z;
     let x1: i32 = x0 + PRIME_X;
     let y1: i32 = y0 + PRIME_Y;
     let z1: i32 = z0 + PRIME_Z;
@@ -765,16 +802,22 @@ pub fn perlin_split(q: vec3<f64>, seed: i32) -> f32 {
 }
 
 pub fn variation(dir: vec3<f64>, radius: f64, octaves: f64, seed: i32) -> vec3<f32> {
-    var q: vec3<f64> = dir * (radius / (BASE_WAVELENGTH as f64)) * pow(2.0, VARY_FIRST as f64);
+    let q = dir * (radius / (BASE_WAVELENGTH as f64)) * pow(2.0, VARY_FIRST as f64);
+    var pa = perlin_anchor(q);
     var lum: f32 = 0.0;
     var tint: f32 = 0.0;
     var vl: f32 = 0.0;
     var vt: f32 = 0.0;
-    let n = ceil(octaves) as i32;
+    let oct = octaves as f32;
+    let n = ceil(oct) as i32;
     for (var o: i32 = VARY_FIRST; o < n; o += 1) {
-        let w = clamp(octaves - (o as f64), 0.0, 1.0) as f32;
+        // On the anchor's lattice in f32, anchored again from f64 every
+        // ANCHOR_EVERY octaves (fbm_to).
+        let k = o - VARY_FIRST;
+        if (k > 0 && (k & (ANCHOR_EVERY - 1)) == 0) { pa = perlin_anchor(q * exp2(k as f64)); }
+        let w = clamp(oct - (o as f32), 0.0, 1.0);
         let al = lum_amp(o) * w;
-        let nl = perlin_split(q, seed + 101 + o);
+        let nl = perlin_at(pa, seed + 101 + o);
         lum += nl * al;
         vl += al * al * PERLIN_VAR;
         if (o < TINT_LAST) {
@@ -782,12 +825,12 @@ pub fn variation(dir: vec3<f64>, radius: f64, octaves: f64, seed: i32) -> vec3<f
             // A meadow's light patches are its dry ones, straw, and its dark
             // ones lush: in the patch octaves the tint follows the
             // luminance at a correlation of PATCH_CORR (its variance kept).
-            var nt = perlin_split(q, seed + 211 + o);
+            var nt = perlin_at(pa, seed + 211 + o);
             if (o >= PATCH_FIRST && o <= PATCH_LAST) { nt = PATCH_CORR * nl + PATCH_CORR_REST * nt; }
             tint += nt * at;
             vt += at * at * PERLIN_VAR;
         }
-        q = q * 2.0;
+        pa = perlin_twice(pa);
     }
     let axis = tint_axis();
     let s = vec3<f32>(lum, lum, lum) + axis * tint;

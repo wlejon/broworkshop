@@ -113,6 +113,14 @@ pub fn simplex_past(at: SimplexAt, offset: vec3<f32>) -> SimplexAt {
     return SimplexAt { cell: at.cell + vec3<i32>(fl.x as i32, fl.y as i32, fl.z as i32), sk: s - fl };
 }
 
+// The same point an octave finer: q doubled lands at twice the cell plus
+// the floor of twice the offset, exactly (the skew is linear).
+pub fn simplex_twice(at: SimplexAt) -> SimplexAt {
+    let twice = at.sk * 2.0;
+    let fl = floor(twice);
+    return SimplexAt { cell: at.cell * 2 + vec3<i32>(fl.x as i32, fl.y as i32, fl.z as i32), sk: twice - fl };
+}
+
 // One lattice point's share and its gradient: its falloff f = (0.75 -
 // |r|^2) / 2 (r the point's offset from it) to the fourth, times its
 // gradient's dot with r.
