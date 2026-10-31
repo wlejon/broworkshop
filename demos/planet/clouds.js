@@ -52,7 +52,7 @@ const FACE_TEXELS = (FACE + 2) * (FACE + 2);
 // face's centre, the clipmap's finest. The ground's light stays on the
 // clipmap (cloudGlsl) until its chunk is a module that can import tiles.bk.
 const TILE = 64, TILE_BORDER = 1, TILE_CELLS = TILE + 2 * TILE_BORDER, TILE_LEVELS = 13;
-const TILE_PIXELS = 1, TILE_CAPACITY = 6144, TILE_BUDGET_MS = 0.3, TILE_ATLAS = 2;
+const TILE_PIXELS = 1, TILE_CAPACITY = 6144, TILE_ATLAS = 2;
 
 // The column's octaves (clouds.bk column): wavelength and amplitude.
 const OCTAVES = [];
@@ -357,7 +357,7 @@ export function createClouds(scene, radius, module, readers, seed, hook) {
         domain: { type: 'cubeSphere', radius, center: [0, 0, 0] },
         tileSize: TILE, border: TILE_BORDER, capacity: TILE_CAPACITY, maxLevel: TILE_LEVELS,
         minHeight: CLOUD_BASE, maxHeight: CLOUD_BASE + CLOUD_DEPTH + Math.max(...liftCpu),
-        pixelsPerCell: TILE_PIXELS, producePerUpdate: 64, produceBudgetMs: TILE_BUDGET_MS,
+        pixelsPerCell: TILE_PIXELS, producePerUpdate: 64,
         layers: { column: 4 },
         produce(batch) {
             kTile.dispatch([TILE_CELLS, TILE_CELLS, batch.count], batch.table, this.layer('column'),
