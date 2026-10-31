@@ -572,14 +572,14 @@ fn max4(v: vec4<f32>) -> f32 {
     return max(max(v.x, v.y), max(v.z, v.w));
 }
 
-// A per-pixel offset in [0, 1), moved on by the golden ratio each render, so
-// a pixel's offsets cover a step evenly over the renders the engine's
-// reconstruction averages (camera.frame.x).
+// A per-pixel offset in [0, 1), moved on by the golden ratio each march, so
+// a pixel's offsets cover a step evenly over the marches the engine's
+// reconstruction averages (volume::march_index).
 fn jitter(pixel: vec2<f32>) -> f32 {
     var hp: i32 = (pixel.x as i32) * 1973 + (pixel.y as i32) * 9277;
     hp = (hp ^ ((hp >> 13) & 524287)) * 1540483477;
     let bits = (hp ^ ((hp >> 15) & 131071)) & 1023;
-    return fract((bits as f32) / 1024.0 + 0.618034 * scene::camera.frame.x);
+    return fract((bits as f32) / 1024.0 + 0.618034 * volume::march_index());
 }
 
 // The march. Steps grow with the distance (a pixel's footprint grows with
