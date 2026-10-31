@@ -125,9 +125,12 @@ const STREET_REGION: f64 = 800000.0;
 const STREET_WARP: f64 = 80000.0;
 const STREET_WARP_ROWS: f32 = 3.0;
 // How strongly a region's cumuli line up, 0 to 1, fading toward the poles
-// where the parallels close.
+// where the parallels close. Streets are a particular weather's (cold air
+// over warmer sea, the trades): some in about an eighth of the regions
+// (Perlin over 0.3, its deviation 0.27), full in one in fifty. Over half of
+// them had rows, and from orbit the field read as stripes, not cumulus.
 fn street_strength(q: vec3<f64>, radius: f64, qf: vec3<f32>) -> f32 {
-    let s = clamp(perlin_split(q * (radius / STREET_REGION), 211) * 4.0 - 0.1, 0.0, 1.0);
+    let s = clamp(perlin_split(q * (radius / STREET_REGION), 211) * 4.0 - 1.2, 0.0, 1.0);
     return s * clamp((0.95 - abs(qf.y)) * 10.0, 0.0, 1.0);
 }
 // The row a point is in, counted from the equator, its fraction the place
