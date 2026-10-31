@@ -1,0 +1,34 @@
+// The ground under the blades (grass.js), for a node the grass is given as
+// a reader: grass_floor(pl, p, d) is what the ground's colour is taken by
+// at p (about the planet's centre, d from the eye) where blades stand: the
+// ground between them, in their shade, GRASS_FLOOR of what the blades
+// average to, as much as the field's cover there grows grass, and fading
+// out as the blades do toward FAR, past which the ground is the blades'
+// average itself.
+module planet::grass_floor;
+from planet::grass_layout import P, FAR, GRASS_FLOOR;
+
+// The grass's field as a reader binds it: P x P points of 7 floats
+// (grass.bk k_grass_field), and where it lies.
+@binding(4, 17) pub var grass_field: read_buffer<f32>;
+pub struct GrassPlace {
+    a: vec3<f32>,    // the eye's cube face's gnomonic plane
+    e: vec3<f32>,
+    f: vec3<f32>,
+    uv: vec3<f32>,   // the first point on the plane, and the spacing (0: no field)
+}
+
+pub fn grass_floor(pl: GrassPlace, p: vec3<f32>, d: f32) -> f32 {
+    let fade = smoothstep(FAR, FAR * 0.8, d);
+    if (fade <= 0.0 || pl.uv.z <= 0.0) { return 1.0; }
+    let q = normalize(p);
+    let f = (vec2<f32>(dot(q, pl.e), dot(q, pl.f)) / dot(q, pl.a) - pl.uv.xy) / pl.uv.z;
+    let last = (P - 1) as f32;
+    if (f.x < 0.0 || f.y < 0.0 || f.x >= last || f.y >= last) { return 1.0; }
+    let i = vec2<i32>(f.x as i32, f.y as i32);
+    let t = f - vec2<f32>(i.x as f32, i.y as f32);
+    let k = (i.y * P + i.x) * 7 + 3;
+    let cover = mix(mix(grass_field[k], grass_field[k + 7], t.x),
+                    mix(grass_field[k + P * 7], grass_field[k + P * 7 + 7], t.x), t.y);
+    return mix(1.0, GRASS_FLOOR, fade * cover);
+}

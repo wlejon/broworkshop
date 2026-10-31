@@ -1,0 +1,122 @@
+// A tree's hash and crown, from its site on the world's lattice (trees.js):
+// the tree hook (trees_mesh.bk) draws it from them, and the ground
+// (ground_mesh.bk) its shadow.
+module planet::tree_crown;
+from planet::tree_layout import N, FAR, MAX_TREE_H, SHADOW_REACH, SHADOW_STEPS;
+
+pub fn pcg(v: u32) -> u32 {
+    let s = v * 747796405u + 2891336453u;
+    let w = ((s >> ((s >> 28u) + 4u)) ^ s) * 277803737u;
+    return (w >> 22u) ^ w;
+}
+pub fn rnd_val(s: u32) -> f32 {
+    return (s as f32) * (1.0 / 4294967296.0);
+}
+pub fn tree_seed(world: vec2<i32>, face: f32) -> u32 {
+    return pcg((world.x as u32) * 73856093u ^ (world.y as u32) * 19349663u ^ (face as u32) * 83492791u);
+}
+pub struct Crown {
+    h: f32,
+    r: f32,
+    foot: f32,
+    seed: u32,
+}
+// Its height, the crown's radius at its foot and the foot's height
+// (below it, the bare trunk), for a site of the given size.
+pub fn tree_crown(seed_in: u32, size: f32) -> Crown {
+    let s1 = pcg(seed_in);
+    let h = size * mix(11.0, 24.0, rnd_val(s1));
+    let s2 = pcg(s1);
+    let r = h * mix(0.17, 0.25, rnd_val(s2));
+    return Crown { h: h, r: r, foot: 0.08 * h, seed: s2 };
+}
+
+// The trees' field as a reader (the ground) binds it: N x N sites of 7
+// floats (trees.bk k_tree_field), and where it lies.
+@binding(4, 18) pub var tree_field: read_buffer<f32>;
+pub struct TreePlace {
+    o_hi: vec3<f32>,      // the field's origin about the planet's centre
+    o_lo: vec3<f32>,
+    lattice: vec3<f32>,   // its first site on the world's lattice, and its cube face
+    a: vec3<f32>,         // the face's gnomonic plane
+    e: vec3<f32>,
+    f: vec3<f32>,
+    uv: vec3<f32>,        // the first site on the plane, and the spacing (0: no field)
+}
+
+// The trees' shadows on the ground: tree_shadow(pl, p, eye, up, to_sun) is
+// the sun the crowns leave at p, the ground point about the field's origin
+// (eye the camera's), each crown the cone the tree draws it as, from R at
+// its foot to nothing at its top. The trees whose crowns the sun's ray from
+// p can cross stand within a crown's reach of its path across the ground,
+// up to the tallest tree's height over the sun's slope: the sites about
+// that path (three across it, a step of 0.7 sites along it) are tested. For
+// each, the ray's horizontal distance to the axis and the crown's radius at
+// the ray's height are both linear in the distance along the ray (with the
+// square root), so the nearest the ray comes inside the crown is where
+// their difference is least: at the point of closest approach, moved down
+// the ray by e k / sqrt(1 - k^2) (k the rate the crown widens as the ray
+// descends), within the crown's heights. A crown passes 15% of the sun
+// through its gaps, its edge a penumbra growing with the distance (the
+// sun's disc) and its ragged rim.
+pub fn tree_shadow(pl: TreePlace, p: vec3<f32>, eye: vec3<f32>, up: vec3<f32>, to_sun: vec3<f32>) -> f32 {
+    let mu = dot(to_sun, up);
+    if (mu <= 0.05 || pl.uv.z <= 0.0) { return 1.0; }
+    var lh = to_sun - up * mu;
+    let lhl = length(lh);
+    lh = lh / lhl;
+    let tan_e = mu / lhl;
+    // p's site coordinates, and the sun's direction across the ground in
+    // sites a metre (the gnomonic plane's derivative).
+    let big_p = pl.o_hi + (pl.o_lo + p);
+    let r = length(big_p);
+    let q = big_p / r;
+    let z = dot(q, pl.a);
+    let uv = vec2<f32>(dot(q, pl.e), dot(q, pl.f)) / z;
+    let s = (uv - pl.uv.xy) / pl.uv.z;
+    let ds = (vec2<f32>(dot(lh, pl.e), dot(lh, pl.f)) - uv * dot(lh, pl.a)) / (z * r * pl.uv.z);
+    let per_metre = length(ds);
+    let dn = ds / per_metre;
+    let across = abs(dn.x) > abs(dn.y) ? vec2<i32>(0, 1) : vec2<i32>(1, 0);
+    let steps = min((ceil(min(MAX_TREE_H / tan_e, SHADOW_REACH) * per_metre / 0.7) as i32) + 2, SHADOW_STEPS);
+    var vis: f32 = 1.0;
+    let lat_xy = vec2<i32>(pl.lattice.x as i32, pl.lattice.y as i32);
+    for (var k: i32 = -1; k < steps; k += 1) {
+        let nf = floor(s + dn * (0.7 * (k as f32)) + vec2<f32>(0.5));
+        let n = vec2<i32>(nf.x as i32, nf.y as i32);
+        for (var j: i32 = -1; j <= 1; j += 1) {
+            let site = n + across * j;
+            let edge = min(min(site.x, N - 1 - site.x), min(site.y, N - 1 - site.y));
+            if (edge >= 0) {
+                let idx = (site.y * N + site.x) * 7;
+                let c = vec3<f32>(tree_field[idx], tree_field[idx + 1], tree_field[idx + 2]);
+                // Sized as the tree is drawn: shrinking into the ground over
+                // the last sixth of its reach and at the field's edge.
+                let size = tree_field[idx + 3] * smoothstep(0.0, 12.0, edge as f32)
+                         * smoothstep(FAR, FAR * (5.0 / 6.0), length(c - eye));
+                if (size > 0.0) {
+                    let seed = tree_seed(site + lat_xy, pl.lattice.z);
+                    let cr = tree_crown(seed, size);
+                    let w = c - p;
+                    let hb = dot(w, up);            // the tree's foot over p
+                    let wh = w - up * hb;
+                    let a = dot(wh, lh);            // along the sun's path to the axis
+                    let e = length(wh - lh * a);    // and across it
+                    let kw = tan_e * cr.r / (cr.h - cr.foot);
+                    var t = kw < 1.0 ? a - e * kw * inversesqrt(1.0 - kw * kw) : -1.0e9;
+                    let t_foot = (cr.foot + hb) / tan_e;
+                    let t_top = (cr.h + hb) / tan_e;
+                    t = clamp(t, max(t_foot, 0.0), t_top);
+                    if (t_top > 0.0) {
+                        let height = t * tan_e - hb;
+                        let rr = cr.r * (cr.h - height) / (cr.h - cr.foot);
+                        let dist = length(vec2<f32>(e, a - t));
+                        let pen = 0.2 * rr + 0.0093 * t + 0.1;
+                        vis = min(vis, 1.0 - 0.85 * smoothstep(rr + pen, rr - pen, dist));
+                    }
+                }
+            }
+        }
+    }
+    return vis;
+}
