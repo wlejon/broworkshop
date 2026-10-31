@@ -1,0 +1,807 @@
+// The clouds as the view sees them (clouds.js createClouds): the engine's
+// volume hook (volume.bk), each pixel's ray marched through the cloud
+// layer's column field (clouds.bk) and, near the eye, the same integrand
+// given point by point to the engine's near grid.
+//
+// Light, per step of the march: the sun through the cloud between the point
+// and it (the column above up to its top, then the column toward the sun:
+// bright tops, shaded far sides, grey bases), scattered in a two-lobed phase
+// (the silver lining toward the sun), with the light scattered many times as
+// two-stream diffusion carries it in; the sky from above through the depth
+// over the point; integrated over each step in closed form (Hillaire 2016).
+module hook;
+
+import scene;
+import volume;
+import lighting;
+import custom;
+from planet::clouds import NOISE_VAR, CLOUD_BASE, CLOUD_DEPTH, CLOUD_SIGMA, CLOUD_FLOOR, CLOUD_DETAIL_FULL,
+                           cloud_need, cloud_need_slope, cloud_top, cloud_occupancy;
+
+// The node's values (clouds.js update): the planet's radius; the detail's
+// billow statistics and variance (clouds.js noiseSlices, CLOUD_DETAIL_VAR);
+// the eye's cube face (faceFrame: its axis and plane axes); the eye about
+// the centre as an f32 and the rest; its altitude over the radius; the least
+// and most lift a ray from the eye can meet; the near grid's range (0 off).
+struct Params {
+    radius: f32,
+    billow_mean: f32,
+    billow_var: f32,
+    detail_var: f32,
+    face_a: vec3<f32>,
+    face_e: vec3<f32>,
+    face_f: vec3<f32>,
+    cam_hi: vec3<f32>,
+    cam_lo: vec3<f32>,
+    cam_alt: f32,
+    lift_range: vec2<f32>,
+    near_range: f32,
+}
+@binding(4, 0) var params: uniform<Params>;
+
+// The column field's clipmap (clouds.bk k_cloud_level): the levels as the
+// slices of a texture the engine copies from the map each render (amount,
+// variance), wrapping; the lift on the globe's six faces; the detail's
+// noise, a tiling 3D texture.
+@binding(4, 1) var levels: texture2d_array<vec4<f32>>;
+@binding(4, 2) var lift_faces: texture2d_array<vec4<f32>>;
+@binding(4, 3) var noise: texture3d<vec4<f32>>;
+// Per level its plane origin, texel spacing and gradient bound; at
+// CLOUD_LEVELS the globe's spacing and bound; after it each level's origin in
+// texels (where its wrapped grid starts).
+@binding(4, 14) var head: read_buffer<vec4<f32>>;
+// The map itself, for the globe's faces (two floats a texel).
+@binding(4, 15) var map: read_buffer<vec2<f32>>;
+
+// The clipmap's layout (clouds.js LEVELS, N, FACE + 2, GLOBE_BASE,
+// FACE_TEXELS).
+const CLOUD_LEVELS: i32 = 11;
+const CLOUD_N: i32 = 512;
+const CLOUD_FACE: i32 = 258;
+const CLOUD_GLOBE: i32 = 2883584;
+const CLOUD_FACE_TEXELS: i32 = 66564;
+// The finest footprint the column resolves (clouds.bk CLOUD_COLUMN_MIN).
+const CLOUD_COLUMN_MIN: f32 = 60.0;
+const CLOUD_LIFT_SLOPE: f32 = 0.05;   // a bound on the lift's gradient (m/m)
+// The noise texture: NOISE_CELL texels a lattice unit, NOISE_TEXELS a side.
+const NOISE_CELL: f32 = 4.0;
+const NOISE_TEXELS: f32 = 64.0;
+
+fn detail_scale(f: f32) -> f32 {
+    return clamp(f / CLOUD_DETAIL_FULL, 0.0, 1.0);
+}
+
+// The globe level's face at the unit direction q (the largest axis), and q's
+// texel coordinates on it.
+struct FacePoint {
+    face: i32,
+    t: vec2<f32>,
+}
+fn face_of(q: vec3<f32>) -> FacePoint {
+    let m = abs(q);
+    var r: vec3<f32> = q.zxy;
+    var axis: i32 = 2;
+    if (m.x >= m.y && m.x >= m.z) {
+        r = q;
+        axis = 0;
+    } else if (m.y >= m.z) {
+        r = q.yzx;
+        axis = 1;
+    }
+    let uv = r.yz / abs(r.x);
+    let delta = head[CLOUD_LEVELS].x;
+    let t = clamp((uv + 1.0 + delta) / delta, vec2<f32>(0.0), vec2<f32>((CLOUD_FACE as f32) - 1.001));
+    var face: i32 = axis;
+    if (r.x < 0.0) {
+        face = axis + 3;
+    }
+    return FacePoint { face: face, t: t };
+}
+
+// The globe level at the unit direction q: bilinear over its face's texels.
+fn globe(q: vec3<f32>) -> vec2<f32> {
+    let p = face_of(q);
+    let c = floor(p.t);
+    let f = p.t - c;
+    let i = CLOUD_GLOBE + p.face * CLOUD_FACE_TEXELS + (c.y as i32) * CLOUD_FACE + (c.x as i32);
+    return mix(mix(map[i], map[i + 1], f.x), mix(map[i + CLOUD_FACE], map[i + CLOUD_FACE + 1], f.x), f.y);
+}
+
+// The layer's lift at the unit direction q (clouds.bk k_cloud_lift): its base
+// stands CLOUD_BASE over it.
+fn lift(q: vec3<f32>) -> f32 {
+    let p = face_of(q);
+    let uv = (p.t + 0.5) / (CLOUD_FACE as f32);
+    return lift_faces.sample_lod(custom::linear, vec3<f32>(uv.x, uv.y, p.face as f32), 0.0).x;
+}
+
+// The level a footprint of w metres reads at the layer point q (0 the
+// finest, fractional between two, CLOUD_LEVELS the globe), q's point on the
+// eye's face plane (the globe off it), and the level's footprint there.
+struct LevelAt {
+    level: f32,
+    uv: vec2<f32>,
+}
+fn level_of(q: vec3<f32>, w: f32) -> LevelAt {
+    let z = dot(q, params.face_a);
+    if (z <= 0.1) {
+        return LevelAt { level: CLOUD_LEVELS as f32, uv: vec2<f32>(0.0) };
+    }
+    let uv = vec2<f32>(dot(q, params.face_e), dot(q, params.face_f)) / z;
+    let d = 1.0 + dot(uv, uv);
+    let stretch = sqrt(1.0 + max(uv.x * uv.x, uv.y * uv.y)) / d;
+    // The finest level's spacing: the globe's over 2^CLOUD_LEVELS.
+    let delta0 = head[CLOUD_LEVELS].x / 2048.0;
+    let l = log2(max(w, CLOUD_COLUMN_MIN) / (2.0 * params.radius * delta0 * stretch));
+    return LevelAt { level: clamp(l, 0.0, CLOUD_LEVELS as f32), uv: uv };
+}
+
+// Level k at the plane point uv; `held` false outside its grid. Its grid
+// wraps: texel p of it (from the plane's origin) is in slot p mod n, the
+// texture's repeat.
+struct Texel {
+    held: bool,
+    c: vec2<f32>,
+}
+fn level(k: i32, uv: vec2<f32>) -> Texel {
+    let h = head[k];
+    let t = (uv - h.xy) / h.z;
+    let top = (CLOUD_N as f32) - 1.001;
+    if (t.x < 0.0 || t.y < 0.0 || t.x >= top || t.y >= top) {
+        return Texel { held: false, c: vec2<f32>(0.0) };
+    }
+    let p = (t + head[CLOUD_LEVELS + 1 + k].xy + 0.5) / (CLOUD_N as f32);
+    let c = levels.sample_lod(custom::repeat, vec3<f32>(p.x, p.y, k as f32), 0.0);
+    return Texel { held: true, c: c.xy };
+}
+
+// The column's amount F at the layer point q resolved at a footprint of w
+// metres, and the variance of what is finer: between the two levels whose
+// footprints bracket w, as a mip's levels blend, or the finest level holding
+// q if neither does. `cloud` false when even 3.4 deviations of what is finer
+// cannot lift it to need, with `clear` the distance (m) within which the
+// level's own amount cannot either, given that need falls by at most drop a
+// metre along the way: how far a ray may step and find no cloud.
+struct Column {
+    cloud: bool,
+    f: f32,
+    variance: f32,
+    clear: f32,
+}
+fn column(q: vec3<f32>, w: f32, need: f32, drop: f32) -> Column {
+    let at = level_of(q, w);
+    let k0 = at.level as i32;
+    var frac: f32 = at.level - (k0 as f32);
+    var c: vec2<f32> = vec2<f32>(0.0);
+    var k: i32 = k0;
+    while (k < CLOUD_LEVELS) {
+        let x = level(k, at.uv);
+        if (x.held) {
+            c = x.c;
+            break;
+        }
+        frac = 0.0;
+        k += 1;
+    }
+    if (k < CLOUD_LEVELS && frac > 0.0) {
+        var c1: vec2<f32> = c;
+        if (k + 1 == CLOUD_LEVELS) {
+            c1 = globe(q);
+        } else {
+            let x = level(k + 1, at.uv);
+            if (x.held) {
+                c1 = x.c;
+            }
+        }
+        c = mix(c, c1, frac);
+    }
+    if (k == CLOUD_LEVELS) {
+        c = globe(q);
+    }
+    let g = detail_scale(c.x);
+    let variance = c.y + params.detail_var * g * g;
+    let reach = 3.4 * sqrt(variance);
+    if (c.x + reach < need) {
+        return Column { cloud: false, f: c.x, variance: variance, clear: (need - c.x - reach) / (head[k].w + drop) };
+    }
+    return Column { cloud: true, f: c.x, variance: variance, clear: 0.0 };
+}
+
+// The cloud's own relief, in three dimensions: the column is the same at
+// every height, so its sides would be its pattern drawn straight up (walls
+// streaked toward the zenith seen from under them). Octaves of gradient noise
+// over space are added to the column's amount, billows of a few hundred
+// metres in its sides, base and tops (the erosion of Schneider's Nubis), in
+// proportion to the column's amount up to CLOUD_DETAIL_FULL, so a column
+// barely short of cloud stays clear. A column read alone carries their
+// variance as unresolved (params.detail_var), so the shadows, the light's
+// tops and far pixels see what they average to; where a sample resolves them
+// (detailed) they are added and their share of the variance taken back out.
+// The finer two are billows, the noise's magnitude less its mean: lobes
+// bounded by creases where it crosses zero, a cumulus's cauliflower.
+fn noise_at(p: vec3<f32>) -> f32 {
+    return noise.sample_lod(custom::repeat, (p * NOISE_CELL + 0.5) / NOISE_TEXELS, 0.0).x;
+}
+// One octave of wavelength lambda, amplitude amp and offset off at P, at
+// weight g (detail_scale) over r (F, variance); `billow` its magnitude.
+fn octave(r: vec2<f32>, p: vec3<f32>, w: f32, g: f32, lambda: f32, amp: f32, off: f32, billow: bool) -> vec2<f32> {
+    // At full weight from 4 footprints a wavelength, none at 2.
+    let a = clamp(lambda / w * 0.5 - 1.0, 0.0, 1.0);
+    if (a <= 0.0) {
+        return r;
+    }
+    let n = noise_at(p / lambda + off);
+    if (billow) {
+        return vec2<f32>(r.x + a * g * amp * (abs(n) - params.billow_mean),
+                         r.y - a * a * g * g * amp * amp * params.billow_var);
+    }
+    return vec2<f32>(r.x + a * g * amp * n, r.y - a * a * g * g * amp * amp * NOISE_VAR);
+}
+// The column's (F, variance) with the detail a footprint of w metres
+// resolves at P (about the centre).
+fn detailed(p: vec3<f32>, w: f32, f: f32, variance: f32) -> vec2<f32> {
+    let g = detail_scale(f);
+    var r: vec2<f32> = vec2<f32>(f, variance);
+    if (g > 0.0) {
+        r = octave(r, p, w, g, 480.0, 0.07, 0.0, false);
+        r = octave(r, p, w, g, 190.0, 0.04, 17.0, false);
+        r = octave(r, p, w, g, 85.0, 0.03, 5.3, true);
+        r = octave(r, p, w, g, 38.0, 0.02, 11.7, true);
+    }
+    return vec2<f32>(r.x, max(r.y, 0.0));
+}
+
+// The ray's distances to the sphere at altitude hs, from the eye's altitude
+// hc (so nothing squares a radius); `hit` false when it misses.
+struct Shell {
+    hit: bool,
+    near: f32,
+    far: f32,
+}
+fn shell(hc: f32, hs: f32, mu: f32) -> Shell {
+    let r0 = params.radius + hc;
+    let b = r0 * mu;
+    let c = (hc - hs) * (2.0 * params.radius + hc + hs);   // r0^2 - r^2
+    let disc = b * b - c;
+    if (disc < 0.0) {
+        return Shell { hit: false, near: 0.0, far: 0.0 };
+    }
+    let sq = sqrt(disc);
+    var q: f32 = -b + sq;
+    if (b > 0.0) {
+        q = -b - sq;
+    }
+    var t2: f32 = 0.0;
+    if (abs(q) > 0.0) {
+        t2 = c / q;
+    }
+    return Shell { hit: true, near: min(q, t2), far: max(q, t2) };
+}
+
+// The light a step of length dt scatters toward the eye, per unit of the
+// source at its start, from a medium of extinction sigma whose light dims
+// along the step at a further rate: sigma * the integral over x of
+// exp(-(sigma + rate) x). Four sub-columns at once, each its own length.
+fn step_light(sigma: vec4<f32>, rate: vec4<f32>, dt: vec4<f32>) -> vec4<f32> {
+    let r = sigma + rate;
+    let some = step(vec4<f32>(1.0e-7), abs(r));
+    let rs = mix(vec4<f32>(1.0), r, some);
+    return mix(sigma * dt, sigma * (1.0 - exp(-rs * dt)) / rs, some);
+}
+
+// The sun's light a step of length dt scatters toward the eye, per unit of
+// the sun's: sigma * the integral over x of exp(-sigma x) times the sun
+// through the cloud, exp(-(tau0 + rate x)). A ray rising toward a low sun
+// crosses less cloud toward it as it goes, at a rate that can pass the
+// extinction, but the sun's depth only falls to nothing, at x0, and from
+// there the step sees it whole. Written with each exponent whole, none of
+// them positive: taken apart, one overflowed to infinity where the other was
+// nothing, a NaN, and a white blot on every cloud at dusk.
+fn sun_step(sigma: vec4<f32>, tau0: vec4<f32>, rate: vec4<f32>, dt: vec4<f32>) -> vec4<f32> {
+    let falling = vec4<f32>(1.0) - step(vec4<f32>(0.0), rate);
+    let x0 = mix(dt, min(tau0 / max(-rate, vec4<f32>(1.0e-9)), dt), falling);
+    let r = sigma + rate;
+    let e0 = exp(-tau0);
+    let e1 = exp(-tau0 - r * x0);
+    let some = step(vec4<f32>(1.0e-7), abs(r));
+    let lit = mix(sigma * x0 * e0, sigma * (e0 - e1) / mix(vec4<f32>(1.0), r, some), some);
+    return lit + exp(-sigma * x0) - exp(-sigma * dt);
+}
+
+const CLOUD_TOP_SOFT: f32 = 0.04;   // of the layer's height, about 100 m
+// Footprints along a ray over which its cover is one cloud's.
+const CLOUD_DECORRELATE: f32 = 6.0;
+// The excess where the occupancy is 0.003, the occupancy's threshold for
+// cloud: ln(0.003 / 0.997) / 1.7.
+const CLOUD_EDGE: f32 = -3.415;
+// The sub-columns' ranks, the cloudiest first to fill.
+const CLOUD_RANK = vec4<f32>(3.0, 2.0, 1.0, 0.0);
+// Each sub-column's amount about the column's, at its rank's quantile of the
+// occupancy's logistic, in deviations: ln(p / (1 - p)) / 1.7 at p = 1/8,
+// 3/8, 5/8, 7/8.
+const CLOUD_QUANTILE = vec4<f32>(-1.1446, -0.3011, 0.3011, 1.1446);
+
+// The height share s of the layer at distance t along the ray from the eye
+// (an altitude of hc, mu the cosine to up), and the point's direction.
+struct Height {
+    p: vec3<f32>,
+    up: vec3<f32>,
+    s: f32,
+}
+fn height_at(eye: vec3<f32>, dir: vec3<f32>, t: f32, hc: f32, mu: f32) -> Height {
+    let p = eye + dir * t;
+    let rp = length(p);
+    let h = hc + (2.0 * (params.radius + hc) * mu * t + t * t) / (rp + params.radius + hc);
+    let up = p / rp;
+    return Height { p: p, up: up, s: (h - CLOUD_BASE - lift(up)) / CLOUD_DEPTH };
+}
+
+// How far the column's amount passes what the height needs, in deviations
+// of what the footprint leaves unresolved (the occupancy's logistic argument
+// over 1.7), at distance t along the ray; -10 outside the layer.
+fn excess_at(eye: vec3<f32>, dir: vec3<f32>, t: f32, hc: f32, mu: f32, w: f32) -> f32 {
+    let x = height_at(eye, dir, t, hc, mu);
+    if (x.s < 0.0 || x.s > 1.0) {
+        return -10.0;
+    }
+    let col = column(x.up, w, cloud_need(x.s), 0.0);
+    let fd = detailed(x.p, w, col.f, col.variance);
+    return (fd.x - cloud_need(x.s)) / sqrt(fd.y + 1.0e-5);
+}
+
+fn hg_phase(g: f32, c: f32) -> f32 {
+    let k = 1.0 + g * g - 2.0 * g * c;
+    return (1.0 - g * g) / (12.566 * k * sqrt(k));
+}
+// Single scattering's forward and back lobes (the silver lining; the dimmer
+// glow away from the sun).
+fn phase(cos_sun: f32) -> f32 {
+    return mix(hg_phase(-0.25, cos_sun), hg_phase(0.8, cos_sun), 0.7);
+}
+
+// The sun's light scattered many times toward the eye, per unit of the
+// sun's and of the light scattered, at a depth tau_sun toward a sun at mu_s
+// over the horizon: near a surface it falls fast with the depth the sun
+// crossed (the first few scatterings, Wrenninge's octaves), deep in as slowly
+// as diffusion through a thick slab carries it, 1 / (1 + 0.75 (1 - g) tau),
+// so a deck's top glows near white and its base is a lit grey. The sky's the
+// same, through the depth straight up.
+fn sun_many(tau_sun: vec4<f32>, mu_s: f32) -> vec4<f32> {
+    return (0.85 * mu_s / 3.14159) * (0.55 * exp(-0.6 * tau_sun) + 0.45 / (1.0 + 0.1125 * tau_sun));
+}
+fn sky_many(tau_sun: vec4<f32>, mu_s: f32) -> vec4<f32> {
+    return 1.0 / (1.0 + 0.1125 * mu_s * tau_sun);
+}
+
+// The sub-columns' tops of a column (F, v).
+fn tops(f: f32, v: f32) -> vec4<f32> {
+    let dev = sqrt(v);
+    return vec4<f32>(cloud_top(f + dev * CLOUD_QUANTILE.x), cloud_top(f + dev * CLOUD_QUANTILE.y),
+                     cloud_top(f + dev * CLOUD_QUANTILE.z), cloud_top(f + dev * CLOUD_QUANTILE.w));
+}
+
+// Those tops seen from height share s: cloud the detail lifts over the
+// column's top is in the sun, reached through a smooth maximum over
+// CLOUD_TOP_SOFT of the height (at a hard one, every such patch had a hard
+// edge across the bases).
+fn soft_tops(s: f32, f: f32, v: f32) -> vec4<f32> {
+    let over = tops(f, v) - s;
+    return s + 0.5 * (over + sqrt(over * over + CLOUD_TOP_SOFT * CLOUD_TOP_SOFT));
+}
+
+// The sun's tap: the sub-columns' tops of the column the sun's ray reaches
+// 200 m over the highest top of the column at P (height share s), read at a
+// footprint of at least a quarter of the way there.
+struct SunDepth {
+    tau: vec4<f32>,
+    above: vec4<f32>,
+}
+fn sun_tap(p: vec3<f32>, s: f32, f: f32, v: f32, w: f32, to_sun: vec3<f32>, mu_s: f32) -> vec4<f32> {
+    let rise = max(soft_tops(s, f, v).w - s, 0.0) * CLOUD_DEPTH + 200.0;
+    let pl = p + to_sun * (rise / mu_s);
+    let col = column(normalize(pl), max(w, 0.25 * rise / mu_s), CLOUD_FLOOR, 0.0);
+    if (!col.cloud) {
+        return vec4<f32>(0.0);
+    }
+    return tops(col.f, col.variance);
+}
+// The depth of cloud toward the sun from height share s of a column (F, v):
+// through the column up to each sub-column's top (bright tops, dark bases),
+// then through the sun's tap (tap_top: a top's far side shaded behind the
+// bumps toward it), and how far each top is above.
+fn sun_depth(s: f32, f: f32, v: f32, mu_s: f32, tap_top: vec4<f32>) -> SunDepth {
+    let top = soft_tops(s, f, v);
+    let above = max(top - s, vec4<f32>(0.0)) * CLOUD_DEPTH;
+    let rise = max(top.w - s, 0.0) * CLOUD_DEPTH + 200.0;
+    let s_mid = s + 0.5 * rise / CLOUD_DEPTH;
+    let s_out = s + rise / CLOUD_DEPTH;
+    let path = (clamp(top, vec4<f32>(s), vec4<f32>(s_mid)) - s) + (clamp(tap_top, vec4<f32>(s_mid), vec4<f32>(s_out)) - s_mid);
+    return SunDepth { tau: CLOUD_SIGMA * path * CLOUD_DEPTH / mu_s, above: above };
+}
+
+// How far on a ray outside the layer's heights here can first meet them
+// again: the gap to the base below it (or the top above) closes at most at
+// the ray's fall (rise) less the lift's slope bound, and the planet's curve
+// bends the ray up by between nothing and x^2 / 2R: under the base, the
+// first root of gap + a x - x^2 / 2R; over the top, of gap + a x, none where
+// it never closes.
+fn skip_outside(s: f32, climb: f32) -> f32 {
+    if (s < 0.0) {
+        let gap = -s * CLOUD_DEPTH;
+        let a = -climb - CLOUD_LIFT_SLOPE;
+        return 2.0 * gap / (sqrt(a * a + 2.0 * gap / params.radius) - a);
+    }
+    let gap = (s - 1.0) * CLOUD_DEPTH;
+    let a = climb - CLOUD_LIFT_SLOPE;
+    if (a < 0.0) {
+        return gap / -a;
+    }
+    return 1.0e9;
+}
+
+fn max4(v: vec4<f32>) -> f32 {
+    return max(max(v.x, v.y), max(v.z, v.w));
+}
+
+// A per-pixel offset in [0, 1), moved on by the golden ratio each render, so
+// a pixel's offsets cover a step evenly over the renders the engine's
+// reconstruction averages (camera.frame.x).
+fn jitter(pixel: vec2<f32>) -> f32 {
+    var hp: i32 = (pixel.x as i32) * 1973 + (pixel.y as i32) * 9277;
+    hp = (hp ^ ((hp >> 13) & 524287)) * 1540483477;
+    let bits = (hp ^ ((hp >> 15) & 131071)) & 1023;
+    return fract((bits as f32) / 1024.0 + 0.618034 * scene::camera.frame.x);
+}
+
+// The march. Steps grow with the distance (a pixel's footprint grows with
+// it, and the field with it): STEP_RATIO of the distance ahead, at least
+// STEP_MIN, a step landing in cloud backing up to find its edge. Started at a
+// per-pixel offset, so a step's edge is grain, not bands, and the grain
+// averages over the renders the engine's reconstruction blends.
+//
+// A pixel's ray through cloud its footprint cannot resolve crosses cloudy
+// columns and clear ones, and its light is the average over them, not that
+// of a thinner cloud everywhere: 30% cover passes 70% of the light behind
+// it. Columns are cloudy up to their tops (maximum overlap, Geleyn and
+// Hollingsworth 1979), so the ray is marched as four sub-columns ranked by
+// their amount, the cloudiest first to fill as the occupancy rises:
+// sub-column j is cloud, in full density, where the occupancy passes its
+// rank, with its own transmittance and its own depth into the cloud.
+const STEP_RATIO: f32 = 0.15;
+const STEP_MIN: f32 = 40.0;
+const IN_RATIO: f32 = 0.05;
+// Inside cloud, steps of an optical depth of at most 4 in its densest
+// sub-column still seen through.
+const CLOUD_STEP: f32 = 133.33333;
+const MAX_STEPS: i32 = 96;
+
+pub fn volume(ray: volume::Ray) -> volume::Light {
+    let dir = ray.dir;
+    let eye = params.cam_hi + params.cam_lo;
+    let up = normalize(eye);
+    let mu = dot(dir, up);
+    let hc = params.cam_alt;
+    var none: volume::Light = volume::light(vec3<f32>(0.0), 1.0, 0.0);
+    // The layer between its lowest base and highest top about the eye.
+    let lo = CLOUD_BASE + params.lift_range.x;
+    let hi = CLOUD_BASE + CLOUD_DEPTH + params.lift_range.y;
+    let base = shell(hc, lo, mu);
+    let top = shell(hc, hi, mu);
+    if (!top.hit) {
+        return none;
+    }
+    var t0: f32 = 0.0;
+    var t1: f32 = top.far;
+    if (hc > hi) {
+        if (top.near < 0.0) {
+            return none;
+        }
+        t0 = top.near;
+        if (base.hit && base.near > 0.0) {
+            t1 = base.near;
+        }
+    } else if (hc >= lo) {
+        if (base.hit && base.near > 0.0) {
+            t1 = base.near;
+        }
+    } else if (base.hit) {
+        t0 = base.far;
+    }
+    t1 = min(t1, min(ray.scene_dist, t0 + 6.0e5));
+    // On from the near grid's far end (medium below).
+    t0 = max(t0, ray.near);
+    if (t1 <= t0) {
+        return none;
+    }
+
+    let to_sun = lighting::to_sun();
+    let ph = phase(dot(dir, to_sun));
+    var sun: vec3<f32> = vec3<f32>(0.0);
+    var sky: vec3<f32> = vec3<f32>(0.0);
+    var lit_at: f32 = -1.0e9;
+    let jit = jitter(ray.pixel);
+
+    var sum_t: f32 = 0.0;
+    var sum_w: f32 = 0.0;
+    var l: vec3<f32> = vec3<f32>(0.0);
+    // A sub-column part filled is part cover, not a thinner cloud: in the
+    // cloud the ray is crossing, the share of its columns that hold cloud is
+    // the most it has filled (cover), crossed at the density of the fill
+    // over the cover, its transmittance tc; the rest is clear. Where the
+    // sub-column leaves the cloud the mixture folds into tr, what is seen
+    // through before it.
+    var tr: vec4<f32> = vec4<f32>(1.0);
+    var cover: vec4<f32> = vec4<f32>(0.0);
+    var tc: vec4<f32> = vec4<f32>(1.0);
+    // At least a dozen steps across the layer, so its profile is sampled and
+    // not hit or missed by the jitter of one step.
+    let dt_max = clamp((t1 - t0) / 12.0, 20.0, 4000.0);
+    var t: f32 = t0 + clamp(t0 * STEP_RATIO, STEP_MIN, dt_max) * jit;
+    var in_step: f32 = CLOUD_STEP;
+    var t_prev: f32 = t;
+    var fine_until: f32 = -1.0;
+    var in_cloud: bool = false;
+    // Which sub-columns the last sample found in cloud.
+    var inside: vec4<f32> = vec4<f32>(0.0);
+    // The sun tap's tops, for the cloud the ray is in.
+    var tap_top: vec4<f32> = vec4<f32>(0.0);
+    var marched: i32 = 0;              // the debug view 'cloudSteps'
+    var kinds: vec3<f32> = vec3<f32>(0.0);   // 'cloudStepKinds': proved empty, sampled clear, in cloud
+    var i: i32 = 0;
+    while (i < MAX_STEPS && t < t1) {
+        i += 1;
+        marched = i;
+        var dt: f32 = clamp(t * STEP_RATIO, STEP_MIN, dt_max);
+        // In cloud at most IN_RATIO of the distance as well, so a far run's
+        // samples follow its clouds and the gaps between them.
+        if (in_cloud) {
+            dt = min(dt, min(in_step, IN_RATIO * t));
+        } else if (t < fine_until) {
+            dt = min(dt, CLOUD_STEP);
+        }
+        // The field at the ray's footprint (the pixel's; the meter's, the
+        // scene's scale), not the step's: a step only places samples.
+        let w = max(volume::footprint(ray, t), 1.0);
+        var x: Height = height_at(eye, dir, t, hc, mu);
+        if (x.s < 0.0 || x.s > 1.0) {
+            in_cloud = false;
+            inside = vec4<f32>(0.0);
+            tr *= 1.0 - cover + cover * tc;
+            cover = vec4<f32>(0.0);
+            tc = vec4<f32>(1.0);
+            // Outside the layer's heights here: on to where the ray can
+            // first meet them again.
+            let skip = skip_outside(x.s, dot(dir, x.up));
+            t_prev = t + skip;
+            t += max(dt, skip);
+            continue;
+        }
+        // No cloud this high: on as far as the field provably stays below
+        // the ray, rising at most by its gradient bound along the layer while
+        // what the ray's height needs falls as it descends, or as the lift
+        // rises under it.
+        let drop = cloud_need_slope(x.s) * (max(-dot(dir, x.up), 0.0) + CLOUD_LIFT_SLOPE) / CLOUD_DEPTH;
+        var col: Column = column(x.up, w, cloud_need(x.s), drop);
+        if (!col.cloud) {
+            kinds.x += 1.0;
+            t_prev = t + col.clear;   // proved empty this far
+            in_cloud = false;
+            inside = vec4<f32>(0.0);
+            tr *= 1.0 - cover + cover * tc;
+            cover = vec4<f32>(0.0);
+            tc = vec4<f32>(1.0);
+            t += max(dt, col.clear);
+            continue;
+        }
+        var fd: vec2<f32> = detailed(x.p, w, col.f, col.variance);
+        var occ: f32 = cloud_occupancy(fd.x, fd.y, x.s);
+        if (occ <= 0.003) {
+            kinds.y += 1.0;
+            in_cloud = false;
+            inside = vec4<f32>(0.0);
+            tr *= 1.0 - cover + cover * tc;
+            cover = vec4<f32>(0.0);
+            tc = vec4<f32>(1.0);
+            t_prev = t;
+            t += dt;
+            continue;
+        }
+        kinds.z += 1.0;
+        // A step that lands in cloud has passed its edge since the last
+        // point known clear: the gap halved five times finds it, and the
+        // cloud is taken from there, so its edge is where the field puts it
+        // and not where the step fell.
+        if (!in_cloud && t - t_prev > 1.0) {
+            var a: f32 = t_prev;
+            var b: f32 = t;
+            for (var k: i32 = 0; k < 5; k += 1) {
+                let m = 0.5 * (a + b);
+                if (excess_at(eye, dir, m, hc, mu, w) > CLOUD_EDGE) {
+                    b = m;
+                } else {
+                    a = m;
+                }
+            }
+            // The sample is taken there, at the same footprint.
+            fine_until = t;
+            t = b;
+            t_prev = b;
+            x = height_at(eye, dir, t, hc, mu);
+            col = column(x.up, w, cloud_need(x.s), 0.0);
+            fd = detailed(x.p, w, col.f, col.variance);
+            occ = max(cloud_occupancy(fd.x, fd.y, x.s), 0.0031);
+            // The step on from the edge is a half to one and a half of one,
+            // by the pixel's offset, so as many samples cross the cloud
+            // (stepped alike from an edge alike along rows, they drew a
+            // layer's base as stripes).
+            dt = min(dt, CLOUD_STEP) * (0.5 + jit);
+        }
+        in_cloud = true;
+        let fill = clamp(occ * 4.0 - CLOUD_RANK, vec4<f32>(0.0), vec4<f32>(1.0));
+        // A sub-column out of cloud again folds its mixture.
+        let gone = (vec4<f32>(1.0) - step(vec4<f32>(1.0e-30), fill)) * step(vec4<f32>(1.0e-30), cover);
+        tr *= mix(vec4<f32>(1.0), 1.0 - cover + cover * tc, gone);
+        cover *= 1.0 - gone;
+        tc = mix(tc, vec4<f32>(1.0), gone);
+        // More cover: the columns it adds are clear so far.
+        let grown = max(cover, fill);
+        tc = mix(vec4<f32>(1.0), (cover * tc + grown - cover) / max(grown, vec4<f32>(1.0e-4)), step(vec4<f32>(1.0e-30), grown));
+        cover = grown;
+        var sigma: vec4<f32> = CLOUD_SIGMA * fill / max(cover, vec4<f32>(1.0e-4));
+        let mu_s = max(dot(to_sun, x.up), 0.04);
+        // The cloud between the point and the sun: the column above it up to
+        // the sub-column's own top, at the sun's slant, deepening along the
+        // step as the ray descends and thinning as it rises; of the column's
+        // amount, not the detail here, which says nothing of the cloud above
+        // (taken as if it did, the light drew its contours on every top).
+        let descent = -dot(dir, x.up);
+        // The sun's tap is taken where the ray enters a cloud and kept while
+        // it stays in it: the steps after are seen through the cloud in
+        // front.
+        if (dot(inside, vec4<f32>(1.0)) == 0.0) {
+            tap_top = sun_tap(x.p, x.s, col.f, col.variance, w, to_sun, mu_s);
+        }
+        let sd = sun_depth(x.s, col.f, col.variance, mu_s, tap_top);
+        let rate = step(vec4<f32>(1.0e-30), sd.above) * (CLOUD_SIGMA * descent / mu_s);
+        // A sub-column the ray came down into since the last sample is
+        // integrated from the top it crossed, where the sun's depth is
+        // nothing: a sample lands anywhere up to a step below a top.
+        var back: vec4<f32> = vec4<f32>(0.0);
+        if (descent > 0.05) {
+            back = (1.0 - inside) * min(sd.above / descent, vec4<f32>(t - t_prev));
+        }
+        let tau_sun = max(sd.tau - rate * back, vec4<f32>(0.0));
+        let len = dt + back;
+        // The sun and the sky through the air, taken where the ray first
+        // meets cloud and again every 20 km along it.
+        if (t > lit_at + 20000.0) {
+            let pos = dir * t;
+            sun = volume::sun_light(pos);
+            // The sky's radiance (its irradiance over pi) scattered evenly
+            // from the hemisphere above: half of it.
+            sky = 0.5 * volume::sky_light(pos, x.up);
+            lit_at = t;
+        }
+        // The cover holds as one cloud's only over what the field resolves:
+        // a few footprints on, the ray has left one cloud and met another,
+        // and cover at random overlaps cover. A step longer than
+        // CLOUD_DECORRELATE footprints is taken as that many pieces at random
+        // overlap, in closed form: what comes through m^n of each piece's m,
+        // the light each piece's through those before it, a geometric sum.
+        let pieces = max(dt / (CLOUD_DECORRELATE * w), 1.0);
+        if (pieces > 1.0) {
+            tr *= 1.0 - cover + cover * tc;
+            tc = vec4<f32>(1.0);
+            cover = fill;
+            sigma = vec4<f32>(CLOUD_SIGMA);
+        }
+        let len_p = len / pieces;
+        let step_t = exp(-sigma * len_p);
+        let fill_step = step_light(sigma, vec4<f32>(0.0), len_p);
+        let by_sun = ph * sun_step(sigma, tau_sun, rate, len_p) + sun_many(tau_sun, mu_s) * fill_step;
+        let by_sky = sky_many(tau_sun, mu_s) * fill_step;
+        let m = 1.0 - cover + cover * step_t;
+        let mn = pow(m, vec4<f32>(pieces));
+        var geo: vec4<f32> = vec4<f32>(1.0);
+        if (pieces > 1.0) {
+            geo = mix(vec4<f32>(pieces), (1.0 - mn) / max(1.0 - m, vec4<f32>(1.0e-6)), step(vec4<f32>(1.0e-5), 1.0 - m));
+        }
+        let wt = tr * cover * tc * geo;
+        l += 0.25 * (sun * dot(wt, by_sun) + sky * dot(wt, by_sky));
+        var wgt: f32 = 0.25 * dot(tr * cover * tc, 1.0 - step_t);
+        if (pieces > 1.0) {
+            wgt = 0.25 * dot(tr, 1.0 - mn);
+            tr *= mn;
+        } else {
+            tc *= step_t;
+        }
+        sum_t += wgt * t;
+        sum_w += wgt;
+        inside = step(vec4<f32>(1.0e-30), fill);
+        let seen = tr * (1.0 - cover + cover * tc);
+        if (max4(seen) < 0.004) {
+            break;
+        }
+        // The next step by the densest sub-column whose cloud is still seen:
+        // one gone dark no longer needs it sampled finely.
+        let dense = fill * step(vec4<f32>(0.004), tr * cover * tc);
+        in_step = CLOUD_STEP / max(max4(dense), 0.05);
+        t_prev = t;
+        t += dt;
+    }
+    tr *= 1.0 - cover + cover * tc;
+    let tm = 0.25 * (tr.x + tr.y + tr.z + tr.w);
+    var transmittance: f32 = tm;
+    if (tm < 0.004) {
+        transmittance = 0.0;
+    }
+    var depth: f32 = 0.0;
+    if (sum_w > 0.0) {
+        depth = sum_t / sum_w;
+    }
+    var out: volume::Light = volume::light(l, transmittance, depth);
+    // Debug views: the steps a pixel marched, a 96th of white each; the
+    // steps by kind as shares of them: red proved empty, green sampled
+    // clear, blue in cloud, the rest (dark) outside the layer's heights.
+    if (SCENE_DEBUG(cloudSteps)) {
+        out.debug = vec4<f32>(vec3<f32>((marched as f32) / 96.0), 1.0);
+    }
+    if (SCENE_DEBUG(cloudStepKinds)) {
+        out.debug = vec4<f32>(kinds / max(marched as f32, 1.0), 1.0);
+    }
+    return out;
+}
+
+// The near field, to params.near_range from the eye (clouds.js update: none
+// while the layer is out of its reach), integrated by the engine over its
+// grid: the march's integrand at one point, its four sub-columns the grid's
+// four parts, each filled as the march fills it and lit through its own
+// depth toward the sun.
+pub fn medium_range() -> f32 {
+    return params.near_range;
+}
+
+pub fn medium(pos: vec3<f32>, dir: vec3<f32>, w: f32) -> volume::Medium {
+    let zero = vec3<f32>(0.0);
+    var none: volume::Medium = volume::Medium { scatter0: zero, scatter1: zero, scatter2: zero, scatter3: zero,
+                                                extinction: vec4<f32>(0.0), clear: 0.0 };
+    let eye = params.cam_hi + params.cam_lo;
+    let hc = params.cam_alt;
+    let t = length(pos);
+    let mu = dot(dir, normalize(eye));
+    let x = height_at(eye, dir, t, hc, mu);
+    let climb = dot(dir, x.up);
+    if (x.s < 0.0 || x.s > 1.0) {
+        // As far as the ray can first meet the layer's heights again.
+        none.clear = skip_outside(x.s, climb);
+        return none;
+    }
+    let fw = max(w, 1.0);
+    // As far as the column provably stays short of cloud (the march's).
+    let drop = cloud_need_slope(x.s) * (max(-climb, 0.0) + CLOUD_LIFT_SLOPE) / CLOUD_DEPTH;
+    let col = column(x.up, fw, cloud_need(x.s), drop);
+    if (!col.cloud) {
+        none.clear = col.clear;
+        return none;
+    }
+    let fd = detailed(x.p, fw, col.f, col.variance);
+    let occ = cloud_occupancy(fd.x, fd.y, x.s);
+    if (occ <= 0.003) {
+        return none;
+    }
+    let fill = clamp(occ * 4.0 - CLOUD_RANK, vec4<f32>(0.0), vec4<f32>(1.0));
+    let extinction = CLOUD_SIGMA * fill;
+    let to_sun = lighting::to_sun();
+    let mu_s = max(dot(to_sun, x.up), 0.04);
+    let tap = sun_tap(x.p, x.s, col.f, col.variance, fw, to_sun, mu_s);
+    let sd = sun_depth(x.s, col.f, col.variance, mu_s, tap);
+    let by_sun = phase(dot(dir, to_sun)) * exp(-sd.tau) + sun_many(sd.tau, mu_s);
+    let by_sky = sky_many(sd.tau, mu_s);
+    let sun = volume::sun_light(pos);
+    let sky = 0.5 * volume::sky_light(pos, x.up);
+    let a = extinction * by_sun;
+    let b = extinction * by_sky;
+    return volume::Medium { scatter0: sun * a.x + sky * b.x, scatter1: sun * a.y + sky * b.y,
+                            scatter2: sun * a.z + sky * b.z, scatter3: sun * a.w + sky * b.w,
+                            extinction: extinction, clear: 0.0 };
+}

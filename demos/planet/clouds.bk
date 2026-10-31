@@ -6,7 +6,7 @@
 from planet::ground import perlin_split, terrain_base, octaves_for;
 
 const F0: f32 = -0.12;          // the mean amount: clear more than cloudy
-const NOISE_VAR: f32 = 0.0728;  // perlin_split's variance (ground.bk PERLIN_VAR)
+pub const NOISE_VAR: f32 = 0.0728;  // perlin_split's variance (ground.bk PERLIN_VAR)
 
 // The column at the unit direction q, resolved at a footprint of w metres:
 // an octave counts in full from 4 footprints a wavelength, not at all at 2,
@@ -44,27 +44,38 @@ fn column(q: vec3<f64>, w: f64, radius: f64) -> vec2<f32> {
     return vec2<f32>(f, v);
 }
 
-// The layer's shape (clouds.js cloudGlsl, which the shaders read it by):
-// its base over the lift, its depth, a cloud's extinction, and what a
-// column must hold to reach the layer's height s (cloudNeed); the finest
-// footprint the column resolves, and the amount up to which the detail's
-// variance grows in (CLOUD_COLUMN_MIN, CLOUD_DETAIL_FULL).
-const CLOUD_BASE: f32 = 1500.0;
-const CLOUD_DEPTH: f32 = 2600.0;
-const CLOUD_SIGMA: f32 = 0.03;
-const CLOUD_FLOOR: f32 = 0.02;
-const CLOUD_CURVE: f32 = 0.7;
-const CLOUD_COLUMN_MIN: f64 = 60.0;
-const CLOUD_DETAIL_FULL: f32 = 0.04;
+// The layer's shape (also read by the view's volume, clouds_volume.bk, and
+// the ground, clouds.js cloudGlsl): its base over the lift, its depth, a
+// cloud's extinction, and what a column must hold to reach the layer's
+// height s (cloud_need); the finest footprint the column resolves, and the
+// amount up to which the detail's variance grows in (CLOUD_COLUMN_MIN,
+// CLOUD_DETAIL_FULL).
+pub const CLOUD_BASE: f32 = 1500.0;
+pub const CLOUD_DEPTH: f32 = 2600.0;
+pub const CLOUD_SIGMA: f32 = 0.03;
+pub const CLOUD_FLOOR: f32 = 0.02;
+pub const CLOUD_CURVE: f32 = 0.7;
+pub const CLOUD_COLUMN_MIN: f64 = 60.0;
+pub const CLOUD_DETAIL_FULL: f32 = 0.04;
 const CLOUD_SHADOW_STEPS: i32 = 6;
 const LIFT_OCTAVES: f64 = 3.0;   // the lift's (k_cloud_lift)
-fn cloud_need(s: f32) -> f32 {
+pub fn cloud_need(s: f32) -> f32 {
     let s2 = min(s * s, 0.999);
     return CLOUD_FLOOR + CLOUD_CURVE * s2 / (1.0 - s2);
 }
+// Its rate per unit of s.
+pub fn cloud_need_slope(s: f32) -> f32 {
+    let d = max(1.0 - s * s, 0.001);
+    return 2.0 * CLOUD_CURVE * s / (d * d);
+}
+// The height share a column's cloud reaches: where cloud_need(s) = f.
+pub fn cloud_top(f: f32) -> f32 {
+    let x = max(f - CLOUD_FLOOR, 0.0) / CLOUD_CURVE;
+    return sqrt(x / (1.0 + x));
+}
 // The chance of cloud at height s in a column of amount f with unresolved
 // variance v (cloudOccupancy's logistic).
-fn cloud_occupancy(f: f32, v: f32, s: f32) -> f32 {
+pub fn cloud_occupancy(f: f32, v: f32, s: f32) -> f32 {
     return 1.0 / (1.0 + exp(-1.7 * (f - cloud_need(s)) / sqrt(v + 1.0e-5)));
 }
 // The optical depth a step of length len adds to sub-column `rank` (3 the
