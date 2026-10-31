@@ -19,7 +19,7 @@ const RADIUS = 6371000;
 const TILE = 32;            // cells along a tile's drawn edge
 const BORDER = 2;           // cells beyond it: the skirts' bottoms, and the detail layer's gradients at the edge
 const CELLS = TILE + 2 * BORDER;
-const DETAIL = 2;           // detail texels along a cell's edge (planet.bk's detail layer)
+const DETAIL = 4;         // detail texels along a cell's edge (planet.bk's detail layer)
 const TEXELS = CELLS * DETAIL;
 const HZ = CELLS / 2;        // horizon points along a tile's edge, every other cell (planet.bk's horizon layer)
 const HZ_GRID = TILE + 2 * 16 - 1;   // the heights a tile's horizons march through, along an edge (planet.bk HZ_MARGIN 16)
@@ -222,7 +222,7 @@ ground = scene.createInstancedMesh({
                ...treeModules, ...grassModules },
 });
 ground.cullMargin = 4 * RADIUS;   // the shader places tiles; the cache culls them
-makeCache(4);
+makeCache(Number(document.querySelector('#detail').value));
 const cloudMod = bro.kernel.compile(readApp('clouds.bk'), { file: 'clouds.bk', modules: MODULES });
 const sunMod = bro.kernel.compile(readApp('sun.bk'), { file: 'sun.bk', modules: MODULES });
 const grassMod = bro.kernel.compile(readApp('grass.bk'), { file: 'grass.bk', modules: MODULES });

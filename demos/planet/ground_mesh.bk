@@ -4,9 +4,9 @@
 //
 // The light the ground sees at a vertex (the vertex shader; the fragment
 // interpolates it): what it sees changes over metres to kilometres and its
-// vertices stand a few pixels apart (a tile's cells, DETAIL px), so at the
-// vertices it costs a sixteenth of what every pixel did, the same to the
-// eye. light: x the sun's share seen (its disc over the horizons, under the
+// vertices stand a few pixels apart (a tile's cells, DETAIL texels: 8 px at
+// the default Detail), so at the vertices it costs a small share of what
+// every pixel did, the same to the eye. light: x the sun's share seen (its disc over the horizons, under the
 // clouds and the drawn trees), y the sky's (GTAO over the horizons, under
 // the clouds), z the clouds' shadow, which the slopes around share, w the
 // sun the clouds scatter down shadowless (clouds.bk cloud_light's y); bent:
