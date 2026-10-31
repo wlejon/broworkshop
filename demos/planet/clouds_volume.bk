@@ -386,8 +386,19 @@ fn phase(cos_sun: f32) -> f32 {
 // as diffusion through a thick slab carries it, 1 / (1 + 0.75 (1 - g) tau),
 // so a deck's top glows near white and its base is a lit grey. The sky's the
 // same, through the depth straight up.
+//
+// What enters is the sun's flux through the cloud's surface. The diffusion
+// deep in is fed through a deck's top, the sun's flux on the level, mu_s of
+// it; but the first scatterings are near the surface the sun's ray came in
+// by (tau_sun is along that ray), and a cumulus's billows face a low sun
+// with their sides: MANY_FACING of the way from the level to facing it. At
+// mu_s alone, a low sun lit every top through its weak back lobe only, the
+// clouds seen from above at dusk a flat mauve-brown where they glow gold on
+// every bump toward the sun, dark between.
+const MANY_FACING: f32 = 0.5;
 fn sun_many(tau_sun: vec4<f32>, mu_s: f32) -> vec4<f32> {
-    return (0.85 * mu_s / 3.14159) * (0.55 * exp(-0.6 * tau_sun) + 0.45 / (1.0 + 0.1125 * tau_sun));
+    return (0.85 / 3.14159) * (0.55 * mix(mu_s, 1.0, MANY_FACING) * exp(-0.6 * tau_sun)
+                               + 0.45 * mu_s / (1.0 + 0.1125 * tau_sun));
 }
 fn sky_many(tau_sun: vec4<f32>, mu_s: f32) -> vec4<f32> {
     return 1.0 / (1.0 + 0.1125 * mu_s * tau_sun);
