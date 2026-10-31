@@ -49,8 +49,8 @@ const FACE_TEXELS = (FACE + 2) * (FACE + 2);
 // projects over TILE_PIXELS pixels, so every part of the view reads its own
 // footprint, where the clipmap's levels about the eye fell coarser past an
 // eighth of the eye's distance. TILE_LEVELS deep: 49 m footprints at a
-// face's centre, the clipmap's finest. The ground's light stays on the
-// clipmap (cloudGlsl) until its chunk is a module that can import tiles.bk.
+// face's centre, the clipmap's finest. The ground's light reads the clipmap
+// (cloudBk).
 const TILE = 64, TILE_BORDER = 1, TILE_CELLS = TILE + 2 * TILE_BORDER, TILE_LEVELS = 13;
 const TILE_PIXELS = 1, TILE_CAPACITY = 6144, TILE_ATLAS = 2;
 
@@ -110,7 +110,7 @@ function noiseSlices() {
 // and its variance, from the slices.
 let BILLOW_MEAN = 0, BILLOW_VAR = 0;
 const NOISE = noiseSlices();
-// The variance the detail adds to a column at full amount (cloudGlsl's
+// The variance the detail adds to a column at full amount (cloudBk's
 // CLOUD_DETAIL_VAR, clouds.bk cloud_light's detail_var).
 export const CLOUD_DETAIL_VAR = NOISE_VAR * (0.07 * 0.07 + 0.04 * 0.04) + BILLOW_VAR * (0.03 * 0.03 + 0.02 * 0.02);
 
@@ -136,111 +136,135 @@ export function faceFrame(i) {
     return { a, e, f };
 }
 
-// The clouds' light on the ground (cloudLight), for the ground's chunk.
+// The clouds' light on the ground (cloud_light_at), for the ground's module.
 // Positions are about the planet's centre, in metres. The clipmap's levels
-// are the column field's (clouds.bk): u_cloudHead holds, for level k, its
+// are the column field's (clouds.bk): cloud_head holds, for level k, its
 // plane origin, texel spacing and gradientBound; at CLOUD_LEVELS, the
 // globe's spacing and bound; after it, each level's origin in texels (where
-// its wrapped grid starts). u_cloudA/E/F is the eye's face (faceFrame).
-export const cloudGlsl = (radius) => `
-    const float CLOUD_R = ${radius.toFixed(1)};
-    buffer vec4 u_cloudHead[];
-    uniform vec3 u_cloudA;
-    uniform vec3 u_cloudE;
-    uniform vec3 u_cloudF;
-    const int CLOUD_LEVELS = ${LEVELS}, CLOUD_N = ${N}, CLOUD_FACE = ${FACE + 2};
-    const int CLOUD_GLOBE = ${GLOBE_BASE}, CLOUD_FACE_TEXELS = ${FACE_TEXELS};
-    const float CLOUD_DELTA0 = ${DELTA0};
+// its wrapped grid starts). cloud_a/e/f is the eye's face (faceFrame).
+export const cloudBk = (radius) => `
+    fn cloud_head_at(row: i32) -> vec4<f32> {
+        return vec4<f32>(
+            cloud_head.fetch(vec2<i32>(0, row), 0).x,
+            cloud_head.fetch(vec2<i32>(1, row), 0).x,
+            cloud_head.fetch(vec2<i32>(2, row), 0).x,
+            cloud_head.fetch(vec2<i32>(3, row), 0).x,
+        );
+    }
 
     // The globe level's face at the unit direction q (the largest axis), and
     // q's texel coordinates t on it.
-    int cloudFace(vec3 q, out vec2 t) {
-        vec3 m = abs(q);
-        int axis = m.x >= m.y && m.x >= m.z ? 0 : (m.y >= m.z ? 1 : 2);
+    struct CloudFace {
+        face: i32,
+        t: vec2<f32>,
+    }
+    fn cloud_face(q: vec3<f32>) -> CloudFace {
+        let m = abs(q);
+        let axis = m.x >= m.y && m.x >= m.z ? 0 : (m.y >= m.z ? 1 : 2);
         // q's axes rotated so the face's comes first (a swizzle: a vector
         // indexed by a variable is kept in local memory, not registers).
-        vec3 r = axis == 0 ? q : (axis == 1 ? q.yzx : q.zxy);
-        float z = r.x;
-        vec2 uv = r.yz / abs(z);
-        float delta = u_cloudHead[CLOUD_LEVELS].x;
-        t = clamp((uv + 1.0 + delta) / delta, vec2(0.0), vec2(float(CLOUD_FACE) - 1.001));
-        return axis + (z < 0.0 ? 3 : 0);
+        let r = axis == 0 ? q : (axis == 1 ? q.yzx : q.zxy);
+        let z = r.x;
+        let uv = r.yz / abs(z);
+        let delta = cloud_head.fetch(vec2<i32>(0, ${LEVELS}), 0).x;
+        let t = clamp((uv + 1.0 + delta) / delta, vec2<f32>(0.0), vec2<f32>(${FACE + 2}.0 - 1.001));
+        return CloudFace { face: axis + (z < 0.0 ? 3 : 0), t: t };
     }
 
     // The level a footprint of w metres reads at the layer point q (0 the
     // finest, fractional between two, CLOUD_LEVELS the globe), and q's point
     // uv on the eye's face plane (the globe off it), as the volume reads the
     // field (clouds_volume.bk level_of).
-    const float CLOUD_COLUMN_MIN = 60.0;
-    float cloudLevelOf(vec3 q, float w, out vec2 uv) {
-        uv = vec2(0.0);
-        float z = dot(q, u_cloudA);
-        if (z <= 0.1) return float(CLOUD_LEVELS);
-        uv = vec2(dot(q, u_cloudE), dot(q, u_cloudF)) / z;
-        float d = 1.0 + dot(uv, uv);
-        float stretch = sqrt(1.0 + max(uv.x * uv.x, uv.y * uv.y)) / d;
-        return clamp(log2(max(w, CLOUD_COLUMN_MIN) / (2.0 * CLOUD_R * CLOUD_DELTA0 * stretch)), 0.0, float(CLOUD_LEVELS));
+    struct CloudLevel {
+        l: f32,
+        uv: vec2<f32>,
+    }
+    fn cloud_level_of(q: vec3<f32>, w: f32) -> CloudLevel {
+        let z = dot(q, params.cloud_a);
+        if (z <= 0.1) { return CloudLevel { l: ${LEVELS}.0, uv: vec2<f32>(0.0) }; }
+        let uv = vec2<f32>(dot(q, params.cloud_e), dot(q, params.cloud_f)) / z;
+        let d = 1.0 + dot(uv, uv);
+        let stretch = sqrt(1.0 + max(uv.x * uv.x, uv.y * uv.y)) / d;
+        let l = clamp(log2(max(w, 60.0) / (2.0 * ${radius.toFixed(1)} * ${DELTA0} * stretch)), 0.0, ${LEVELS}.0);
+        return CloudLevel { l: l, uv: uv };
     }
 
     // What the clouds leave of the ground's light (clouds.bk k_cloud_light),
     // over the column field's texels: the sun straight through (x),
     // scattered down (y), and the sky's (z). A level's grid wraps: texel p
     // of it (counted from the plane's origin) is in slot p mod n.
-    buffer uint u_cloudLight[];
-    vec3 cloudLightTexel(int base, ivec2 p) {
-        p &= ivec2(CLOUD_N - 1);
-        return unpackUnorm4x8(u_cloudLight[base + p.y * CLOUD_N + p.x]).xyz;
+    fn cloud_light_texel(base: i32, p_in: vec2<i32>) -> vec3<f32> {
+        let p = p_in & vec2<i32>(${N - 1});
+        return unpack_unorm4x8(cloud_light[base + p.y * ${N} + p.x]).xyz;
     }
-    bool cloudLightLevel(int k, vec2 uv, out vec3 c) {
-        vec4 h = u_cloudHead[k];
-        vec2 t = (uv - h.xy) / h.z;
-        if (any(lessThan(t, vec2(0.0))) || any(greaterThanEqual(t, vec2(float(CLOUD_N) - 1.001)))) return false;
-        vec2 fl = floor(t), f = t - fl;
-        ivec2 p = ivec2(fl) + ivec2(u_cloudHead[CLOUD_LEVELS + 1 + k].xy);
-        int base = k * CLOUD_N * CLOUD_N;
-        c = mix(mix(cloudLightTexel(base, p), cloudLightTexel(base, p + ivec2(1, 0)), f.x),
-                mix(cloudLightTexel(base, p + ivec2(0, 1)), cloudLightTexel(base, p + ivec2(1, 1)), f.x), f.y);
-        return true;
+    struct CloudLightSample {
+        hit: bool,
+        c: vec3<f32>,
     }
-    vec3 cloudLightGlobe(vec3 q) {
-        vec2 t;
-        int face = cloudFace(q, t);
-        vec2 c = floor(t), f = t - c;
-        int i = CLOUD_GLOBE + face * CLOUD_FACE_TEXELS + int(c.y) * CLOUD_FACE + int(c.x);
-        return mix(mix(unpackUnorm4x8(u_cloudLight[i]).xyz, unpackUnorm4x8(u_cloudLight[i + 1]).xyz, f.x),
-                   mix(unpackUnorm4x8(u_cloudLight[i + CLOUD_FACE]).xyz,
-                       unpackUnorm4x8(u_cloudLight[i + CLOUD_FACE + 1]).xyz, f.x), f.y);
+    fn cloud_light_level(k: i32, uv: vec2<f32>) -> CloudLightSample {
+        let h = cloud_head_at(k);
+        let t = (uv - h.xy) / h.z;
+        if (t.x < 0.0 || t.y < 0.0 || t.x >= ${N}.0 - 1.001 || t.y >= ${N}.0 - 1.001) {
+            return CloudLightSample { hit: false, c: vec3<f32>(0.0) };
+        }
+        let fl = floor(t);
+        let f = t - fl;
+        let orig_x = cloud_head.fetch(vec2<i32>(0, ${LEVELS + 1} + k), 0).x as i32;
+        let orig_y = cloud_head.fetch(vec2<i32>(1, ${LEVELS + 1} + k), 0).x as i32;
+        let p = vec2<i32>(fl.x as i32, fl.y as i32) + vec2<i32>(orig_x, orig_y);
+        let base = k * ${N * N};
+        let c = mix(mix(cloud_light_texel(base, p), cloud_light_texel(base, p + vec2<i32>(1, 0)), f.x),
+                    mix(cloud_light_texel(base, p + vec2<i32>(0, 1)), cloud_light_texel(base, p + vec2<i32>(1, 1)), f.x), f.y);
+        return CloudLightSample { hit: true, c: c };
+    }
+    fn cloud_light_globe(q: vec3<f32>) -> vec3<f32> {
+        let cf = cloud_face(q);
+        let c = floor(cf.t);
+        let f = cf.t - c;
+        let i = ${GLOBE_BASE} + cf.face * ${FACE_TEXELS} + (c.y as i32) * ${FACE + 2} + (c.x as i32);
+        return mix(mix(unpack_unorm4x8(cloud_light[i]).xyz, unpack_unorm4x8(cloud_light[i + 1]).xyz, f.x),
+                   mix(unpack_unorm4x8(cloud_light[i + ${FACE + 2}]).xyz,
+                       unpack_unorm4x8(cloud_light[i + ${FACE + 3}]).xyz, f.x), f.y);
     }
     // At the ground point g over a footprint of w metres, between the levels
     // as the volume reads the field (clouds_volume.bk column).
-    vec3 cloudLight(vec3 g, float w) {
-        vec3 q = normalize(g);
-        vec2 uv;
-        float l = cloudLevelOf(q, w, uv);
-        int k0 = int(l);
-        float frac = l - float(k0);
-        vec3 c = vec3(1.0, 0.0, 1.0);
-        int k;
-        for (k = k0; k < CLOUD_LEVELS; k++) {
-            if (cloudLightLevel(k, uv, c)) break;
-            frac = 0.0;
+    fn cloud_light_at(g: vec3<f32>, w: f32) -> vec3<f32> {
+        let q = normalize(g);
+        let cl = cloud_level_of(q, w);
+        let k0 = cl.l as i32;
+        var frac = cl.l - (k0 as f32);
+        var c = vec3<f32>(1.0, 0.0, 1.0);
+        var found_k: i32 = ${LEVELS};
+        for (var k: i32 = k0; k < ${LEVELS}; k += 1) {
+            if (found_k == ${LEVELS}) {
+                let s = cloud_light_level(k, cl.uv);
+                if (s.hit) {
+                    c = s.c;
+                    found_k = k;
+                } else {
+                    frac = 0.0;
+                }
+            }
         }
-        if (k == CLOUD_LEVELS) return cloudLightGlobe(q);
+        if (found_k == ${LEVELS}) { return cloud_light_globe(q); }
         if (frac > 0.0) {
-            vec3 c1;
-            if (k + 1 == CLOUD_LEVELS) c1 = cloudLightGlobe(q);
-            else if (!cloudLightLevel(k + 1, uv, c1)) c1 = c;
+            var c1 = c;
+            if (found_k + 1 == ${LEVELS}) {
+                c1 = cloud_light_globe(q);
+            } else {
+                let s1 = cloud_light_level(found_k + 1, cl.uv);
+                if (s1.hit) { c1 = s1.c; }
+            }
             c = mix(c, c1, frac);
         }
         return c;
     }
-
 `;
 
 // The clouds' volume in `scene`, its column field produced by `module`'s
 // k_cloud_level (clouds.bk) and its lift by k_cloud_lift once, both bound to
-// it and to each of `readers` (nodes whose chunks include cloudGlsl, which
-// read the clouds' light on the ground with cloudLight from k_cloud_light's
+// it and to each of `readers` (nodes whose modules include cloudBk, which
+// read the clouds' light on the ground with cloud_light_at from k_cloud_light's
 // clipmap). update() each frame with the eye about the planet's centre
 // (f64), its altitude and the unit direction to the sun.
 export function createClouds(scene, radius, module, readers, seed, hook) {
@@ -251,12 +275,11 @@ export function createClouds(scene, radius, module, readers, seed, hook) {
     });
     node.setShaderTexture('noise', { data: NOISE, width: NOISE_TEXELS, height: NOISE_TEXELS, depth: NOISE_TEXELS, repeat: true });
     const map = bro.kernel.createBuffer((GLOBE_BASE + 6 * FACE_TEXELS) * 8);
-    // u_cloudHead: LEVELS + 1 headers, then each level's grid origin in
+    // cloud_head: LEVELS + 1 headers, then each level's grid origin in
     // texels (where its wrapped grid starts).
     const head = new Float32Array(4 * (2 * LEVELS + 1));
-    const headBuffer = bro.kernel.createBuffer(head.byteLength);
     // The clouds' light on the ground over the same texels (k_cloud_light,
-    // u_cloudLight), one word each, for the sun toward toSun.
+    // cloud_light), one word each, for the sun toward toSun.
     const kLight = module.kernel('k_cloud_light');
     const light = bro.kernel.createBuffer((GLOBE_BASE + 6 * FACE_TEXELS) * 4);
     const toSun = [0, 0, 0];   // none yet: the first update lights them all
@@ -352,6 +375,7 @@ export function createClouds(scene, radius, module, readers, seed, hook) {
     }
     const liftNear = [0, 0];
 
+    // Each tile's column field (k_cloud_tile).
     const kTile = module.kernel('k_cloud_tile');
     const cache = bro.tiles.createCache({
         domain: { type: 'cubeSphere', radius, center: [0, 0, 0] },
@@ -402,9 +426,9 @@ export function createClouds(scene, radius, module, readers, seed, hook) {
             face = f;
             held.fill(0);
             for (const n of readers) {
-                n.setShaderUniform('u_cloudA', frame.a);
-                n.setShaderUniform('u_cloudE', frame.e);
-                n.setShaderUniform('u_cloudF', frame.f);
+                n.setShaderUniform('cloud_a', frame.a);
+                n.setShaderUniform('cloud_e', frame.e);
+                n.setShaderUniform('cloud_f', frame.f);
             }
         }
         const z = eye[0] * frame.a[0] + eye[1] * frame.a[1] + eye[2] * frame.a[2];
@@ -440,18 +464,19 @@ export function createClouds(scene, radius, module, readers, seed, hook) {
             head.set([ox, oy], 4 * (LEVELS + 1 + k));
             moved = true;
         }
-        if (moved) headBuffer.write(head);
+        if (moved) {
+            for (const n of readers) n.setShaderTexture('cloud_head', { data: head, width: 4, height: 2 * LEVELS + 1 });
+        }
     }
 
-    headBuffer.write(head);
     for (const n of readers) {
-        n.setShaderBuffer('u_cloudHead', headBuffer);
-        n.setShaderBuffer('u_cloudLight', light);
+        n.setShaderTexture('cloud_head', { data: head, width: 4, height: 2 * LEVELS + 1 });
+        n.setShaderBuffer('cloud_light', light);
     }
     node.setShaderTexture('lift_faces', { data: liftCpu, width: FACE + 2, height: FACE + 2, layers: 6, channels: 1 });
     return {
         node,
-        // The clipmap, for tests: its buffer, the level headers (u_cloudHead)
+        // The clipmap, for tests: its buffer, the level headers (cloud_head)
         // and layout, and the eye's face.
         map, head, layout: { levels: LEVELS, n: N, globe: GLOBE_BASE, faceTexels: FACE_TEXELS },
         get face() { return face; },

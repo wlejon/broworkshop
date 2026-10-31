@@ -7,9 +7,9 @@
 // doubles on the CPU, so nothing ever holds a planet-sized f32.
 import { boot } from "/lib/kit/app.js";
 import { bindControl, logMap } from "/lib/kit/params.js";
-import { cloudGlsl, createClouds } from "/app/clouds.js";
-import { createGrass, grassFloorGlsl } from "/app/grass.js";
-import { createTrees, treeShadowGlsl } from "/app/trees.js";
+import { cloudBk, createClouds } from "/app/clouds.js";
+import { createGrass, grassFloorBk } from "/app/grass.js";
+import { createTrees, treeShadowBk } from "/app/trees.js";
 import { createRivers } from "/app/rivers.js";
 
 boot();
@@ -155,10 +155,10 @@ function makeCache(pixelsPerTexel) {
         },
     });
     if (ground) {
-        ground.setShaderBuffer('u_pos', cache.layer('position'));
-        ground.setShaderBuffer('u_det', cache.layer('detail'));
-        ground.setShaderBuffer('u_hz', cache.layer('horizon'));
-        ground.setShaderBuffer('u_tiles', cache.drawList);
+        ground.setShaderTexture('pos', { buffer: cache.layer('position'), width: CELLS, height: CELLS, layers: CAPACITY, atlas: 2, channels: 4, format: 'float32' });
+        ground.setShaderBuffer('det', cache.layer('detail'));
+        ground.setShaderBuffer('hz', cache.layer('horizon'));
+        ground.setShaderBuffer('tiles', cache.drawList);
     }
 }
 
@@ -212,464 +212,494 @@ function patchMesh() {
 // (clouds.js) at a footprint of w metres, and the sky they hide overhead:
 // under a deck the blue sky is gone and the light is the grey the deck
 // scatters down. Among drawn trees, their shadows (trees.js treeShadowGlsl).
-const groundLightGlsl = `buffer uvec4 u_hz[];
-    uniform vec3 u_toSun;
-    uniform float u_treesFar;   // trees.js: how far off the trees are drawn, 0 none
-    ${cloudGlsl(RADIUS)}
-    ${treeShadowGlsl}
-    const float GROUND_PI = 3.14159265;
+const groundHookBk = `module hook;
+import scene;
+import mesh;
 
-    // Point p of tile slot's horizon grid: the sines of its horizon's
-    // elevation along the grid's 8 directions. Directions 0-3 in lo, 4-7 in
-    // hi: its four words are one 16-byte load.
-    void horizonPoint(int slot, ivec2 p, out vec4 lo, out vec4 hi) {
-        const int N = ${HZ};
-        p = clamp(p, ivec2(0), ivec2(N - 1));
-        uvec4 w = u_hz[((slot * N + p.y) * N + p.x) * 4];
-        lo = vec4(unpackUnorm2x16(w.x), unpackUnorm2x16(w.y)) * 2.0 - 1.0;
-        hi = vec4(unpackUnorm2x16(w.z), unpackUnorm2x16(w.w)) * 2.0 - 1.0;
-    }
-    float horizonAt(vec4 lo, vec4 hi, int k) { return k < 4 ? lo[k] : hi[k - 4]; }
+struct Params {
+    cam_hi: vec3<f32>,
+    cam_lo: vec3<f32>,
+    to_sun: vec3<f32>,
+    time: f32,
+    trees_far: f32,
+    cloud_a: vec3<f32>,
+    cloud_e: vec3<f32>,
+    cloud_f: vec3<f32>,
+    grass_a: vec3<f32>,
+    grass_e: vec3<f32>,
+    grass_f: vec3<f32>,
+    grass_uv: vec3<f32>,
+    tree_o_hi: vec3<f32>,
+    tree_o_lo: vec3<f32>,
+    tree_lattice: vec3<f32>,
+    tree_a: vec3<f32>,
+    tree_e: vec3<f32>,
+    tree_f: vec3<f32>,
+    tree_uv: vec3<f32>,
+}
+@binding(4, 0) var params: uniform<Params>;
+@binding(4, 1) var pos: texture2d_array<vec4<f32>>;
+@binding(4, 2) var cloud_head: texture2d<vec4<f32>>;
+@binding(4, 14) var tiles: read_buffer<vec4<i32>>;
+@binding(4, 15) var det: read_buffer<u32>;
+@binding(4, 16) var hz: read_buffer<vec4<u32>>;
+@binding(4, 17) var grass_field: read_buffer<f32>;
+@binding(4, 18) var tree_field: read_buffer<f32>;
+@binding(4, 19) var cloud_light: read_buffer<u32>;
 
-    // acos to 7e-5 rad (Abramowitz and Stegun 4.4.45).
-    float fastAcos(float x) {
-        float a = abs(x);
-        float r = sqrt(max(1.0 - a, 0.0)) * (1.5707288 + a * (-0.2121144 + a * (0.0742610 - 0.0187293 * a)));
-        return x < 0.0 ? GROUND_PI - r : r;
-    }
+const GROUND_PI: f32 = 3.14159265;
+const TREE_CROWNS: f32 = 0.55;
+const TREE_TINT: vec3<f32> = vec3<f32>(0.22, 0.24, 0.33);
+const VARY_LUM: f32 = 0.11;      // ground.bk VARY_LUM
+const PERLIN_VAR: f32 = 0.0728;  // ground.bk PERLIN_VAR
+const RELIEF: f32 = 0.08;        // slope per octave, per unit of the noise's gradient
+const ROCK_LUM: f32 = 1.8;
+const ROCK_RELIEF: f32 = 3.0;
+const WAVE_RESIDUAL: f32 = ${glslFloat(WAVES.residual)};
+const WAVE_FRESH_SCALE: f32 = ${glslFloat(WAVES.freshScale)};
 
-    void groundLight(int slot, vec2 hz, vec3 tu, vec3 tv, vec3 up, vec3 n, vec3 rel, float w,
-                     out vec4 light, out vec3 bent) {
-        vec3 toSun = u_toSun;
-        vec2 f = hz - floor(hz);
-        ivec2 p = ivec2(floor(hz));
-        vec4 al, ah, bl, bh, cl, ch, dl, dh;
-        horizonPoint(slot, p, al, ah);
-        horizonPoint(slot, p + ivec2(1, 0), bl, bh);
-        horizonPoint(slot, p + ivec2(0, 1), cl, ch);
-        horizonPoint(slot, p + ivec2(1, 1), dl, dh);
-        vec4 sl = clamp(mix(mix(al, bl, f.x), mix(cl, dl, f.x), f.y), -1.0, 1.0);
-        vec4 sh = clamp(mix(mix(ah, bh, f.x), mix(ch, dh, f.x), f.y), -1.0, 1.0);
-        // The grid's axes on the tangent plane: direction k is
-        // cos * gu + sin * gv. The sun's azimuth is taken in those axes.
-        vec3 gu = tu - up * dot(tu, up);
-        vec3 gv = tv - up * dot(tv, up);
-        float uu = dot(gu, gu), uv = dot(gu, gv), vv = dot(gv, gv);
-        float su = dot(toSun, gu), sv = dot(toSun, gv);
-        float fk = mod(atan(uu * sv - uv * su, vv * su - uv * sv) / (GROUND_PI * 0.25), 8.0);
-        int k0 = int(fk) & 7;
-        // Each point's share of the disc, blended: across a ridge's horizon
-        // jump, blended horizons would step from point to point.
-        int k1 = (k0 + 1) & 7;
-        float fa = fk - floor(fk);
-        // In sines, not angles: across the disc an elevation's step is its
-        // sine's over the cosine.
-        float sun = clamp(dot(toSun, up), -1.0, 1.0);
-        vec4 corner = vec4(
-            mix(horizonAt(al, ah, k0), horizonAt(al, ah, k1), fa), mix(horizonAt(bl, bh, k0), horizonAt(bl, bh, k1), fa),
-            mix(horizonAt(cl, ch, k0), horizonAt(cl, ch, k1), fa), mix(horizonAt(dl, dh, k0), horizonAt(dl, dh, k1), fa));
-        vec4 lit = clamp((sun - corner) / (0.0093 * max(sqrt(1.0 - sun * sun), 0.02)) + 0.5, 0.0, 1.0);
-        float sunSeen = mix(mix(lit.x, lit.y, f.x), mix(lit.z, lit.w, f.x), f.y);
+const WAVE_K: array<vec4<f32>, ${WAVES.list.length}> = [
+    ${WAVES.list.map((w) =>
+        `vec4<f32>(${w.n.map((c) => glslFloat(c * 2 * Math.PI / w.period)).join(', ')}, ${glslFloat(Math.PI / 2 / w.k)})`).join(',\n    ')}
+];
+const WAVE_F: array<vec4<f32>, ${WAVES.list.length}> = [
+    ${WAVES.list.map((w) =>
+        `vec4<f32>(${[w.omega, w.tail, w.slope / w.k, w.slope * w.slope / 2].map(glslFloat).join(', ')})`).join(',\n    ')}
+];
 
-        float visible = 0.0;
-        vec3 mean = vec3(0.0);
-        // Without trigonometry: the horizons are kept as the cosines of their
-        // zenith angles (the sines of their elevations, as stored), clamped
-        // to the normal's hemisphere there as a max of cosines, and each
-        // angle's double-angle terms are taken from its cosine and sine.
-        const vec2 AZ[4] = vec2[4](vec2(1.0, 0.0), vec2(0.70710678, 0.70710678), vec2(0.0, 1.0), vec2(-0.70710678, 0.70710678));
-        for (int s = 0; s < 4; s++) {
-            vec3 t = normalize(gu * AZ[s].x + gv * AZ[s].y);
-            vec3 across = cross(up, t);
-            vec3 np = n - across * dot(n, across);
-            float len = length(np);
-            float il = 1.0 / max(len, 1e-6);
-            float cg = dot(np, up) * il, sg = dot(np, t) * il;   // cos, sin of the normal's angle gamma
-            // The horizons' zenith angles toward +t (h2) and -t (h1), no
-            // further than 90 degrees from the normal: cosines c2, c1.
-            float c2 = max(sl[s], -sg), c1 = max(sh[s], sg);
-            float h2 = fastAcos(c2), h1 = -fastAcos(c1);
-            float s2 = sqrt(max(1.0 - c2 * c2, 0.0)), s1 = -sqrt(max(1.0 - c1 * c1, 0.0));
-            // cos(2h - gamma) = cos 2h cos gamma + sin 2h sin gamma.
-            float k2 = (2.0 * c2 * c2 - 1.0) * cg + 2.0 * s2 * c2 * sg;
-            float k1 = (2.0 * c1 * c1 - 1.0) * cg + 2.0 * s1 * c1 * sg;
-            float slice = 0.25 * (-k1 + cg + 2.0 * h1 * sg) + 0.25 * (-k2 + cg + 2.0 * h2 * sg);
-            visible += len * slice;
-            // The direction halfway between the horizons: the perpendicular
-            // of their difference, which holds when they are over 180 apart.
-            vec2 b = vec2(c1 - c2, s2 - s1);
-            float bl2 = dot(b, b);
-            if (bl2 > 1e-12) mean += (t * b.x + up * b.y) * (len * slice * inversesqrt(bl2));
+${cloudBk(RADIUS)}
+${treeShadowBk}
+${grassFloorBk}
+
+fn vec4_at(v: vec4<f32>, i: i32) -> f32 {
+    return i == 0 ? v.x : (i == 1 ? v.y : (i == 2 ? v.z : v.w));
+}
+
+fn pos_at(slot: i32, x: i32, y: i32) -> vec4<f32> {
+    let cell = slot & 3;
+    return pos.fetch(vec3<i32>((cell & 1) * ${CELLS} + x, (cell >> 1) * ${CELLS} + y, slot >> 2), 0);
+}
+
+// Point p of tile slot's horizon grid: the sines of its horizon's
+// elevation along the grid's 8 directions. Directions 0-3 in lo, 4-7 in
+// hi: its four words are one 16-byte load.
+struct Horizon {
+    lo: vec4<f32>,
+    hi: vec4<f32>,
+}
+fn horizon_point(slot: i32, p_in: vec2<i32>) -> Horizon {
+    let p = clamp(p_in, vec2<i32>(0), vec2<i32>(${HZ - 1}));
+    let w = hz[((slot * ${HZ} + p.y) * ${HZ} + p.x) * 4];
+    let lo = vec4<f32>(unpack_unorm2x16(w.x), unpack_unorm2x16(w.y)) * 2.0 - vec4<f32>(1.0);
+    let hi = vec4<f32>(unpack_unorm2x16(w.z), unpack_unorm2x16(w.w)) * 2.0 - vec4<f32>(1.0);
+    return Horizon { lo: lo, hi: hi };
+}
+fn horizon_at(h: Horizon, k: i32) -> f32 {
+    return k < 4 ? vec4_at(h.lo, k) : vec4_at(h.hi, k - 4);
+}
+
+// acos to 7e-5 rad (Abramowitz and Stegun 4.4.45).
+fn fast_acos(x: f32) -> f32 {
+    let a = abs(x);
+    let r = sqrt(max(1.0 - a, 0.0)) * (1.5707288 + a * (-0.2121144 + a * (0.0742610 - 0.0187293 * a)));
+    return x < 0.0 ? GROUND_PI - r : r;
+}
+
+struct GroundLight {
+    light: vec4<f32>,
+    bent: vec3<f32>,
+}
+fn ground_light(slot: i32, hz_coord: vec2<f32>, tu: vec3<f32>, tv: vec3<f32>, up: vec3<f32>,
+                n: vec3<f32>, rel: vec3<f32>, w: f32) -> GroundLight {
+    let to_sun = params.to_sun;
+    let fl = floor(hz_coord);
+    let f = hz_coord - fl;
+    let p = vec2<i32>(fl.x as i32, fl.y as i32);
+    let ha = horizon_point(slot, p);
+    let hb = horizon_point(slot, p + vec2<i32>(1, 0));
+    let hc = horizon_point(slot, p + vec2<i32>(0, 1));
+    let hd = horizon_point(slot, p + vec2<i32>(1, 1));
+    let sl = clamp(mix(mix(ha.lo, hb.lo, f.x), mix(hc.lo, hd.lo, f.x), f.y), vec4<f32>(-1.0), vec4<f32>(1.0));
+    let sh = clamp(mix(mix(ha.hi, hb.hi, f.x), mix(hc.hi, hd.hi, f.x), f.y), vec4<f32>(-1.0), vec4<f32>(1.0));
+    // The grid's axes on the tangent plane: direction k is
+    // cos * gu + sin * gv. The sun's azimuth is taken in those axes.
+    let gu = tu - up * dot(tu, up);
+    let gv = tv - up * dot(tv, up);
+    let uu = dot(gu, gu);
+    let uv = dot(gu, gv);
+    let vv = dot(gv, gv);
+    let su = dot(to_sun, gu);
+    let sv = dot(to_sun, gv);
+    let fk = mod(atan2(uu * sv - uv * su, vv * su - uv * sv) / (GROUND_PI * 0.25), 8.0);
+    let k0 = (fk as i32) & 7;
+    // Each point's share of the disc, blended: across a ridge's horizon
+    // jump, blended horizons would step from point to point.
+    let k1 = (k0 + 1) & 7;
+    let fa = fk - floor(fk);
+    // In sines, not angles: across the disc an elevation's step is its
+    // sine's over the cosine.
+    let sun = clamp(dot(to_sun, up), -1.0, 1.0);
+    let corner = vec4<f32>(
+        mix(horizon_at(ha, k0), horizon_at(ha, k1), fa),
+        mix(horizon_at(hb, k0), horizon_at(hb, k1), fa),
+        mix(horizon_at(hc, k0), horizon_at(hc, k1), fa),
+        mix(horizon_at(hd, k0), horizon_at(hd, k1), fa),
+    );
+    let lit = clamp((vec4<f32>(sun) - corner) / (0.0093 * max(sqrt(1.0 - sun * sun), 0.02)) + vec4<f32>(0.5), vec4<f32>(0.0), vec4<f32>(1.0));
+    var sun_seen = mix(mix(lit.x, lit.y, f.x), mix(lit.z, lit.w, f.x), f.y);
+
+    var visible: f32 = 0.0;
+    var mean = vec3<f32>(0.0);
+    // Without trigonometry: the horizons are kept as the cosines of their
+    // zenith angles (the sines of their elevations, as stored), clamped
+    // to the normal's hemisphere there as a max of cosines, and each
+    // angle's double-angle terms are taken from its cosine and sine.
+    for (var s: i32 = 0; s < 4; s += 1) {
+        let az = s == 0 ? vec2<f32>(1.0, 0.0) : (s == 1 ? vec2<f32>(0.70710678, 0.70710678) : (s == 2 ? vec2<f32>(0.0, 1.0) : vec2<f32>(-0.70710678, 0.70710678)));
+        let t = normalize(gu * az.x + gv * az.y);
+        let across = cross(up, t);
+        let np = n - across * dot(n, across);
+        let len = length(np);
+        let il = 1.0 / max(len, 1e-6);
+        let cg = dot(np, up) * il;
+        let sg = dot(np, t) * il;   // cos, sin of the normal's angle gamma
+        // The horizons' zenith angles toward +t (h2) and -t (h1), no
+        // further than 90 degrees from the normal: cosines c2, c1.
+        let c2 = max(vec4_at(sl, s), -sg);
+        let c1 = max(vec4_at(sh, s), sg);
+        let h2 = fast_acos(c2);
+        let h1 = -fast_acos(c1);
+        let s2 = sqrt(max(1.0 - c2 * c2, 0.0));
+        let s1 = -sqrt(max(1.0 - c1 * c1, 0.0));
+        // cos(2h - gamma) = cos 2h cos gamma + sin 2h sin gamma.
+        let k2 = (2.0 * c2 * c2 - 1.0) * cg + 2.0 * s2 * c2 * sg;
+        let k1 = (2.0 * c1 * c1 - 1.0) * cg + 2.0 * s1 * c1 * sg;
+        let slice = 0.25 * (-k1 + cg + 2.0 * h1 * sg) + 0.25 * (-k2 + cg + 2.0 * h2 * sg);
+        visible += len * slice;
+        // The direction halfway between the horizons: the perpendicular
+        // of their difference, which holds when they are over 180 apart.
+        let b = vec2<f32>(c1 - c2, s2 - s1);
+        let bl2 = dot(b, b);
+        if (bl2 > 1e-12) {
+            mean += (t * b.x + up * b.y) * (len * slice * inversesqrt(bl2));
         }
-        bent = dot(mean, mean) > 1e-12 ? normalize(mean) - n : vec3(0.0);
+    }
+    let bent = dot(mean, mean) > 1e-12 ? normalize(mean) - n : vec3<f32>(0.0);
 
-        vec3 sky = cloudLight((u_camHi + u_camLo) + rel, w);
-        sunSeen *= sky.x;
-        if (u_treesFar > 0.0 && length(rel) < u_treesFar) {
-            vec3 eye = (u_camHi - u_treeOHi) + (u_camLo - u_treeOLo);
-            sunSeen *= treeShadow(eye + rel, eye, up, toSun);
+    let sky = cloud_light_at((params.cam_hi + params.cam_lo) + rel, w);
+    sun_seen *= sky.x;
+    if (params.trees_far > 0.0 && length(rel) < params.trees_far) {
+        let eye = (params.cam_hi - params.tree_o_hi) + (params.cam_lo - params.tree_o_lo);
+        sun_seen *= tree_shadow(eye + rel, eye, up, to_sun);
+    }
+    return GroundLight { light: vec4<f32>(sun_seen, visible * 0.25 * sky.z, sky.x, sky.y), bent: bent };
+}
+
+pub fn vertex(v_in: mesh::Vertex) -> mesh::Vertex {
+    var v = v_in;
+    let inst = v.instance_index;
+    let ids = tiles[inst * 4];   // slot, parentSlot, root, level
+    let hi = bitcast<vec4<f32>>(tiles[inst * 4 + 2]);
+    let lo = bitcast<vec4<f32>>(tiles[inst * 4 + 3]);
+    let i = (v.pos.x + 0.5) as i32;
+    let j = (v.pos.z + 0.5) as i32;
+    let slot = ids.x;
+    let cx = i + ${BORDER};
+    let cy = j + ${BORDER};
+    let c0 = pos_at(slot, cx, cy);
+    var c_xyz = c0.xyz;
+    let c_w = c0.w;
+    // The vertex in the detail layer's texels (planet.bk): texel t is
+    // centred at cell (t + 0.5) / D - 0.5.
+    let v_tex = (vec2<f32>(cx as f32, cy as f32) + vec2<f32>(0.5)) * ${DETAIL}.0 - vec2<f32>(0.5);
+    let v_skirt = v.pos.y;
+    // The tile grid's axes, which the horizons' directions are measured
+    // along, and the surface's normal across them.
+    let tu = pos_at(slot, cx + 1, cy).xyz - pos_at(slot, cx - 1, cy).xyz;
+    let tv = pos_at(slot, cx, cy + 1).xyz - pos_at(slot, cx, cy - 1).xyz;
+    // A skirt's bottom sits under the border cell beyond the edge, so the
+    // skirts of neighbouring tiles cross beneath their seam instead of
+    // sharing a plane: f32 rounding differs tile to tile, and coplanar
+    // skirts leave pinholes along the seam and at corners.
+    if (v.pos.y > 0.5) {
+        let si = i == 0 ? -1 : (i == ${TILE} ? 1 : 0);
+        let sj = j == 0 ? -1 : (j == ${TILE} ? 1 : 0);
+        c_xyz = pos_at(slot, cx + si, cy + sj).xyz;
+    }
+    // Up at this vertex: away from the planet's center at the origin.
+    let up = normalize(c_xyz + hi.xyz);
+    // Skirts hang a sixteenth of the tile's edge below the surface.
+    let extent = ${(RADIUS * Math.PI / 2).toFixed(1)} / ((1 << ids.w) as f32);
+    let rel = (hi.xyz - params.cam_hi) + (lo.xyz - params.cam_lo);
+    v.pos = rel + c_xyz - up * (v.pos.y * extent * 0.0625);
+    v.normal = up;   // the fragment shades with the detail layer's normal
+    // The ground's fine detail is periodic over ${DETAIL_PERIOD} m: the tile's
+    // center modulo that (exact in f32, the period a power of two) plus
+    // the cell's offset from it is a coordinate good to micrometres near
+    // the camera, and the same modulo the period on every tile.
+    let v_q = mod(hi.xyz, ${DETAIL_PERIOD}.0) + mod(lo.xyz, ${DETAIL_PERIOD}.0) + c_xyz;
+    let v_swell = mod(hi.xyz, ${SWELL_PERIOD}.0) + mod(lo.xyz, ${SWELL_PERIOD}.0) + c_xyz;
+    // The light it sees, on the horizon layer's grid (a point every
+    // other cell), at a cell's footprint.
+    var n = normalize(cross(tu, tv));
+    if (dot(n, up) < 0.0) { n = -n; }
+    let gl = ground_light(slot, vec2<f32>(cx as f32, cy as f32) * 0.5, tu, tv, up, n, v.pos, 0.5 * length(tu));
+    v.v0 = vec4<f32>(v_tex, v_skirt, c_w);
+    v.v1 = vec4<f32>(up, 0.0);
+    v.v2 = vec4<f32>(v_q, 0.0);
+    v.v3 = vec4<f32>(v_swell, 0.0);
+    v.v4 = gl.light;
+    v.v5 = vec4<f32>(gl.bent, 0.0);
+    v.vi = vec4<i32>(slot, ids.w, 0, 0);
+    return v;
+}
+
+// Texel (x, y) of this tile: colour (rgb, water), the octahedral normal
+// unfolded and the forest's cover.
+struct DetailTexel {
+    col: vec4<f32>,
+    nrm: vec3<f32>,
+    cover: f32,
+}
+fn detail_texel(slot: i32, t_in: vec2<i32>) -> DetailTexel {
+    let t = clamp(t_in, vec2<i32>(0), vec2<i32>(${TEXELS - 1}));
+    let k = ((slot * ${TEXELS} + t.y) * ${TEXELS} + t.x) * 2;
+    let col = unpack_unorm4x8(det[k]);
+    let w = det[k + 1];
+    let ox = ((w & 4095u) as f32) * (2.0 / 4095.0) - 1.0;
+    let oy = (((w >> 12u) & 4095u) as f32) * (2.0 / 4095.0) - 1.0;
+    let cover = ((w >> 24u) as f32) / 255.0;
+    let nz = 1.0 - abs(ox) - abs(oy);
+    let nx = nz < 0.0 ? (1.0 - abs(oy)) * (ox >= 0.0 ? 1.0 : -1.0) : ox;
+    let ny = nz < 0.0 ? (1.0 - abs(ox)) * (oy >= 0.0 ? 1.0 : -1.0) : oy;
+    return DetailTexel { col: col, nrm: normalize(vec3<f32>(nx, ny, nz)), cover: cover };
+}
+// Texel t's share of water alone.
+fn detail_water(slot: i32, t_in: vec2<i32>) -> f32 {
+    let t = clamp(t_in, vec2<i32>(0), vec2<i32>(${TEXELS - 1}));
+    return ((det[((slot * ${TEXELS} + t.y) * ${TEXELS} + t.x) * 2] >> 24u) as f32) / 255.0;
+}
+// A uniform cubic B-spline's four weights at fraction f past the second.
+fn bspline(f: f32) -> vec4<f32> {
+    let g = 1.0 - f;
+    let f2 = f * f;
+    let f3 = f2 * f;
+    return vec4<f32>(g * g * g, 3.0 * f3 - 6.0 * f2 + 4.0, -3.0 * f3 + 3.0 * f2 + 3.0 * f + 1.0, f3) / 6.0;
+}
+
+// One of the 12 cube-edge gradients at lattice point c, the lattice
+// periodic over \`cells\` (a power of two).
+fn lattice_gradient(c: vec3<i32>, cells: i32, seed: i32) -> vec3<f32> {
+    let m = c & vec3<i32>(cells - 1);
+    let px = m.x as u32;
+    let py = m.y as u32;
+    let pz = m.z as u32;
+    var h = (px * 0x8da6b343u ^ py * 0xd8163841u ^ pz * 0xcb1ab31fu ^ (seed as u32)) * 0x27d4eb2du;
+    h = h ^ (h >> 15u);
+    let e = h % 12u;
+    let s1 = (e & 1u) != 0u ? -1.0 : 1.0;
+    let s2 = (e & 2u) != 0u ? -1.0 : 1.0;
+    let axis = e >> 2u;
+    return axis == 0u ? vec3<f32>(0.0, s1, s2) : (axis == 1u ? vec3<f32>(s1, 0.0, s2) : vec3<f32>(s1, s2, 0.0));
+}
+
+// Perlin noise at x (lattice units) and its gradient: x value, yzw gradient.
+fn perlin_grad(x: vec3<f32>, cells: i32, seed: i32) -> vec4<f32> {
+    let fl = floor(x);
+    let i = vec3<i32>(fl.x as i32, fl.y as i32, fl.z as i32);
+    let f = fract(x);
+    let u = f * f * f * (f * (f * 6.0 - 15.0) + 10.0);
+    let du = 30.0 * f * f * (f * (f - 2.0) + 1.0);
+    let ga = lattice_gradient(i, cells, seed);
+    let gb = lattice_gradient(i + vec3<i32>(1, 0, 0), cells, seed);
+    let gc = lattice_gradient(i + vec3<i32>(0, 1, 0), cells, seed);
+    let gd = lattice_gradient(i + vec3<i32>(1, 1, 0), cells, seed);
+    let ge = lattice_gradient(i + vec3<i32>(0, 0, 1), cells, seed);
+    let gf = lattice_gradient(i + vec3<i32>(1, 0, 1), cells, seed);
+    let gg = lattice_gradient(i + vec3<i32>(0, 1, 1), cells, seed);
+    let gh = lattice_gradient(i + vec3<i32>(1, 1, 1), cells, seed);
+    let va = dot(ga, f);
+    let vb = dot(gb, f - vec3<f32>(1.0, 0.0, 0.0));
+    let vc = dot(gc, f - vec3<f32>(0.0, 1.0, 0.0));
+    let vd = dot(gd, f - vec3<f32>(1.0, 1.0, 0.0));
+    let ve = dot(ge, f - vec3<f32>(0.0, 0.0, 1.0));
+    let vf = dot(gf, f - vec3<f32>(1.0, 0.0, 1.0));
+    let vg = dot(gg, f - vec3<f32>(0.0, 1.0, 1.0));
+    let vh = dot(gh, f - vec3<f32>(1.0, 1.0, 1.0));
+    let k1 = vb - va;
+    let k2 = vc - va;
+    let k3 = ve - va;
+    let k4 = va - vb - vc + vd;
+    let k5 = va - vc - ve + vg;
+    let k6 = va - vb - ve + vf;
+    let k7 = -va + vb + vc - vd + ve - vf - vg + vh;
+    let value = va + u.x * k1 + u.y * k2 + u.z * k3 + u.x * u.y * k4 + u.y * u.z * k5 + u.z * u.x * k6 + u.x * u.y * u.z * k7;
+    let grad = ga + u.x * (gb - ga) + u.y * (gc - ga) + u.z * (ge - ga)
+             + u.x * u.y * (ga - gb - gc + gd) + u.y * u.z * (ga - gc - ge + gg) + u.z * u.x * (ga - gb - ge + gf)
+             + u.x * u.y * u.z * (-ga + gb + gc - gd + ge - gf - gg + gh)
+             + du * (vec3<f32>(k1, k2, k3) + u.yzx * vec3<f32>(k4, k5, k6) + u.zxy * vec3<f32>(k6, k4, k5) + u.yzx * u.zxy * k7);
+    return vec4<f32>(value, grad);
+}
+
+struct SeaResult {
+    slope: vec3<f32>,
+    variance: f32,
+}
+fn sea_slope(footprint: f32, up: vec3<f32>, v_swell: vec3<f32>, v_q: vec3<f32>, first: i32) -> SeaResult {
+    var slope = vec3<f32>(0.0);
+    var variance: f32 = WAVE_RESIDUAL;
+    for (var i: i32 = first; i < ${WAVES.list.length}; i += 1) {
+        let k = WAVE_K[i];
+        let f = WAVE_F[i];
+        let w = clamp(k.w / footprint - 1.0, 0.0, 1.0);
+        if (w <= 0.0) {
+            variance += f.y;
+            break;
         }
-        light = vec4(sunSeen, visible * 0.25 * sky.z, sky.x, sky.y);
-    }`;
-
-// Instance i draws the cache's draw-list record i (tiles-api.js): its slot,
-// level, and center as hi + lo floats, from which the camera (split the same
-// way) is subtracted for a camera-relative placement good to f64.
-const vertex = `buffer vec4 u_pos[];
-    buffer ivec4 u_tiles[];
-    uniform vec3 u_camHi;
-    uniform vec3 u_camLo;
-    out vec2 v_tex;
-    flat out int v_slot;
-    flat out int v_level;   // the tile's (the debug view 'level')
-    out float v_skirt;      // 0 on the surface, 1 at a skirt's bottom (the debug view 'skirt')
-    out vec3 v_up;
-    out vec3 v_q;
-    out vec3 v_swell;
-    out float v_height;   // the ground's, or a lake's level (m)
-    out vec4 v_light;     // groundLight's sun and sky seen, and the occluders' sun
-    out vec3 v_bent;      // and the sky's mean direction
-    ${groundLightGlsl}
-    void userVertex(inout vec3 pos, inout vec3 normal, inout vec2 uv) {
-        ivec4 ids = u_tiles[gl_InstanceIndex * 4];   // slot, parentSlot, root, level
-        vec4 hi = intBitsToFloat(u_tiles[gl_InstanceIndex * 4 + 2]);
-        vec4 lo = intBitsToFloat(u_tiles[gl_InstanceIndex * 4 + 3]);
-        const int C = ${CELLS}, B = ${BORDER};
-        int i = int(pos.x + 0.5), j = int(pos.z + 0.5);
-        int k = ids.x * C * C + (j + B) * C + (i + B);
-        vec4 c = u_pos[k];
-        // The vertex in the detail layer's texels (planet.bk): texel t is
-        // centred at cell (t + 0.5) / D - 0.5.
-        v_tex = (vec2(i + B, j + B) + 0.5) * ${DETAIL}.0 - 0.5;
-        v_slot = ids.x;
-        v_level = ids.w;
-        v_skirt = pos.y;
-        // The tile grid's axes, which the horizons' directions are measured
-        // along, and the surface's normal across them.
-        vec3 tu = u_pos[k + 1].xyz - u_pos[k - 1].xyz;
-        vec3 tv = u_pos[k + C].xyz - u_pos[k - C].xyz;
-        // A skirt's bottom sits under the border cell beyond the edge, so the
-        // skirts of neighbouring tiles cross beneath their seam instead of
-        // sharing a plane: f32 rounding differs tile to tile, and coplanar
-        // skirts leave pinholes along the seam and at corners.
-        if (pos.y > 0.5) {
-            int si = i == 0 ? -1 : (i == ${TILE} ? 1 : 0);
-            int sj = j == 0 ? -1 : (j == ${TILE} ? 1 : 0);
-            c.xyz = u_pos[k + sj * C + si].xyz;
-        }
-        // Up at this vertex: away from the planet's center at the origin.
-        vec3 up = normalize(c.xyz + hi.xyz);
-        // Skirts hang a sixteenth of the tile's edge below the surface.
-        float extent = ${RADIUS * Math.PI / 2} / float(1 << ids.w);
-        vec3 rel = (hi.xyz - u_camHi) + (lo.xyz - u_camLo);
-        pos = rel + c.xyz - up * (pos.y * extent * 0.0625);
-        normal = up;   // the fragment shades with the detail layer's normal
-        v_up = up;
-        v_height = c.w;
-        // The ground's fine detail is periodic over ${DETAIL_PERIOD} m: the tile's
-        // center modulo that (exact in f32, the period a power of two) plus
-        // the cell's offset from it is a coordinate good to micrometres near
-        // the camera, and the same modulo the period on every tile.
-        v_q = mod(hi.xyz, ${DETAIL_PERIOD}.0) + mod(lo.xyz, ${DETAIL_PERIOD}.0) + c.xyz;
-        v_swell = mod(hi.xyz, ${SWELL_PERIOD}.0) + mod(lo.xyz, ${SWELL_PERIOD}.0) + c.xyz;
-        // The light it sees, on the horizon layer's grid (a point every
-        // other cell), at a cell's footprint.
-        vec3 n = normalize(cross(tu, tv));
-        if (dot(n, up) < 0.0) n = -n;
-        groundLight(ids.x, vec2(i + B, j + B) * 0.5, tu, tv, up, n, pos, 0.5 * length(tu), v_light, v_bent);
-    }`;
-
-// The detail layer (planet.bk) holds, finer than the vertices, the mean of
-// the ground under each texel: albedo, how much of it is water, and the
-// normal of its mean surface, read here bilinearly. Per pixel, the land
-// carries on past the finest tile's texels: octaves of wavelength 1/8 m down
-// to 2 mm, of albedo variation (ground.bk variation, the same contrast per
-// octave) and of relief (the same slope per octave), each faded out as its
-// wavelength nears a pixel; and coarser, where a far texel spans several
-// pixels, the albedo's octaves between the texel and the pixel. All are
-// zero-mean, so what a pixel averages to is the texel's.
-const fragment = `buffer uint u_det[];
-    in vec2 v_tex;
-    flat in int v_slot;
-    flat in int v_level;
-    in float v_skirt;
-    in vec3 v_up;
-    in vec3 v_q;
-    in vec3 v_swell;
-    in float v_height;
-    in vec4 v_light;
-    in vec3 v_bent;
-    uniform float u_time;
-    uniform vec3 u_camHi;
-    uniform vec3 u_camLo;
-    uniform float u_treesFar;   // trees.js: how far off the trees are drawn, 0 none
-    // The trees' crowns (trees.js), as the share of a forest's ground they
-    // hide from straight above and their lit colour over the forest floor's.
-    const float TREE_CROWNS = 0.55;
-    const vec3 TREE_TINT = vec3(0.22, 0.24, 0.33);
-    // userFragment to userLight: the crowns' share above the floor where the
-    // trees are drawn (TREE_CROWNS times the cover), whose shade it is in.
-    float g_floor = 0.0;
-    ${grassFloorGlsl}
-
-    // The light the ground sees, as its vertices found it (groundLight), and
-    // the sky through the gaps in the crowns overhead among drawn trees. The
-    // sky's direction turns from this pixel's normal as the vertices' turned
-    // from theirs.
-    void userLight(vec3 toSun, inout float sunVisibility, inout float skyVisibility, inout vec3 skyNormal,
-                   inout float occluderSun, inout float sunDiffuse) {
-        sunVisibility *= v_light.x;
-        skyVisibility *= v_light.y * (1.0 - 0.8 * g_floor);
-        occluderSun *= v_light.z;
-        sunDiffuse = v_light.w;
-        skyNormal = normalize(skyNormal + v_bent);
+        let q = i < ${WAVES.swell} ? v_swell : v_q;
+        slope += k.xyz * (f.z * w * cos(dot(k.xyz, q) - f.x * params.time));
+        variance += f.w * (1.0 - w);
     }
+    return SeaResult { slope: slope - up * dot(slope, up), variance: variance };
+}
 
-    // Texel (x, y) of this tile: colour (rgb, water), the octahedral normal
-    // unfolded and the forest's cover.
-    void detailTexel(ivec2 t, out vec4 col, out vec3 nrm, out float cover) {
-        const int W = ${TEXELS};
-        t = clamp(t, ivec2(0), ivec2(W - 1));
-        int k = ((v_slot * W + t.y) * W + t.x) * 2;
-        col = unpackUnorm4x8(u_det[k]);
-        uint w = u_det[k + 1];
-        vec2 o = vec2(float(w & 4095u), float((w >> 12) & 4095u)) * (2.0 / 4095.0) - 1.0;
-        cover = float(w >> 24) / 255.0;
-        vec3 n = vec3(o, 1.0 - abs(o.x) - abs(o.y));
-        if (n.z < 0.0) n.xy = (1.0 - abs(n.yx)) * vec2(n.x >= 0.0 ? 1.0 : -1.0, n.y >= 0.0 ? 1.0 : -1.0);
-        nrm = normalize(n);
-    }
-    // Texel t's share of water alone.
-    float detailWater(ivec2 t) {
-        const int W = ${TEXELS};
-        t = clamp(t, ivec2(0), ivec2(W - 1));
-        return float(u_det[((v_slot * W + t.y) * W + t.x) * 2] >> 24) / 255.0;
-    }
-    // A uniform cubic B-spline's four weights at fraction f past the second.
-    vec4 bspline(float f) {
-        float g = 1.0 - f, f2 = f * f, f3 = f2 * f;
-        return vec4(g * g * g, 3.0 * f3 - 6.0 * f2 + 4.0, -3.0 * f3 + 3.0 * f2 + 3.0 * f + 1.0, f3) / 6.0;
-    }
-    const float VARY_LUM = 0.11;      // ground.bk VARY_LUM
-    const float PERLIN_VAR = 0.0728;  // ground.bk PERLIN_VAR
-    const float RELIEF = 0.08;        // slope per octave, per unit of the noise's gradient
-    // Bare rock is rougher and more contrasted than a sward at every scale a
-    // pixel resolves: its faces and cracks, lit and shaded. Rock is the grey
-    // ground (little chroma, short of snow's white), and its octaves take
-    // ROCK_LUM and ROCK_RELIEF times a sward's, still zero-mean, so its
-    // average is the texel's as it is everywhere.
-    const float ROCK_LUM = 1.8;
-    const float ROCK_RELIEF = 3.0;
+pub fn fragment(v: mesh::Vertex, s_in: mesh::Surface) -> mesh::Surface {
+    var s = s_in;
+    let v_tex = v.v0.xy;
+    let v_skirt = v.v0.z;
+    let v_height = v.v0.w;
+    let v_up = v.v1.xyz;
+    let v_q = v.v2.xyz;
+    let v_swell = v.v3.xyz;
+    let v_light = v.v4;
+    let v_bent = v.v5.xyz;
+    let v_slot = v.vi.x;
+    let v_level = v.vi.y;
 
-    // One of the 12 cube-edge gradients at lattice point c, the lattice
-    // periodic over \`cells\` (a power of two).
-    vec3 latticeGradient(ivec3 c, int cells, int seed) {
-        uvec3 p = uvec3(c & (cells - 1));
-        uint h = (p.x * 0x8da6b343u ^ p.y * 0xd8163841u ^ p.z * 0xcb1ab31fu ^ uint(seed)) * 0x27d4eb2du;
-        h ^= h >> 15;
-        uint e = h % 12u;
-        float s1 = (e & 1u) != 0u ? -1.0 : 1.0, s2 = (e & 2u) != 0u ? -1.0 : 1.0;
-        uint axis = e >> 2;
-        return axis == 0u ? vec3(0.0, s1, s2) : (axis == 1u ? vec3(s1, 0.0, s2) : vec3(s1, s2, 0.0));
-    }
-
-    // Perlin noise at x (lattice units) and its gradient: x value, yzw gradient.
-    vec4 perlinGrad(vec3 x, int cells, int seed) {
-        ivec3 i = ivec3(floor(x));
-        vec3 f = fract(x);
-        vec3 u = f * f * f * (f * (f * 6.0 - 15.0) + 10.0);
-        vec3 du = 30.0 * f * f * (f * (f - 2.0) + 1.0);
-        vec3 ga = latticeGradient(i, cells, seed), gb = latticeGradient(i + ivec3(1, 0, 0), cells, seed);
-        vec3 gc = latticeGradient(i + ivec3(0, 1, 0), cells, seed), gd = latticeGradient(i + ivec3(1, 1, 0), cells, seed);
-        vec3 ge = latticeGradient(i + ivec3(0, 0, 1), cells, seed), gf = latticeGradient(i + ivec3(1, 0, 1), cells, seed);
-        vec3 gg = latticeGradient(i + ivec3(0, 1, 1), cells, seed), gh = latticeGradient(i + ivec3(1, 1, 1), cells, seed);
-        float va = dot(ga, f), vb = dot(gb, f - vec3(1, 0, 0)), vc = dot(gc, f - vec3(0, 1, 0)), vd = dot(gd, f - vec3(1, 1, 0));
-        float ve = dot(ge, f - vec3(0, 0, 1)), vf = dot(gf, f - vec3(1, 0, 1)), vg = dot(gg, f - vec3(0, 1, 1)), vh = dot(gh, f - vec3(1, 1, 1));
-        float k1 = vb - va, k2 = vc - va, k3 = ve - va, k4 = va - vb - vc + vd;
-        float k5 = va - vc - ve + vg, k6 = va - vb - ve + vf, k7 = -va + vb + vc - vd + ve - vf - vg + vh;
-        float value = va + u.x * k1 + u.y * k2 + u.z * k3 + u.x * u.y * k4 + u.y * u.z * k5 + u.z * u.x * k6 + u.x * u.y * u.z * k7;
-        vec3 grad = ga + u.x * (gb - ga) + u.y * (gc - ga) + u.z * (ge - ga)
-                  + u.x * u.y * (ga - gb - gc + gd) + u.y * u.z * (ga - gc - ge + gg) + u.z * u.x * (ga - gb - ge + gf)
-                  + u.x * u.y * u.z * (-ga + gb + gc - gd + ge - gf - gg + gh)
-                  + du * (vec3(k1, k2, k3) + u.yzx * vec3(k4, k5, k6) + u.zxy * vec3(k6, k4, k5) + u.yzx * u.zxy * k7);
-        return vec4(value, grad);
-    }
-
-    // The sea's waves (WAVES): wave vector (rad/m) and a quarter of its
-    // wavelength; the angular frequency, the mean square slope of the wave and
-    // every shorter one, the slope amplitude over |k| and its mean square
-    // slope. The first WAVE_SWELL are periodic over v_swell, the rest over v_q.
-    const int WAVE_COUNT = ${WAVES.list.length}, WAVE_SWELL = ${WAVES.swell}, WAVE_FRESH = ${WAVES.fresh};
-    const float WAVE_RESIDUAL = ${glslFloat(WAVES.residual)}, WAVE_FRESH_SCALE = ${glslFloat(WAVES.freshScale)};
-    const vec4 WAVE_K[WAVE_COUNT] = vec4[](${WAVES.list.map((w) =>
-        `vec4(${w.n.map((c) => glslFloat(c * 2 * Math.PI / w.period)).join(', ')}, ${glslFloat(Math.PI / 2 / w.k)})`).join(', ')});
-    const vec4 WAVE_F[WAVE_COUNT] = vec4[](${WAVES.list.map((w) =>
-        `vec4(${[w.omega, w.tail, w.slope / w.k, w.slope * w.slope / 2].map(glslFloat).join(', ')})`).join(', ')});
-
-    // The sea's slope along the surface from the waves this pixel resolves
-    // (full from 8 pixels a wavelength, none at 4: a sinusoid nearer a pixel
-    // beats against the pixels in moire), and the mean square slope of those
-    // it does not: the waves become the sea's roughness as they shrink below
-    // a pixel, so far off the sun's glint spreads as the waves it is made of
-    // would spread it (Bruneton, Neyret and Holzschuch 2010). From wave
-    // first on: fresh water's are WAVE_FRESH on.
-    vec3 seaSlope(float footprint, vec3 up, int first, out float variance) {
-        vec3 slope = vec3(0.0);
-        variance = WAVE_RESIDUAL;
-        for (int i = first; i < WAVE_COUNT; i++) {
-            vec4 k = WAVE_K[i], f = WAVE_F[i];
-            float w = clamp(k.w / footprint - 1.0, 0.0, 1.0);
-            if (w <= 0.0) { variance += f.y; break; }
-            vec3 q = i < WAVE_SWELL ? v_swell : v_q;
-            slope += k.xyz * (f.z * w * cos(dot(k.xyz, q) - f.x * u_time));
-            variance += f.w * (1.0 - w);
-        }
-        return slope - up * dot(slope, up);
-    }
-
-    void userFragment(inout vec3 baseColor, inout vec3 normal,
-                      inout float metallic, inout float roughness,
-                      inout vec3 emissive, inout float alpha) {
-        // Bilinear over the four texels about this point. The layer's normals
-        // face up, so a skirt seen from behind shades as the ground does.
-        vec2 f = v_tex - floor(v_tex);
-        ivec2 t0 = ivec2(floor(v_tex));
-        vec4 c00, c10, c01, c11;
-        vec3 n00, n10, n01, n11;
-        vec4 cover;
-        detailTexel(t0, c00, n00, cover.x);
-        detailTexel(t0 + ivec2(1, 0), c10, n10, cover.y);
-        detailTexel(t0 + ivec2(0, 1), c01, n01, cover.z);
-        detailTexel(t0 + ivec2(1, 1), c11, n11, cover.w);
-        vec4 col = mix(mix(c00, c10, f.x), mix(c01, c11, f.x), f.y);
-        float forest = mix(mix(cover.x, cover.y, f.x), mix(cover.z, cover.w, f.x), f.y);
-        vec3 n = normalize(mix(mix(n00, n10, f.x), mix(n01, n11, f.x), f.y));
-        float water = col.a;
-        // The water's share, where there is any about, by a cubic B-spline
-        // over the 4 x 4 texels around: the share sets the roughness, whose
-        // reflection is far from linear in it, so the water's edge is one of
-        // the share's contours, and a bilinear share's contours are cut
-        // texel by texel into a saw along every diagonal bank.
-        if (max(max(c00.a, c10.a), max(c01.a, c11.a)) > 0.0) {
-            vec4 bx = bspline(f.x), by = bspline(f.y);
-            water = 0.0;
-            for (int j = 0; j < 4; j++) {
-                float row = 0.0;
-                for (int i = 0; i < 4; i++) row += bx[i] * detailWater(t0 + ivec2(i - 1, j - 1));
-                water += by[j] * row;
+    // Bilinear over the four texels about this point. The layer's normals
+    // face up, so a skirt seen from behind shades as the ground does.
+    let fl_tex = floor(v_tex);
+    let f = v_tex - fl_tex;
+    let t0 = vec2<i32>(fl_tex.x as i32, fl_tex.y as i32);
+    let d00 = detail_texel(v_slot, t0);
+    let d10 = detail_texel(v_slot, t0 + vec2<i32>(1, 0));
+    let d01 = detail_texel(v_slot, t0 + vec2<i32>(0, 1));
+    let d11 = detail_texel(v_slot, t0 + vec2<i32>(1, 1));
+    let col = mix(mix(d00.col, d10.col, f.x), mix(d01.col, d11.col, f.x), f.y);
+    let forest = mix(mix(d00.cover, d10.cover, f.x), mix(d01.cover, d11.cover, f.x), f.y);
+    var n = normalize(mix(mix(d00.nrm, d10.nrm, f.x), mix(d01.nrm, d11.nrm, f.x), f.y));
+    var water = col.w;
+    // The water's share, where there is any about, by a cubic B-spline
+    // over the 4 x 4 texels around.
+    if (max(max(d00.col.w, d10.col.w), max(d01.col.w, d11.col.w)) > 0.0) {
+        let bx = bspline(f.x);
+        let by = bspline(f.y);
+        water = 0.0;
+        for (var j: i32 = 0; j < 4; j += 1) {
+            var row: f32 = 0.0;
+            for (var i: i32 = 0; i < 4; i += 1) {
+                row += vec4_at(bx, i) * detail_water(v_slot, t0 + vec2<i32>(i - 1, j - 1));
             }
+            water += vec4_at(by, j) * row;
         }
+    }
 
-        // The octaves a pixel resolves: full weight from 4 pixels a
-        // wavelength, none at 2.
-        float footprint = max(length(dFdx(v_q)), length(dFdy(v_q)));
-        float lum = 0.0, lumVar = 0.0, wavelength = 0.125;
-        vec3 slope = vec3(0.0);
-        float hiC = max(col.r, max(col.g, col.b)), loC = min(col.r, min(col.g, col.b));
-        float rock = (1.0 - smoothstep(0.15, 0.45, (hiC - loC) / max(hiC, 1e-3))) * (1.0 - smoothstep(0.35, 0.6, hiC));
-        float lumGain = mix(1.0, ROCK_LUM, rock), reliefGain = mix(1.0, ROCK_RELIEF, rock);
-        // Coarser, the albedo's octaves the pixel resolves and its texel
-        // does not (each at the pixel's weight less the texel's, by the same
-        // rule, so what the texel holds is not counted twice): a texel spans
-        // up to a few pixels far off, and its variation would end there.
-        // Octaves of a metre and up repeat over v_swell's 1024 m.
-        float texel = footprint / max(max(length(dFdx(v_tex)), length(dFdy(v_tex))), 1e-6);
-        float coarse = min(exp2(ceil(log2(2.0 * texel))), 32.0);
-        for (int k = 0; k < 8 && coarse > wavelength; k++) {
-            float w = clamp(coarse / footprint * 0.5 - 1.0, 0.0, 1.0) - clamp(coarse / texel * 0.5 - 1.0, 0.0, 1.0);
-            if (w > 0.0) {
-                bool far = coarse >= 1.0;
-                vec3 x = (far ? v_swell : v_q) / coarse;
-                float g = perlinGrad(x, int((far ? ${SWELL_PERIOD}.0 : ${DETAIL_PERIOD}.0) / coarse), 41 + k).x;
-                float a = VARY_LUM * lumGain * w;
-                lum += g * a;
-                lumVar += a * a * PERLIN_VAR;
-            }
-            coarse *= 0.5;
+    // The octaves a pixel resolves: full weight from 4 pixels a
+    // wavelength, none at 2.
+    let footprint = max(length(dpdx(v_q)), length(dpdy(v_q)));
+    var lum: f32 = 0.0;
+    var lum_var: f32 = 0.0;
+    var wavelength: f32 = 0.125;
+    var slope = vec3<f32>(0.0);
+    let hi_c = max(col.x, max(col.y, col.z));
+    let lo_c = min(col.x, min(col.y, col.z));
+    let rock = (1.0 - smoothstep(0.15, 0.45, (hi_c - lo_c) / max(hi_c, 1e-3))) * (1.0 - smoothstep(0.35, 0.6, hi_c));
+    let lum_gain = mix(1.0, ROCK_LUM, rock);
+    let relief_gain = mix(1.0, ROCK_RELIEF, rock);
+    let texel = footprint / max(max(length(dpdx(v_tex)), length(dpdy(v_tex))), 1e-6);
+    var coarse = min(exp2(ceil(log2(2.0 * texel))), 32.0);
+    for (var k: i32 = 0; k < 8 && coarse > wavelength; k += 1) {
+        let w = clamp(coarse / footprint * 0.5 - 1.0, 0.0, 1.0) - clamp(coarse / texel * 0.5 - 1.0, 0.0, 1.0);
+        if (w > 0.0) {
+            let far = coarse >= 1.0;
+            let x = (far ? v_swell : v_q) / coarse;
+            let g = perlin_grad(x, ((far ? ${SWELL_PERIOD}.0 : ${DETAIL_PERIOD}.0) / coarse) as i32, 41 + k).x;
+            let a = VARY_LUM * lum_gain * w;
+            lum += g * a;
+            lum_var += a * a * PERLIN_VAR;
         }
-        int cells = int(${DETAIL_PERIOD}.0 / wavelength);
-        for (int k = 0; k < 6; k++) {
-            float w = clamp(wavelength / footprint * 0.5 - 1.0, 0.0, 1.0);
-            if (w <= 0.0) break;
-            vec3 x = v_q / wavelength;
-            // One noise for both: the relief's crests are the lighter ground.
-            vec4 g = perlinGrad(x, cells, 11 + k);
-            float a = VARY_LUM * lumGain * w;
-            lum += g.x * a;
-            lumVar += a * a * PERLIN_VAR;
-            slope += g.yzw * (RELIEF * reliefGain * w);
-            wavelength *= 0.5;
-            cells *= 2;
-        }
-        float land = 1.0 - water;
-        baseColor = col.rgb * mix(1.0, exp(lum - 0.5 * lumVar), land);
-        // Where the trees are not drawn (or only shrunk, over their last
-        // sixth), their crowns over the floor: the share of the view they
-        // hide is the gap probability of a Poisson canopy, 1 - (1 - c)^(1 /
-        // cos) of the share c hidden looking straight down (Nilson 1971),
-        // so a forest seen across is all crowns, as the drawn trees are.
-        vec3 eye = -normalize(vWorldPos);
-        float drawn = u_treesFar <= 0.0 ? 0.0 : smoothstep(u_treesFar, u_treesFar * ${(5 / 6).toFixed(4)}, length(vWorldPos));
-        float crowns = 1.0 - pow(1.0 - TREE_CROWNS * forest, 1.0 / max(dot(eye, normalize(v_up)), 0.05));
-        // Where blades stand, the ground between them, in their shade.
-        baseColor *= grassFloor((u_camHi + u_camLo) + vWorldPos, length(vWorldPos));
-        baseColor *= mix(vec3(1.0), TREE_TINT, crowns * (1.0 - drawn * drawn));
-        g_floor = TREE_CROWNS * forest * drawn * drawn;
-        // The relief's gradient along the surface tilts the normal against it.
-        n = normalize(n - (slope - dot(slope, n) * n) * land);
-        float seaVariance = 0.0;
-        vec3 up = normalize(v_up);
-        // Rivers and lakes stand above the sea: their water is sheltered,
-        // a breeze's ripples on it (the waves of 4 m and shorter, scaled to
-        // Cox and Munk's mean square slope at 2 m/s: WAVES.fresh) rather
-        // than the sea's swell and waves. A ripple tilts the normal only
-        // from 32 pixels a wavelength (the sea's from 8): a few wave trains
-        // over a narrow water read as a woven grid, where the eye takes a
-        // breeze's ripples seen from off as gloss.
-        float fresh = smoothstep(0.0, 1.0, v_height);
-        vec3 sea = up;
-        // (Land near sea level carries a trace of water, the chance its
-        // unresolved heights dip under the sea: too little to show.)
-        if (water > 0.001) {
-            float calm = mix(1.0, WAVE_FRESH_SCALE, fresh);
-            sea = normalize(up - seaSlope(footprint * mix(1.0, 4.0, fresh), up, fresh > 0.5 ? WAVE_FRESH : 0, seaVariance) * calm);
-            seaVariance *= calm * calm;
-        }
-        normal = normalize(mix(n, sea, water));
-        // GGX's alpha is the root mean square slope; the engine's roughness
-        // its square root.
-        roughness = mix(0.9, sqrt(sqrt(seaVariance)), water);
-        metallic = 0.0;
+        coarse *= 0.5;
+    }
+    var cells = (${DETAIL_PERIOD}.0 / wavelength) as i32;
+    for (var k: i32 = 0; k < 6; k += 1) {
+        let w = clamp(wavelength / footprint * 0.5 - 1.0, 0.0, 1.0);
+        if (w <= 0.0) { break; }
+        let x = v_q / wavelength;
+        // One noise for both: the relief's crests are the lighter ground.
+        let g = perlin_grad(x, cells, 11 + k);
+        let a = VARY_LUM * lum_gain * w;
+        lum += g.x * a;
+        lum_var += a * a * PERLIN_VAR;
+        slope += g.yzw * (RELIEF * relief_gain * w);
+        wavelength *= 0.5;
+        cells *= 2;
+    }
+    let land = 1.0 - water;
+    s.base_color = col.xyz * mix(1.0, exp(lum - 0.5 * lum_var), land);
+    let eye = -normalize(v.world_pos);
+    let drawn = params.trees_far <= 0.0 ? 0.0 : smoothstep(params.trees_far, params.trees_far * ${(5 / 6).toFixed(4)}, length(v.world_pos));
+    let crowns = 1.0 - pow(1.0 - TREE_CROWNS * forest, 1.0 / max(dot(eye, normalize(v_up)), 0.05));
+    // Where blades stand, the ground between them, in their shade.
+    s.base_color *= grass_floor((params.cam_hi + params.cam_lo) + v.world_pos, length(v.world_pos));
+    s.base_color *= mix(vec3<f32>(1.0), TREE_TINT, crowns * (1.0 - drawn * drawn));
+    let g_floor = TREE_CROWNS * forest * drawn * drawn;
+    // The relief's gradient along the surface tilts the normal against it.
+    n = normalize(n - (slope - dot(slope, n) * n) * land);
+    var sea_variance: f32 = 0.0;
+    let up = normalize(v_up);
+    let fresh = smoothstep(0.0, 1.0, v_height);
+    var sea = up;
+    if (water > 0.001) {
+        let calm = mix(1.0, WAVE_FRESH_SCALE, fresh);
+        let sr = sea_slope(footprint * mix(1.0, 4.0, fresh), up, v_swell, v_q, fresh > 0.5 ? ${WAVES.fresh} : 0);
+        sea = normalize(up - sr.slope * calm);
+        sea_variance = sr.variance * calm * calm;
+    }
+    s.normal = normalize(mix(n, sea, water));
+    s.roughness = mix(0.9, sqrt(sqrt(sea_variance)), water);
+    s.metallic = 0.0;
 
-        // Debug views (scene.setDebugView): the share under water, the
-        // tile's level (a hue each of six), the base colour unlit, the light
-        // groundLight found (sun seen, sky seen, the clouds' share of the
-        // sun), and the shading normal.
-        if (SCENE_DEBUG(water)) sceneDebugOut(vec3(water));
-        if (SCENE_DEBUG(level)) {
-            float hue = float(v_level % 6) / 6.0;
-            sceneDebugOut(clamp(abs(mod(hue * 6.0 + vec3(0.0, 4.0, 2.0), 6.0) - 3.0) - 1.0, 0.0, 1.0) * 0.5);
-        }
-        if (SCENE_DEBUG(albedo)) sceneDebugOut(baseColor);
-        // The albedo's two factors: the detail layer's texels, bilinear, and
-        // the octaves' luminance over them (a half for 1).
-        if (SCENE_DEBUG(texels)) sceneDebugOut(col.rgb);
-        if (SCENE_DEBUG(octaves)) sceneDebugOut(vec3(0.5 * exp(lum - 0.5 * lumVar)));
-        if (SCENE_DEBUG(light)) sceneDebugOut(v_light.xyz);
-        if (SCENE_DEBUG(normal)) sceneDebugOut(normal * 0.5 + 0.5);
-        if (SCENE_DEBUG(skirt)) sceneDebugOut(v_skirt > 0.0 ? vec3(1.0, 0.0, 0.0) : baseColor);
-        // Where in its tile a pixel lies (0 to 1 across), its texel's edges
-        // dark over the base colour.
-        if (SCENE_DEBUG(tile)) {
-            vec2 at = (v_tex + 0.5) / ${DETAIL}.0 - ${BORDER}.0;
-            vec2 e = abs(fract(v_tex + 0.5) - 0.5);
-            sceneDebugOut(mix(vec3(at / ${TILE}.0, 0.0), baseColor, 0.5) * (max(e.x, e.y) > 0.45 ? 0.3 : 1.0));
-        }
-    }`;
+    s.sun_visibility *= v_light.x;
+    s.sky_visibility *= v_light.y * (1.0 - 0.8 * g_floor);
+    s.occluder_sun *= v_light.z;
+    s.sun_diffuse = v_light.w;
+    s.sky_normal = normalize(s.normal + v_bent);
+
+    if (SCENE_DEBUG(water)) { s = mesh::debug(s, vec3<f32>(water)); }
+    if (SCENE_DEBUG(level)) {
+        let hue = ((v_level % 6) as f32) / 6.0;
+        s = mesh::debug(s, clamp(abs(mod(vec3<f32>(hue * 6.0) + vec3<f32>(0.0, 4.0, 2.0), 6.0) - vec3<f32>(3.0)) - vec3<f32>(1.0), vec3<f32>(0.0), vec3<f32>(1.0)) * 0.5);
+    }
+    if (SCENE_DEBUG(albedo)) { s = mesh::debug(s, s.base_color); }
+    if (SCENE_DEBUG(texels)) { s = mesh::debug(s, col.xyz); }
+    if (SCENE_DEBUG(octaves)) { s = mesh::debug(s, vec3<f32>(0.5 * exp(lum - 0.5 * lum_var))); }
+    if (SCENE_DEBUG(light)) { s = mesh::debug(s, v_light.xyz); }
+    if (SCENE_DEBUG(normal)) { s = mesh::debug(s, s.normal * 0.5 + vec3<f32>(0.5)); }
+    if (SCENE_DEBUG(skirt)) { s = mesh::debug(s, v_skirt > 0.0 ? vec3<f32>(1.0, 0.0, 0.0) : s.base_color); }
+    if (SCENE_DEBUG(tile)) {
+        let at = (v_tex + vec2<f32>(0.5)) / ${DETAIL}.0 - vec2<f32>(${BORDER}.0);
+        let e = abs(fract(v_tex + vec2<f32>(0.5)) - vec2<f32>(0.5));
+        s = mesh::debug(s, mix(vec3<f32>(at / ${TILE}.0, 0.0), s.base_color, 0.5) * (max(e.x, e.y) > 0.45 ? 0.3 : 1.0));
+    }
+    return s;
+}`;
 
 let ground = null;
-ground = scene.createInstancedMesh({ mesh: patchMesh(), color: [1, 1, 1], castsShadow: false, receivesShadow: false, doubleSided: true });
-ground.setShader({ vertex, fragment });
+ground = scene.createInstancedMesh({
+    mesh: patchMesh(), color: [1, 1, 1],
+    castsShadow: false, receivesShadow: false, doubleSided: true,
+    module: groundHookBk, file: 'ground_mesh.bk',
+});
 ground.cullMargin = 4 * RADIUS;   // the shader places tiles; the cache culls them
 makeCache(4);
 const cloudMod = bro.kernel.compile(readApp('clouds.bk'), { file: 'clouds.bk', modules: MODULES });
@@ -738,14 +768,14 @@ function frame() {
         camHi[k] = Math.fround(f.pos[k]);
         camLo[k] = f.pos[k] - camHi[k];
     }
-    ground.setShaderUniform('u_camHi', camHi);
-    ground.setShaderUniform('u_camLo', camLo);
-    ground.setShaderUniform('u_time', performance.now() / 1000 % WAVE_CLOCK);
-    ground.setShaderUniform('u_treesFar', trees.far);
+    ground.setShaderUniform('cam_hi', camHi);
+    ground.setShaderUniform('cam_lo', camLo);
+    ground.setShaderUniform('time', performance.now() / 1000 % WAVE_CLOCK);
+    ground.setShaderUniform('trees_far', trees.far);
     const d = sun.direction, dl = Math.hypot(d[0], d[1], d[2]);
     clouds.update(f.pos, f.surface + cam.alt - RADIUS, [-d[0] / dl, -d[1] / dl, -d[2] / dl], lastView);
     const cone = Math.atan(Math.tan(FOV * Math.PI / 360) * Math.hypot(1, aspect));
-    ground.setShaderUniform('u_toSun', [-d[0] / dl, -d[1] / dl, -d[2] / dl]);
+    ground.setShaderUniform('to_sun', [-d[0] / dl, -d[1] / dl, -d[2] / dl]);
     grass.update(f.pos, cam.alt, [-d[0] / dl, -d[1] / dl, -d[2] / dl], camHi, camLo, f.fwd, cone, performance.now() / 1000 % WAVE_CLOCK);
     trees.update(f.pos, cam.alt, [-d[0] / dl, -d[1] / dl, -d[2] / dl], camHi, camLo, f.fwd, cone, performance.now() / 1000 % WAVE_CLOCK);
     for (let k = 0; k < 3; k++) atmosphere.planetCenter[k] = -f.pos[k];

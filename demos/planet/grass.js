@@ -95,180 +95,193 @@ const SUN_P = N / SUN_STRIDE + 1;
 // as the field's cover there grows grass, and fading out as the blades do
 // toward FAR, past which the ground is the blades' average itself.
 export const GRASS_FLOOR = 0.55;
-export const grassFloorGlsl = `
-    buffer float u_grassField[];
-    uniform vec3 u_grassA;    // the face's plane: axis and its two directions
-    uniform vec3 u_grassE;
-    uniform vec3 u_grassF;
-    uniform vec3 u_grassUV;   // the field's point 0 on the plane, and the plane's units a point; 0: no field
-    float grassFloor(vec3 P, float d) {
-        float fade = smoothstep(${FAR}.0, ${FAR * 0.8}, d);
-        if (fade <= 0.0 || u_grassUV.z <= 0.0) return 1.0;
-        vec3 q = normalize(P);
-        vec2 f = (vec2(dot(q, u_grassE), dot(q, u_grassF)) / dot(q, u_grassA) - u_grassUV.xy) / u_grassUV.z;
-        if (any(lessThan(f, vec2(0.0))) || any(greaterThanEqual(f, vec2(${P - 1}.0)))) return 1.0;
-        ivec2 i = ivec2(f);
-        vec2 t = f - vec2(i);
-        int k = (i.y * ${P} + i.x) * 7 + 3;
-        float cover = mix(mix(u_grassField[k], u_grassField[k + 7], t.x),
-                          mix(u_grassField[k + ${P * 7}], u_grassField[k + ${P * 7 + 7}], t.x), t.y);
+export const grassFloorBk = `
+    fn grass_floor(p: vec3<f32>, d: f32) -> f32 {
+        let fade = smoothstep(${FAR.toFixed(1)}, ${(FAR * 0.8).toFixed(1)}, d);
+        if (fade <= 0.0 || params.grass_uv.z <= 0.0) { return 1.0; }
+        let q = normalize(p);
+        let f = (vec2<f32>(dot(q, params.grass_e), dot(q, params.grass_f)) / dot(q, params.grass_a) - params.grass_uv.xy) / params.grass_uv.z;
+        if (f.x < 0.0 || f.y < 0.0 || f.x >= ${P - 1}.0 || f.y >= ${P - 1}.0) { return 1.0; }
+        let i = vec2<i32>(f.x as i32, f.y as i32);
+        let t = f - vec2<f32>(i.x as f32, i.y as f32);
+        let k = (i.y * ${P} + i.x) * 7 + 3;
+        let cover = mix(mix(grass_field[k], grass_field[k + 7], t.x),
+                        mix(grass_field[k + ${P * 7}], grass_field[k + ${P * 7 + 7}], t.x), t.y);
         return mix(1.0, ${GRASS_FLOOR}, fade * cover);
     }`;
 
-const vertex = `buffer float u_field[];
-    buffer uint u_sun[];
-    buffer int u_cells[];
-    uniform vec3 u_camHi;
-    uniform vec3 u_camLo;
-    uniform vec3 u_oHi;
-    uniform vec3 u_oLo;
-    uniform vec2 u_lattice;   // the field's point 0 on the world's lattice
-    uniform vec2 u_sunLattice;   // and the sun grid's
-    uniform float u_time;
-    uniform float u_blades;   // this cell's blades
-    uniform vec2 u_band;      // the distances this node draws over: blades from r0, none past r1
-    uniform vec3 u_camFwd;
-    uniform float u_cosView;  // the cosine of the view's half diagonal, a little wider
-    uniform float u_first;    // the first cell drawn, of u_cellCount
-    uniform float u_cellCount;
-    out vec3 v_col;
-    out float v_t;
-    // The sun seen past the terrain, then the clouds' sun straight through,
-    // scattered down, and sky (sunAt): one varying, as a blade's triangles
-    // are tiny and each one costs.
-    out vec4 v_light;
-    uint pcg(uint v) {
-        uint s = v * 747796405u + 2891336453u;
-        uint w = ((s >> ((s >> 28u) + 4u)) ^ s) * 277803737u;
-        return (w >> 22u) ^ w;
-    }
-    float rnd(inout uint s) { s = pcg(s); return float(s) * (1.0 / 4294967296.0); }
-    void fieldPoint(int x, int y, out vec3 p, out float cover, out vec3 albedo) {
-        int k = (y * ${P} + x) * 7;
-        p = vec3(u_field[k], u_field[k + 1], u_field[k + 2]);
-        cover = u_field[k + 3];
-        albedo = vec3(u_field[k + 4], u_field[k + 5], u_field[k + 6]);
-    }
-    // The sun grid between its points, at field point f (sun.js: the
-    // terrain's sun, then the clouds' direct, scattered and sky).
-    vec4 sunAt(vec2 f) {
-        vec2 s = clamp(f / ${SUN_STRIDE}.0, vec2(0.0), vec2(${SUN_P - 1}.0 - 1e-3));
-        ivec2 i = ivec2(s);
-        vec2 t = s - vec2(i);
-        int k = i.y * ${SUN_P} + i.x;
-        return mix(mix(unpackUnorm4x8(u_sun[k]), unpackUnorm4x8(u_sun[k + 1]), t.x),
-                   mix(unpackUnorm4x8(u_sun[k + ${SUN_P}]), unpackUnorm4x8(u_sun[k + ${SUN_P + 1}]), t.x), t.y);
-    }
-    void userVertex(inout vec3 pos, inout vec3 normal, inout vec2 uv) {
-        // The cells are sorted by their angle about the field's centre, and a
-        // node draws the run of them toward the view, from u_first round.
-        int ci = (gl_InstanceIndex + int(u_first)) % int(u_cellCount);
-        ivec2 cell = ivec2(u_cells[2 * ci], u_cells[2 * ci + 1]) + ivec2(${N / 2});
-        int b = int(pos.x + 0.5);
-        float t = pos.y, side = pos.z;
-        ivec2 world = cell + ivec2(u_lattice);
-        uint seed = pcg(uint(world.x) * 73856093u ^ uint(world.y) * 19349663u ^ uint(b) * 83492791u);
-        vec2 at = vec2(rnd(seed), rnd(seed));
-        cell = clamp(cell, ivec2(0), ivec2(${N - 1}));
-        // A blade whose cell (under 1.5 m across) is out of this node's band
-        // or the view, or that stands beyond what the distance keeps, is one
-        // point: its triangles have no area, and it costs one field read.
-        int k0 = (cell.y * ${P} + cell.x) * 7;
-        vec3 rel0 = (u_oHi - u_camHi) + (u_oLo - u_camLo) + vec3(u_field[k0], u_field[k0 + 1], u_field[k0 + 2]);
-        float d0 = length(rel0);
-        if (d0 < u_band.x - 1.5 || d0 > u_band.y + 1.5 || dot(rel0, u_camFwd) + 1.5 < u_cosView * d0
-            || float(b) + 0.5 > min(1.0, ${THIN}.0 / max(d0 - 1.5, 1e-6)) * ${DENSE}.0) {
-            pos = vec3(0.0);
-            normal = vec3(0.0, 0.0, 1.0);
-            v_t = 0.0;
-            v_col = vec3(0.0);
-            v_light = vec4(0.0);
-            return;
-        }
-        vec3 p00, p10, p01, p11, a00, a10, a01, a11;
-        float c00, c10, c01, c11;
-        fieldPoint(cell.x, cell.y, p00, c00, a00);
-        fieldPoint(cell.x + 1, cell.y, p10, c10, a10);
-        fieldPoint(cell.x, cell.y + 1, p01, c01, a01);
-        fieldPoint(cell.x + 1, cell.y + 1, p11, c11, a11);
-        vec3 base = mix(mix(p00, p10, at.x), mix(p01, p11, at.x), at.y);
-        float cover = mix(mix(c00, c10, at.x), mix(c01, c11, at.x), at.y);
-        vec3 albedo = mix(mix(a00, a10, at.x), mix(a01, a11, at.x), at.y);
-        v_light = sunAt(vec2(cell) + at + (u_lattice - u_sunLattice));
-        vec3 rel = (u_oHi - u_camHi) + (u_oLo - u_camLo) + base;
-        vec3 up = normalize(u_oHi + (u_oLo + base));
-        float d = length(rel);
+const grassHookBk = `module hook;
+import mesh;
 
-        // How many stand here, of the dense cell's: all out to THIN, then
-        // THIN / d (a blade's height on screen falls as 1 / d, so as many
-        // per pixel would thin the cover); this cell's share of them, its blades taken in index
-        // order, the last shrinking into the ground. Wider by the root of
-        // what was dropped, so the cover holds.
-        float keep = min(1.0, ${THIN}.0 / max(d, 1e-6));
-        float share = keep * ${DENSE}.0 / u_blades * cover;
-        float grow = clamp((share - (float(b) + 0.5) / u_blades) * u_blades, 0.0, 1.0);
-        // This node's band (the sparse cells take over at NEAR, where they
-        // stand as many as the dense), and the last fifth before FAR fading.
-        grow *= step(u_band.x, d) * step(d, u_band.y) * smoothstep(${FAR}.0, ${FAR * 0.8}, d);
-        float wide = clamp(inversesqrt(keep), 1.0, 8.0);
+struct Params {
+    cam_hi: vec3<f32>,
+    cam_lo: vec3<f32>,
+    o_hi: vec3<f32>,
+    o_lo: vec3<f32>,
+    lattice: vec2<f32>,
+    sun_lattice: vec2<f32>,
+    time: f32,
+    blades: f32,
+    band: vec2<f32>,
+    cam_fwd: vec3<f32>,
+    cos_view: f32,
+    first: f32,
+    cell_count: f32,
+}
+@binding(4, 0) var params: uniform<Params>;
+@binding(4, 14) var field: read_buffer<f32>;
+@binding(4, 15) var sun: read_buffer<u32>;
+@binding(4, 16) var cells: read_buffer<i32>;
 
-        // The blade: its height, facing, bend and width from its hash.
-        float height = mix(0.22, 0.55, rnd(seed)) * grow;
-        float phi = 6.2831853 * rnd(seed);
-        vec3 tx = normalize(cross(up, abs(up.y) < 0.9 ? vec3(0.0, 1.0, 0.0) : vec3(1.0, 0.0, 0.0)));
-        vec3 ty = cross(up, tx);
-        vec3 facing = tx * cos(phi) + ty * sin(phi);
-        vec3 across = cross(up, facing);
-        // A gusting breeze along tx, its phase moving over the ground.
-        vec3 w = mod(u_oHi, 64.0) + mod(u_oLo, 64.0) + base;
-        float gust = 0.5 + 0.5 * sin(u_time * 1.3 - dot(w, tx) * 0.35 + 0.8 * sin(dot(w, ty) * 0.2 + u_time * 0.4));
-        float sway = (0.10 + 0.25 * gust) + 0.06 * sin(u_time * 4.1 + rnd(seed) * 6.28);
-        float bend = mix(0.12, 0.45, rnd(seed));
-        vec3 lean = facing * bend + tx * sway;
-        // Along the blade, bent as a cantilever: up, then over.
-        vec3 spine = up * height * t + lean * height * t * t;
-        vec3 dspine = up * height + lean * height * 2.0 * t;
-        float width = 0.028 * wide * (1.0 - t) * step(1e-4, height);
-        pos = rel + spine + across * (side * width * 0.5);
-        vec3 n = normalize(cross(across, dspine + up * 1e-5));
-        if (dot(n, facing) < 0.0) n = -n;
-        // Rounded across the blade, and toward the sky: a field of blades
-        // lights as the soft cover it is, not as flat cards.
-        normal = normalize(n + across * side * 0.5 + up * 1.2);
-        v_t = t;
-        v_col = albedo * exp(0.3 * (rnd(seed) - 0.5));
-    }`;
-
-const fragment = (radius) => `in vec3 v_col;
-    in float v_t;
-    in vec4 v_light;
-    uniform vec3 u_camHi;
-    uniform vec3 u_camLo;
-    void userFragment(inout vec3 baseColor, inout vec3 normal, inout float metallic,
-                      inout float roughness, inout vec3 emissive, inout float alpha) {
-        // Darker toward the root, where the blades around shade it.
-        baseColor = v_col * mix(0.75, 1.1, v_t);
-        // A two-sided blade's back face turns the normal down; a thin blade
-        // passes light through, so either face lights as the sky side does.
-        if (dot(normal, (u_camHi + u_camLo) + vWorldPos) < 0.0) normal = -normal;
-        metallic = 0.0;
-        roughness = 0.75;
+fn pcg(v: u32) -> u32 {
+    let s = v * 747796405u + 2891336453u;
+    let w = ((s >> ((s >> 28u) + 4u)) ^ s) * 277803737u;
+    return (w >> 22u) ^ w;
+}
+fn rnd_val(s: u32) -> f32 {
+    return (s as f32) * (1.0 / 4294967296.0);
+}
+struct FieldPoint {
+    p: vec3<f32>,
+    cover: f32,
+    albedo: vec3<f32>,
+}
+fn field_point(x: i32, y: i32) -> FieldPoint {
+    let k = (y * ${P} + x) * 7;
+    return FieldPoint {
+        p: vec3<f32>(field[k], field[k + 1], field[k + 2]),
+        cover: field[k + 3],
+        albedo: vec3<f32>(field[k + 4], field[k + 5], field[k + 6]),
+    };
+}
+// The sun grid between its points, at field point f (sun.js: the
+// terrain's sun, then the clouds' direct, scattered and sky).
+fn sun_at(f: vec2<f32>) -> vec4<f32> {
+    let s = clamp(f / ${SUN_STRIDE}.0, vec2<f32>(0.0), vec2<f32>(${SUN_P - 1}.0 - 1e-3));
+    let i = vec2<i32>(s.x as i32, s.y as i32);
+    let t = s - vec2<f32>(i.x as f32, i.y as f32);
+    let k = i.y * ${SUN_P} + i.x;
+    return mix(mix(unpack_unorm4x8(sun[k]), unpack_unorm4x8(sun[k + 1]), t.x),
+               mix(unpack_unorm4x8(sun[k + ${SUN_P}]), unpack_unorm4x8(sun[k + ${SUN_P + 1}]), t.x), t.y);
+}
+pub fn vertex(v_in: mesh::Vertex) -> mesh::Vertex {
+    var v = v_in;
+    // The cells are sorted by their angle about the field's centre, and a
+    // node draws the run of them toward the view, from first round.
+    let ci = (v.instance_index + (params.first as i32)) % (params.cell_count as i32);
+    var cell = vec2<i32>(cells[2 * ci], cells[2 * ci + 1]) + vec2<i32>(${N / 2});
+    let b = (v.pos.x + 0.5) as i32;
+    let t = v.pos.y;
+    let side = v.pos.z;
+    let world = cell + vec2<i32>(params.lattice.x as i32, params.lattice.y as i32);
+    var seed = pcg((world.x as u32) * 73856093u ^ (world.y as u32) * 19349663u ^ (b as u32) * 83492791u);
+    seed = pcg(seed);
+    let at_x = rnd_val(seed);
+    seed = pcg(seed);
+    let at_y = rnd_val(seed);
+    let at = vec2<f32>(at_x, at_y);
+    cell = clamp(cell, vec2<i32>(0), vec2<i32>(${N - 1}));
+    // A blade whose cell (under 1.5 m across) is out of this node's band
+    // or the view, or that stands beyond what the distance keeps, is one
+    // point: its triangles have no area, and it costs one field read.
+    let k0 = (cell.y * ${P} + cell.x) * 7;
+    let rel0 = (params.o_hi - params.cam_hi) + (params.o_lo - params.cam_lo) + vec3<f32>(field[k0], field[k0 + 1], field[k0 + 2]);
+    let d0 = length(rel0);
+    if (d0 < params.band.x - 1.5 || d0 > params.band.y + 1.5 || dot(rel0, params.cam_fwd) + 1.5 < params.cos_view * d0
+        || (b as f32) + 0.5 > min(1.0, ${THIN}.0 / max(d0 - 1.5, 1e-6)) * ${DENSE}.0) {
+        v.pos = vec3<f32>(0.0);
+        v.normal = vec3<f32>(0.0, 0.0, 1.0);
+        v.v0 = vec4<f32>(0.0);
+        v.v1 = vec4<f32>(0.0);
+        return v;
     }
+    let fp00 = field_point(cell.x, cell.y);
+    let fp10 = field_point(cell.x + 1, cell.y);
+    let fp01 = field_point(cell.x, cell.y + 1);
+    let fp11 = field_point(cell.x + 1, cell.y + 1);
+    let base = mix(mix(fp00.p, fp10.p, at.x), mix(fp01.p, fp11.p, at.x), at.y);
+    let cover = mix(mix(fp00.cover, fp10.cover, at.x), mix(fp01.cover, fp11.cover, at.x), at.y);
+    let albedo = mix(mix(fp00.albedo, fp10.albedo, at.x), mix(fp01.albedo, fp11.albedo, at.x), at.y);
+    let v_light = sun_at(vec2<f32>(cell.x as f32, cell.y as f32) + at + (params.lattice - params.sun_lattice));
+    let rel = (params.o_hi - params.cam_hi) + (params.o_lo - params.cam_lo) + base;
+    let up = normalize(params.o_hi + (params.o_lo + base));
+    let d = length(rel);
+
+    // How many stand here, of the dense cell's: all out to THIN, then
+    // THIN / d (a blade's height on screen falls as 1 / d, so as many
+    // per pixel would thin the cover); this cell's share of them, its blades taken in index
+    // order, the last shrinking into the ground. Wider by the root of
+    // what was dropped, so the cover holds.
+    let keep = min(1.0, ${THIN}.0 / max(d, 1e-6));
+    let share = keep * ${DENSE}.0 / params.blades * cover;
+    var grow = clamp((share - ((b as f32) + 0.5) / params.blades) * params.blades, 0.0, 1.0);
+    // This node's band (the sparse cells take over at NEAR, where they
+    // stand as many as the dense), and the last fifth before FAR fading.
+    grow *= step(params.band.x, d) * step(d, params.band.y) * smoothstep(${FAR.toFixed(1)}, ${(FAR * 0.8).toFixed(1)}, d);
+    let wide = clamp(inversesqrt(keep), 1.0, 8.0);
+
+    // The blade: its height, facing, bend and width from its hash.
+    seed = pcg(seed);
+    let height = mix(0.22, 0.55, rnd_val(seed)) * grow;
+    seed = pcg(seed);
+    let phi = 6.2831853 * rnd_val(seed);
+    let tx = normalize(cross(up, abs(up.y) < 0.9 ? vec3<f32>(0.0, 1.0, 0.0) : vec3<f32>(1.0, 0.0, 0.0)));
+    let ty = cross(up, tx);
+    let facing = tx * cos(phi) + ty * sin(phi);
+    let across = cross(up, facing);
+    // A gusting breeze along tx, its phase moving over the ground.
+    let w = mod(params.o_hi, 64.0) + mod(params.o_lo, 64.0) + base;
+    let gust = 0.5 + 0.5 * sin(params.time * 1.3 - dot(w, tx) * 0.35 + 0.8 * sin(dot(w, ty) * 0.2 + params.time * 0.4));
+    seed = pcg(seed);
+    let sway = (0.10 + 0.25 * gust) + 0.06 * sin(params.time * 4.1 + rnd_val(seed) * 6.28);
+    seed = pcg(seed);
+    let bend = mix(0.12, 0.45, rnd_val(seed));
+    let lean = facing * bend + tx * sway;
+    // Along the blade, bent as a cantilever: up, then over.
+    let spine = up * height * t + lean * height * t * t;
+    let dspine = up * height + lean * height * 2.0 * t;
+    let width = 0.028 * wide * (1.0 - t) * step(1e-4, height);
+    v.pos = rel + spine + across * (side * width * 0.5);
+    var n = normalize(cross(across, dspine + up * 1e-5));
+    if (dot(n, facing) < 0.0) { n = -n; }
+    // Rounded across the blade, and toward the sky: a field of blades
+    // lights as the soft cover it is, not as flat cards.
+    v.normal = normalize(n + across * side * 0.5 + up * 1.2);
+    seed = pcg(seed);
+    let v_col = albedo * exp(0.3 * (rnd_val(seed) - 0.5));
+    v.v0 = vec4<f32>(v_col, t);
+    v.v1 = v_light;
+    return v;
+}
+
+pub fn fragment(v: mesh::Vertex, s_in: mesh::Surface) -> mesh::Surface {
+    var s = s_in;
+    let v_col = v.v0.xyz;
+    let v_t = v.v0.w;
+    let v_light = v.v1;
+    // Darker toward the root, where the blades around shade it.
+    s.base_color = v_col * mix(0.75, 1.1, v_t);
+    // A two-sided blade's back face turns the normal down; a thin blade
+    // passes light through, so either face lights as the sky side does.
+    if (dot(s.normal, (params.cam_hi + params.cam_lo) + v.world_pos) < 0.0) {
+        s.normal = -s.normal;
+    }
+    s.metallic = 0.0;
+    s.roughness = 0.75;
     // The terrain's shadow and the clouds' light from the sun grid, which
     // takes the clouds as the ground's light does (sun.bk); and the sky the
     // blades around hide from a blade's lower part.
-    void userLight(vec3 toSun, inout float sunVisibility, inout float skyVisibility, inout vec3 skyNormal,
-                   inout float occluderSun, inout float sunDiffuse) {
-        sunVisibility *= v_light.x * v_light.y;
-        sunDiffuse = v_light.z;
-        skyVisibility *= mix(0.45, 1.0, v_t) * v_light.w;
-        occluderSun *= v_light.y;
-    }`;
+    s.sun_visibility *= v_light.x * v_light.y;
+    s.sun_diffuse = v_light.z;
+    s.sky_visibility *= mix(0.45, 1.0, v_t) * v_light.w;
+    s.occluder_sun *= v_light.y;
+    return s;
+}`;
 
 // The grass in `scene`, its field produced by `module` (grass.bk
 // k_grass_field) and its sun grid, the terrain's shadow and the clouds'
 // light, by `sunModule` (sun.bk) at `octaves` of the ground's; `readers` are
-// nodes whose chunks include grassFloorGlsl, bound to its field. update() each frame with the eye about the
+// nodes whose modules include grassFloorBk, bound to its field. update() each frame with the eye about the
 // planet's centre (f64), its altitude and the unit direction to the sun.
 export function createGrass(scene, radius, module, sunModule, octaves, seed, net, readers = []) {
     const fieldKernel = module.kernel('k_grass_field'), heightsKernel = module.kernel('k_grass_heights');
@@ -279,20 +292,22 @@ export function createGrass(scene, radius, module, sunModule, octaves, seed, net
         { blades: SPARSE, band: [NEAR, FAR], ring: cellRing(NEAR, FAR) },
     ];
     const nodes = bands.map(({ blades, band, ring }) => {
-        const node = scene.createInstancedMesh({ mesh: bladeCell(blades), color: [1, 1, 1],
-                                                 castsShadow: false, receivesShadow: false, doubleSided: true });
-        node.setShader({ vertex, fragment: fragment(radius) });
+        const node = scene.createInstancedMesh({
+            mesh: bladeCell(blades), color: [1, 1, 1],
+            castsShadow: false, receivesShadow: false, doubleSided: true,
+            module: grassHookBk, file: 'grass_mesh.bk',
+        });
         node.cullMargin = 4 * radius;   // the shader places the blades
         node.drawOrder = 6;             // before the ground it hides
-        node.setShaderBuffer('u_field', field);
-        node.setShaderBuffer('u_sun', sunGrid.buffer);
-        node.setShaderBuffer('u_cells', bro.kernel.createBuffer(ring.cells));
-        node.setShaderUniform('u_blades', blades);
-        node.setShaderUniform('u_band', band);
+        node.setShaderBuffer('field', field);
+        node.setShaderBuffer('sun', sunGrid.buffer);
+        node.setShaderBuffer('cells', bro.kernel.createBuffer(ring.cells));
+        node.setShaderUniform('blades', blades);
+        node.setShaderUniform('band', band);
         node.count = ring.angles.length;
         node.angles = ring.angles;
-        node.setShaderUniform('u_cellCount', node.count);
-        node.setShaderUniform('u_first', 0);
+        node.setShaderUniform('cell_count', node.count);
+        node.setShaderUniform('first', 0);
         node.reach = band[1];
         node.shown = false;
         node.setInstanceCount(0);
@@ -353,7 +368,7 @@ export function createGrass(scene, radius, module, sunModule, octaves, seed, net
                 const end = lowerBound(n.angles, wrap(azimuth + half));
                 count = (end - first + n.count) % n.count;
             }
-            n.setShaderUniform('u_first', first);
+            n.setShaderUniform('first', first);
             if (count !== n.instanceCount) n.setInstanceCount(count);
         }
     }
@@ -388,16 +403,16 @@ export function createGrass(scene, radius, module, sunModule, octaves, seed, net
                 lo[k] = origin[k] - hi[k];
             }
             for (const n of nodes) {
-                n.setShaderUniform('u_oHi', hi);
-                n.setShaderUniform('u_oLo', lo);
-                n.setShaderUniform('u_lattice', [ui - N / 2, vi - N / 2]);
+                n.setShaderUniform('o_hi', hi);
+                n.setShaderUniform('o_lo', lo);
+                n.setShaderUniform('lattice', [ui - N / 2, vi - N / 2]);
             }
             for (const n of readers) {
-                n.setShaderBuffer('u_grassField', field);
-                n.setShaderUniform('u_grassA', frame.a);
-                n.setShaderUniform('u_grassE', frame.e);
-                n.setShaderUniform('u_grassF', frame.f);
-                n.setShaderUniform('u_grassUV', [(ui - N / 2) * dl, (vi - N / 2) * dl, dl]);
+                n.setShaderBuffer('grass_field', field);
+                n.setShaderUniform('grass_a', frame.a);
+                n.setShaderUniform('grass_e', frame.e);
+                n.setShaderUniform('grass_f', frame.f);
+                n.setShaderUniform('grass_uv', [(ui - N / 2) * dl, (vi - N / 2) * dl, dl]);
             }
             // The sun grid follows, read about its own lattice until shown.
             sunDue = true;
@@ -414,8 +429,8 @@ export function createGrass(scene, radius, module, sunModule, octaves, seed, net
         sunProduction = stepped(steps, () => {
             const buffer = sunGrid.swap();
             for (const n of nodes) {
-                n.setShaderBuffer('u_sun', buffer);
-                n.setShaderUniform('u_sunLattice', lattice);
+                n.setShaderBuffer('sun', buffer);
+                n.setShaderUniform('sun_lattice', lattice);
             }
         });
     }
@@ -440,11 +455,11 @@ export function createGrass(scene, radius, module, sunModule, octaves, seed, net
             produce(eye, toSun);
             aim(eye, forward, cone);
             for (const n of nodes) {
-                n.setShaderUniform('u_camHi', camHi);
-                n.setShaderUniform('u_camLo', camLo);
-                n.setShaderUniform('u_time', time);
-                n.setShaderUniform('u_camFwd', forward);
-                n.setShaderUniform('u_cosView', Math.cos(Math.min(cone + 0.1, Math.PI)));
+                n.setShaderUniform('cam_hi', camHi);
+                n.setShaderUniform('cam_lo', camLo);
+                n.setShaderUniform('time', time);
+                n.setShaderUniform('cam_fwd', forward);
+                n.setShaderUniform('cos_view', Math.cos(Math.min(cone + 0.1, Math.PI)));
             }
         },
     };
