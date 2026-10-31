@@ -732,12 +732,17 @@ pub fn volume(ray: volume::Ray) -> volume::Light {
         // (a cut-off at a slope drew a line across every cloud there).
         let back = (1.0 - inside) * min(sd.above / max(descent, 1.0e-6), vec4<f32>(0.5 * (t - t_prev)));
         // Where the sun field finds a shorter way out (a side toward a low
-        // sun, the sun's ray leaving the cloud long before any top), it.
+        // sun, the sun's ray leaving the cloud long before any top), it. The
+        // way back to where the step entered keeps of either depth what it
+        // keeps of the column's: subtracted from the field's whole, the
+        // column's fall (steep at a low sun) took it to nothing, and a level
+        // ray at dusk lit its clouds half again as bright as fine steps do.
         let tf = field_tau(sp, st, x.s);
         if (sun_seen < 0.0) {
             sun_seen = tf;
         }
-        let tau_sun = max(min(sd.tau, vec4<f32>(tf)) - rate * back, vec4<f32>(0.0));
+        let kept = max(sd.tau - rate * back, vec4<f32>(0.0)) / max(sd.tau, vec4<f32>(1.0e-6));
+        let tau_sun = min(sd.tau, vec4<f32>(tf)) * kept;
         let len = dt + back;
         // The sun and the sky through the air, taken where the ray first
         // meets cloud and again every 20 km along it.
