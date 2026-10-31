@@ -6,17 +6,17 @@ module planet::ground;
 
 import std::noise::*;
 from planet::rivers import water_at, lake_surface;
+// The ridged relief's octaves and statistics, which the ground's shader
+// shares (relief.bk): BASE_WAVELENGTH the first octave's wavelength, metres;
+// RIDGE_MEAN E[(1 - |noise|)^2] and NOISE_VAR Var(noise), measured over 200k
+// samples; NOISE_GRAD_VAR the variance of the noise's gradient along one axis
+// per unit of input.
+from planet::relief import BASE_WAVELENGTH, RIDGE_MEAN, NOISE_VAR, NOISE_GRAD_VAR, NOISE_BOX, RIDGE_FIRST, RIDGE_LAST,
+    RIDGE_PAST, FINE_FIRST, WARP_OCTAVE, WARP_DISPLACE, ridge_amp, normal_cdf, ridge_cell_mean, span_at, mean_factor, SimplexAt;
 
-// Wavelength of the first octave, in metres.
-const BASE_WAVELENGTH: f64 = 2400000.0;
-// E[(1 - |noise|)^2], measured over 200k samples.
-const RIDGE_MEAN: f64 = 0.4999;
-// Var(noise), measured the same way.
-const NOISE_VAR: f32 = 0.1504;
-// Var((1 - |noise|)^2), and the variance of either one's gradient along one
-// axis per unit of input, measured the same way.
+// Var((1 - |noise|)^2), and the variance of its gradient along one axis per
+// unit of input, measured the same way.
 const RIDGE_VAR: f32 = 0.0727;
-const NOISE_GRAD_VAR: f32 = 2.027;
 const RIDGE_GRAD_VAR: f32 = 4.586;
 
 // The ground's noise: OpenSimplex2S, which is continuous everywhere. The
@@ -160,6 +160,24 @@ fn noise(q: vec3<f64>, seed: i32) -> f64 {
 
     return scale_output<f32>(value, -0.0069091119803488254547119140625, 0.0069091119803488254547119140625) as f64;
 }
+pub fn noise_at(q: vec3<f64>, seed: i32) -> f64 {
+    return noise(q, seed);
+}
+
+// Where q is on the noise's lattice, as noise() finds it: the f64 half, from
+// which relief.bk's simplex_grad runs the rest in f32, and simplex_past
+// moves to points near by.
+pub fn simplex_anchor(q: vec3<f64>) -> SimplexAt {
+    let s3: f64 = (0.3333333432674407958984375 as f32) as f64;
+    let sum = q.x + q.y + q.z;
+    let s = q + vec3<f64>(s3 * sum);
+    let c = floor(s);
+    let f = s - c;
+    return SimplexAt {
+        cell: vec3<i32>((c.x as i64) as i32, (c.y as i64) as i32, (c.z as i64) as i32),
+        sk: vec3<f32>(f.x as f32, f.y as f32, f.z as f32),
+    };
+}
 
 // A cell holds the mean of the ground over it, not the value at its centre:
 // on a crest the centre stands above the mean, in a hollow below it, and
@@ -175,14 +193,12 @@ fn noise(q: vec3<f64>, seed: i32) -> f64 {
 // cell a wavelength wide; the ridge's crests are kinks, whose gradient is not
 // curvature a box removes, so its factor falls by exp(-0.9 span) as cells
 // widen. Both within a few hundredths of the measured slopes.
-const NOISE_BOX: f32 = 2.0 * NOISE_GRAD_VAR / NOISE_VAR / 24.0;
 const RIDGE_BOX: f32 = 2.0 * RIDGE_GRAD_VAR / RIDGE_VAR / 24.0;
 fn span_of(o: i32, octaves: f64) -> f32 {
-    return exp2((o as f32) - (octaves as f32)) / 2.5;
+    return span_at(o, octaves as f32);
 }
 fn noise_mean_factor(o: i32, octaves: f64) -> f32 {
-    let s = span_of(o, octaves);
-    return exp(-NOISE_BOX * s * s);
+    return mean_factor(o, octaves as f32);
 }
 fn ridge_mean_factor(o: i32, octaves: f64) -> f32 {
     let s = span_of(o, octaves);
@@ -193,7 +209,6 @@ fn ridge_mean_factor(o: i32, octaves: f64) -> f32 {
 // ridge's 1.1, factor 0.08), the last fading out over its final octave so
 // the sum is continuous in `octaves`.
 const NOISE_PAST: f64 = 2.5;
-const RIDGE_PAST: f64 = 1.5;
 
 // The octaves first to last - 1 of noise, each at the factor of its mean
 // over one of the tile's cells (noise_mean_factor): a tile holds the average
@@ -215,7 +230,7 @@ fn fbm_to(p: vec3<f64>, octaves: f64, first: i32, last: i32, seed: i32) -> f64 {
 // The octaves a tile `extent` wide with cells of `inv_size` of its edge can
 // carry: down to a wavelength of 2.5 cells (app.js octavesFor, the same).
 pub fn octaves_for(extent: f64, inv_size: f64) -> f64 {
-    let ratio = (BASE_WAVELENGTH / (2.5 * extent * inv_size)) as f32;
+    let ratio = ((BASE_WAVELENGTH as f64) / (2.5 * extent * inv_size)) as f32;
     return clamp(log2(ratio), 1.0, 30.0) as f64;
 }
 
@@ -228,18 +243,8 @@ pub fn octaves_for(extent: f64, inv_size: f64) -> f64 {
 // equal slope (0.5), so the slope settles near 33 degrees instead of growing
 // with every octave down. They go on to a 2.3 m wavelength: spurs, gullies
 // and knolls down to a few metres, where a mountainside stopped at 73 m
-// was smooth as a dune from close by.
-const RIDGE_FIRST: i32 = 4;
-const RIDGE_LAST: i32 = 21;
-fn ridge_amp(o: i32) -> f32 {
-    if (o < 8) {
-        if (o == 4) { return 200.0; }
-        if (o == 5) { return 350.0; }
-        if (o == 6) { return 600.0; }
-        return 900.0;
-    }
-    return 1200.0 * pow(0.45, (o - 8) as f32);
-}
+// was smooth as a dune from close by. (relief.bk holds them: RIDGE_FIRST,
+// RIDGE_LAST, ridge_amp.)
 // Where ranges are, their ground is lifted this far (metres): the belt the
 // relief stands on.
 const UPLIFT: f64 = 2500.0;
@@ -292,11 +297,6 @@ fn gradient_share(f: f32, span: f32) -> f32 {
     return min(1.0 - kept * kept + span * span * f * f, 1.0);
 }
 
-// The standard normal CDF.
-fn normal_cdf(z: f32) -> f32 {
-    return 0.5 * (1.0 + tanh(0.7978846 * (z + 0.044715 * z * z * z)));
-}
-
 // E[(X - k)+] for X ~ N(m, s^2): the mean of a ramp over noise a tile
 // cannot resolve.
 fn ramp_mean(m: f32, s: f32, k: f32) -> f32 {
@@ -338,67 +338,31 @@ fn masks(p: vec3<f64>, octaves: f64, seed: i32) -> vec4<f64> {
 // warp much broader than the relief only moves it. Its largest stretch stays
 // short of folding the ground over itself (a displacement gradient of -1).
 // Where it compresses the ground a cell spans more of an octave than its
-// size says, which the mean factors do not follow.
-const WARP_OCTAVE: f64 = 7.0;
-const WARP_DISPLACE: f64 = 0.0013;   // in p units (BASE_WAVELENGTH), per unit of noise
-
-// A ridge octave's mean over one of the tile's cells, from the noise n at
-// the centre. The ridge is (1 - |n|)^2 of a smooth noise, whose cell mean
-// is nonlinear: on a crest (n ~ 0) the centre is the ridge's top and the
-// cell around it is lower, by more than any factor on the ridge's value
-// says. So it is taken through the smooth noise, which holds to its box
-// factor: n over the cell ~ N(f n, (1 - f^2) NOISE_VAR), and the mean of
-// (1 - |n|)^2 is 1 - 2 E|n| + E[n^2], E|n| a folded normal's, scaled so a
-// cell that resolves nothing of the octave holds the ridge's measured mean
-// exactly (the noise is bounded, not Gaussian: E|n| = (1 + NOISE_VAR -
-// RIDGE_MEAN) / 2 over the Gaussian's sqrt(NOISE_VAR) sqrt(2 / pi)).
-// Measured against 16 x 16 box means, it errs 30-40% less than a linear
-// factor on the ridge for cells up to a third of a wavelength, crests
-// included, and the same for wider ones.
-//
-// The spread never falls below CREST: a crest is (1 - |n|)^2 seen through
-// that much noise, rounded over a twentieth of its octave's wavelength,
-// where an exact |n| creases it. A broad octave's crest runs kilometres
-// nearly straight, and creased it was a hard line across the land with
-// planar flanks either side, at every distance.
-const CREST: f32 = 0.08;
-fn ridge_cell_mean(n: f32, f: f32) -> f32 {
-    let mu = f * n;
-    let spread2 = max(max(1.0 - f * f, 0.0) * NOISE_VAR, CREST * CREST);
-    let sd = sqrt(spread2);
-    var fold = abs(mu);
-    if (sd > 1e-6) {
-        let scale = (1.0 + NOISE_VAR - (RIDGE_MEAN as f32)) * 0.5 / (0.7978846 * sqrt(NOISE_VAR));
-        fold = scale * sd * 0.7978846 * exp(-0.5 * mu * mu / spread2) + mu * (1.0 - 2.0 * normal_cdf(-mu / sd));
-    }
-    return 1.0 - 2.0 * fold + mu * mu + spread2;
-}
+// size says, which the mean factors do not follow. (WARP_OCTAVE and
+// WARP_DISPLACE, in p units per unit of noise, are relief.bk's.)
 
 // The relief at p, metres at full uplift: the ridged octaves, each its mean
-// over one of the tile's cells less the ridge's mean.
-// x the octaves below FINE_FIRST, y those from it on.
+// over one of the tile's cells (relief.bk ridge_cell_mean) less the ridge's
+// mean. x the octaves below FINE_FIRST, y those from it on: the ground's
+// fine relief (a 1.2 km wavelength on), spurs, gullies and knolls, which a
+// valley's sides carry on (terrain) instead of being planed away.
 fn relief(p: vec3<f64>, octaves: f64, seed: i32) -> vec2<f64> {
-    let n = min(ceil(octaves + RIDGE_PAST) as i32, RIDGE_LAST);
+    let n = min(ceil(octaves + (RIDGE_PAST as f64)) as i32, RIDGE_LAST);
     if (n <= RIDGE_FIRST) { return vec2<f64>(0.0, 0.0); }
-    let wq = p * exp2(WARP_OCTAVE);
+    let wq = p * exp2(WARP_OCTAVE as f64);
     let warp = vec3<f64>(noise(wq, seed + 400), noise(wq, seed + 401), noise(wq, seed + 402));
-    var q: vec3<f64> = (p + warp * WARP_DISPLACE) * exp2(RIDGE_FIRST as f64);
+    var q: vec3<f64> = (p + warp * (WARP_DISPLACE as f64)) * exp2(RIDGE_FIRST as f64);
     var broad: f64 = 0.0;
     var fine: f64 = 0.0;
     for (var o: i32 = RIDGE_FIRST; o < n; o += 1) {
-        let fade = clamp(octaves + RIDGE_PAST - (o as f64), 0.0, 1.0);
+        let fade = clamp(octaves + (RIDGE_PAST as f64) - (o as f64), 0.0, 1.0);
         let mean = ridge_cell_mean(noise(q, seed + 100 + o) as f32, noise_mean_factor(o, octaves));
-        let v = ((mean as f64) - RIDGE_MEAN) * (ridge_amp(o) as f64) * fade;
+        let v = ((mean - RIDGE_MEAN) as f64) * (ridge_amp(o) as f64) * fade;
         if (o < FINE_FIRST) { broad += v; } else { fine += v; }
         q = q * 2.0;
     }
     return vec2<f64>(broad, fine);
 }
-
-// The octaves from FINE_FIRST on (a 1.2 km wavelength) are the ground's
-// fine relief: spurs, gullies and knolls, which a valley's sides carry on
-// (terrain) instead of being planed away.
-const FINE_FIRST: i32 = 11;
 
 // The ground before the water cuts it, metres above the sphere at `dir`: x
 // its broad shape, y the fine relief over it (FINE_FIRST). Continents from
@@ -406,7 +370,7 @@ const FINE_FIRST: i32 = 11;
 // and carrying the ridged relief), and the fine octaves over both, rougher
 // in the ranges.
 pub fn terrain_parts(dir: vec3<f64>, radius: f64, octaves: f64, seed: i32) -> vec2<f64> {
-    let p = dir * (radius / BASE_WAVELENGTH);
+    let p = dir * (radius / (BASE_WAVELENGTH as f64));
     let m = masks(p, octaves, seed);
     let land = clamp_mean(m.x * 3.0 + 0.15, m.y * 3.0, -1.0, 1.0);
     let uplift = m.z * m.w;
@@ -487,7 +451,7 @@ pub fn cell_height(c: vec3<f64>, u: vec3<f64>, v: vec3<f64>, s: f64, t: f64, cel
 // draws. With gain 0.5 and lacunarity 2 every octave adds the same slope,
 // so the fine octaves matter to the gradient as much as the broad ones.
 pub fn spread(dir: vec3<f64>, radius: f64, octaves: f64, truth: f32, seed: i32) -> vec2<f32> {
-    let m = masks(dir * (radius / BASE_WAVELENGTH), octaves, seed);
+    let m = masks(dir * (radius / (BASE_WAVELENGTH as f64)), octaves, seed);
     let oct = octaves as f32;
     // The continents through the coastline clamp, which passes them where
     // it is linear: 1100 * 3 metres of height per unit of noise.
@@ -786,7 +750,7 @@ pub fn perlin_split(q: vec3<f64>, seed: i32) -> f32 {
 }
 
 pub fn variation(dir: vec3<f64>, radius: f64, octaves: f64, seed: i32) -> vec3<f32> {
-    var q: vec3<f64> = dir * (radius / BASE_WAVELENGTH) * pow(2.0, VARY_FIRST as f64);
+    var q: vec3<f64> = dir * (radius / (BASE_WAVELENGTH as f64)) * pow(2.0, VARY_FIRST as f64);
     var lum: f32 = 0.0;
     var tint: f32 = 0.0;
     var vl: f32 = 0.0;

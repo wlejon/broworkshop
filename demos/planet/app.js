@@ -67,7 +67,7 @@ const WAVES = (() => {
     const freshScale = Math.sqrt((0.003 + 0.00512 * 2) / (list[fresh].tail + residual));
     return { list, residual, swell: list.filter((w) => w.period === SWELL_PERIOD).length, fresh, freshScale };
 })();
-const MODULES = { 'planet::ground': readApp('ground.bk'), 'planet::rivers': readApp('rivers.bk'),
+const MODULES = { 'planet::ground': readApp('ground.bk'), 'planet::relief': readApp('relief.bk'), 'planet::rivers': readApp('rivers.bk'),
                   'planet::clouds': readApp('clouds.bk'), tiles: bro.tiles.module };
 const mod = bro.kernel.compile(readApp('planet.bk'), { file: 'planet.bk', modules: MODULES });
 const rivers = createRivers(bro.kernel.compile(readApp('riverbuild.bk'), { file: 'riverbuild.bk', modules: MODULES }), RADIUS, SEED);

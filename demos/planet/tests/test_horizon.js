@@ -11,7 +11,7 @@ import { check, frames, test, done } from "/lib/kit/test.js";
 const fs = require('fs');
 const readApp = (path) => fs.readFileSync(bro.resolvePath('/app/' + path), 'utf-8');
 const mod = bro.kernel.compile(readApp('tests/measure.bk'),
-                               { file: 'measure.bk', modules: { 'planet::ground': readApp('ground.bk'), 'planet::rivers': readApp('rivers.bk') } });
+                               { file: 'measure.bk', modules: { 'planet::ground': readApp('ground.bk'), 'planet::relief': readApp('relief.bk'), 'planet::rivers': readApp('rivers.bk') } });
 // The drainage network the app built (rivers.js), which the ground carves.
 const NET = planet.rivers.cpu;
 const kTruth = mod.kernel('k_horizon_truth');

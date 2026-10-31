@@ -12,7 +12,7 @@ const fs = require('fs');
 const readApp = (path) => fs.readFileSync(bro.resolvePath('/app/' + path), 'utf-8');
 const mod = bro.kernel.compile(readApp('tests/measure_clouds.bk'), {
     file: 'measure_clouds.bk',
-    modules: { 'planet::ground': readApp('ground.bk'), 'planet::rivers': readApp('rivers.bk'),
+    modules: { 'planet::ground': readApp('ground.bk'), 'planet::relief': readApp('relief.bk'), 'planet::rivers': readApp('rivers.bk'),
                'planet::clouds': readApp('clouds.bk'), tiles: bro.tiles.module },
 });
 const kColumn = mod.kernel('k_column'), kLight = mod.kernel('k_ground_light');
