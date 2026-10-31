@@ -239,12 +239,12 @@ export function createClouds(scene, radius, module, readers, seed, hook, maxGrou
         tileSize: TILE, border: TILE_BORDER, capacity: TILE_CAPACITY, maxLevel: TILE_LEVELS,
         minHeight: CLOUD_BASE, maxHeight: CLOUD_BASE + CLOUD_DEPTH + Math.max(...liftCpu),
         pixelsPerCell: TILE_PIXELS, producePerUpdate: 64,
-        layers: { column: 4, sun: 8 },
+        layers: { column: 4, sun: 8, sunFar: 8 },
         produce(batch) {
             kTile.dispatch([TILE_CELLS, TILE_CELLS, batch.count], batch.table, this.layer('column'),
                            TILE_CELLS, TILE, TILE_BORDER, radius);
             kSun.dispatch([TILE_CELLS, TILE_CELLS, batch.count], batch.table, this.lookup, this.layer('column'),
-                          this.layer('sun'), TILE_CELLS, TILE, TILE_BORDER, TILE_LEVELS, 4 * radius / TILE,
+                          this.layer('sun'), this.layer('sunFar'), TILE_CELLS, TILE, TILE_BORDER, TILE_LEVELS, 4 * radius / TILE,
                           radius, seed, toSun[0], toSun[1], toSun[2], CLOUD_DETAIL_VAR);
         },
     });
@@ -297,6 +297,8 @@ export function createClouds(scene, radius, module, readers, seed, hook, maxGrou
         node.setShaderBuffer('bounds', boundsBuffer);
         node.setShaderTexture('sun_field', { buffer: cache.layer('sun'), width: TILE_CELLS, height: TILE_CELLS,
                                              layers: TILE_CAPACITY, atlas: TILE_ATLAS, channels: 4, format: 'unorm16' });
+        node.setShaderTexture('sun_far', { buffer: cache.layer('sunFar'), width: TILE_CELLS, height: TILE_CELLS,
+                                           layers: TILE_CAPACITY, atlas: TILE_ATLAS, channels: 4, format: 'unorm16' });
         node.setShaderUniform('lift_range', liftRange);
     }
     bind();

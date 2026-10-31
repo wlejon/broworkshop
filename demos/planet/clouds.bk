@@ -370,7 +370,11 @@ fn k_cloud_tile(g: grid<3>, table: read_store<f64, 1>, pool: write_store<i32, 1>
 // third's cover is a depth of 250. Taken a step at a time instead, the
 // gaps of a kilometres-long step lined up whole: the deck's faces toward a
 // dusk sun were lit where the light-marched sun, clouds.sunReference, finds
-// them dark.)
+// them dark.) Beside it, out_far holds the columns SUN_FAR_NEAR and
+// SUN_FAR_OUT metres toward the sun at the tile's own footprint, from which
+// a reader takes the neighbours' shade at its own height (clouds_volume.bk
+// billow_tau): at the field's four heights, 750 m apart, a top's shade came
+// out in kilometre blotches.
 pub const SUN_LOWEST: f32 = 0.15;
 pub const SUN_SPACING: f32 = 0.25;
 const SUN_STEPS: i32 = 12;
@@ -378,6 +382,9 @@ const SUN_FIRST: f32 = 60.0;
 const SUN_SEGMENT: f32 = 500.0;
 const SUN_W_SHARE: f32 = 0.25;
 pub const SUN_TAU_MAX: f32 = 48.0;   // the depth a unorm16 channel spans
+// The neighbours' columns toward the sun (clouds_volume.bk billow_tau).
+pub const SUN_FAR_NEAR: f32 = 500.0;
+pub const SUN_FAR_OUT: f32 = 1400.0;
 const CELL_COLUMN_RANGE: f32 = 2.0 * COLUMN_F_RANGE / 65535.0;
 const CELL_VAR_RANGE: f32 = COLUMN_V_RANGE / 65535.0;
 
@@ -393,9 +400,29 @@ fn pool_column<P>(pool: P, t: tiles::Tile, p: tiles::Point, tile: i32, border: i
     return mix(a, b, c.f.y);
 }
 
+// The column d metres toward the sun from a cell (along the ray from the
+// layer's middle; the point under it moves a part in 1e4 of the height
+// between rays from other heights), read at the tile's own level.
+fn far_column<P, B>(pool: P, lookup: B, own: tiles::Tile, root: i32, tile: i32, border: i32, up: vec3<f32>,
+                    rf: f32, base: f32, to_sun: vec3<f32>, d: f32) -> vec2<f32> {
+    let x = up * (rf + base + 0.5 * CLOUD_DEPTH) + to_sun * d;
+    let p = tiles::cube_point(normalize(x));
+    let at = tiles::tile_at(p, own.level);
+    var c: vec2<f32> = vec2<f32>(-COLUMN_F_RANGE, 0.0);
+    if (p.root == root && at.x == own.x && at.y == own.y) {
+        c = pool_column(pool, own, p, tile, border);
+    } else {
+        let found = tiles::locate(lookup, p, own.level);
+        if (found.slot >= 0) {
+            c = pool_column(pool, found, p, tile, border);
+        }
+    }
+    return c;
+}
+
 @kernel @grid(3)
 fn k_cloud_sun(g: grid<3>, table: read_store<f64, 1>, lookup: read_store<vec4<i32>, 1>, pool: read_store<i32, 1>,
-               out: write_store<i32, 1>, cells: i32, tile: i32, border: i32, levels: i32, w0: f32,
+               out: write_store<i32, 1>, out_far: write_store<i32, 1>, cells: i32, tile: i32, border: i32, levels: i32, w0: f32,
                radius: f64, seed: i32, sx: f32, sy: f32, sz: f32, detail_var: f32) {
     let r = g.z() * 24;
     let slot = table[r] as i32;
@@ -476,6 +503,8 @@ fn k_cloud_sun(g: grid<3>, table: read_store<f64, 1>, lookup: read_store<vec4<i3
     let i = ((slot * cells + g.y()) * cells + g.x()) * 2;
     out[i] = (n.x as i32) | ((n.y as i32) << 16);
     out[i + 1] = (n.z as i32) | ((n.w as i32) << 16);
+    out_far[i] = pack_column(far_column(pool, lookup, own, root, tile, border, up, rf, base, to_sun, SUN_FAR_NEAR));
+    out_far[i + 1] = pack_column(far_column(pool, lookup, own, root, tile, border, up, rf, base, to_sun, SUN_FAR_OUT));
 }
 
 // 0 to 1 in 8 bits, rounded.
