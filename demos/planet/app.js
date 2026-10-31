@@ -101,7 +101,7 @@ const texelHeights = bro.kernel.createBuffer(PRODUCE_PER_UPDATE * TEXELS * TEXEL
 // The batch's horizon heights, k_horizon_heights to k_horizon.
 const horizonHeights = bro.kernel.createBuffer(PRODUCE_PER_UPDATE * HZ_GRID * HZ_GRID * 4);
 // Each resident tile's relief anchors (planet.bk k_anchor), by slot.
-const anchors = bro.kernel.createBuffer(CAPACITY * 32 * 4);
+const anchors = bro.kernel.createBuffer(CAPACITY * 20 * 4);
 
 const canvas = document.querySelector('#stage');
 const scene = canvas.getContext('scene');
@@ -139,7 +139,7 @@ function makeCache(pixelsPerTexel) {
         domain: { type: 'cubeSphere', radius: RADIUS, center: [0, 0, 0] },
         tileSize: TILE, border: BORDER, capacity: CAPACITY, maxLevel: MAX_LEVEL,
         minHeight: 0, maxHeight: MAX_HEIGHT, pixelsPerCell, producePerUpdate: PRODUCE_PER_UPDATE,
-        layers: { position: 16, relief: 4, detail: DETAIL * DETAIL * 8, horizon: 16 },
+        layers: { position: 16, relief: 16, detail: DETAIL * DETAIL * 8, horizon: 16 },
         ranges: true,
         // The whole batch in six dispatches: the GPU fills up on the
         // batch's cells together, where a tile's own were a few warps.
@@ -157,7 +157,7 @@ function makeCache(pixelsPerTexel) {
     });
     if (ground) {
         ground.setShaderTexture('pos', { buffer: cache.layer('position'), width: CELLS, height: CELLS, layers: CAPACITY, atlas: 2, channels: 4, format: 'float32' });
-        ground.setShaderBuffer('relief_scale', cache.layer('relief'));
+        ground.setShaderBuffer('relief', cache.layer('relief'));
         ground.setShaderBuffer('anchors', anchors);
         ground.setShaderBuffer('det', cache.layer('detail'));
         ground.setShaderBuffer('hz', cache.layer('horizon'));
@@ -201,7 +201,7 @@ const GROUND_LAYOUT = constants('planet::ground_layout', {
     CELLS: ['i32', CELLS], BORDER: ['i32', BORDER], TILE: ['i32', TILE], DETAIL: ['i32', DETAIL],
     TEXELS: ['i32', TEXELS], HZ: ['i32', HZ], FACE_EXTENT: ['f32', RADIUS * Math.PI / 2],
     DETAIL_PERIOD: ['f32', DETAIL_PERIOD], SWELL_PERIOD: ['f32', SWELL_PERIOD],
-    RADIUS: ['f32', RADIUS], SEED: ['i32', SEED],
+    SEED: ['i32', SEED],
     GL_TILE: ['i32', GROUND_LIGHT.tile], GL_BORDER: ['i32', GROUND_LIGHT.border],
     GL_ATLAS: ['i32', GROUND_LIGHT.atlas], GL_LEVELS: ['i32', GROUND_LIGHT.levels],
     WAVE_COUNT: ['i32', WAVES.list.length], WAVE_SWELL: ['i32', WAVES.swell], WAVE_FRESH: ['i32', WAVES.fresh],

@@ -28,10 +28,10 @@ import mesh;
 import custom;
 import tiles;
 from planet::ground_layout import CELLS, BORDER, TILE, DETAIL, TEXELS, HZ, FACE_EXTENT, DETAIL_PERIOD, SWELL_PERIOD,
-    RADIUS, SEED, GL_TILE, GL_BORDER, GL_ATLAS, GL_LEVELS, WAVE_COUNT, WAVE_SWELL, WAVE_FRESH, WAVE_RESIDUAL,
+    SEED, GL_TILE, GL_BORDER, GL_ATLAS, GL_LEVELS, WAVE_COUNT, WAVE_SWELL, WAVE_FRESH, WAVE_RESIDUAL,
     WAVE_FRESH_SCALE, WAVE_K, WAVE_F;
-from planet::relief import BASE_WAVELENGTH, RIDGE_LAST, RIDGE_PAST, FINE_FIRST, WARP_OCTAVE, WARP_DISPLACE,
-    ridge_amp, span_at, mean_factor, ridge_cell_slope, simplex_grad, simplex_past, SimplexAt;
+from planet::relief import BASE_WAVELENGTH, RIDGE_LAST, RIDGE_PAST, FINE_FIRST, ridge_amp, span_at, mean_factor,
+    ridge_cell_slope, simplex_grad, simplex_past, SimplexAt;
 from planet::tree_crown import tree_shadow, TreePlace;
 from planet::grass_floor import grass_floor, GrassPlace;
 
@@ -61,11 +61,11 @@ struct Params {
 @binding(4, 15) var det: read_buffer<u32>;
 @binding(4, 16) var hz: read_buffer<vec4<u32>>;
 @binding(4, 19) var cloud_lookup: read_buffer<vec4<i32>>;
-// Each tile's relief anchors (planet.bk k_anchor), and each cell's relief
-// scales (planet.bk k_tile).
+// Each tile's relief anchors (planet.bk k_anchor), and each cell's offset in
+// the relief's noise and its scales (planet.bk k_tile).
 @binding(4, 20) var anchors: read_buffer<vec4<i32>>;
-@binding(4, 21) var relief_scale: read_buffer<u32>;
-const ANCHOR_VEC4S: i32 = 8;
+@binding(4, 21) var relief: read_buffer<vec4<f32>>;
+const ANCHOR_VEC4S: i32 = 5;
 
 const GROUND_PI: f32 = 3.14159265;
 const TREE_CROWNS: f32 = 0.55;
@@ -285,28 +285,12 @@ pub fn vertex(v_in: mesh::Vertex) -> mesh::Vertex {
     var n = normalize(cross(tu, tv));
     if (dot(n, up) < 0.0) { n = -n; }
     let gl = ground_light(slot, vec2<f32>(cx as f32, cy as f32) * 0.5, tu, tv, up, n, v.pos, 0.5 * length(tu));
-    // Where the vertex is in the relief's noise (ground.bk relief), from the
-    // tile's centre: its direction's offset from the centre's, taken without
-    // the cancellation of differencing two unit vectors (the vertex is c,
-    // over the centre's distance, past the centre's direction m: dir - m =
-    // (c - m s / (1 + sqrt(1 + s))) / sqrt(1 + s), s = 2 m.c + c.c), in the
-    // noise's units, through the warp, which varies smoothly enough that
-    // the vertices hold it.
-    let center = hi.xyz + lo.xyz;
-    let cl = length(center);
-    let m = center / cl;
-    let cv = c_xyz / cl;
-    let sv = 2.0 * dot(m, cv) + dot(cv, cv);
-    let rt = sqrt(1.0 + sv);
-    let dp = (cv - m * (sv / (1.0 + rt))) / rt * (RADIUS / BASE_WAVELENGTH);
-    let a = slot * ANCHOR_VEC4S;
-    let wa = SimplexAt { cell: anchors[a + 2].xyz, sk: bitcast<vec4<f32>>(anchors[a + 3]).xyz };
-    let wp = simplex_past(wa, dp * exp2(WARP_OCTAVE as f32));
-    let warp = vec3<f32>(simplex_grad(wp, SEED + 400).x, simplex_grad(wp, SEED + 401).x, simplex_grad(wp, SEED + 402).x);
-    let dq = dp + (warp - bitcast<vec4<f32>>(anchors[a + 4]).xyz) * WARP_DISPLACE;
-    // How much the ground here moves with the relief's octaves below
-    // FINE_FIRST and from it on.
-    let rs = relief_scale[(slot * CELLS + cy) * CELLS + cx];
+    // Where the vertex is in the relief's noise from the tile's centre,
+    // through the warp, and how much the ground here moves with the
+    // relief's octaves below FINE_FIRST and from it on (planet.bk k_tile).
+    let rl = relief[(slot * CELLS + cy) * CELLS + cx];
+    let dq = rl.xyz;
+    let rs = bitcast<u32>(rl.w);
     v.uv = vec2<f32>((rs & 65535u) as f32, (rs >> 16u) as f32) * (1.5 / 65535.0) - vec2<f32>(0.5);
     v.v0 = vec4<f32>(v_tex, v_skirt, c_w);
     v.v1 = vec4<f32>(up, dq.x);
@@ -439,6 +423,53 @@ pub fn fragment(v: mesh::Vertex, s_in: mesh::Surface) -> mesh::Surface {
     let v_bent = v.v5.xyz;
     let v_slot = v.vi.x;
     let v_level = v.vi.y;
+    let footprint = max(length(dpdx(v_q)), length(dpdy(v_q)));
+
+    // The mountains' ridged octaves finer than the tile's texels, as the
+    // truth has them (ground.bk relief), to what this pixel resolves (full
+    // weight from 4 pixels a wavelength, none at 2, as the detail below):
+    // each octave's slope at the pixel's mean factor less what the texel's
+    // normal already holds, its slope at the texel's mean factor through
+    // the central difference over two texels it is taken by (sinc(2 pi
+    // span), ground.bk gradient_share). The same noise, from the
+    // tile's anchor (planet.bk k_anchor), each octave's lattice twice the
+    // last's, at the vertices' offset through the warp, scaled by how much
+    // the ground here moves with them (v.uv), the gradient taken through
+    // the warp's stretch. First, while little else is live: the noise
+    // needs registers.
+    let a = v_slot * ANCHOR_VEC4S;
+    let a0 = anchors[a];
+    let oct_pix = log2(BASE_WAVELENGTH / (2.5 * max(footprint, 1e-4)));
+    // The octave whose wavelength is two pixels.
+    let o_nyquist = log2(BASE_WAVELENGTH / (2.0 * max(footprint, 1e-4)));
+    let o_end = min(ceil(o_nyquist) as i32, RIDGE_LAST);
+    var ridges = vec3<f32>(0.0);
+    if (max(abs(v.uv.x), abs(v.uv.y)) > 0.002 && a0.w < o_end) {
+        let a1 = anchors[a + 1];
+        let oct_tex = bitcast<f32>(a1.w);
+        var at = SimplexAt { cell: a0.xyz, sk: bitcast<vec4<f32>>(a1).xyz };
+        let dq = vec3<f32>(v.v1.w, v.v2.w, v.v3.w);
+        var lattice = exp2(a0.w as f32);
+        var gq = vec3<f32>(0.0);
+        for (var o: i32 = a0.w; o < o_end; o += 1) {
+            let fo = o as f32;
+            let fade_p = clamp(o_nyquist - fo, 0.0, 1.0);
+            let fade_t = clamp(oct_tex + RIDGE_PAST - fo, 0.0, 1.0);
+            let x = 6.2831853 * min(span_at(o, oct_tex), 1.0);
+            let kept = max(sin(x) / x, 0.0);
+            let nq = simplex_grad(simplex_past(at, dq * lattice), SEED + 100 + o);
+            let dr = ridge_cell_slope(nq.x, mean_factor(o, oct_pix)) * fade_p
+                   - ridge_cell_slope(nq.x, mean_factor(o, oct_tex)) * fade_t * kept;
+            gq += nq.yzw * (ridge_amp(o) * (o < FINE_FIRST ? v.uv.x : v.uv.y) * dr * lattice);
+            let twice = at.sk * 2.0;
+            let fl = floor(twice);
+            at = SimplexAt { cell: at.cell * 2 + vec3<i32>(fl.x as i32, fl.y as i32, fl.z as i32), sk: twice - fl };
+            lattice *= 2.0;
+        }
+        let gp = gq + bitcast<vec4<f32>>(anchors[a + 2]).xyz * gq.x + bitcast<vec4<f32>>(anchors[a + 3]).xyz * gq.y
+               + bitcast<vec4<f32>>(anchors[a + 4]).xyz * gq.z;
+        ridges = gp * (1.0 / BASE_WAVELENGTH);
+    }
 
     // Bilinear over the four texels about this point. The layer's normals
     // face up, so a skirt seen from behind shades as the ground does.
@@ -470,11 +501,10 @@ pub fn fragment(v: mesh::Vertex, s_in: mesh::Surface) -> mesh::Surface {
 
     // The octaves a pixel resolves: full weight from 4 pixels a
     // wavelength, none at 2.
-    let footprint = max(length(dpdx(v_q)), length(dpdy(v_q)));
     var lum: f32 = 0.0;
     var lum_var: f32 = 0.0;
     var wavelength: f32 = 0.125;
-    var slope = vec3<f32>(0.0);
+    var slope = ridges;
     let hi_c = max(col.x, max(col.y, col.z));
     let lo_c = min(col.x, min(col.y, col.z));
     let rock = (1.0 - smoothstep(0.15, 0.45, (hi_c - lo_c) / max(hi_c, 1e-3))) * (1.0 - smoothstep(0.35, 0.6, hi_c));
@@ -509,51 +539,6 @@ pub fn fragment(v: mesh::Vertex, s_in: mesh::Surface) -> mesh::Surface {
         cells *= 2;
     }
     let land = 1.0 - water;
-    // The mountains' ridged octaves finer than the tile's texels, as the
-    // truth has them (ground.bk relief), to what this pixel resolves (full
-    // weight from 4 pixels a wavelength, none at 2, as the detail above):
-    // each octave's slope at the pixel's mean factor less what the texel's
-    // normal already holds, its slope at the texel's mean factor through
-    // the central difference over two texels it is taken by (sinc(2 pi
-    // span), ground.bk gradient_share). The same noise, from the
-    // tile's anchor (planet.bk k_anchor), each octave's lattice twice the
-    // last's, at the vertices' offset through the warp, scaled by how much
-    // the ground here moves with them (v.uv), the gradient taken through
-    // the warp's stretch.
-    let a = v_slot * ANCHOR_VEC4S;
-    let a0 = anchors[a];
-    let a1 = anchors[a + 1];
-    let oct_tex = bitcast<f32>(a1.w);
-    let oct_pix = log2(BASE_WAVELENGTH / (2.5 * max(footprint, 1e-4)));
-    // The octave whose wavelength is two pixels.
-    let o_nyquist = log2(BASE_WAVELENGTH / (2.0 * max(footprint, 1e-4)));
-    var ridges = vec3<f32>(0.0);
-    if (land > 0.0 && max(abs(v.uv.x), abs(v.uv.y)) > 0.002 && o_nyquist > oct_tex - 1.0) {
-        var at = SimplexAt { cell: a0.xyz, sk: bitcast<vec4<f32>>(a1).xyz };
-        let dq = vec3<f32>(v.v1.w, v.v2.w, v.v3.w);
-        let o_end = min(ceil(o_nyquist) as i32, RIDGE_LAST);
-        var lattice = exp2(a0.w as f32);
-        var gq = vec3<f32>(0.0);
-        for (var o: i32 = a0.w; o < o_end; o += 1) {
-            let fo = o as f32;
-            let fade_p = clamp(o_nyquist - fo, 0.0, 1.0);
-            let fade_t = clamp(oct_tex + RIDGE_PAST - fo, 0.0, 1.0);
-            let x = 6.2831853 * min(span_at(o, oct_tex), 1.0);
-            let kept = max(sin(x) / x, 0.0);
-            let nq = simplex_grad(simplex_past(at, dq * lattice), SEED + 100 + o);
-            let dr = ridge_cell_slope(nq.x, mean_factor(o, oct_pix)) * fade_p
-                   - ridge_cell_slope(nq.x, mean_factor(o, oct_tex)) * fade_t * kept;
-            gq += nq.yzw * (ridge_amp(o) * (o < FINE_FIRST ? v.uv.x : v.uv.y) * dr * lattice);
-            let twice = at.sk * 2.0;
-            let fl = floor(twice);
-            at = SimplexAt { cell: at.cell * 2 + vec3<i32>(fl.x as i32, fl.y as i32, fl.z as i32), sk: twice - fl };
-            lattice *= 2.0;
-        }
-        let gp = gq + bitcast<vec4<f32>>(anchors[a + 5]).xyz * gq.x + bitcast<vec4<f32>>(anchors[a + 6]).xyz * gq.y
-               + bitcast<vec4<f32>>(anchors[a + 7]).xyz * gq.z;
-        ridges = gp * (1.0 / BASE_WAVELENGTH);
-        slope += ridges;
-    }
     s.base_color = col.xyz * mix(1.0, exp(lum - 0.5 * lum_var), land);
     let eye = -normalize(v.world_pos);
     let drawn = params.trees_far <= 0.0 ? 0.0 : smoothstep(params.trees_far, params.trees_far * (5.0 / 6.0), length(v.world_pos));
@@ -593,7 +578,9 @@ pub fn fragment(v: mesh::Vertex, s_in: mesh::Surface) -> mesh::Surface {
     if (SCENE_DEBUG(albedo)) { s = mesh::debug(s, s.base_color); }
     if (SCENE_DEBUG(texels)) { s = mesh::debug(s, col.xyz); }
     if (SCENE_DEBUG(octaves)) { s = mesh::debug(s, vec3<f32>(0.5 * exp(lum - 0.5 * lum_var))); }
-    if (SCENE_DEBUG(ridges)) { s = mesh::debug(s, vec3<f32>(min(length(ridges), 1.0), oct_pix - oct_tex, 0.0) * vec3<f32>(1.0, 0.25, 0.0)); }
+    if (SCENE_DEBUG(ridges)) {
+        s = mesh::debug(s, vec3<f32>(min(length(ridges), 1.0), max((o_end - a0.w) as f32, 0.0) * 0.2, 0.0));
+    }
     if (SCENE_DEBUG(light)) { s = mesh::debug(s, v_light.xyz); }
     if (SCENE_DEBUG(normal)) { s = mesh::debug(s, s.normal * 0.5 + vec3<f32>(0.5)); }
     if (SCENE_DEBUG(skirt)) { s = mesh::debug(s, v_skirt > 0.0 ? vec3<f32>(1.0, 0.0, 0.0) : s.base_color); }
