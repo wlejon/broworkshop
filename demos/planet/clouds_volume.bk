@@ -504,6 +504,12 @@ const IN_RATIO: f32 = 0.05;
 // sub-column still seen through.
 const CLOUD_STEP: f32 = 133.33333;
 const MAX_STEPS: i32 = 96;
+// In cloud, while more than SEEN_SHARE of the ray is seen, steps of at most
+// SEEN_FOOTPRINTS footprints or CLOUD_STEP, whichever is longer.
+const SEEN_FOOTPRINTS: f32 = 3.0;
+const SEEN_SHARE: f32 = 0.6;
+// Halvings of the gap a step into cloud crossed, finding its edge.
+const EDGE_HALVINGS: i32 = 1;
 
 // The next sample after a skip from t to `clear`, proved empty that far:
 // the step's own when the skip is shorter, else a jittered part of the step
@@ -588,6 +594,8 @@ pub fn volume(ray: volume::Ray) -> volume::Light {
     var in_cloud: bool = false;
     // Which sub-columns the last sample found in cloud.
     var inside: vec4<f32> = vec4<f32>(0.0);
+    // What of the ray is still seen, at the last sample in cloud.
+    var seen_now: f32 = 1.0;
     // The sun tap's tops, for the cloud the ray is in.
     var tap_top: vec4<f32> = vec4<f32>(0.0);
     var marched: i32 = 0;              // the debug view 'cloudSteps'
@@ -602,6 +610,15 @@ pub fn volume(ray: volume::Ray) -> volume::Light {
         // samples follow its clouds and the gaps between them.
         if (in_cloud) {
             dt = min(dt, min(in_step, in_ratio * t));
+            // And while much of the ray is still seen, no longer than the
+            // detail it reads can be followed along it (a few footprints) or
+            // a dense cloud's step, whichever is longer: a thin cloud's steps
+            // (CLOUD_STEP over its fill, kilometres) hit or missed its
+            // billows by the pixel's offset, which averages over the renders
+            // to a cloud thinned to grey (the mean of e^-tau is not e^-(mean
+            // tau)), the 27.6 km view's decks a translucent haze against a
+            // march sixteen times finer.
+            dt = min(dt, mix(1.0e9, max(SEEN_FOOTPRINTS * volume::footprint(ray, t), cloud_step), step(SEEN_SHARE, seen_now)));
         } else if (t < fine_until) {
             dt = min(dt, cloud_step);
         }
@@ -659,20 +676,21 @@ pub fn volume(ray: volume::Ray) -> volume::Light {
         }
         kinds.z += 1.0;
         // A step that lands in cloud has passed its edge since the last
-        // point known clear: the gap halved (up to four times, down to the
-        // footprint) brackets it, and the cloud is taken from where the
+        // point known clear: the gap halved (EDGE_HALVINGS times, down to
+        // the footprint) brackets it, and the cloud is taken from where the
         // excess read at the bracket's ends crosses the edge between them
         // (or its cloudy end, where its clear end was never read), so its
-        // edge is where the field puts it and not where the step fell. The
-        // crossing places it closer to eight halvings' edge than a fifth
-        // halving did, for a fifth fewer reads.
+        // edge is where the field puts it and not where the step fell.
+        // Against the reference march (clouds.reference) one halving is as
+        // close as four, for a quarter of the reads: the search was a
+        // quarter of the pass, its lanes idling the rest of their warps.
         if (!in_cloud && t - t_prev > 1.0) {
             var a: f32 = t_prev;
             var b: f32 = t;
             var ea: f32 = 1.0e9;   // not read
             var eb: f32 = (fd.x - cloud_need(x.s)) / sqrt(fd.y + 1.0e-5);
             // No finer than the footprint the field is read at.
-            for (var k: i32 = 0; k < 4 && b - a > w; k += 1) {
+            for (var k: i32 = 0; k < EDGE_HALVINGS && b - a > w; k += 1) {
                 let m = 0.5 * (a + b);
                 let e = excess_at(eye, dir, m, hc, mu, w, xt);
                 if (e > CLOUD_EDGE) {
@@ -797,6 +815,7 @@ pub fn volume(ray: volume::Ray) -> volume::Light {
         sum_w += wgt;
         inside = step(vec4<f32>(1.0e-30), fill);
         let seen = tr * (1.0 - cover + cover * tc);
+        seen_now = 0.25 * dot(seen, vec4<f32>(1.0));
         if (max4(seen) < 0.004) {
             break;
         }
