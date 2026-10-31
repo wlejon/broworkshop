@@ -436,8 +436,11 @@ const MAX_STEPS: i32 = 96;
 // past it. Landing on the skip's end, the pixels of a row crossing the same
 // cells took their samples at the same distances and drew the layer in
 // slats.
-fn skip_to(t: f32, dt: f32, clear: f32, jit: f32, dt_max: f32) -> f32 {
-    return max(t + dt, clear + jit * clamp(clear * STEP_RATIO, STEP_MIN, dt_max));
+// The pixel's jitter, growing as the ray levels: only rays along the layer
+// share their skips along a row.
+fn skip_to(t: f32, dt: f32, clear: f32, jit: f32, mu: f32, dt_max: f32) -> f32 {
+    let level = 1.0 - abs(mu);
+    return max(t + dt, clear + jit * level * level * clamp(clear * STEP_RATIO, STEP_MIN, dt_max));
 }
 
 pub fn volume(ray: volume::Ray) -> volume::Light {
@@ -538,7 +541,7 @@ pub fn volume(ray: volume::Ray) -> volume::Light {
             // first meet them again.
             let skip = skip_outside(x.s, dot(dir, x.up));
             t_prev = t + skip;
-            t = skip_to(t, dt, t_prev, jit, dt_max);
+            t = skip_to(t, dt, t_prev, jit, mu, dt_max);
             continue;
         }
         // No cloud this high: on as far as the field provably stays below
@@ -555,7 +558,7 @@ pub fn volume(ray: volume::Ray) -> volume::Light {
             tr *= 1.0 - cover + cover * tc;
             cover = vec4<f32>(0.0);
             tc = vec4<f32>(1.0);
-            t = skip_to(t, dt, t_prev, jit, dt_max);
+            t = skip_to(t, dt, t_prev, jit, mu, dt_max);
             continue;
         }
         var fd: vec2<f32> = detailed(x.p, w, col.f, col.variance);
@@ -573,13 +576,15 @@ pub fn volume(ray: volume::Ray) -> volume::Light {
         }
         kinds.z += 1.0;
         // A step that lands in cloud has passed its edge since the last
-        // point known clear: the gap halved five times finds it, and the
+        // point known clear: the gap halved (up to five times, down to the
+        // footprint) finds it, and the
         // cloud is taken from there, so its edge is where the field puts it
         // and not where the step fell.
         if (!in_cloud && t - t_prev > 1.0) {
             var a: f32 = t_prev;
             var b: f32 = t;
-            for (var k: i32 = 0; k < 5; k += 1) {
+            // No finer than the footprint the field is read at.
+            for (var k: i32 = 0; k < 5 && b - a > w; k += 1) {
                 let m = 0.5 * (a + b);
                 if (excess_at(eye, dir, m, hc, mu, w) > CLOUD_EDGE) {
                     b = m;
