@@ -128,8 +128,17 @@ function gradientBound(w) {
     const r = Math.min(Math.max(STREETS.spacing / w * 0.5 - 1, 0), 1);
     const rowsPerM = 1 / STREETS.spacing + STREETS.warpRows * NOISE_SLOPE / STREETS.warp;
     g += r * STREETS.amp * 2 * Math.PI * rowsPerM + STREETS.amp * 4 * NOISE_SLOPE / STREETS.region;
+    // The open cells: the ring's steepest (sqrt(2 / e) / width a unit of
+    // the gap, which changes at most 2 a cell unit, more by the warp's
+    // stretch), and their regions' change, the ring's and the two octaves
+    // they thin.
+    const rc = Math.min(Math.max(CELLS.resolve / w * 0.5 - 1, 0), 1);
+    const stretch = 1 + Math.sqrt(3) * CELLS.warp * 0.6 * NOISE_SLOPE;
+    g += rc * CELLS.amp * 2 * stretch * Math.sqrt(2 / Math.E) / CELLS.width / CELLS.size;
+    g += 4 * NOISE_SLOPE / CELLS.region * (CELLS.amp + CELLS.take * 0.7 * (0.32 + 0.32 * 0.62));
     return g;
 }
+const CELLS = { size: 25000, amp: 0.22, width: 0.22, resolve: 8000, take: 0.35, region: 1500000, warp: 0.5 };
 const STREETS = { spacing: 4000, amp: 0.09, region: 800000, warp: 80000, warpRows: 3 };
 
 // Cube face i (0..5): axis i % 3, its sign, and the plane's axes, the same

@@ -5,6 +5,7 @@
 // And what the clouds leave of the ground's light, in a second cache
 // (k_cloud_ground).
 from planet::ground import perlin_split, terrain_base, octaves_for;
+from std::noise import cellular_distance3d, perlin3d;
 import tiles;
 
 const F0: f32 = -0.12;          // the mean amount: clear more than cloudy
@@ -37,6 +38,21 @@ pub fn column(q: vec3<f64>, w: f64, radius: f64) -> vec2<f32> {
         p *= 2.0;
         amp *= 0.6;
     }
+    // Open cells: over a region whose weather has them, the convection
+    // organises into cells CELL_SIZE across, cloud on their walls and clear
+    // in their middles (mesoscale cellular convection, the honeycomb seen
+    // from orbit over the sea), in place of most of the cumuli's coarsest
+    // two octaves' random clusters. The ring is zero-mean (RING_MEAN) and
+    // resolved as an octave CELL_RESOLVE long is, its variance where not.
+    let qf = vec3<f32>(q.x as f32, q.y as f32, q.z as f32);
+    let cells = cell_strength(q, radius);
+    if (cells > 0.0) {
+        let r = clamp(CELL_RESOLVE * inv_w * 0.5 - 1.0, 0.0, 1.0);
+        if (r > 0.0) {
+            f += r * cells * CELL_AMP * (cell_ring(qf * ((radius as f32) / CELL_SIZE)) - RING_MEAN);
+        }
+        v += (1.0 - r * r) * cells * cells * CELL_AMP * CELL_AMP * RING_VAR;
+    }
     // The cumuli: from 13 km to 25 m, each octave 0.62 of the last; past
     // the finest, the variance of yet finer ones.
     wavelength = 12800.0;
@@ -44,10 +60,11 @@ pub fn column(q: vec3<f64>, w: f64, radius: f64) -> vec2<f32> {
     amp = 0.32;
     for (var k: i32 = 0; k < 10; k += 1) {
         let r = clamp(wavelength * inv_w * 0.5 - 1.0, 0.0, 1.0);
+        let a = amp * (1.0 - CELL_TAKE * cells * step(k as f32, 1.5));
         if (r > 0.0) {
-            f += r * amp * perlin_split(p, 7 + k);
+            f += r * a * perlin_split(p, 7 + k);
         }
-        v += (1.0 - r * r) * amp * amp * NOISE_VAR;
+        v += (1.0 - r * r) * a * a * NOISE_VAR;
         wavelength *= 0.5;
         p *= 2.0;
         amp *= 0.62;
@@ -60,7 +77,6 @@ pub fn column(q: vec3<f64>, w: f64, radius: f64) -> vec2<f32> {
     // (none in most): resolved as an octave is, the rows' variance where
     // unresolved. Without them the field was the same speckle everywhere,
     // from orbit a uniform grain.
-    let qf = vec3<f32>(q.x as f32, q.y as f32, q.z as f32);
     let rows = street_strength(q, radius, qf);
     if (rows > 0.0) {
         let r = clamp(STREET_SPACING * inv_w * 0.5 - 1.0, 0.0, 1.0);
@@ -70,6 +86,34 @@ pub fn column(q: vec3<f64>, w: f64, radius: f64) -> vec2<f32> {
         v += (1.0 - r * r) * rows * rows * STREET_AMP * STREET_AMP * 0.5;
     }
     return vec2<f32>(f, v);
+}
+
+// The cells' size (m), the ring's amplitude, its width (cell units), the
+// length it resolves as (m), the share of the coarsest cumulus octaves the
+// cells take, the regions' wavelength (m); the ring's mean and variance over
+// space (measured at the width). clouds.js's gradient bound has the same
+// numbers.
+const CELL_SIZE: f32 = 25000.0;
+const CELL_AMP: f32 = 0.22;
+const RING_WIDTH: f32 = 0.22;
+const CELL_RESOLVE: f32 = 8000.0;
+const CELL_TAKE: f32 = 0.35;
+const CELL_REGION: f64 = 1500000.0;
+const CELL_WARP: f32 = 0.5;   // cell units, of Perlin noise 1 / 0.6 cells long
+const RING_MEAN: f32 = 0.5349;
+const RING_VAR: f32 = 0.1313;
+fn cell_strength(q: vec3<f64>, radius: f64) -> f32 {
+    return clamp(perlin_split(q * (radius / CELL_REGION), 227) * 4.0 - 0.2, 0.0, 1.0);
+}
+// 1 on a cell's wall, falling to 0 within RING_WIDTH of it: of cellular
+// noise's gap between its nearest two points (cell units), its domain
+// warped so the cells are rounded and uneven, not polygons.
+fn cell_ring(p: vec3<f32>) -> f32 {
+    let pw = p * 0.6;
+    let wp = p + CELL_WARP * vec3<f32>(perlin3d<f32>(pw, 231), perlin3d<f32>(pw + vec3<f32>(17.3, 0.0, 0.0), 232),
+                                       perlin3d<f32>(pw + vec3<f32>(0.0, 31.1, 0.0), 233));
+    let gap = (cellular_distance3d<f32>(wp, 229, 0, 2, 1.0) + 1.0) * 0.5 * 1.9490077;
+    return exp(-(gap / RING_WIDTH) * (gap / RING_WIDTH));
 }
 
 // The streets' spacing (m), the rows' amplitude, and their regions' and
