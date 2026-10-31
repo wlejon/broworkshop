@@ -368,8 +368,8 @@ fn relief(p: vec3<f64>, octaves: f64, seed: i32) -> vec2<f64> {
 // its broad shape, y the fine relief over it (FINE_FIRST). Continents from
 // the broad octaves, ranges where a broad mask allows them on land (lifted,
 // and carrying the ridged relief), and the fine octaves over both, rougher
-// in the ranges.
-pub fn terrain_parts(dir: vec3<f64>, radius: f64, octaves: f64, seed: i32) -> vec2<f64> {
+// in the ranges. z the uplift, which scales the relief.
+pub fn terrain_parts(dir: vec3<f64>, radius: f64, octaves: f64, seed: i32) -> vec3<f64> {
     let p = dir * (radius / (BASE_WAVELENGTH as f64));
     let m = masks(p, octaves, seed);
     let land = clamp_mean(m.x * 3.0 + 0.15, m.y * 3.0, -1.0, 1.0);
@@ -378,7 +378,7 @@ pub fn terrain_parts(dir: vec3<f64>, radius: f64, octaves: f64, seed: i32) -> ve
     let amp = (DETAIL_PLAINS + DETAIL_RANGES * (uplift as f32)) as f64;
     let broad = fbm_to(p, octaves, 4, FINE_FIRST, seed + 200);
     let fine = fbm_to(p, octaves, FINE_FIRST, 64, seed + 200) * exp2((4 - FINE_FIRST) as f64);
-    return vec2<f64>(land * 1100.0 + uplift * (UPLIFT + r.x) + broad * amp, uplift * r.y + fine * amp);
+    return vec3<f64>(land * 1100.0 + uplift * (UPLIFT + r.x) + broad * amp, uplift * r.y + fine * amp, uplift);
 }
 pub fn terrain_base(dir: vec3<f64>, radius: f64, octaves: f64, seed: i32) -> f64 {
     let t = terrain_parts(dir, radius, octaves, seed);
@@ -399,17 +399,32 @@ pub fn cell_width(octaves: f64) -> f32 {
 // minimum over CUT_BLEND metres joins the cut to the ground.
 const VALLEY_FLOOR: f32 = 150.0;
 const CUT_BLEND: f32 = 40.0;
-pub fn terrain(dir: vec3<f64>, radius: f64, octaves: f64, seed: i32, net: read_store<f32, 1>) -> f64 {
+//
+// y and z: how much the ground here moves with the relief's octaves below
+// FINE_FIRST and from it on, per metre of relief at full uplift (relief):
+// the uplift where the ground stands, less where a valley cuts it (the
+// fine part as its sides carry it on), none under a lake. The ground's
+// shader scales the octaves finer than its texels by them (ground_mesh.bk).
+pub fn terrain_shaped(dir: vec3<f64>, radius: f64, octaves: f64, seed: i32, net: read_store<f32, 1>) -> vec3<f64> {
     let t = terrain_parts(dir, radius, octaves, seed);
     let h = t.x + t.y;
     let w = water_at(dir, radius, cell_width(octaves), net, seed);
     let side = smoothstep(0.0, VALLEY_FLOOR, w.near.x - w.bed);
     let valley = w.near.x + (t.y as f32) * side;
-    let m = max(CUT_BLEND - abs((h as f32) - valley), 0.0) / CUT_BLEND;
+    let x = (h as f32) - valley;
+    let m = max(CUT_BLEND - abs(x), 0.0) / CUT_BLEND;
     let cut = min(h, (valley - m * m * CUT_BLEND * 0.25) as f64);
     let lake = lake_surface(cut as f32, w);
-    if (lake > (cut as f32)) { return lake as f64; }
-    return cut;
+    if (lake > (cut as f32)) { return vec3<f64>(lake as f64, 0.0, 0.0); }
+    let u = t.z as f32;
+    if (cut >= h) { return vec3<f64>(cut, t.z, t.z); }
+    // On the cut: d cut / d h and d cut / d valley.
+    let sx = x >= 0.0 ? 1.0 : -1.0;
+    let dh = 0.5 * m * sx;
+    return vec3<f64>(cut, (u * dh) as f64, (u * (dh + (1.0 - dh) * side)) as f64);
+}
+pub fn terrain(dir: vec3<f64>, radius: f64, octaves: f64, seed: i32, net: read_store<f32, 1>) -> f64 {
+    return terrain_shaped(dir, radius, octaves, seed, net).x;
 }
 
 // Below this many octaves a cell is wide enough that the next octaves vary

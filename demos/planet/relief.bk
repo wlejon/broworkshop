@@ -84,6 +84,17 @@ pub fn ridge_cell_mean(n: f32, f: f32) -> f32 {
     }
     return 1.0 - 2.0 * fold + mu * mu + spread2;
 }
+// ridge_cell_mean's derivative in n. The folded normal's E|X| has slope
+// 1 - 2 Phi(-mu / sd) in mu; its scaling leaves (1 - scale) of the
+// Gaussian term's own slope over.
+pub fn ridge_cell_slope(n: f32, f: f32) -> f32 {
+    let mu = f * n;
+    let spread2 = max(max(1.0 - f * f, 0.0) * NOISE_VAR, CREST * CREST);
+    let sd = sqrt(spread2);
+    let scale = (1.0 + NOISE_VAR - RIDGE_MEAN) * 0.5 / (0.7978846 * sqrt(NOISE_VAR));
+    let dfold = 1.0 - 2.0 * normal_cdf(-mu / sd) + 0.7978846 * (1.0 - scale) * mu * exp(-0.5 * mu * mu / spread2) / sd;
+    return f * (2.0 * mu - 2.0 * dfold);
+}
 
 // Where a point is on the noise's lattice: its skewed cell and the offset
 // inside it (ground.bk simplex_anchor finds them in f64).
@@ -108,9 +119,15 @@ pub fn simplex_past(at: SimplexAt, offset: vec3<f32>) -> SimplexAt {
 fn corner(seed: i32, xp: i32, yp: i32, zp: i32, r: vec3<f32>) -> vec4<f32> {
     let f = max(0.5 * (0.75 - dot(r, r)), 0.0);
     if (f <= 0.0) { return vec4<f32>(0.0); }
+    // The gradient grad_dot_common3d dots with: bit 0 the sign of one axis
+    // (y where hash & 13 is over 7, else x), bit 1 of another (y under 2,
+    // x at 12, else z).
     let h = hash_primes3d(seed, xp, yp, zp);
-    let g = vec3<f32>(grad_dot_common3d<f32>(h, 1.0, 0.0, 0.0), grad_dot_common3d<f32>(h, 0.0, 1.0, 0.0),
-                      grad_dot_common3d<f32>(h, 0.0, 0.0, 1.0));
+    let h13 = h & 13;
+    let s1: f32 = (h & 1) != 0 ? -1.0 : 1.0;
+    let s2: f32 = (h & 2) != 0 ? -1.0 : 1.0;
+    let g = vec3<f32>((h13 > 7 ? 0.0 : s1) + (h13 == 12 ? s2 : 0.0), (h13 > 7 ? s1 : 0.0) + (h13 < 2 ? s2 : 0.0),
+                      (h13 < 2 || h13 == 12) ? 0.0 : s2);
     let gr = dot(g, r);
     let f2 = f * f;
     return vec4<f32>(f2 * f2 * gr, g * (f2 * f2) - r * (4.0 * f2 * f * gr));

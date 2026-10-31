@@ -2,8 +2,9 @@
 // tile kernels produce a whole batch in one dispatch (bro.tiles' produce):
 // grid z is the tile's record in the batch table (tiles-api.js), whose slot
 // says where in the pools, viewed as [cells, cells, capacity], it goes.
-from planet::ground import terrain, cell_height, spread, expected_surface, expected_cover, gradient, variation,
-                           strata, octaves_for, range_margin, fresh_water;
+from planet::ground import terrain, terrain_shaped, cell_height, spread, expected_surface, expected_cover, gradient,
+                           variation, strata, octaves_for, range_margin, fresh_water, noise_at, simplex_anchor;
+from planet::relief import BASE_WAVELENGTH, RIDGE_FIRST, WARP_OCTAVE, WARP_DISPLACE, simplex_grad, SimplexAt;
 from planet::rivers import water_at, water_share;
 
 // A batch table record's float64s.
@@ -23,10 +24,13 @@ fn record_vec(table: read_store<f64, 1>, at: i32) -> vec3<f64> {
 // the height). The tile's surface heights gather in `span` for k_range: two
 // int32 per record, INT_MAX less the lowest's float bits and the highest's
 // (a surface never lies below sea level, and non-negative floats order as
-// their bits).
+// their bits). And into `scale`, how much the ground there moves with the
+// relief's octaves (ground.bk terrain_shaped: below FINE_FIRST in the low
+// 16 bits, from it on in the high, each -0.5 to 1 as a unorm), which the
+// ground's shader scales the octaves finer than its texels by.
 @kernel @grid(3)
-fn k_tile(g: grid<3>, table: read_store<f64, 1>, out: write_store<vec4<f32>, 3>, span: rw_store<i32, 1>,
-          radius: f64, border: f64, inv_size: f64, truth: f64, seed: i32, net: read_store<f32, 1>) {
+fn k_tile(g: grid<3>, table: read_store<f64, 1>, out: write_store<vec4<f32>, 3>, scale: write_store<i32, 3>,
+          span: rw_store<i32, 1>, radius: f64, border: f64, inv_size: f64, truth: f64, seed: i32, net: read_store<f32, 1>) {
     let r = g.z() * RECORD;
     let slot = table[r] as i32;
     let c = record_vec(table, r + 8);
@@ -36,9 +40,11 @@ fn k_tile(g: grid<3>, table: read_store<f64, 1>, out: write_store<vec4<f32>, 3>,
     let s = (g.x() as f64 - border) * inv_size;
     let t = (g.y() as f64 - border) * inv_size;
     let dir = normalize(c + u * s + v * t);
-    let h = terrain(dir, radius, truth, seed, net);
+    let shaped = terrain_shaped(dir, radius, truth, seed, net);
+    let h = shaped.x;
     let p = dir * (radius + max(h, 0.0)) - center;
     out[g.x(), g.y(), slot] = vec4<f32>(p.x as f32, p.y as f32, p.z as f32, h as f32);
+    scale[g.x(), g.y(), slot] = unorm(((shaped.y as f32) + 0.5) / 1.5, 16) | (unorm(((shaped.z as f32) + 0.5) / 1.5, 16) << 16);
     let bits = bitcast<i32>(max(h as f32, 0.0));
     span.atomic_max(2 * g.z(), 2147483647 - bits);
     span.atomic_max(2 * g.z() + 1, bits);
@@ -150,6 +156,76 @@ fn k_detail(g: grid<3>, table: read_store<f64, 1>, heights: read_store<f32, 1>, 
     out[at] = unorm(col.x, 8) | (unorm(col.y, 8) << 8) | (unorm(col.z, 8) << 16) | (unorm(col.w, 8) << 24);
     // The normal in 12 bits a coordinate, the forest's cover in the top 8.
     out[at + 1] = unorm(ox * 0.5 + 0.5, 12) | (unorm(oy * 0.5 + 0.5, 12) << 12) | (unorm(cover, 8) << 24);
+}
+
+// ── The relief anchors ──────────────────────────────────────────────────────
+//
+// Where a tile's centre is on the lattices of the relief's noise (ground.bk
+// relief), for the ground's shader, which adds per pixel the ridged octaves
+// finer than the tile's texels (ground_mesh.bk): the f64 half of the noise,
+// once a tile, from which the shader runs the rest in f32 (relief.bk). The
+// ridge octaves' lattices are each twice the last, so one anchor gives every
+// finer octave's exactly. ANCHOR_WORDS int32 a slot, as eight vec4s:
+//   0 the ridge octaves' lattice cell at octave o_a (xyz), o_a (w)
+//   1 the offset in it (xyz, float bits), the octaves the texels carry (w)
+//   2 the warp's lattice cell (octave WARP_OCTAVE), 3 the offset in it
+//   4 the warp at the centre (xyz)
+//   5-7 the warp's x, y and z noise's gradients per unit of p, times
+//       WARP_DISPLACE: the warp's stretch, which the shader's gradients take
+const ANCHOR_WORDS: i32 = 32;
+fn f32_bits(x: f32) -> i32 {
+    return bitcast<i32>(x);
+}
+@kernel @grid(1)
+fn k_anchor(g: grid<1>, table: read_store<f64, 1>, out: write_store<i32, 1>, radius: f64, inv_size: f64, d: f64, seed: i32) {
+    let r = g.x() * RECORD;
+    let slot = table[r] as i32;
+    let p = normalize(record_vec(table, r + 17)) * (radius / (BASE_WAVELENGTH as f64));
+    let wq = p * exp2(WARP_OCTAVE as f64);
+    let warp = vec3<f64>(noise_at(wq, seed + 400), noise_at(wq, seed + 401), noise_at(wq, seed + 402));
+    let oct = octaves_for(table[r + 20], inv_size / d);
+    // An octave broader than the texels': they still hold less of it than
+    // a pixel does.
+    let o_a = max((floor(oct) as i32) - 1, RIDGE_FIRST);
+    let ra = simplex_anchor((p + warp * (WARP_DISPLACE as f64)) * exp2(o_a as f64));
+    let wa = simplex_anchor(wq);
+    let k = WARP_DISPLACE * exp2(WARP_OCTAVE as f32);
+    let gx = simplex_grad(wa, seed + 400).yzw * k;
+    let gy = simplex_grad(wa, seed + 401).yzw * k;
+    let gz = simplex_grad(wa, seed + 402).yzw * k;
+    let at = slot * ANCHOR_WORDS;
+    out[at] = ra.cell.x;
+    out[at + 1] = ra.cell.y;
+    out[at + 2] = ra.cell.z;
+    out[at + 3] = o_a;
+    out[at + 4] = f32_bits(ra.sk.x);
+    out[at + 5] = f32_bits(ra.sk.y);
+    out[at + 6] = f32_bits(ra.sk.z);
+    out[at + 7] = f32_bits(oct as f32);
+    out[at + 8] = wa.cell.x;
+    out[at + 9] = wa.cell.y;
+    out[at + 10] = wa.cell.z;
+    out[at + 11] = 0;
+    out[at + 12] = f32_bits(wa.sk.x);
+    out[at + 13] = f32_bits(wa.sk.y);
+    out[at + 14] = f32_bits(wa.sk.z);
+    out[at + 15] = 0;
+    out[at + 16] = f32_bits(warp.x as f32);
+    out[at + 17] = f32_bits(warp.y as f32);
+    out[at + 18] = f32_bits(warp.z as f32);
+    out[at + 19] = 0;
+    out[at + 20] = f32_bits(gx.x);
+    out[at + 21] = f32_bits(gx.y);
+    out[at + 22] = f32_bits(gx.z);
+    out[at + 23] = 0;
+    out[at + 24] = f32_bits(gy.x);
+    out[at + 25] = f32_bits(gy.y);
+    out[at + 26] = f32_bits(gy.z);
+    out[at + 27] = 0;
+    out[at + 28] = f32_bits(gz.x);
+    out[at + 29] = f32_bits(gz.y);
+    out[at + 30] = f32_bits(gz.z);
+    out[at + 31] = 0;
 }
 
 // ── The horizon layer ───────────────────────────────────────────────────────

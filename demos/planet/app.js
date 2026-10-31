@@ -74,6 +74,7 @@ const rivers = createRivers(bro.kernel.compile(readApp('riverbuild.bk'), { file:
 const kTile = mod.kernel('k_tile');
 const kHeight = mod.kernel('k_height');
 const kRange = mod.kernel('k_range');
+const kAnchor = mod.kernel('k_anchor');
 const kDetailHeight = mod.kernel('k_detail_height');
 const kDetail = mod.kernel('k_detail');
 const kHorizonHeights = mod.kernel('k_horizon_heights');
@@ -99,6 +100,8 @@ span.write(new Int32Array(PRODUCE_PER_UPDATE * 2));
 const texelHeights = bro.kernel.createBuffer(PRODUCE_PER_UPDATE * TEXELS * TEXELS * 4);
 // The batch's horizon heights, k_horizon_heights to k_horizon.
 const horizonHeights = bro.kernel.createBuffer(PRODUCE_PER_UPDATE * HZ_GRID * HZ_GRID * 4);
+// Each resident tile's relief anchors (planet.bk k_anchor), by slot.
+const anchors = bro.kernel.createBuffer(CAPACITY * 32 * 4);
 
 const canvas = document.querySelector('#stage');
 const scene = canvas.getContext('scene');
@@ -136,13 +139,14 @@ function makeCache(pixelsPerTexel) {
         domain: { type: 'cubeSphere', radius: RADIUS, center: [0, 0, 0] },
         tileSize: TILE, border: BORDER, capacity: CAPACITY, maxLevel: MAX_LEVEL,
         minHeight: 0, maxHeight: MAX_HEIGHT, pixelsPerCell, producePerUpdate: PRODUCE_PER_UPDATE,
-        layers: { position: 16, detail: DETAIL * DETAIL * 8, horizon: 16 },
+        layers: { position: 16, relief: 4, detail: DETAIL * DETAIL * 8, horizon: 16 },
         ranges: true,
-        // The whole batch in five dispatches: the GPU fills up on the
+        // The whole batch in six dispatches: the GPU fills up on the
         // batch's cells together, where a tile's own were a few warps.
         produce(batch) {
             const grid = [CELLS, CELLS, batch.count], pos = this.layer('position');
-            kTile.dispatch(grid, batch.table, pos, span, RADIUS, BORDER, 1 / TILE, TRUTH, SEED, rivers.net);
+            kTile.dispatch(grid, batch.table, pos, this.layer('relief'), span, RADIUS, BORDER, 1 / TILE, TRUTH, SEED, rivers.net);
+            kAnchor.dispatch([batch.count], batch.table, anchors, RADIUS, 1 / TILE, DETAIL, SEED);
             kHorizonHeights.dispatch([HZ_GRID, HZ_GRID, batch.count], batch.table, horizonHeights, RADIUS, 1 / TILE, SEED, rivers.net);
             kHorizon.dispatch([HZ, HZ, batch.count], batch.table, horizonHeights, this.layer('horizon'), HZ_GRID, RADIUS, BORDER, 1 / TILE);
             const texels = [TEXELS, TEXELS, batch.count];
@@ -153,6 +157,8 @@ function makeCache(pixelsPerTexel) {
     });
     if (ground) {
         ground.setShaderTexture('pos', { buffer: cache.layer('position'), width: CELLS, height: CELLS, layers: CAPACITY, atlas: 2, channels: 4, format: 'float32' });
+        ground.setShaderBuffer('relief_scale', cache.layer('relief'));
+        ground.setShaderBuffer('anchors', anchors);
         ground.setShaderBuffer('det', cache.layer('detail'));
         ground.setShaderBuffer('hz', cache.layer('horizon'));
         ground.setShaderBuffer('tiles', cache.drawList);
@@ -195,6 +201,7 @@ const GROUND_LAYOUT = constants('planet::ground_layout', {
     CELLS: ['i32', CELLS], BORDER: ['i32', BORDER], TILE: ['i32', TILE], DETAIL: ['i32', DETAIL],
     TEXELS: ['i32', TEXELS], HZ: ['i32', HZ], FACE_EXTENT: ['f32', RADIUS * Math.PI / 2],
     DETAIL_PERIOD: ['f32', DETAIL_PERIOD], SWELL_PERIOD: ['f32', SWELL_PERIOD],
+    RADIUS: ['f32', RADIUS], SEED: ['i32', SEED],
     GL_TILE: ['i32', GROUND_LIGHT.tile], GL_BORDER: ['i32', GROUND_LIGHT.border],
     GL_ATLAS: ['i32', GROUND_LIGHT.atlas], GL_LEVELS: ['i32', GROUND_LIGHT.levels],
     WAVE_COUNT: ['i32', WAVES.list.length], WAVE_SWELL: ['i32', WAVES.swell], WAVE_FRESH: ['i32', WAVES.fresh],
@@ -211,7 +218,8 @@ ground = scene.createInstancedMesh({
     mesh: patchMesh(), color: [1, 1, 1],
     castsShadow: false, receivesShadow: false, doubleSided: true,
     module: readApp('ground_mesh.bk'), file: 'ground_mesh.bk',
-    modules: { tiles: bro.tiles.module, 'planet::ground_layout': GROUND_LAYOUT, ...treeModules, ...grassModules },
+    modules: { tiles: bro.tiles.module, 'planet::ground_layout': GROUND_LAYOUT, 'planet::relief': MODULES['planet::relief'],
+               ...treeModules, ...grassModules },
 });
 ground.cullMargin = 4 * RADIUS;   // the shader places tiles; the cache culls them
 makeCache(4);

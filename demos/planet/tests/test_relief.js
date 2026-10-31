@@ -42,4 +42,21 @@ for (const scale of [16, 4096, 5.5e6]) {
     });
 }
 
+// A ridge octave's slope (what the shader adds per octave) is its cell
+// mean's derivative, crests and folds included, at every factor.
+test('ridge_cell_slope is ridge_cell_mean\'s derivative', () => {
+    const kr = mod.kernel('k_ridge');
+    let worst = 0;
+    const h = 1e-3;
+    for (const f of [1, 0.95, 0.8, 0.5, 0.2])
+        for (let n = -0.9; n <= 0.9; n += 0.05) {
+            const fd = (kr.run(1, n + h, f, 0)[0] - kr.run(1, n - h, f, 0)[0]) / (2 * h);
+            worst = Math.max(worst, Math.abs(kr.run(1, n, f, 1)[0] - fd));
+        }
+    console.log(`ridge slope error ${worst.toExponential(2)}`);
+    // Within the tanh fit of the normal CDF the mean takes (its derivative
+    // is not exactly the density the slope uses), of slopes up to 2.
+    check(worst < 5e-3, `slope as the mean's differences (${worst.toExponential(2)})`);
+});
+
 done('planet relief');

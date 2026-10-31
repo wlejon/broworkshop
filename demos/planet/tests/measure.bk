@@ -2,7 +2,15 @@
 // compute it, at (0, 0) of a frame (corner c, axes u, v), `cell` wide.
 from planet::ground import cell_height, spread, expected_surface, gradient, variation, strata, terrain, octaves_for,
     noise_at, simplex_anchor;
-from planet::relief import simplex_grad, simplex_past;
+from planet::relief import simplex_grad, simplex_past, ridge_cell_mean, ridge_cell_slope;
+
+// A ridge octave's mean over a cell at noise n and factor f (`ch` 0), and
+// its slope in n (1).
+@kernel @grid(1)
+fn k_ridge(g: grid<1>, n: f32, f: f32, ch: i32) -> f64 {
+    if (ch == 0) { return ridge_cell_mean(n, f) as f64; }
+    return ridge_cell_slope(n, f) as f64;
+}
 
 // The ground's noise at q + o: `ch` 0 as noise() takes it in f64, 1-4 as
 // simplex_grad takes it from q's lattice cell moved by o (1 its value, 2-4
