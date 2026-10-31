@@ -264,7 +264,7 @@ export function createClouds(scene, radius, module, readers, seed, hook, maxGrou
         n.setShaderUniform('cloud_w0', 4 * radius / GROUND_TILE);
     }
 
-    let reference = false;
+    let reference = false, sunReference = false;
     const hi = [0, 0, 0], lo = [0, 0, 0];
     node.setShaderTexture('lift_faces', { data: liftCpu, width: FACE + 2, height: FACE + 2, layers: 6, channels: 1 });
     return {
@@ -300,7 +300,14 @@ export function createClouds(scene, radius, module, readers, seed, hook, maxGrou
                          altitude < CLOUD_BASE + CLOUD_DEPTH + liftNear[1] + NEAR_MARGIN;
             node.setShaderUniform('near_range', near && !reference ? NEAR_RANGE : 0);
             node.setShaderUniform('fine', reference === true ? REFERENCE_FINE : reference || 1);
+            node.setShaderUniform('sun_march', sunReference ? 1 : 0);
         },
+        // The sun's depth light-marched through the field itself at every
+        // sample, its detail included, in place of the depth's model: what
+        // that model is measured against (a look change's oracle, with
+        // `reference` for the march's steps; never shipped on).
+        get sunReference() { return sunReference; },
+        set sunReference(on) { sunReference = !!on; },
         // The reference: the whole march in steps 16 times finer (or a
         // number, that many: a convergence sweep), no near grid, at many
         // times the cost, what the march and the grid are measured against

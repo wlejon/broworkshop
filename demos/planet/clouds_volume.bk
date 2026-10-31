@@ -38,6 +38,10 @@ struct Params {
     // How many times finer than its own the march steps in cloud (1; the
     // reference, clouds.reference, 16).
     fine: f32,
+    // 1: the sun's depth light-marched through the field itself
+    // (sun_march_tau; clouds.sunReference), what the depth's model is
+    // measured against.
+    sun_march: f32,
 }
 @binding(4, 0) var params: uniform<Params>;
 
@@ -450,6 +454,63 @@ fn sun_depth(s: f32, f: f32, v: f32, mu_s: f32, tap_top: vec4<f32>) -> SunDepth 
     return SunDepth { tau: CLOUD_SIGMA * path * CLOUD_DEPTH / mu_s, above: above };
 }
 
+// The billows' own shade. The column's depth toward the sun runs through the
+// column to its tops, the same for a lobe toward the sun and the crease
+// beside it, so near clouds were lit as smooth cotton. The first 160 m
+// toward the sun are integrated through the field itself, its detail
+// included (taps at 40 m and 160 m, trapezoids), and the column's depth past
+// them added: a lobe's sunward face is lit through metres of itself, a
+// crease shaded through the lobe beside it, and deep in, every tap in cloud,
+// the depth is the column's. The rest is added even where the far tap is
+// clear: a ray out through a crease meets the cloud's body again (weighted
+// by the far tap's fill, a big cloud's lower half shone gold where the
+// light-marched sun leaves it dark). Against that march (clouds.sunReference)
+// the column alone was RMS 11.5 / 12.5 / 20.5 / 13.5 off at 800 m, sunrise,
+// sunset and 27.6 km; this is 8.3 / 8.1 / 15.8 / 8.5, a third tap no closer,
+// one at 160 m alone 9.3 / 9.4 / 15.7 / 8.6. The far tap reads at a footprint
+// of half its distance (only the shape that far matters). The column is the
+// sample's over the taps' few metres across; the detail carries their shape.
+fn tap_fill(p: vec3<f32>, s: f32, f: f32, v: f32, w: f32, to_sun: vec3<f32>, mu_s: f32, d: f32) -> vec4<f32> {
+    let fd = detailed(p + to_sun * d, w, f, v);
+    let occ = cloud_occupancy(fd.x, fd.y, s + d * mu_s / CLOUD_DEPTH);
+    return clamp(occ * 4.0 - CLOUD_RANK, vec4<f32>(0.0), vec4<f32>(1.0));
+}
+fn billow_tau(p: vec3<f32>, s: f32, f: f32, v: f32, w: f32, to_sun: vec3<f32>, mu_s: f32, fill0: vec4<f32>, tau_col: vec4<f32>) -> vec4<f32> {
+    let f1 = tap_fill(p, s, f, v, w, to_sun, mu_s, 40.0);
+    let f2 = tap_fill(p, s, f, v, max(w, 80.0), to_sun, mu_s, 160.0);
+    let local = CLOUD_SIGMA * (20.0 * (fill0 + f1) + 60.0 * (f1 + f2));
+    return local + max(tau_col - vec4<f32>(CLOUD_SIGMA * 160.0), vec4<f32>(0.0));
+}
+
+// The sun's depth from P marched through the field, its detail included, at
+// the footprint w: steps from 10 m growing by 15%, to the layer's top. The
+// oracle of the depth's model (params.sun_march); never shipped on.
+fn sun_march_tau(p: vec3<f32>, w: f32, to_sun: vec3<f32>) -> vec4<f32> {
+    var tau: vec4<f32> = vec4<f32>(0.0);
+    var d: f32 = 0.0;
+    var ds: f32 = 10.0;
+    for (var k: i32 = 0; k < 96; k += 1) {
+        let q = p + to_sun * (d + 0.5 * ds);
+        let rq = length(q);
+        let up = q / rq;
+        let s = (rq - params.radius - CLOUD_BASE - lift(up)) / CLOUD_DEPTH;
+        if (s > 1.0 || min(min(tau.x, tau.y), min(tau.z, tau.w)) > 40.0) {
+            break;
+        }
+        if (s >= 0.0) {
+            let col = column(up, w, cloud_need(s), 0.0);
+            if (col.cloud) {
+                let fd = detailed(q, w, col.f, col.variance);
+                let occ = cloud_occupancy(fd.x, fd.y, s);
+                tau += CLOUD_SIGMA * ds * clamp(occ * 4.0 - CLOUD_RANK, vec4<f32>(0.0), vec4<f32>(1.0));
+            }
+        }
+        d += ds;
+        ds *= 1.15;
+    }
+    return tau;
+}
+
 // How far on a ray outside the layer's heights here can first meet them
 // again: the gap to the base below it (or the top above) closes at most at
 // the ray's fall (rise) less the lift's slope bound, and the planet's curve
@@ -777,7 +838,12 @@ pub fn volume(ray: volume::Ray) -> volume::Light {
             sun_seen = tf;
         }
         let kept = max(sd.tau - rate * back, vec4<f32>(0.0)) / max(sd.tau, vec4<f32>(1.0e-6));
-        let tau_sun = min(sd.tau, vec4<f32>(tf)) * kept;
+        var tau_sun: vec4<f32> = min(sd.tau, vec4<f32>(tf)) * kept;
+        if (params.sun_march > 0.5) {
+            tau_sun = sun_march_tau(x.p, w, to_sun);
+        } else if (seen_now > 0.05) {
+            tau_sun = billow_tau(x.p, x.s, col.f, col.variance, w, to_sun, mu_s, fill, tau_sun);
+        }
         let len = dt + back;
         // The sun and the sky through the air, taken where the ray first
         // meets cloud and again every 20 km along it.
@@ -916,7 +982,8 @@ pub fn medium(pos: vec3<f32>, dir: vec3<f32>, w: f32) -> volume::Medium {
     let mu_s = max(dot(to_sun, x.up), 0.04);
     let tap = sun_tap(x.p, x.s, col.f, col.variance, fw, to_sun, mu_s);
     let sd = sun_depth(x.s, col.f, col.variance, mu_s, tap);
-    let tau = min(sd.tau, vec4<f32>(field_tau(cp, ct, x.s)));   // the march's
+    let tau = billow_tau(x.p, x.s, col.f, col.variance, fw, to_sun, mu_s, fill,
+                         min(sd.tau, vec4<f32>(field_tau(cp, ct, x.s))));   // the march's
     let by_sun = phase(dot(dir, to_sun)) * exp(-tau) + sun_many(tau, mu_s);
     let by_sky = sky_many(tau, mu_s);
     let sun = volume::sun_light(pos);
