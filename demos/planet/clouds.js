@@ -20,7 +20,9 @@
 
 // The layer's shape is clouds.bk's (CLOUD_BASE, CLOUD_DEPTH), here for the
 // near grid's gate and the tests.
-export const CLOUD_BASE = 1100;       // m above the broad ground under it (clouds.bk k_cloud_lift): the layer's floor
+import { constants } from "/app/shaders.js";
+
+export const CLOUD_BASE = 1100;      // m above the broad ground under it (clouds.bk k_cloud_lift): the layer's floor
 export const CLOUD_DEPTH = 3000;      // m from the floor to the tallest tops
 const NEAR_RANGE = 1500;              // m from the eye the engine's near grid integrates (userMedium)
 const REFERENCE_FINE = 16;            // the reference march's steps, this many times finer
@@ -168,7 +170,7 @@ export function createClouds(scene, radius, module, readers, seed, hook, maxGrou
     // values anew (bind, below).
     const volumeModules = (fine, sunMarch) => ({
         ...hook.modules,
-        cloud_oracle: `module cloud_oracle;\npub const FINE: f32 = ${fine.toFixed(1)};\npub const SUN_MARCH: bool = ${sunMarch};\n`,
+        cloud_oracle: constants('cloud_oracle', { FINE: ['f32', fine], SUN_MARCH: ['bool', sunMarch] }),
     });
     let built = '1,false';
     const node = scene.createVolume({
