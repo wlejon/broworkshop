@@ -522,12 +522,13 @@ export function createClouds(scene, radius, module, readers, seed, hook) {
             const near = altitude > CLOUD_BASE + liftNear[0] - NEAR_MARGIN &&
                          altitude < CLOUD_BASE + CLOUD_DEPTH + liftNear[1] + NEAR_MARGIN;
             node.setShaderUniform('near_range', near && !reference ? NEAR_RANGE : 0);
-            node.setShaderUniform('fine', reference ? REFERENCE_FINE : 1);
+            node.setShaderUniform('fine', reference === true ? REFERENCE_FINE : reference || 1);
         },
-        // The reference: the whole march in steps 16 times finer, no near
-        // grid, at many times the cost, what the march and the grid are
-        // measured against (a look change's oracle; never shipped on).
+        // The reference: the whole march in steps 16 times finer (or a
+        // number, that many: a convergence sweep), no near grid, at many
+        // times the cost, what the march and the grid are measured against
+        // (a look change's oracle; never shipped on).
         get reference() { return reference; },
-        set reference(on) { reference = !!on; },
+        set reference(on) { reference = typeof on === 'number' ? Math.max(1, Math.round(on)) : !!on; },
     };
 }
