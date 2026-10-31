@@ -259,18 +259,29 @@ fn k_cloud_tile(g: grid<3>, table: read_store<f64, 1>, pool: write_store<i32, 1>
 // light field for Nubis; Hillaire's shadow steps), and only with the layer's
 // own column above a point does it say less (clouds_volume.bk sun_depth).
 // The ray is sampled at SUN_STEPS lengths growing geometrically from
-// SUN_FIRST metres to where it leaves the layer's top, each reading the
-// column field at a footprint of half its length from the cache itself
-// (the coarse tiles always resident; this tile's own cells from its slot,
-// written by k_cloud_tile before), as cover: a step whose occupancy is occ
-// passes 1 - occ of the light whole and the rest through its cloud, the
-// steps at random overlap (as the march's pieces), so a long way through a
-// layer of scattered cloud finds its gaps. (At the occupancy's mean density,
-// every low sun's ray was dark: 28 km of a third's cover is a depth of 250.)
+// SUN_FIRST metres (the first 160 m are the readers' own billow taps) to
+// where it leaves the layer's top, each reading the column field at a
+// footprint of SUN_W_SHARE of its length from the cache itself (the coarse
+// tiles always resident; this tile's own cells from its slot, written by
+// k_cloud_tile before), as cover. The footprint is the step's, never the
+// tile's own cells': read at a coarse tile's, a coarse tile's depths came
+// out lower than its children's at the same points, a step at the edge of
+// where the finer tiles end. A step whose occupancy is occ, SUN_SEGMENT
+// metres of it at a time (about a cumulus across), passes 1 - occ of the
+// light whole and the rest through its cloud, the segments at random
+// overlap (as the march's pieces), so a long way through a layer of
+// scattered cloud finds its gaps and a deck's does not. (At the
+// occupancy's mean density, every low sun's ray was dark: 28 km of a
+// third's cover is a depth of 250. Taken a step at a time instead, the
+// gaps of a kilometres-long step lined up whole: the deck's faces toward a
+// dusk sun were lit where the light-marched sun, clouds.sunReference, finds
+// them dark.)
 pub const SUN_LOWEST: f32 = 0.15;
 pub const SUN_SPACING: f32 = 0.25;
-const SUN_STEPS: i32 = 10;
-const SUN_FIRST: f32 = 15.0;
+const SUN_STEPS: i32 = 12;
+const SUN_FIRST: f32 = 60.0;
+const SUN_SEGMENT: f32 = 500.0;
+const SUN_W_SHARE: f32 = 0.25;
 pub const SUN_TAU_MAX: f32 = 48.0;   // the depth a unorm16 channel spans
 const CELL_COLUMN_RANGE: f32 = 2.0 * COLUMN_F_RANGE / 65535.0;
 const CELL_VAR_RANGE: f32 = COLUMN_V_RANGE / 65535.0;
@@ -306,8 +317,6 @@ fn k_cloud_sun(g: grid<3>, table: read_store<f64, 1>, lookup: read_store<vec4<i3
     let to_sun = vec3<f32>(sx, sy, sz);
     let mu = dot(to_sun, up);
     let rf = radius as f32;
-    // The tile's footprint (two cells), at a face's centre's stretch.
-    let w_cell = w0 / exp2(own.level as f32);
     var taus: vec4<f32> = vec4<f32>(SUN_TAU_MAX);
     for (var k: i32 = 0; k < 4; k += 1) {
         let sk = SUN_LOWEST + (k as f32) * SUN_SPACING;
@@ -328,14 +337,14 @@ fn k_cloud_sun(g: grid<3>, table: read_store<f64, 1>, lookup: read_store<vec4<i3
             let rx = length(x);
             let qx = x / rx;
             let si = (rx - rf - base) / CLOUD_DEPTH;
-            if (si > 1.0) {
+            if (si > 1.0 || tau > SUN_TAU_MAX) {
                 break;
             }
             if (si >= 0.0) {
                 let p = tiles::cube_point(qx);
                 let uv = vec2<f32>(p.u, p.v) * 2.0 - 1.0;
                 let stretch = sqrt(1.0 + max(uv.x * uv.x, uv.y * uv.y)) / (1.0 + dot(uv, uv));
-                let w = max(w_cell, 0.5 * len);
+                let w = max(CLOUD_COLUMN_MIN as f32, SUN_W_SHARE * len);
                 let lk = min(tiles::level_for(w, w0 * stretch, levels) as i32, levels);
                 let at = tiles::tile_at(p, own.level);
                 var c: vec2<f32> = vec2<f32>(-COLUMN_F_RANGE, 0.0);
@@ -349,7 +358,8 @@ fn k_cloud_sun(g: grid<3>, table: read_store<f64, 1>, lookup: read_store<vec4<i3
                 }
                 let gq = clamp(c.x / CLOUD_DETAIL_FULL, 0.0, 1.0);
                 let occ = cloud_occupancy(c.x, c.y + detail_var * gq * gq, si);
-                tau -= log(max(1.0 - occ * (1.0 - exp(-CLOUD_SIGMA * len)), 1.0e-12));
+                let segs = max(len / SUN_SEGMENT, 1.0);
+                tau -= segs * log(max(1.0 - occ * (1.0 - exp(-CLOUD_SIGMA * len / segs)), 1.0e-12));
             }
         }
         if (mu > -0.2) {
