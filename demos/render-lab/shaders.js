@@ -1,104 +1,107 @@
-// shaders.js — three custom GLSL effects spliced into the PBR uber-shader.
+// shaders.js — three custom brokernel (.bk) effects compiled into the PBR mesh program.
 //
-// `setShader` is NOT "replace the shader". You hand the engine two function
-// BODIES and it splices them into whichever mesh program the node needs
-// (static / skinned / instanced), so custom code composes with everything the
-// material system already does: textures, the light loop, shadows, IBL and
-// probes, fog, tonemap. The contract, verbatim from docs/scene-api.js:
+// `setShader` is NOT "replace the shader". You hand the engine a brokernel
+// `hook` module and brass compiles it alongside whichever mesh program the
+// node needs (static / skinned / instanced), so custom code composes with
+// everything the material system already does: textures, the light loop,
+// shadows, IBL and probes, fog, tonemap. The contract, from docs/scene-nodes-api.js:
 //
-//   void userVertex(inout vec3 pos, inout vec3 normal, inout vec2 uv)
+//   pub fn vertex(v: mesh::Vertex) -> mesh::Vertex
 //       Runs in OBJECT space, after skinning and wind sway, before the camera
-//       transforms. Displace `pos` and the world position, lighting, fog and
-//       shadows all track it — the depth-only shadow pass runs userVertex too,
+//       transforms. Displace `v.pos` and the world position, lighting, fog and
+//       shadows all track it — the depth-only shadow pass runs `vertex` too,
 //       so a displaced static mesh casts its DISPLACED silhouette.
 //
-//   void userFragment(inout vec3 baseColor, inout vec3 normal,
-//                     inout float metallic, inout float roughness,
-//                     inout vec3 emissive, inout float alpha)
+//   pub fn fragment(v: mesh::Vertex, s: mesh::Surface) -> mesh::Surface
 //       Runs after every material input is gathered and BEFORE the light loop,
-//       so what you write into those six values is what standard PBR shades.
-//       `normal` here is world-space (renormalized after the hook).
+//       so what you return in `Surface` is what standard PBR shades.
+//       `s.normal` here is world-space (renormalized after the hook).
 //
-// Available to both chunks: engine varyings vWorldPos (camera-RELATIVE world
-// position), vNormal, vUV, vColor, vCamDist, and engine uniforms like
-// uWindTime. Your own uniforms must live in the reserved `u_` namespace and be
-// numeric (float / vec2 / vec3 / vec4 — samplers are not supported yet); your
-// own varyings must live in the reserved `v_` namespace.
+// Available to both hooks: `v.world_pos` (camera-RELATIVE world position),
+// `v.normal`, `v.uv`, `v.color`, `v.tangent`, `v.user0..2`, and engine modules
+// like `scene::camera`. Your own uniforms are fields of a `@binding(4, 0)`
+// uniform struct (`setShaderUniform` writes them by field name).
 //
 // Two sharp edges this file is shaped around:
 //
-//   1. vWorldPos is CAMERA-RELATIVE. Any pattern keyed off it swims when the
-//      camera moves. The dissolve therefore keys off vUV, which is stable in
-//      object space and needs no vertex chunk at all.
+//   1. `v.world_pos` is CAMERA-RELATIVE. Any pattern keyed off it swims when the
+//      camera moves. The dissolve therefore keys off `v.uv`, which is stable in
+//      object space and needs no vertex hook at all.
 //
-//   2. A vertex chunk that references a varying IT declares makes the shadow
-//      pass fall back to the undisplaced silhouette (with a log warning),
-//      because that symbol does not exist in the depth-only program. The wave
-//      below deliberately declares NO custom varying so its shadow ripples
-//      with the geometry — that displaced shadow is half the demonstration.
+//   2. A vertex hook also runs in the depth-only shadow pass, so the wave's
+//      shadow ripples with the geometry — that displaced shadow is half the
+//      demonstration.
 //
 // Also true, and worth stating because it is the usual next question: the same
-// chunk pair works on SkinnedMeshNode and InstancedMeshNode — the engine
-// compiles a program variant per pipeline. No skinned mesh is built here;
-// that belongs to demos/anim-lab. Instanced meshes cast UNdisplaced shadows,
-// and their hook runs in mesh-local space before the per-instance transform.
+// module works on SkinnedMeshNode and InstancedMeshNode — the engine compiles
+// a program variant per pipeline. No skinned mesh is built here; that belongs
+// to demos/anim-lab. Instanced meshes run their hook in mesh-local space
+// before the per-instance transform.
 //
-// Culling cannot see GLSL, so every displacing node sets `cullMargin` to its
-// maximum displacement — otherwise a node whose geometry has been pushed
-// outside its AABB gets culled while still plainly on screen.
+// Culling cannot see shader displacement, so every displacing node sets
+// `cullMargin` to its maximum displacement — otherwise a node whose geometry
+// has been pushed outside its AABB gets culled while still plainly on screen.
 
 // --- effect A: dissolve / burn ----------------------------------------------
-// A hash-noise threshold with an emissive edge just above it. `discard` is the
-// honest way to punch holes: alpha would need a blend pass the lit path does
-// not run for opaque meshes. The edge is a smoothstep band that rides the
-// threshold, so sweeping u_diss walks a burning front across the surface.
+// A hash-noise threshold with an emissive edge just above it. `discard_fragment()`
+// is the honest way to punch holes: alpha would need a blend pass the lit path
+// does not run for opaque meshes. The edge is a smoothstep band that rides the
+// threshold, so sweeping `diss` walks a burning front across the surface.
 //
 // Fragment-only, on purpose — which means the SHADOW keeps the solid
 // silhouette. That is a real limitation of the fragment hook (the shared
 // default shadow program has no idea about the discard), and it is visible in
 // the app: dissolve the monolith to 0.9 and its shadow stays whole.
 
-const DISSOLVE_FRAG = `
-uniform float u_diss;     // 0 = solid, 1 = fully burned away
-uniform float u_edge;     // width of the glowing front
-uniform float u_scale;    // noise cells across the UV sheet
-uniform vec3  u_burn;     // edge colour (HDR — it is meant to bloom)
+const DISSOLVE_MODULE = `
+module hook;
+import mesh;
 
-float hash21(vec2 p) {
-    return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453123);
+struct Params {
+    diss:  f32,     // 0 = solid, 1 = fully burned away
+    edge:  f32,     // width of the glowing front
+    scale: f32,     // noise cells across the UV sheet
+    _pad:  f32,
+    burn:  vec3<f32>, // edge colour (HDR — it is meant to bloom)
+}
+@binding(4, 0) var params: uniform<Params>;
+
+fn hash21(p: vec2<f32>) -> f32 {
+    return fract(sin(dot(p, vec2<f32>(127.1, 311.7))) * 43758.5453123);
 }
 
 // Value noise: cheap, and the blocky character actually suits a burn front.
-float vnoise(vec2 p) {
-    vec2 i = floor(p), f = fract(p);
-    f = f * f * (3.0 - 2.0 * f);
-    float a = hash21(i);
-    float b = hash21(i + vec2(1.0, 0.0));
-    float c = hash21(i + vec2(0.0, 1.0));
-    float d = hash21(i + vec2(1.0, 1.0));
+fn vnoise(p: vec2<f32>) -> f32 {
+    let i: vec2<f32> = floor(p);
+    let f0: vec2<f32> = fract(p);
+    let f: vec2<f32> = f0 * f0 * (vec2<f32>(3.0) - 2.0 * f0);
+    let a: f32 = hash21(i);
+    let b: f32 = hash21(i + vec2<f32>(1.0, 0.0));
+    let c: f32 = hash21(i + vec2<f32>(0.0, 1.0));
+    let d: f32 = hash21(i + vec2<f32>(1.0, 1.0));
     return mix(mix(a, b, f.x), mix(c, d, f.x), f.y);
 }
 
-float fbm(vec2 p) {
+fn fbm(p: vec2<f32>) -> f32 {
     return vnoise(p) * 0.62 + vnoise(p * 2.03) * 0.26 + vnoise(p * 4.11) * 0.12;
 }
 
-void userFragment(inout vec3 baseColor, inout vec3 normal,
-                  inout float metallic, inout float roughness,
-                  inout vec3 emissive, inout float alpha) {
-    float n = fbm(vUV * u_scale);
-    if (n < u_diss) discard;
+pub fn fragment(v: mesh::Vertex, s: mesh::Surface) -> mesh::Surface {
+    let n: f32 = fbm(v.uv * params.scale);
+    if (n < params.diss) { discard_fragment(); }
 
     // 1 at the threshold, falling to 0 one edge-width above it.
-    float front = 1.0 - smoothstep(u_diss, u_diss + max(u_edge, 1e-4), n);
+    let front: f32 = 1.0 - smoothstep(params.diss, params.diss + max(params.edge, 0.0001), n);
 
-    // Char the surface into the front, then light it. Zeroing baseColor under
+    // Char the surface into the front, then light it. Zeroing base_color under
     // the hottest part is what makes the edge read as burning rather than as
     // a glow painted over intact material.
-    baseColor *= (1.0 - front * 0.85);
-    roughness = mix(roughness, 0.95, front);
-    metallic  = mix(metallic, 0.0, front);
-    emissive += u_burn * front * front * 7.0;
+    var out = s;
+    out.base_color = out.base_color * (1.0 - front * 0.85);
+    out.roughness  = mix(out.roughness, 0.95, front);
+    out.metallic   = mix(out.metallic, 0.0, front);
+    out.emissive   = out.emissive + params.burn * (front * front * 7.0);
+    return out;
 }`;
 
 // --- effect B: vertex-displacement wave --------------------------------------
@@ -108,57 +111,71 @@ void userFragment(inout vec3 baseColor, inout vec3 normal,
 // alone the surface ripples but shades flat, and the difference is obvious the
 // moment you drag the amplitude.
 
-const WAVE_VERT = `
-uniform float u_amp;
-uniform float u_freq;
-uniform float u_speed;
-uniform float u_time;
+const WAVE_MODULE = `
+module hook;
+import mesh;
 
-void userVertex(inout vec3 pos, inout vec3 normal, inout vec2 uv) {
-    float px = pos.x * u_freq + u_time * u_speed;
-    float pz = pos.z * u_freq * 0.78 - u_time * u_speed * 0.61;
+struct Params {
+    amp:   f32,
+    freq:  f32,
+    speed: f32,
+    time:  f32,
+}
+@binding(4, 0) var params: uniform<Params>;
 
-    pos.y += sin(px) * cos(pz) * u_amp;
+pub fn vertex(v: mesh::Vertex) -> mesh::Vertex {
+    var out = v;
+    let px: f32 = out.pos.x * params.freq + params.time * params.speed;
+    let pz: f32 = out.pos.z * params.freq * 0.78 - params.time * params.speed * 0.61;
+
+    out.pos.y += sin(px) * cos(pz) * params.amp;
 
     // d/dx and d/dz of the displacement above; the surface normal of a height
     // field y = h(x,z) is normalize(-dh/dx, 1, -dh/dz).
-    float dx =  cos(px) * cos(pz) * u_amp * u_freq;
-    float dz = -sin(px) * sin(pz) * u_amp * u_freq * 0.78;
-    normal = normalize(vec3(-dx, 1.0, -dz));
+    let dx: f32 =  cos(px) * cos(pz) * params.amp * params.freq;
+    let dz: f32 = -sin(px) * sin(pz) * params.amp * params.freq * 0.78;
+    out.normal = normalize(vec3<f32>(-dx, 1.0, -dz));
+    return out;
 }`;
 
 // --- effect C: fresnel rim + scanline emissive -------------------------------
-// The rim term needs the view vector, and vWorldPos being camera-relative is
+// The rim term needs the view vector, and v.world_pos being camera-relative is
 // exactly what makes that a one-liner: the fragment's offset FROM the camera
-// is vWorldPos, so the direction back to the eye is normalize(-vWorldPos).
+// is v.world_pos, so the direction back to the eye is normalize(-v.world_pos).
 // Scanlines scroll in UV space so they stay glued to the surface.
 
-const RIM_FRAG = `
-uniform float u_rimPow;     // fresnel falloff exponent
-uniform float u_rimGain;    // rim brightness
-uniform float u_scanFreq;   // scanlines around the surface
-uniform float u_scanGain;   // scanline brightness
-uniform float u_time;
-uniform vec3  u_rimColor;
+const RIM_MODULE = `
+module hook;
+import mesh;
 
-void userFragment(inout vec3 baseColor, inout vec3 normal,
-                  inout float metallic, inout float roughness,
-                  inout vec3 emissive, inout float alpha) {
-    vec3 V = normalize(-vWorldPos);
-    float fres = pow(1.0 - clamp(dot(normal, V), 0.0, 1.0), max(u_rimPow, 0.01));
+struct Params {
+    rimPow:   f32,      // fresnel falloff exponent
+    rimGain:  f32,      // rim brightness
+    scanFreq: f32,      // scanlines around the surface
+    scanGain: f32,      // scanline brightness
+    rimColor: vec3<f32>,
+    time:     f32,
+}
+@binding(4, 0) var params: uniform<Params>;
+
+pub fn fragment(v: mesh::Vertex, s: mesh::Surface) -> mesh::Surface {
+    let view_dir: vec3<f32> = normalize(-v.world_pos);
+    let fres: f32 = pow(1.0 - clamp(dot(s.normal, view_dir), 0.0, 1.0), max(params.rimPow, 0.01));
 
     // Slow breath on the rim so a still frame still reads as "powered".
-    float pulse = 0.72 + 0.28 * sin(u_time * 1.6);
+    let pulse: f32 = 0.72 + 0.28 * sin(params.time * 1.6);
 
     // Hard-edged scanlines plus one bright band sweeping bottom to top.
-    float lines = smoothstep(0.45, 0.55, fract(vUV.y * u_scanFreq));
-    float sweep = smoothstep(0.965, 1.0, fract(vUV.y * 0.5 - u_time * 0.22));
+    let lines: f32 = smoothstep(0.45, 0.55, fract(v.uv.y * params.scanFreq));
+    let sweep: f32 = smoothstep(0.965, 1.0, fract(v.uv.y * 0.5 - params.time * 0.22));
 
-    emissive += u_rimColor * (fres * u_rimGain * pulse
-                              + lines * u_scanGain * 0.12
-                              + sweep * 2.4);
+    var out = s;
+    out.emissive = out.emissive + params.rimColor * (fres * params.rimGain * pulse
+                                                     + lines * params.scanGain * 0.12
+                                                     + sweep * 2.4);
     // Interior stays dark and mirror-ish so the rim is the whole read.
-    roughness = mix(roughness, 0.18, fres);
+    out.roughness = mix(out.roughness, 0.18, fres);
+    return out;
 }`;
 
 // --- effect registry ---------------------------------------------------------
@@ -223,37 +240,37 @@ export function buildShaderProps(scene, handles) {
  * replacing it.
  */
 export function applyShaders(cfg, on) {
-    setEffect('dissolve', on && cfg.dissolve.enabled, { fragment: DISSOLVE_FRAG }, {
-        u_diss:  cfg.dissolve.amount,
-        u_edge:  cfg.dissolve.edge,
-        u_scale: cfg.dissolve.scale,
-        u_burn:  [1.0, 0.42, 0.12],
+    setEffect('dissolve', on && cfg.dissolve.enabled, { module: DISSOLVE_MODULE }, {
+        diss:  cfg.dissolve.amount,
+        edge:  cfg.dissolve.edge,
+        scale: cfg.dissolve.scale,
+        burn:  [1.0, 0.42, 0.12],
     });
 
-    setEffect('wave', on && cfg.wave.enabled, { vertex: WAVE_VERT }, {
-        u_amp:   cfg.wave.amp,
-        u_freq:  cfg.wave.freq,
-        u_speed: cfg.wave.speed,
-        u_time:  0,
+    setEffect('wave', on && cfg.wave.enabled, { module: WAVE_MODULE }, {
+        amp:   cfg.wave.amp,
+        freq:  cfg.wave.freq,
+        speed: cfg.wave.speed,
+        time:  0,
     });
 
-    setEffect('rim', on && cfg.rim.enabled, { fragment: RIM_FRAG }, {
-        u_rimPow:   cfg.rim.power,
-        u_rimGain:  cfg.rim.gain,
-        u_scanFreq: cfg.rim.scanFreq,
-        u_scanGain: cfg.rim.scanGain,
-        u_rimColor: [0.30, 0.92, 1.0],
-        u_time:     0,
+    setEffect('rim', on && cfg.rim.enabled, { module: RIM_MODULE }, {
+        rimPow:   cfg.rim.power,
+        rimGain:  cfg.rim.gain,
+        scanFreq: cfg.rim.scanFreq,
+        scanGain: cfg.rim.scanGain,
+        rimColor: [0.30, 0.92, 1.0],
+        time:     0,
     });
 }
 
 /**
  * One effect's install/clear/update cycle. `setShader` COMPILES NOW — every
- * program variant the node can render with — and throws SyntaxError carrying
- * the driver log on failure, leaving the node on its previous shader. So the
- * chunk source is only ever handed over on the install edge; steady-state
- * updates go through setShaderUniform, which is a per-node value write and
- * costs nothing.
+ * program variant the node can render with — and throws Error carrying
+ * brokernel's diagnostics on failure, leaving the node on its previous shader.
+ * So the module source is only ever handed over on the install edge;
+ * steady-state updates go through setShaderUniform, which is a per-node value
+ * write and costs nothing.
  */
 function setEffect(key, want, chunks, uniforms) {
     const node = _nodes[key];
@@ -283,17 +300,17 @@ function setEffect(key, want, chunks, uniforms) {
  */
 export function tickShaders(cfg, on, timeSec) {
     if (on && cfg.wave.enabled && _installed.wave) {
-        _nodes.wave.setShaderUniform('u_time', timeSec);
+        _nodes.wave.setShaderUniform('time', timeSec);
     }
     if (on && cfg.rim.enabled && _installed.rim) {
-        _nodes.rim.setShaderUniform('u_time', timeSec);
+        _nodes.rim.setShaderUniform('time', timeSec);
     }
     // The burn front only animates when asked; otherwise the slider owns it,
     // because a hand-parked dissolve is easier to inspect than a moving one.
     if (on && cfg.dissolve.enabled && _installed.dissolve && cfg.dissolve.sweep) {
         const v = 0.5 - 0.5 * Math.cos(timeSec * 0.55);
         cfg.dissolve.amount = v;
-        _nodes.dissolve.setShaderUniform('u_diss', v);
+        _nodes.dissolve.setShaderUniform('diss', v);
         return v;
     }
     return null;

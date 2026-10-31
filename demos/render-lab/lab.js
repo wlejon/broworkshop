@@ -14,7 +14,7 @@
 //   lod.js          setLodMeshes() chains vs visibilityRange detail/imposter
 //                   pairs, side by side down the same avenue
 //   shaders.js      three setShader() effects (fragment dissolve, vertex wave,
-//                   fresnel rim) spliced into the PBR uber-shader
+//                   fresnel rim) compiled as brokernel (.bk) modules into the PBR mesh program
 //   monitor.js      a second scene rendered to a texture via asTexture() and
 //                   mapped onto a screen in the courtyard, live
 //

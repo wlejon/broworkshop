@@ -34,8 +34,8 @@
 // is fixed at creation — the `color` property is LightNode-only, and writing
 // it on a mesh is silently a no-op — so per-level tinting cannot be done by
 // assigning a colour per frame. The way through is a one-uniform fragment
-// chunk (see shaders.js for the full setShader contract): install it on the
-// props while the debug view is on, then push a `u_lodTint` per node from the
+// module (see shaders.js for the full setShader contract): install it on the
+// props while the debug view is on, then push a `lodTint` per node from the
 // level the renderer actually chose. Reading `lodLevel` back to drive it is
 // also the proof that the readout is the renderer's decision and not a JS
 // re-implementation of it.
@@ -48,18 +48,24 @@ const LEVEL_TINTS = [
     [0.90, 0.34, 0.25],
 ];
 
-const LOD_TINT_FRAG = `
-uniform vec3 u_lodTint;
+const LOD_TINT_MODULE = `
+module hook;
+import mesh;
 
-void userFragment(inout vec3 baseColor, inout vec3 normal,
-                  inout float metallic, inout float roughness,
-                  inout vec3 emissive, inout float alpha) {
+struct Params {
+    lodTint: vec3<f32>,
+}
+@binding(4, 0) var params: uniform<Params>;
+
+pub fn fragment(v: mesh::Vertex, s: mesh::Surface) -> mesh::Surface {
     // Flat, unmissable, still lit — the shape has to stay readable so the
     // geometry change is what you notice, with the colour only confirming it.
-    baseColor = u_lodTint;
-    metallic  = 0.0;
-    roughness = 0.65;
-    emissive += u_lodTint * 0.22;
+    var out = s;
+    out.base_color = params.lodTint;
+    out.metallic   = 0.0;
+    out.roughness  = 0.65;
+    out.emissive   = out.emissive + params.lodTint * 0.22;
+    return out;
 }`;
 
 // Base thresholds in world units, before the HUD's distance multiplier. The
@@ -225,8 +231,8 @@ export function setLodDebugColors(on) {
     _debugColors = want;
     for (const p of _props) {
         if (want) {
-            p.node.setShader({ fragment: LOD_TINT_FRAG,
-                               uniforms: { u_lodTint: LEVEL_TINTS[0] } });
+            p.node.setShader({ module: LOD_TINT_MODULE,
+                               uniforms: { lodTint: LEVEL_TINTS[0] } });
         } else {
             p.node.clearShader();
         }
@@ -276,7 +282,7 @@ export function tickLod() {
         if (_debugColors) {
             const t = Math.max(0, Math.min(2, lv));
             if (p.tint !== t) {
-                p.node.setShaderUniform('u_lodTint', LEVEL_TINTS[t]);
+                p.node.setShaderUniform('lodTint', LEVEL_TINTS[t]);
                 p.tint = t;
             }
         }
