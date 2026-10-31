@@ -73,10 +73,12 @@ fn texel_dir(table: read_store<f64, 1>, r: i32, tx: i32, ty: i32, border: f64, i
     return normalize(record_vec(table, r + 8) + record_vec(table, r + 11) * s + record_vec(table, r + 14) * t);
 }
 
-// The mean height of each texel of a batch into `heights`, the batch's
-// tiles one after another, (n * d)^2 each.
+// Each texel of a batch into `texels`, the batch's tiles one after another,
+// (n * d)^2 each: xyz its point of the mean surface relative to the tile's
+// center, w its mean height. k_detail reads every texel's point four times
+// over, from its neighbours, so it is found once here in f64.
 @kernel @grid(3)
-fn k_detail_height(g: grid<3>, table: read_store<f64, 1>, heights: write_store<f32, 1>,
+fn k_detail_height(g: grid<3>, table: read_store<f64, 1>, texels: write_store<vec4<f32>, 1>,
                    radius: f64, border: f64, inv_size: f64, d: f64, seed: i32, net: read_store<f32, 1>) {
     let r = g.z() * RECORD;
     let w = g.width();
@@ -89,17 +91,14 @@ fn k_detail_height(g: grid<3>, table: read_store<f64, 1>, heights: write_store<f
     let s = ((tx as f64 + 0.5) / d - 0.5 - border) * inv_size;
     let t = ((ty as f64 + 0.5) / d - 0.5 - border) * inv_size;
     let octaves = octaves_for(table[r + 20], cell);
-    heights[(g.z() * w + ty) * w + tx] = cell_height(c, u, v, s, t, cell, radius, octaves, seed, net) as f32;
+    let h = cell_height(c, u, v, s, t, cell, radius, octaves, seed, net);
+    let p = normalize(c + u * s + v * t) * (radius + max(h, 0.0)) - record_vec(table, r + 17);
+    texels[(g.z() * w + ty) * w + tx] = vec4<f32>(p.x as f32, p.y as f32, p.z as f32, h as f32);
 }
 
-// Texel (tx, ty)'s point of the mean surface, relative to the tile's center.
-fn texel_point(table: read_store<f64, 1>, heights: read_store<f32, 1>, r: i32, z: i32, w: i32, tx: i32, ty: i32,
-               radius: f64, border: f64, inv_size: f64, d: f64, center: vec3<f64>) -> vec3<f32> {
-    let x = clamp(tx, 0, w - 1);
-    let y = clamp(ty, 0, w - 1);
-    let h = heights[(z * w + y) * w + x] as f64;
-    let p = texel_dir(table, r, x, y, border, inv_size, d) * (radius + max(h, 0.0)) - center;
-    return vec3<f32>(p.x as f32, p.y as f32, p.z as f32);
+// Texel (tx, ty) of tile z, clamped to the tile's texels.
+fn texel_at(texels: read_store<vec4<f32>, 1>, z: i32, w: i32, tx: i32, ty: i32) -> vec4<f32> {
+    return texels[(z * w + clamp(ty, 0, w - 1)) * w + clamp(tx, 0, w - 1)];
 }
 
 // 0 to 1 into `bits` bits, rounded.
@@ -113,24 +112,21 @@ fn unorm(x: f32, bits: i32) -> i32 {
 // resolve, and the expected surface over them, with the mean surface's
 // normal.
 @kernel @grid(3)
-fn k_detail(g: grid<3>, table: read_store<f64, 1>, heights: read_store<f32, 1>, out: write_store<i32, 1>,
+fn k_detail(g: grid<3>, table: read_store<f64, 1>, texels: read_store<vec4<f32>, 1>, out: write_store<i32, 1>,
             radius: f64, border: f64, inv_size: f64, d: f64, truth: f32, seed: i32, net: read_store<f32, 1>) {
     let r = g.z() * RECORD;
     let z = g.z();
     let w = g.width();
     let slot = table[r] as i32;
-    let center = record_vec(table, r + 17);
     let tx = g.x();
     let ty = g.y();
     let octaves = octaves_for(table[r + 20], inv_size / d);
-    let du = texel_point(table, heights, r, z, w, tx + 1, ty, radius, border, inv_size, d, center)
-           - texel_point(table, heights, r, z, w, tx - 1, ty, radius, border, inv_size, d, center);
-    let dv = texel_point(table, heights, r, z, w, tx, ty + 1, radius, border, inv_size, d, center)
-           - texel_point(table, heights, r, z, w, tx, ty - 1, radius, border, inv_size, d, center);
+    let du = texel_at(texels, z, w, tx + 1, ty).xyz - texel_at(texels, z, w, tx - 1, ty).xyz;
+    let dv = texel_at(texels, z, w, tx, ty + 1).xyz - texel_at(texels, z, w, tx, ty - 1).xyz;
     let dir = texel_dir(table, r, tx, ty, border, inv_size, d);
     let up = vec3<f32>(dir.x as f32, dir.y as f32, dir.z as f32);
     let sp = spread(dir, radius, octaves, truth, seed);
-    let h = heights[(z * w + ty) * w + tx];
+    let h = texels[(z * w + ty) * w + tx].w;
     // du and dv span two texels.
     let grad = gradient(du, dv, up);
     let trend = grad * length(du) * 0.5;

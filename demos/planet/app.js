@@ -96,8 +96,8 @@ const PRODUCE_PER_UPDATE = 24;
 // batches by k_range itself.
 const span = bro.kernel.createBuffer(PRODUCE_PER_UPDATE * 2 * 4);
 span.write(new Int32Array(PRODUCE_PER_UPDATE * 2));
-// The batch's texel mean heights, k_detail_height to k_detail.
-const texelHeights = bro.kernel.createBuffer(PRODUCE_PER_UPDATE * TEXELS * TEXELS * 4);
+// The batch's texels, each its point and mean height, k_detail_height to k_detail.
+const texelHeights = bro.kernel.createBuffer(PRODUCE_PER_UPDATE * TEXELS * TEXELS * 16);
 // The batch's horizon heights, k_horizon_heights to k_horizon.
 const horizonHeights = bro.kernel.createBuffer(PRODUCE_PER_UPDATE * HZ_GRID * HZ_GRID * 4);
 // Each resident tile's relief anchors (planet.bk k_anchor), by slot.
