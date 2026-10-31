@@ -25,6 +25,20 @@ struct Params {
 @binding(4, 15) var sun: read_buffer<u32>;
 @binding(4, 16) var blocks: read_buffer<i32>;
 
+const TWIGS: f32 = 44.0;        // twigs along a finger, rim to trunk (about 7 cm apart)
+const TWIG_SLANT: f32 = 2.2;    // twigs they lag behind from the axis to the edge
+const TWIG_CORE: f32 = 0.2;     // a twig's half-thickness, of the spacing
+const TWIG_NEEDLE: f32 = 0.18;  // and how far past it its needles reach
+const NEEDLES: f32 = 40.0;      // needles along a twig, each side
+const TWIG_THICK: f32 = 0.18;   // what a twig averages to: core and needles, over its varied reach
+const BOUGH_CORE: f32 = 0.55;   // the solid middle of a finger's spray, of its half-width
+const STEM: f32 = 0.05;         // and its own branch
+// A gap opens as the features it lies between grow from 1 / OPEN_FROM to
+// 1 / OPEN_BY pixels apart: smaller, a cut out shape would flicker as it
+// moves.
+const OPEN_FROM: f32 = 0.125;
+const OPEN_BY: f32 = 0.05;
+
 // The sun grid between its points, at field point f (sun.js: the
 // terrain's sun, then the clouds' direct, scattered and sky).
 fn sun_at(f: vec2<f32>) -> vec4<f32> {
@@ -184,32 +198,57 @@ pub fn fragment(v: mesh::Vertex, s_in: mesh::Surface) -> mesh::Surface {
         let width = mix(0.46, 0.27, v_branch.z);
         let fw = fwidth(a);
         let in_branch = 1.0 - smoothstep(width - 0.06 - fw, width + fw, off);
-        // Out toward the rim the gaps between fingers are open, each
-        // finger reaching its own way out and narrowing to its tip, so a
-        // tier's edge is ragged rather than a polygon's; where the
-        // fingers are finer than a pixel, the edge is their average
-        // instead. Only the near trees' fingers are that large, and
-        // only their pass gives up the early depth test a discard costs.
+        // Each finger is a herringbone of needled twigs slanting out from
+        // its axis: u counts them along it, and a twig covers the part of
+        // each count within its thickness.
+        // Each twig its own: how far out it reaches (so a finger's outline
+        // is ragged), how thick and how light.
+        let side = min(off / width, 1.0);
+        let finger = floor(a);
+        let f0 = fract(sin(finger * 7.13 + v_seed * 31.7) * 43758.5453);
+        let u = v_branch.z * TWIGS + side * TWIG_SLANT + f0
+              + 0.35 * sin(v_branch.z * 23.0 + f0 * 6.2831853) + 0.2 * sin(v_branch.z * 61.0 + f0 * 17.0);
+        let fu = fwidth(u);
+        let twig_id = floor(u);
+        let h1 = fract(sin(twig_id * 12.9898 + finger * 4.11 + v_seed * 78.233) * 43758.5453);
+        let h2 = fract(h1 * 157.31 + 0.27);
+        let reach_t = 0.65 + 0.35 * h2;
+        // Along each twig, its needles: a comb of fine spikes out from its
+        // core, their mean where they are finer than a pixel.
+        let w = side * NEEDLES + twig_id * 0.37;
+        let spike = max(0.0, 1.0 - abs(fract(w) - 0.5) * 6.0);
+        let needle = mix(spike, 1.0 / 6.0, smoothstep(0.06, 0.16, fwidth(w)));
+        let thick = (TWIG_CORE + TWIG_NEEDLE * needle) * (0.8 + 0.4 * h1)
+                  * (1.0 - smoothstep(reach_t - 0.15, reach_t, side));
+        let td = abs(fract(u) - 0.5);
+        let in_twig = 1.0 - smoothstep(thick - fu, thick + fu, td);
+        // The bough is solid out to its core, its twigs' ends a ragged
+        // fringe beyond; seen from within a crown, where the twigs are
+        // tens of pixels apart, the gaps between them open to the stem.
+        let stem = step(side, mix(STEM, BOUGH_CORE, smoothstep(0.015, 0.05, fu)));
+        // Near, the gaps are cut out: between the fingers, each reaching
+        // its own way out and narrowing to its tip, and between the twigs,
+        // so the sky and the crown behind show through and a tier's edge
+        // is ragged rather than a polygon's. A gap opens from nothing as
+        // it grows from about 8 to 20 pixels, so no distance cuts it at
+        // once; finer, the tier is shaded as what the gaps average to.
+        // Only the near trees' fingers are that large, and only their
+        // pass gives up the early depth test a discard costs.
         if (RAGGED) {
-            let reach = 0.6 + 0.3 * fract(sin(floor(a) * 12.9898 + v_seed * 78.233) * 43758.5453);
+            let reach = 0.6 + 0.3 * fract(sin(finger * 12.9898 + v_seed * 78.233) * 43758.5453);
             let tip = (width + 0.04) * (1.0 - 0.75 * smoothstep(reach, 1.0, v_branch.z));
-            if (fw < 0.25 && v_branch.z > reach && off > tip) { discard_fragment(); }
+            let finger_gap = mix(0.5, tip, smoothstep(OPEN_FROM, OPEN_BY, fw));
+            let twig_gap = mix(0.5, thick, smoothstep(OPEN_FROM, OPEN_BY, fu) * (1.0 - stem));
+            if (off > finger_gap || td > twig_gap) { discard_fragment(); }
         }
         let cover = mix(2.0 * width, in_branch, smoothstep(0.6, 0.25, fw));
         shade = mix(0.3, 1.0, cover);
-        // Each finger is needled twigs: across and along it, a grain
-        // that averages out where it is finer than a pixel.
-        let g = vec2<f32>(a * 7.0, v_branch.z * 38.0);
-        let gc = floor(g);
-        var gf = g - gc;
-        gf = gf * gf * (3.0 - 2.0 * gf);
-        let s0 = v_seed * 31.0;
-        let twig = mix(mix(fract(sin(dot(gc, vec2<f32>(12.9898, 78.233)) + s0) * 43758.5453),
-                           fract(sin(dot(gc + vec2<f32>(1.0, 0.0), vec2<f32>(12.9898, 78.233)) + s0) * 43758.5453), gf.x),
-                       mix(fract(sin(dot(gc + vec2<f32>(0.0, 1.0), vec2<f32>(12.9898, 78.233)) + s0) * 43758.5453),
-                           fract(sin(dot(gc + vec2<f32>(1.0, 1.0), vec2<f32>(12.9898, 78.233)) + s0) * 43758.5453), gf.x), gf.y);
-        let gw = max(fwidth(g.x), fwidth(g.y));
-        shade *= mix(1.0, mix(0.72, 1.12, twig), in_branch * smoothstep(0.5, 0.15, gw));
+        // Down a twig the needles darken toward its gaps, each twig a
+        // little lighter or darker than the next; finer than a pixel,
+        // their average.
+        let resolved = smoothstep(0.6, 0.25, fu);
+        let twig = mix(2.0 * TWIG_THICK, in_twig, resolved);
+        shade *= mix(1.0, mix(0.6, 1.1, twig) * mix(1.0, 0.8 + 0.4 * h2, resolved), in_branch * (1.0 - 0.7 * stem));
         // The fingers' edges turn from the sun: rounded, not painted.
         let across = (fract(a) - 0.5) / width;
         shade *= mix(1.0, 1.0 - 0.35 * across * across, in_branch * smoothstep(0.6, 0.25, fw));
