@@ -5,7 +5,7 @@
 module planet::ground;
 
 import std::noise::*;
-from planet::rivers import water_at, lake_surface;
+from planet::rivers import water_at, lake_surface, Water;
 // The ridged relief's octaves and statistics, which the ground's shader
 // shares (relief.bk): BASE_WAVELENGTH the first octave's wavelength, metres;
 // RIDGE_MEAN E[(1 - |noise|)^2] and NOISE_VAR Var(noise), measured over 200k
@@ -423,9 +423,11 @@ const CUT_BLEND: f32 = 40.0;
 // fine part as its sides carry it on), none under a lake. The ground's
 // shader scales the octaves finer than its texels by them (ground_mesh.bk).
 pub fn terrain_shaped(dir: vec3<f64>, radius: f64, octaves: f64, seed: i32, net: read_store<f32, 1>) -> vec3<f64> {
-    let t = terrain_parts(dir, radius, octaves, seed);
+    return shaped_by(terrain_parts(dir, radius, octaves, seed), water_at(dir, radius, cell_width(octaves), net, seed));
+}
+// The ground's parts (terrain_parts) cut by the water w found for them.
+fn shaped_by(t: vec3<f64>, w: Water) -> vec3<f64> {
     let h = t.x + t.y;
-    let w = water_at(dir, radius, cell_width(octaves), net, seed);
     let side = smoothstep(0.0, VALLEY_FLOOR, w.near.x - w.bed);
     let valley = w.near.x + (t.y as f32) * side;
     let x = (h as f32) - valley;
@@ -458,12 +460,13 @@ pub fn cell_height(c: vec3<f64>, u: vec3<f64>, v: vec3<f64>, s: f64, t: f64, cel
     if (octaves >= SUPERSAMPLE_BELOW) {
         return terrain(normalize(c + u * s + v * t), radius, octaves, seed, net);
     }
+    let w = water_at(normalize(c + u * s + v * t), radius, cell_width(octaves), net, seed);
     var sum: f64 = 0.0;
     for (var j: i32 = 0; j < SUB; j += 1) {
         for (var i: i32 = 0; i < SUB; i += 1) {
             let ds = (((i as f64) + 0.5) / (SUB as f64) - 0.5) * cell;
             let dt = (((j as f64) + 0.5) / (SUB as f64) - 0.5) * cell;
-            sum += terrain(normalize(c + u * (s + ds) + v * (t + dt)), radius, octaves + 2.0, seed, net);
+            sum += shaped_by(terrain_parts(normalize(c + u * (s + ds) + v * (t + dt)), radius, octaves + 2.0, seed), w).x;
         }
     }
     return sum / ((SUB * SUB) as f64);

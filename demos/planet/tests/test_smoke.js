@@ -2,8 +2,10 @@
 //   Run: scripts/validate.sh demos/planet
 import { check, frames, test, done } from "/lib/kit/test.js";
 
+// Production spends the gap 360 fps frames leave (about a millisecond), so
+// a jump from orbit to 3 km takes a few hundred frames to refine.
 const settle = () => {
-    for (let i = 0; i < 200 && (i < 4 || planet.cache.pending > 0); i++) frames(1);
+    for (let i = 0; i < 600 && (i < 4 || planet.cache.pending > 0); i++) frames(1);
 };
 const deepest = () => Math.max(...planet.cache.drawn.map((t) => t.level));
 
