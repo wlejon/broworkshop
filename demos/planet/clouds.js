@@ -14,7 +14,7 @@
 // as many cloudy columns and clear ones as that fraction says (the march's
 // sub-columns). Refinement only sharpens it, as the sea's waves turn into
 // its roughness (Bruneton, Neyret and Holzschuch 2010). The field is
-// produced by a kernel into a clipmap about the eye (clouds.bk), so a
+// produced by a kernel into a tile cache over the sphere (clouds.bk), so a
 // shader reads a column in a few loads, whatever its footprint. The view's
 // rays march it, and are lit, in the volume's hook (clouds_volume.bk).
 
@@ -28,32 +28,32 @@ const NEAR_MARGIN = 300;              // m about the layer's heights the eye use
 const NOISE_VAR = 0.0728;             // the Perlin noise's variance (ground.bk PERLIN_VAR)
 const NOISE_SLOPE = 2.5;              // a bound on its gradient, per lattice unit
 
-// The column field is a clipmap (clouds.bk k_cloud_level): LEVELS grids of
-// N x N texels about the eye on the gnomonic plane of the cube face it is
-// over, each level's texels twice the last's, then the whole sphere as six
-// faces of FACE + 2 texels (the faces' edges and a texel beyond). A texel
-// holds the column at a footprint of two texels; the finest are DELTA0 of
-// the plane apart (24 m at a face's centre, a footprint of 48 m: finer is
-// the detail's, CLOUD_COLUMN_MIN), the sphere's as the coarsest
-// level's next. A level follows the eye in steps of SNAP texels and
-// produces only the texels it steps onto, its grid wrapping (k_cloud_level;
-// N a power of two, as the shader wraps by a mask).
-const LEVELS = 11, N = 512, SNAP = 32, FACE = 256;
+// The layer's lift (clouds.bk k_cloud_lift) on six cube faces of FACE + 2
+// texels (the faces' edges and a texel beyond), DELTA_GLOBE of the face
+// plane apart.
+const FACE = 256;
 const DELTA_GLOBE = 2 / (FACE - 1);
-const DELTA0 = DELTA_GLOBE / 2 ** LEVELS;
-const GLOBE_BASE = LEVELS * N * N;     // the first globe texel
 const FACE_TEXELS = (FACE + 2) * (FACE + 2);
 
-// The view's volume reads the same field from a tile cache (bro.tiles,
+// The view's volume reads the field from a tile cache (bro.tiles,
 // clouds.bk k_cloud_tile): TILE cells a tile's edge and TILE_BORDER beyond
 // it, a cell's column at a footprint of two cells, refined wherever a cell
 // projects over TILE_PIXELS pixels, so every part of the view reads its own
-// footprint, where the clipmap's levels about the eye fell coarser past an
-// eighth of the eye's distance. TILE_LEVELS deep: 49 m footprints at a
-// face's centre, the clipmap's finest. The ground's light reads the clipmap
-// (cloudBk).
+// footprint. TILE_LEVELS deep: 49 m footprints at a face's centre (finer is
+// the detail's, CLOUD_COLUMN_MIN).
 const TILE = 64, TILE_BORDER = 1, TILE_CELLS = TILE + 2 * TILE_BORDER, TILE_LEVELS = 13;
 const TILE_PIXELS = 1, TILE_CAPACITY = 6144, TILE_ATLAS = 2;
+
+// The ground reads what the clouds leave of its light from a second tile
+// cache (clouds.bk k_cloud_ground) over the ground's heights, refined where
+// the ground is seen: GROUND_TILE cells an edge, a cell projecting over
+// GROUND_PIXELS pixels splits, GROUND_LEVELS deep (24 m cells at a face's
+// centre, as the column's finest tiles). Light from a cloud a kilometre
+// up is softer than the ground's vertices, so its cells are a few pixels.
+const GROUND_TILE = 32, GROUND_BORDER = 1, GROUND_CELLS = GROUND_TILE + 2 * GROUND_BORDER, GROUND_LEVELS = 14;
+const GROUND_PIXELS = 4, GROUND_CAPACITY = 4096, GROUND_ATLAS = 2;
+// For the readers' modules.
+export const GROUND_LIGHT = { tile: GROUND_TILE, border: GROUND_BORDER, levels: GROUND_LEVELS, atlas: GROUND_ATLAS };
 
 // The column's octaves (clouds.bk column): wavelength and amplitude.
 const OCTAVES = [];
@@ -111,8 +111,8 @@ function noiseSlices() {
 // and its variance, from the slices.
 let BILLOW_MEAN = 0, BILLOW_VAR = 0;
 const NOISE = noiseSlices();
-// The variance the detail adds to a column at full amount (cloudBk's
-// CLOUD_DETAIL_VAR, clouds.bk cloud_light's detail_var).
+// The variance the detail adds to a column at full amount (clouds.bk
+// cloud_light's detail_var, clouds_volume.bk's).
 export const CLOUD_DETAIL_VAR = NOISE_VAR * (0.07 * 0.07 + 0.04 * 0.04) + BILLOW_VAR * (0.03 * 0.03 + 0.02 * 0.02);
 
 // A bound on the gradient (per m along the layer) of the column resolved at
@@ -137,194 +137,24 @@ export function faceFrame(i) {
     return { a, e, f };
 }
 
-// The clouds' light on the ground (cloud_light_at), for the ground's module.
-// Positions are about the planet's centre, in metres. The clipmap's levels
-// are the column field's (clouds.bk): cloud_head holds, for level k, its
-// plane origin, texel spacing and gradientBound; at CLOUD_LEVELS, the
-// globe's spacing and bound; after it, each level's origin in texels (where
-// its wrapped grid starts). cloud_a/e/f is the eye's face (faceFrame).
-export const cloudBk = (radius) => `
-    fn cloud_head_at(row: i32) -> vec4<f32> {
-        return vec4<f32>(
-            cloud_head.fetch(vec2<i32>(0, row), 0).x,
-            cloud_head.fetch(vec2<i32>(1, row), 0).x,
-            cloud_head.fetch(vec2<i32>(2, row), 0).x,
-            cloud_head.fetch(vec2<i32>(3, row), 0).x,
-        );
-    }
-
-    // The globe level's face at the unit direction q (the largest axis), and
-    // q's texel coordinates t on it.
-    struct CloudFace {
-        face: i32,
-        t: vec2<f32>,
-    }
-    fn cloud_face(q: vec3<f32>) -> CloudFace {
-        let m = abs(q);
-        let axis = m.x >= m.y && m.x >= m.z ? 0 : (m.y >= m.z ? 1 : 2);
-        // q's axes rotated so the face's comes first (a swizzle: a vector
-        // indexed by a variable is kept in local memory, not registers).
-        let r = axis == 0 ? q : (axis == 1 ? q.yzx : q.zxy);
-        let z = r.x;
-        let uv = r.yz / abs(z);
-        let delta = cloud_head.fetch(vec2<i32>(0, ${LEVELS}), 0).x;
-        let t = clamp((uv + 1.0 + delta) / delta, vec2<f32>(0.0), vec2<f32>(${FACE + 2}.0 - 1.001));
-        return CloudFace { face: axis + (z < 0.0 ? 3 : 0), t: t };
-    }
-
-    // The level a footprint of w metres reads at the layer point q (0 the
-    // finest, fractional between two, CLOUD_LEVELS the globe), and q's point
-    // uv on the eye's face plane (the globe off it), as the volume reads the
-    // field (clouds_volume.bk level_of).
-    struct CloudLevel {
-        l: f32,
-        uv: vec2<f32>,
-    }
-    fn cloud_level_of(q: vec3<f32>, w: f32) -> CloudLevel {
-        let z = dot(q, params.cloud_a);
-        if (z <= 0.1) { return CloudLevel { l: ${LEVELS}.0, uv: vec2<f32>(0.0) }; }
-        let uv = vec2<f32>(dot(q, params.cloud_e), dot(q, params.cloud_f)) / z;
-        let d = 1.0 + dot(uv, uv);
-        let stretch = sqrt(1.0 + max(uv.x * uv.x, uv.y * uv.y)) / d;
-        let l = clamp(log2(max(w, 60.0) / (2.0 * ${radius.toFixed(1)} * ${DELTA0} * stretch)), 0.0, ${LEVELS}.0);
-        return CloudLevel { l: l, uv: uv };
-    }
-
-    // What the clouds leave of the ground's light (clouds.bk k_cloud_light),
-    // over the column field's texels: the sun straight through (x),
-    // scattered down (y), and the sky's (z). A level's grid wraps: texel p
-    // of it (counted from the plane's origin) is in slot p mod n.
-    fn cloud_light_texel(base: i32, p_in: vec2<i32>) -> vec3<f32> {
-        let p = p_in & vec2<i32>(${N - 1});
-        return unpack_unorm4x8(cloud_light[base + p.y * ${N} + p.x]).xyz;
-    }
-    struct CloudLightSample {
-        hit: bool,
-        c: vec3<f32>,
-    }
-    fn cloud_light_level(k: i32, uv: vec2<f32>) -> CloudLightSample {
-        let h = cloud_head_at(k);
-        let t = (uv - h.xy) / h.z;
-        if (t.x < 0.0 || t.y < 0.0 || t.x >= ${N}.0 - 1.001 || t.y >= ${N}.0 - 1.001) {
-            return CloudLightSample { hit: false, c: vec3<f32>(0.0) };
-        }
-        let fl = floor(t);
-        let f = t - fl;
-        let orig_x = cloud_head.fetch(vec2<i32>(0, ${LEVELS + 1} + k), 0).x as i32;
-        let orig_y = cloud_head.fetch(vec2<i32>(1, ${LEVELS + 1} + k), 0).x as i32;
-        let p = vec2<i32>(fl.x as i32, fl.y as i32) + vec2<i32>(orig_x, orig_y);
-        let base = k * ${N * N};
-        let c = mix(mix(cloud_light_texel(base, p), cloud_light_texel(base, p + vec2<i32>(1, 0)), f.x),
-                    mix(cloud_light_texel(base, p + vec2<i32>(0, 1)), cloud_light_texel(base, p + vec2<i32>(1, 1)), f.x), f.y);
-        return CloudLightSample { hit: true, c: c };
-    }
-    fn cloud_light_globe(q: vec3<f32>) -> vec3<f32> {
-        let cf = cloud_face(q);
-        let c = floor(cf.t);
-        let f = cf.t - c;
-        let i = ${GLOBE_BASE} + cf.face * ${FACE_TEXELS} + (c.y as i32) * ${FACE + 2} + (c.x as i32);
-        return mix(mix(unpack_unorm4x8(cloud_light[i]).xyz, unpack_unorm4x8(cloud_light[i + 1]).xyz, f.x),
-                   mix(unpack_unorm4x8(cloud_light[i + ${FACE + 2}]).xyz,
-                       unpack_unorm4x8(cloud_light[i + ${FACE + 3}]).xyz, f.x), f.y);
-    }
-    // At the ground point g over a footprint of w metres, between the levels
-    // as the volume reads the field (clouds_volume.bk column).
-    fn cloud_light_at(g: vec3<f32>, w: f32) -> vec3<f32> {
-        let q = normalize(g);
-        let cl = cloud_level_of(q, w);
-        let k0 = cl.l as i32;
-        var frac = cl.l - (k0 as f32);
-        var c = vec3<f32>(1.0, 0.0, 1.0);
-        var found_k: i32 = ${LEVELS};
-        for (var k: i32 = k0; k < ${LEVELS}; k += 1) {
-            if (found_k == ${LEVELS}) {
-                let s = cloud_light_level(k, cl.uv);
-                if (s.hit) {
-                    c = s.c;
-                    found_k = k;
-                } else {
-                    frac = 0.0;
-                }
-            }
-        }
-        if (found_k == ${LEVELS}) { return cloud_light_globe(q); }
-        if (frac > 0.0) {
-            var c1 = c;
-            if (found_k + 1 == ${LEVELS}) {
-                c1 = cloud_light_globe(q);
-            } else {
-                let s1 = cloud_light_level(found_k + 1, cl.uv);
-                if (s1.hit) { c1 = s1.c; }
-            }
-            c = mix(c, c1, frac);
-        }
-        return c;
-    }
-`;
-
 // The clouds' volume in `scene`, its column field produced by `module`'s
-// k_cloud_level (clouds.bk) and its lift by k_cloud_lift once, both bound to
-// it and to each of `readers` (nodes whose modules include cloudBk, which
-// read the clouds' light on the ground with cloud_light_at from k_cloud_light's
-// clipmap). update() each frame with the eye about the planet's centre
-// (f64), its altitude and the unit direction to the sun.
-export function createClouds(scene, radius, module, readers, seed, hook) {
-    const kernel = module.kernel('k_cloud_level');
+// k_cloud_tile (clouds.bk) into a tile cache and its lift by k_cloud_lift
+// once; and what the clouds leave of the ground's light (k_cloud_ground) in
+// a second cache over the ground's heights (0 to maxGround metres), bound
+// to each of `readers` (nodes whose modules read it: cloud_lookup, the
+// cache's lookup; cloud_ground, its pool as a unorm8 texture array; and the
+// uniform cloud_w0, the footprint of a root's cells at a face's centre).
+// update() each frame with the eye about the planet's centre (f64), its
+// altitude, the unit direction to the sun and the view.
+export function createClouds(scene, radius, module, readers, seed, hook, maxGround) {
     const node = scene.createVolume({
         module: hook.source, file: 'clouds_volume.bk', modules: hook.modules, name: 'clouds',
         uniforms: { radius, billow_mean: BILLOW_MEAN, billow_var: BILLOW_VAR, detail_var: CLOUD_DETAIL_VAR },
     });
     node.setShaderTexture('noise', { data: NOISE, width: NOISE_TEXELS, height: NOISE_TEXELS, depth: NOISE_TEXELS, repeat: true });
-    const map = bro.kernel.createBuffer((GLOBE_BASE + 6 * FACE_TEXELS) * 8);
-    // cloud_head: LEVELS + 1 headers, then each level's grid origin in
-    // texels (where its wrapped grid starts).
-    const head = new Float32Array(4 * (2 * LEVELS + 1));
-    // The clouds' light on the ground over the same texels (k_cloud_light,
-    // cloud_light), one word each, for the sun toward toSun.
-    const kLight = module.kernel('k_cloud_light');
-    const light = bro.kernel.createBuffer((GLOBE_BASE + 6 * FACE_TEXELS) * 4);
     const toSun = [0, 0, 0];   // none yet: the first update lights them all
-    // Texels [x0, x0 + w) x [y0, y0 + h) of the grid of n a row at texel base.
-    const dispatch = (base, n, x0, y0, w, h, frame, o, delta) => {
-        if (w > 0 && h > 0) kernel.dispatch([w, h], map, base, n, x0, y0,
-            frame.a[0], frame.a[1], frame.a[2], frame.e[0], frame.e[1], frame.e[2], frame.f[0], frame.f[1], frame.f[2],
-            o, delta, radius);
-    };
-    const dispatchLight = (base, n, x0, y0, w, h, frame, o, delta) => {
-        if (w > 0 && h > 0) kLight.dispatch([w, h], light, base, n, x0, y0,
-            frame.a[0], frame.a[1], frame.a[2], frame.e[0], frame.e[1], frame.e[2], frame.f[0], frame.f[1], frame.f[2],
-            o, delta, radius, seed, toSun[0], toSun[1], toSun[2], CLOUD_DETAIL_VAR);
-    };
-    // A whole level's light (or a globe face's) marches the field at every
-    // texel, about 4 ms of GPU: produced LIGHT_ROWS rows a frame (0.12 ms),
-    // the finest level first and the globe last, and the queue reported to
-    // the scene (setPendingWork) so a settle waits for it. A level stepping
-    // over the field produces the light of the texels it steps onto with
-    // their columns, at once.
-    const LIGHT_ROWS = 32;
-    let lightQueue = [];   // [level (LEVELS + face for the globe's), first row]
-    const queueLight = (k) => {
-        if (lightQueue.some((j) => j[0] === k)) return;
-        const rows = k < LEVELS ? N : FACE + 2;
-        for (let y = 0; y < rows; y += LIGHT_ROWS) lightQueue.push([k, y]);
-        lightQueue.sort((a, b) => a[0] - b[0] || a[1] - b[1]);
-    };
-    const runLight = ([k, y]) => {
-        if (k >= LEVELS) {
-            const i = k - LEVELS, rows = Math.min(LIGHT_ROWS, FACE + 2 - y);
-            dispatchLight(GLOBE_BASE + i * FACE_TEXELS, FACE + 2, 0, y, FACE + 2, rows, faceFrame(i), -1 - DELTA_GLOBE, DELTA_GLOBE);
-            return;
-        }
-        if (!held[k]) return;
-        const delta = DELTA0 * 2 ** k, ox = origins[2 * k], oy = origins[2 * k + 1];
-        dispatchLight(k * N * N, N, ox, oy + y, N, Math.min(LIGHT_ROWS, N - y), faceFrame(face), 0, delta);
-    };
 
-    for (let i = 0; i < 6; i++) dispatch(GLOBE_BASE + i * FACE_TEXELS, FACE + 2, 0, 0, FACE + 2, FACE + 2, faceFrame(i), -1 - DELTA_GLOBE, DELTA_GLOBE);
-    head[4 * LEVELS] = DELTA_GLOBE;
-    head[4 * LEVELS + 3] = gradientBound(2 * radius * DELTA_GLOBE * 0.35);
-
-    // The lift, on the globe level's faces, and each texel's direction for
+    // The lift, on the cube's faces, and each texel's direction for
     // the range about the eye.
     const lift = bro.kernel.createBuffer(6 * FACE_TEXELS * 4);
     const kLift = module.kernel('k_cloud_lift');
@@ -413,101 +243,48 @@ export function createClouds(scene, radius, module, readers, seed, hook) {
     node.setShaderTexture('sun_field', { buffer: cache.layer('sun'), width: TILE_CELLS, height: TILE_CELLS,
                                          layers: TILE_CAPACITY, atlas: TILE_ATLAS, channels: 4, format: 'unorm16' });
 
-    let face = -1;
-    let reference = false;
-    // Each level's grid origin in texels, and whether it holds anything.
-    const origins = new Int32Array(2 * LEVELS);
-    const held = new Uint8Array(LEVELS);
-    const hi = [0, 0, 0], lo = [0, 0, 0];
-
-    // The eye's face: the axis it is most along, kept until another is 5%
-    // more so (a change of face produces every level again).
-    function faceOf(eye) {
-        const m = eye.map(Math.abs);
-        const best = m[0] >= m[1] && m[0] >= m[2] ? 0 : (m[1] >= m[2] ? 1 : 2);
-        if (face >= 0 && m[face % 3] * 1.05 >= m[best] && Math.sign(eye[face % 3]) === (face < 3 ? 1 : -1)) return face;
-        return best + (eye[best] < 0 ? 3 : 0);
-    }
-
-    function produce(eye) {
-        const f = faceOf(eye);
-        const frame = faceFrame(f);
-        if (f !== face) {
-            face = f;
-            held.fill(0);
-            for (const n of readers) {
-                n.setShaderUniform('cloud_a', frame.a);
-                n.setShaderUniform('cloud_e', frame.e);
-                n.setShaderUniform('cloud_f', frame.f);
-            }
-        }
-        const z = eye[0] * frame.a[0] + eye[1] * frame.a[1] + eye[2] * frame.a[2];
-        const u = (eye[0] * frame.e[0] + eye[1] * frame.e[1] + eye[2] * frame.e[2]) / z;
-        const v = (eye[0] * frame.f[0] + eye[1] * frame.f[1] + eye[2] * frame.f[2]) / z;
-        let moved = false;
-        for (let k = 0; k < LEVELS; k++) {
-            const delta = DELTA0 * 2 ** k, step = SNAP * delta;
-            const ox = Math.round(u / step) * SNAP - N / 2, oy = Math.round(v / step) * SNAP - N / 2;
-            const px = origins[2 * k], py = origins[2 * k + 1];
-            if (held[k] && ox === px && oy === py) continue;
-            const base = k * N * N;
-            if (!held[k] || Math.abs(ox - px) >= N || Math.abs(oy - py) >= N) {
-                dispatch(base, N, ox, oy, N, N, frame, 0, delta);
-                queueLight(k);
-            } else {
-                // The columns stepped onto, then the rows over the columns
-                // kept; their light with them.
-                const both = (x0, y0, w, h) => {
-                    dispatch(base, N, x0, y0, w, h, frame, 0, delta);
-                    dispatchLight(base, N, x0, y0, w, h, frame, 0, delta);
-                };
-                if (ox > px) both(px + N, oy, ox - px, N);
-                else both(ox, oy, px - ox, N);
-                const kx = Math.max(ox, px), kw = Math.min(ox, px) + N - kx;
-                if (oy > py) both(kx, py + N, kw, oy - py);
-                else both(kx, oy, kw, py - oy);
-            }
-            origins[2 * k] = ox;
-            origins[2 * k + 1] = oy;
-            held[k] = 1;
-            head.set([Math.fround(ox * delta), Math.fround(oy * delta), delta, gradientBound(2 * radius * delta * 0.35)], 4 * k);
-            head.set([ox, oy], 4 * (LEVELS + 1 + k));
-            moved = true;
-        }
-        if (moved) {
-            for (const n of readers) n.setShaderTexture('cloud_head', { data: head, width: 4, height: 2 * LEVELS + 1 });
-        }
-    }
-
+    // The ground's light (k_cloud_ground), for the sun toward toSun:
+    // produced again (TileCache.refresh) once the sun moves.
+    const kGround = module.kernel('k_cloud_ground');
+    const ground = bro.tiles.createCache({
+        domain: { type: 'cubeSphere', radius, center: [0, 0, 0] },
+        tileSize: GROUND_TILE, border: GROUND_BORDER, capacity: GROUND_CAPACITY, maxLevel: GROUND_LEVELS,
+        minHeight: 0, maxHeight: maxGround, pixelsPerCell: GROUND_PIXELS, producePerUpdate: 64,
+        layers: { light: 4 },
+        produce(batch) {
+            kGround.dispatch([GROUND_CELLS, GROUND_CELLS, batch.count], batch.table, this.layer('light'),
+                             GROUND_CELLS, GROUND_TILE, GROUND_BORDER, radius, seed,
+                             toSun[0], toSun[1], toSun[2], CLOUD_DETAIL_VAR);
+        },
+    });
     for (const n of readers) {
-        n.setShaderTexture('cloud_head', { data: head, width: 4, height: 2 * LEVELS + 1 });
-        n.setShaderBuffer('cloud_light', light);
+        n.setShaderBuffer('cloud_lookup', ground.lookup);
+        n.setShaderTexture('cloud_ground', { buffer: ground.layer('light'), width: GROUND_CELLS, height: GROUND_CELLS,
+                                             layers: GROUND_CAPACITY, atlas: GROUND_ATLAS, channels: 4, format: 'unorm8' });
+        n.setShaderUniform('cloud_w0', 4 * radius / GROUND_TILE);
     }
+
+    let reference = false;
+    const hi = [0, 0, 0], lo = [0, 0, 0];
     node.setShaderTexture('lift_faces', { data: liftCpu, width: FACE + 2, height: FACE + 2, layers: 6, channels: 1 });
     return {
         node,
-        // The clipmap, for tests: its buffer, the level headers (cloud_head)
-        // and layout, and the eye's face.
-        map, head, layout: { levels: LEVELS, n: N, globe: GLOBE_BASE, faceTexels: FACE_TEXELS },
-        get face() { return face; },
-        // The volume's tile cache.
-        cache,
+        // The volume's tile cache, and the ground light's; the unit
+        // direction to the sun they were last lit for.
+        cache, ground, sun: toSun,
         // `view` is the camera as a tile cache takes it (TileCache.update).
         update(eye, altitude, sun, view) {
             // A sun moved by a tenth of a degree lights everything anew: the
-            // ground's light, and the tiles' sun fields, produced again.
+            // tiles' sun fields and the ground's light, produced again.
             if (sun[0] * toSun[0] + sun[1] * toSun[1] + sun[2] * toSun[2] < Math.cos(0.1 * Math.PI / 180)) {
                 toSun[0] = sun[0];
                 toSun[1] = sun[1];
                 toSun[2] = sun[2];
-                lightQueue = [];
-                for (let k = 0; k <= LEVELS + 5; k++) queueLight(k);
                 cache.refresh();
+                ground.refresh();
             }
             cache.update(view);
-            produce(eye);
-            if (lightQueue.length) runLight(lightQueue.shift());
-            scene.setPendingWork('cloud light', lightQueue.length);
+            ground.update(view);
             updateLiftRange(eye);
             for (let k = 0; k < 3; k++) {
                 hi[k] = Math.fround(eye[k]);

@@ -1,0 +1,30 @@
+// Kernels for measuring the clouds (CPU eval): the column field and the
+// ground's light at a direction, as the tile kernels compute a cell's.
+from planet::clouds import column, ground_light;
+
+// The column's amount (ch 0) or unresolved variance (ch 1) at direction
+// (x, y, z), resolved at a footprint of w metres.
+@kernel @grid(1)
+fn k_column(g: grid<1>, x: f64, y: f64, z: f64, w: f64, radius: f64, ch: i32) -> f64 {
+    let c = column(normalize(vec3<f64>(x, y, z)), w, radius);
+    if (ch == 1) {
+        return c.y as f64;
+    }
+    return c.x as f64;
+}
+
+// What the clouds leave of the ground's light there (clouds.bk
+// k_cloud_ground): ch 0 the sun straight through, 1 scattered down, 2 the
+// sky's.
+@kernel @grid(1)
+fn k_ground_light(g: grid<1>, x: f64, y: f64, z: f64, w: f64, sx: f64, sy: f64, sz: f64, radius: f64,
+                  seed: i32, detail_var: f32, ch: i32) -> f64 {
+    let c = ground_light(normalize(vec3<f64>(x, y, z)), w, normalize(vec3<f64>(sx, sy, sz)), radius, seed, detail_var);
+    if (ch == 1) {
+        return c.y as f64;
+    }
+    if (ch == 2) {
+        return c.z as f64;
+    }
+    return c.x as f64;
+}

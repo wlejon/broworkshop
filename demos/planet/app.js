@@ -7,7 +7,7 @@
 // doubles on the CPU, so nothing ever holds a planet-sized f32.
 import { boot } from "/lib/kit/app.js";
 import { bindControl, logMap } from "/lib/kit/params.js";
-import { cloudBk, createClouds } from "/app/clouds.js";
+import { GROUND_LIGHT, createClouds } from "/app/clouds.js";
 import { createGrass, grassFloorBk } from "/app/grass.js";
 import { createTrees, treeShadowBk } from "/app/trees.js";
 import { createRivers } from "/app/rivers.js";
@@ -199,7 +199,7 @@ function patchMesh() {
 // the eye. light: x the sun's share seen (its disc over the horizons, under
 // the clouds and the drawn trees), y the sky's (GTAO over the horizons,
 // under the clouds), z the clouds' shadow, which the slopes around share, w
-// the sun the clouds scatter down shadowless (clouds.js cloudLight's y);
+// the sun the clouds scatter down shadowless (clouds.bk cloud_light's y);
 // bent: how the sky's mean direction turns from the normal n.
 //
 // The horizons, read bilinearly at the horizon grid's point hz of tile
@@ -215,6 +215,8 @@ function patchMesh() {
 const groundHookBk = `module hook;
 import scene;
 import mesh;
+import custom;
+import tiles;
 
 struct Params {
     cam_hi: vec3<f32>,
@@ -222,9 +224,7 @@ struct Params {
     to_sun: vec3<f32>,
     time: f32,
     trees_far: f32,
-    cloud_a: vec3<f32>,
-    cloud_e: vec3<f32>,
-    cloud_f: vec3<f32>,
+    cloud_w0: f32,
     grass_a: vec3<f32>,
     grass_e: vec3<f32>,
     grass_f: vec3<f32>,
@@ -239,13 +239,13 @@ struct Params {
 }
 @binding(4, 0) var params: uniform<Params>;
 @binding(4, 1) var pos: texture2d_array<vec4<f32>>;
-@binding(4, 2) var cloud_head: texture2d<vec4<f32>>;
+@binding(4, 2) var cloud_ground: texture2d_array<vec4<f32>>;
 @binding(4, 14) var tiles: read_buffer<vec4<i32>>;
 @binding(4, 15) var det: read_buffer<u32>;
 @binding(4, 16) var hz: read_buffer<vec4<u32>>;
 @binding(4, 17) var grass_field: read_buffer<f32>;
 @binding(4, 18) var tree_field: read_buffer<f32>;
-@binding(4, 19) var cloud_light: read_buffer<u32>;
+@binding(4, 19) var cloud_lookup: read_buffer<vec4<i32>>;
 
 const GROUND_PI: f32 = 3.14159265;
 const TREE_CROWNS: f32 = 0.55;
@@ -267,7 +267,38 @@ const WAVE_F: array<vec4<f32>, ${WAVES.list.length}> = [
         `vec4<f32>(${[w.omega, w.tail, w.slope / w.k, w.slope * w.slope / 2].map(glslFloat).join(', ')})`).join(',\n    ')}
 ];
 
-${cloudBk(RADIUS)}
+// What the clouds leave of the light at the ground point g (about the
+// planet's centre) over a footprint of w metres, from clouds.js's ground
+// light cache (clouds.bk k_cloud_ground): the sun straight through (x),
+// scattered down (y), and the sky's (z). Between the two tile levels whose
+// cells bracket w, as mips blend, each the finest ready tile holding g at
+// that level or coarser; clear sky before any is ready.
+fn cloud_ground_at(t: tiles::Tile, p: tiles::Point) -> vec3<f32> {
+    return cloud_ground.sample_lod(custom::linear,
+        tiles::atlas_uvw(t, p, ${GROUND_LIGHT.tile}, ${GROUND_LIGHT.border}, ${GROUND_LIGHT.atlas}), 0.0).xyz;
+}
+fn cloud_light_at(g: vec3<f32>, w: f32) -> vec3<f32> {
+    let p = tiles::cube_point(normalize(g));
+    let uv = vec2<f32>(p.u, p.v) * 2.0 - 1.0;
+    let stretch = sqrt(1.0 + max(uv.x * uv.x, uv.y * uv.y)) / (1.0 + dot(uv, uv));
+    let l = tiles::level_for(w, params.cloud_w0 * stretch, ${GROUND_LIGHT.levels});
+    let k = min(l as i32, ${GROUND_LIGHT.levels - 1});
+    let fine = tiles::locate(cloud_lookup, p, k + 1);
+    if (fine.slot < 0) {
+        return vec3<f32>(1.0, 0.0, 1.0);
+    }
+    var c: vec3<f32> = cloud_ground_at(fine, p);
+    if (fine.level == k + 1) {
+        var coarse: tiles::Tile = tiles::parent_of(fine);
+        if (coarse.slot < 0) {
+            coarse = tiles::locate(cloud_lookup, p, k);
+        }
+        if (coarse.slot >= 0) {
+            c = mix(cloud_ground_at(coarse, p), c, l - (k as f32));
+        }
+    }
+    return c;
+}
 ${treeShadowBk}
 ${grassFloorBk}
 
@@ -698,7 +729,7 @@ let ground = null;
 ground = scene.createInstancedMesh({
     mesh: patchMesh(), color: [1, 1, 1],
     castsShadow: false, receivesShadow: false, doubleSided: true,
-    module: groundHookBk, file: 'ground_mesh.bk',
+    module: groundHookBk, file: 'ground_mesh.bk', modules: { tiles: bro.tiles.module },
 });
 ground.cullMargin = 4 * RADIUS;   // the shader places tiles; the cache culls them
 makeCache(4);
@@ -709,7 +740,7 @@ const grass = createGrass(scene, RADIUS, grassMod, sunMod, TRUTH, SEED, rivers.n
 const treeMod = bro.kernel.compile(readApp('trees.bk'), { file: 'trees.bk', modules: MODULES });
 const trees = createTrees(scene, RADIUS, treeMod, sunMod, TRUTH, SEED, rivers.net, [ground]);
 const clouds = createClouds(scene, RADIUS, cloudMod, [ground], SEED,
-                            { source: readApp('clouds_volume.bk'), modules: MODULES });
+                            { source: readApp('clouds_volume.bk'), modules: MODULES }, MAX_HEIGHT);
 
 // ── Camera: doubles about the planet's center ───────────────────────────────
 

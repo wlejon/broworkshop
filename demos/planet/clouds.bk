@@ -1,8 +1,9 @@
 // The cloud layer's column field (clouds.js): how much cloud each column of
-// the layer holds, as a clipmap the shaders read. A level is a grid on the
-// gnomonic plane of a cube face, the points a + e u + f v projected onto the
-// sphere; each texel holds the column's amount there, filtered to the
-// texel's footprint, and the variance of the octaves too fine for it.
+// the layer holds, in a tile cache over the cube-sphere the shaders read
+// (k_cloud_tile); each cell holds the column's amount there, filtered to
+// the cell's footprint, and the variance of the octaves too fine for it.
+// And what the clouds leave of the ground's light, in a second cache
+// (k_cloud_ground).
 from planet::ground import perlin_split, terrain_base, octaves_for;
 import tiles;
 
@@ -12,7 +13,7 @@ pub const NOISE_VAR: f32 = 0.0728;  // perlin_split's variance (ground.bk PERLIN
 // The column at the unit direction q, resolved at a footprint of w metres:
 // an octave counts in full from 4 footprints a wavelength, not at all at 2,
 // and adds the variance of what it leaves out.
-fn column(q: vec3<f64>, w: f64, radius: f64) -> vec2<f32> {
+pub fn column(q: vec3<f64>, w: f64, radius: f64) -> vec2<f32> {
     var f: f32 = F0;
     var v: f32 = 0.0;
     // The weather: cloud systems from 2000 km down to fronts and cells of
@@ -46,7 +47,7 @@ fn column(q: vec3<f64>, w: f64, radius: f64) -> vec2<f32> {
 }
 
 // The layer's shape (also read by the view's volume, clouds_volume.bk, and
-// the ground, clouds.js cloudGlsl): its base over the lift, its depth, a
+// the ground's light, k_cloud_ground): its base over the lift, its depth, a
 // cloud's extinction, and what a column must hold to reach the layer's
 // height s (cloud_need); the finest footprint the column resolves, and the
 // amount up to which the detail's variance grows in (CLOUD_COLUMN_MIN,
@@ -125,7 +126,7 @@ fn cloud_sub(occ: f32, rank: f32, len: f32) -> f32 {
 // drawing sharp shadows; z: the sky's light through them, straight up,
 // every step in the column over the point. detail_var: the variance of the
 // clouds' three-dimensional detail at full amount (clouds.js
-// CLOUD_DETAIL_VAR). The ground reads it from a clipmap (k_cloud_light),
+// CLOUD_DETAIL_VAR). The ground reads it from a tile cache (k_cloud_ground),
 // the grass and the trees from their sun grids (sun.bk).
 pub fn cloud_light(dir: vec3<f64>, h: f32, to_sun: vec3<f64>, w: f64, radius: f64, seed: i32,
                    detail_var: f32) -> vec3<f32> {
@@ -196,55 +197,18 @@ fn k_cloud_lift(g: grid<2>, out: write_store<f32, 1>, base: i32, n: i32,
     out[base + g.y() * n + g.x()] = max(terrain_base(normalize(p), radius, LIFT_OCTAVES, seed), 0.0) as f32;
 }
 
-// Texel (X, Y) = (x0 + x, y0 + y) of a level at plane point (o + X delta,
-// o + Y delta), into `out` as two floats at texel `base` + (Y mod n) * n +
-// (X mod n): a level's grid wraps (Losasso and Hoppe 2004), so when it
-// follows the eye only the texels it steps onto are produced, into the
-// slots of those it stepped off. Its footprint is two texels, at the
-// plane's stretch there: the larger of how far the sphere moves for a step
-// in u or in v.
-@kernel @grid(2)
-fn k_cloud_level(g: grid<2>, out: write_store<f32, 1>, base: i32, n: i32, x0: i32, y0: i32,
-                 ax: f64, ay: f64, az: f64, ex: f64, ey: f64, ez: f64, fx: f64, fy: f64, fz: f64,
-                 o: f64, delta: f64, radius: f64) {
-    let tx = x0 + g.x();
-    let ty = y0 + g.y();
-    let u = o + (tx as f64) * delta;
-    let v = o + (ty as f64) * delta;
-    let p = vec3<f64>(ax, ay, az) + vec3<f64>(ex, ey, ez) * u + vec3<f64>(fx, fy, fz) * v;
-    let d = 1.0 + u * u + v * v;
-    let stretch = sqrt(1.0 + max(u * u, v * v)) / d;
-    let c = column(normalize(p), 2.0 * radius * delta * stretch, radius);
-    let i = 2 * (base + (((ty % n) + n) % n) * n + ((tx % n) + n) % n);
-    out[i] = c.x;
-    out[i + 1] = c.y;
+// Cell (x, y) of the tile at record r of a batch table (bro.tiles), its
+// border's cells included: the unit direction of its centre, and the
+// footprint of two cells there, at the face plane's stretch (the larger of
+// how far the sphere moves for a step along either of the plane's axes).
+struct TileCell {
+    dir: vec3<f64>,
+    w: f64,
 }
-
-// A column (amount, variance) in one word: the amount over [-2.5, 2.5]
-// (the octaves' amplitudes sum to under 2.2 about F0) and the variance over
-// [0, 0.05] (all of it is 0.038), 16 bits each, steps of 8e-5 and 8e-7.
-pub const COLUMN_F_RANGE: f32 = 2.5;
-pub const COLUMN_V_RANGE: f32 = 0.05;
-fn pack_column(c: vec2<f32>) -> i32 {
-    let f = (clamp(c.x / COLUMN_F_RANGE * 0.5 + 0.5, 0.0, 1.0) * 65535.0 + 0.5) as i32;
-    let v = (clamp(c.y / COLUMN_V_RANGE, 0.0, 1.0) * 65535.0 + 0.5) as i32;
-    return f | (v << 16);
-}
-
-// A batch of the column field's tiles (clouds.js createClouds' cache, read
-// by the view's volume through tiles.bk): cell (x, y) of each, `border`
-// cells beyond its edges included, at its centre on the sphere; the column
-// at a footprint of two cells, at the plane's stretch there as a level's
-// (k_cloud_level), a word a cell (pack_column) into the pool at the tile's
-// slot.
-@kernel @grid(3)
-fn k_cloud_tile(g: grid<3>, table: read_store<f64, 1>, pool: write_store<i32, 1>, cells: i32,
-                tile: f64, border: f64, radius: f64) {
-    let r = g.z() * 24;
-    let slot = table[r] as i32;
+fn tile_cell<B>(table: B, r: i32, x: i32, y: i32, tile: f64, border: f64, radius: f64) -> TileCell {
     let root = table[r + 2] as i32;
-    let s = ((g.x() as f64) - border + 0.5) / tile;
-    let t = ((g.y() as f64) - border + 0.5) / tile;
+    let s = ((x as f64) - border + 0.5) / tile;
+    let t = ((y as f64) - border + 0.5) / tile;
     let du = vec3<f64>(table[r + 11], table[r + 12], table[r + 13]);
     let dv = vec3<f64>(table[r + 14], table[r + 15], table[r + 16]);
     let b = vec3<f64>(table[r + 8], table[r + 9], table[r + 10]) + du * s + dv * t;
@@ -259,8 +223,31 @@ fn k_cloud_tile(g: grid<3>, table: read_store<f64, 1>, pool: write_store<i32, 1>
         v = b.y;
     }
     let stretch = sqrt(1.0 + max(u * u, v * v)) / (1.0 + u * u + v * v);
-    let c = column(normalize(b), 2.0 * radius * (length(du) / tile) * stretch, radius);
-    pool[(slot * cells + g.y()) * cells + g.x()] = pack_column(c);
+    return TileCell { dir: normalize(b), w: 2.0 * radius * (length(du) / tile) * stretch };
+}
+
+// A column (amount, variance) in one word: the amount over [-2.5, 2.5]
+// (the octaves' amplitudes sum to under 2.2 about F0) and the variance over
+// [0, 0.05] (all of it is 0.038), 16 bits each, steps of 8e-5 and 8e-7.
+pub const COLUMN_F_RANGE: f32 = 2.5;
+pub const COLUMN_V_RANGE: f32 = 0.05;
+fn pack_column(c: vec2<f32>) -> i32 {
+    let f = (clamp(c.x / COLUMN_F_RANGE * 0.5 + 0.5, 0.0, 1.0) * 65535.0 + 0.5) as i32;
+    let v = (clamp(c.y / COLUMN_V_RANGE, 0.0, 1.0) * 65535.0 + 0.5) as i32;
+    return f | (v << 16);
+}
+
+// A batch of the column field's tiles (clouds.js createClouds' cache, read
+// by the view's volume through tiles.bk): each cell's column at its
+// footprint (tile_cell), a word a cell (pack_column) into the pool at the
+// tile's slot.
+@kernel @grid(3)
+fn k_cloud_tile(g: grid<3>, table: read_store<f64, 1>, pool: write_store<i32, 1>, cells: i32,
+                tile: f64, border: f64, radius: f64) {
+    let r = g.z() * 24;
+    let slot = table[r] as i32;
+    let cell = tile_cell(table, r, g.x(), g.y(), tile, border, radius);
+    pool[(slot * cells + g.y()) * cells + g.x()] = pack_column(column(cell.dir, cell.w, radius));
 }
 
 // The sun field: for each of a tile's cells, the optical depth of cloud
@@ -383,28 +370,23 @@ fn unorm8(x: f32) -> i32 {
     return (clamp(x, 0.0, 1.0) * 255.0 + 0.5) as i32;
 }
 
-// The clouds' light on the ground (cloud_light) over the column field's
-// texels: texel (X, Y) of a level as k_cloud_level places it, at its
-// footprint and the broad ground's height there (the octaves the footprint
-// carries), the sun toward (sx, sy, sz); into `out` as one word at the
-// texel's slot, the sun straight through, scattered down and the sky's, 8
-// bits each from the lowest (GLSL's unpackUnorm4x8). So the ground reads
-// what the clouds leave of its light where it reads the clouds, at the
-// footprint it is seen at, in a lookup.
-@kernel @grid(2)
-fn k_cloud_light(g: grid<2>, out: write_store<i32, 1>, base: i32, n: i32, x0: i32, y0: i32,
-                 ax: f64, ay: f64, az: f64, ex: f64, ey: f64, ez: f64, fx: f64, fy: f64, fz: f64,
-                 o: f64, delta: f64, radius: f64, seed: i32, sx: f64, sy: f64, sz: f64, detail_var: f32) {
-    let tx = x0 + g.x();
-    let ty = y0 + g.y();
-    let u = o + (tx as f64) * delta;
-    let v = o + (ty as f64) * delta;
-    let p = vec3<f64>(ax, ay, az) + vec3<f64>(ex, ey, ez) * u + vec3<f64>(fx, fy, fz) * v;
-    let d = 1.0 + u * u + v * v;
-    let stretch = sqrt(1.0 + max(u * u, v * v)) / d;
-    let w = 2.0 * radius * delta * stretch;
-    let dir = normalize(p);
+// A batch of the ground light's tiles (clouds.js createClouds' groundLight
+// cache, read by the ground through tiles.bk): what the clouds leave of the
+// ground's light (cloud_light) at each cell, at its footprint (tile_cell)
+// and the broad ground's height there (the octaves the footprint carries),
+// the sun toward (sx, sy, sz); into the pool at the tile's slot as one word
+// a cell, the sun straight through, scattered down and the sky's, 8 bits
+// each from the lowest (a unorm8 texture's x, y, z).
+pub fn ground_light(dir: vec3<f64>, w: f64, to_sun: vec3<f64>, radius: f64, seed: i32, detail_var: f32) -> vec3<f32> {
     let h = max(terrain_base(dir, radius, octaves_for(w, 1.0), seed), 0.0) as f32;
-    let c = cloud_light(dir, h, normalize(vec3<f64>(sx, sy, sz)), w, radius, seed, detail_var);
-    out[base + (((ty % n) + n) % n) * n + ((tx % n) + n) % n] = unorm8(c.x) | (unorm8(c.y) << 8) | (unorm8(c.z) << 16);
+    return cloud_light(dir, h, to_sun, w, radius, seed, detail_var);
+}
+@kernel @grid(3)
+fn k_cloud_ground(g: grid<3>, table: read_store<f64, 1>, pool: write_store<i32, 1>, cells: i32,
+                  tile: f64, border: f64, radius: f64, seed: i32, sx: f64, sy: f64, sz: f64, detail_var: f32) {
+    let r = g.z() * 24;
+    let slot = table[r] as i32;
+    let cell = tile_cell(table, r, g.x(), g.y(), tile, border, radius);
+    let c = ground_light(cell.dir, cell.w, normalize(vec3<f64>(sx, sy, sz)), radius, seed, detail_var);
+    pool[(slot * cells + g.y()) * cells + g.x()] = unorm8(c.x) | (unorm8(c.y) << 8) | (unorm8(c.z) << 16);
 }
