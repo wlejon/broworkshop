@@ -16,7 +16,7 @@ import volume;
 import lighting;
 import custom;
 import tiles;
-from planet::clouds import NOISE_VAR, CLOUD_BASE, CLOUD_DEPTH, CLOUD_SIGMA, CLOUD_FLOOR, CLOUD_DETAIL_FULL,
+from planet::clouds import NOISE_VAR, CLOUD_BASE, CLOUD_DEPTH, CLOUD_SIGMA, CLOUD_DETAIL_FULL,
                            cloud_need, cloud_need_slope, cloud_top, cloud_occupancy, COLUMN_F_RANGE,
                            COLUMN_V_RANGE, SUN_TAU_MAX, SUN_LOWEST, SUN_SPACING;
 
@@ -357,20 +357,13 @@ fn height_at(eye: vec3<f32>, dir: vec3<f32>, t: f32, hc: f32, mu: f32) -> Height
     return Height { p: p, up: up, s: (h - CLOUD_BASE - lift(up)) / CLOUD_DEPTH };
 }
 
-// How far the column's amount passes what the height needs, in deviations
-// of what the footprint leaves unresolved (the occupancy's logistic argument
-// over 1.7), at distance t along the ray; -10 outside the layer.
-// The column there is read from the tiles found at a point near it (near,
-// tiles_near).
-fn excess_at(eye: vec3<f32>, dir: vec3<f32>, t: f32, hc: f32, mu: f32, w: f32, near: Tiles) -> f32 {
-    let x = height_at(eye, dir, t, hc, mu);
-    if (x.s < 0.0 || x.s > 1.0) {
-        return -10.0;
-    }
-    let p = tiles::cube_point(x.up);
-    let col = column_in(p, tiles_near(p, w, near), cloud_need(x.s), 0.0);
-    let fd = detailed(x.p, w, col.f, col.variance);
-    return (fd.x - cloud_need(x.s)) / sqrt(fd.y + 1.0e-5);
+// Where a cloud's edge is between a point clear at distance a along the ray
+// and one in cloud at b, by their excesses (how far the column's amount
+// passes what the height needs, in deviations of what the footprint leaves
+// unresolved: the occupancy's logistic argument over 1.7; -10 outside the
+// layer): where the line between them crosses CLOUD_EDGE.
+fn edge_at(a: f32, ea: f32, b: f32, eb: f32) -> f32 {
+    return a + (b - a) * clamp((CLOUD_EDGE - ea) / max(eb - ea, 1.0e-6), 0.0, 1.0);
 }
 
 fn hg_phase(g: f32, c: f32) -> f32 {
@@ -424,34 +417,20 @@ fn soft_tops(s: f32, f: f32, v: f32) -> vec4<f32> {
     return s + 0.5 * (over + sqrt(over * over + CLOUD_TOP_SOFT * CLOUD_TOP_SOFT));
 }
 
-// The sun's tap: the sub-columns' tops of the column the sun's ray reaches
-// 200 m over the highest top of the column at P (height share s), read at a
-// footprint of at least a quarter of the way there.
+// The depth of cloud toward the sun from height share s of a column (F, v):
+// through the column up to each sub-column's top (bright tops, dark bases),
+// and how far each top is above. A top's far side shaded behind the bumps
+// toward the sun is the billows' taps' (billow_tau) and the sun field's: a
+// tap of the column the sun's ray reached 200 m over the highest top, read
+// where the ray entered each cloud, came to the same against the
+// light-marched sun (RMS within 0.2 in every view) for 0.15 ms a frame.
 struct SunDepth {
     tau: vec4<f32>,
     above: vec4<f32>,
 }
-fn sun_tap(p: vec3<f32>, s: f32, f: f32, v: f32, w: f32, to_sun: vec3<f32>, mu_s: f32) -> vec4<f32> {
-    let rise = max(soft_tops(s, f, v).w - s, 0.0) * CLOUD_DEPTH + 200.0;
-    let pl = p + to_sun * (rise / mu_s);
-    let col = column(normalize(pl), max(w, 0.25 * rise / mu_s), CLOUD_FLOOR, 0.0);
-    if (!col.cloud) {
-        return vec4<f32>(0.0);
-    }
-    return tops(col.f, col.variance);
-}
-// The depth of cloud toward the sun from height share s of a column (F, v):
-// through the column up to each sub-column's top (bright tops, dark bases),
-// then through the sun's tap (tap_top: a top's far side shaded behind the
-// bumps toward it), and how far each top is above.
-fn sun_depth(s: f32, f: f32, v: f32, mu_s: f32, tap_top: vec4<f32>) -> SunDepth {
-    let top = soft_tops(s, f, v);
-    let above = max(top - s, vec4<f32>(0.0)) * CLOUD_DEPTH;
-    let rise = max(top.w - s, 0.0) * CLOUD_DEPTH + 200.0;
-    let s_mid = s + 0.5 * rise / CLOUD_DEPTH;
-    let s_out = s + rise / CLOUD_DEPTH;
-    let path = (clamp(top, vec4<f32>(s), vec4<f32>(s_mid)) - s) + (clamp(tap_top, vec4<f32>(s_mid), vec4<f32>(s_out)) - s_mid);
-    return SunDepth { tau: CLOUD_SIGMA * path * CLOUD_DEPTH / mu_s, above: above };
+fn sun_depth(s: f32, f: f32, v: f32, mu_s: f32) -> SunDepth {
+    let above = max(soft_tops(s, f, v) - s, vec4<f32>(0.0)) * CLOUD_DEPTH;
+    return SunDepth { tau: CLOUD_SIGMA * above / mu_s, above: above };
 }
 
 // The billows' own shade. The column's depth toward the sun runs through the
@@ -580,8 +559,6 @@ const MAX_STEPS: i32 = 96;
 // SEEN_FOOTPRINTS footprints or CLOUD_STEP, whichever is longer.
 const SEEN_FOOTPRINTS: f32 = 3.0;
 const SEEN_SHARE: f32 = 0.6;
-// Halvings of the gap a step into cloud crossed, finding its edge.
-const EDGE_HALVINGS: i32 = 1;
 
 // The next sample after a skip from t to `clear`, proved empty that far:
 // the step's own when the skip is shorter, else a jittered part of the step
@@ -668,11 +645,15 @@ pub fn volume(ray: volume::Ray) -> volume::Light {
     var inside: vec4<f32> = vec4<f32>(0.0);
     // What of the ray is still seen, at the last sample in cloud.
     var seen_now: f32 = 1.0;
-    // The sun tap's tops, for the cloud the ray is in.
-    var tap_top: vec4<f32> = vec4<f32>(0.0);
     var marched: i32 = 0;              // the debug view 'cloudSteps'
     var kinds: vec3<f32> = vec3<f32>(0.0);   // 'cloudStepKinds': proved empty, sampled clear, in cloud
     var sun_seen: f32 = -1.0;                // 'cloudSun': the sun field's depth at the first cloud
+    // The edge search (below): 0 marching, 1 at the halving's point, 2 at
+    // the edge; the step that landed in cloud, its excess and its length.
+    var edge: i32 = 0;
+    var edge_b: f32 = 0.0;
+    var edge_eb: f32 = 0.0;
+    var edge_dt: f32 = 0.0;
     var i: i32 = 0;
     while (i < max_steps && t < t1) {
         i += 1;
@@ -699,6 +680,15 @@ pub fn volume(ray: volume::Ray) -> volume::Light {
         let w = max(volume::footprint(ray, t), 1.0);
         var x: Height = height_at(eye, dir, t, hc, mu);
         if (x.s < 0.0 || x.s > 1.0) {
+            if (edge == 1) {
+                t = edge_at(t, -10.0, edge_b, edge_eb);
+                edge = 2;
+                continue;
+            }
+            if (edge == 2) {
+                t = edge_b;
+                continue;
+            }
             in_cloud = false;
             inside = vec4<f32>(0.0);
             tr *= 1.0 - cover + cover * tc;
@@ -723,6 +713,15 @@ pub fn volume(ray: volume::Ray) -> volume::Light {
         var sp: tiles::Point = xp;
         var st: Tiles = xt;
         if (!col.cloud) {
+            if (edge == 1) {
+                t = edge_at(t, (col.f - cloud_need(x.s)) / sqrt(col.variance + 1.0e-5), edge_b, edge_eb);
+                edge = 2;
+                continue;
+            }
+            if (edge == 2) {
+                t = edge_b;
+                continue;
+            }
             kinds.x += 1.0;
             t_prev = t + col.clear;   // proved empty this far
             in_cloud = false;
@@ -735,7 +734,12 @@ pub fn volume(ray: volume::Ray) -> volume::Light {
         }
         var fd: vec2<f32> = detailed(x.p, w, col.f, col.variance);
         var occ: f32 = cloud_occupancy(fd.x, fd.y, x.s);
-        if (occ <= 0.003) {
+        if (occ <= 0.003 && edge != 2) {
+            if (edge == 1) {
+                t = edge_at(t, (fd.x - cloud_need(x.s)) / sqrt(fd.y + 1.0e-5), edge_b, edge_eb);
+                edge = 2;
+                continue;
+            }
             kinds.y += 1.0;
             in_cloud = false;
             inside = vec4<f32>(0.0);
@@ -748,48 +752,43 @@ pub fn volume(ray: volume::Ray) -> volume::Light {
         }
         kinds.z += 1.0;
         // A step that lands in cloud has passed its edge since the last
-        // point known clear: the gap halved (EDGE_HALVINGS times, down to
+        // point known clear: the gap halved (once, down to
         // the footprint) brackets it, and the cloud is taken from where the
         // excess read at the bracket's ends crosses the edge between them
         // (or its cloudy end, where its clear end was never read), so its
         // edge is where the field puts it and not where the step fell.
         // Against the reference march (clouds.reference) one halving is as
-        // close as four, for a quarter of the reads: the search was a
-        // quarter of the pass, its lanes idling the rest of their warps.
-        if (!in_cloud && t - t_prev > 1.0) {
-            var a: f32 = t_prev;
-            var b: f32 = t;
-            var ea: f32 = 1.0e9;   // not read
-            var eb: f32 = (fd.x - cloud_need(x.s)) / sqrt(fd.y + 1.0e-5);
-            // No finer than the footprint the field is read at.
-            for (var k: i32 = 0; k < EDGE_HALVINGS && b - a > w; k += 1) {
-                let m = 0.5 * (a + b);
-                let e = excess_at(eye, dir, m, hc, mu, w, xt);
-                if (e > CLOUD_EDGE) {
-                    b = m;
-                    eb = e;
-                } else {
-                    a = m;
-                    ea = e;
-                }
-            }
-            if (ea < 1.0e8) {
-                b = a + (b - a) * clamp((CLOUD_EDGE - ea) / max(eb - ea, 1.0e-6), 0.0, 1.0);
-            }
-            // The sample is taken there, at the same footprint.
-            fine_until = t;
-            t = b;
-            t_prev = b;
-            x = height_at(eye, dir, t, hc, mu);
-            sp = tiles::cube_point(x.up);
-            st = tiles_near(sp, w, xt);
-            col = column_in(sp, st, cloud_need(x.s), 0.0);
-            fd = detailed(x.p, w, col.f, col.variance);
-            occ = max(cloud_occupancy(fd.x, fd.y, x.s), 0.0031);
+        // close as four, for a quarter of the reads.
+        // The halving's point and the edge are read as the march's own
+        // steps, the loop's next iterations (edge 1, then 2 where the
+        // halving's point is clear), not in a search inside this one: there,
+        // the lanes entering a cloud read the field twice more while the rest
+        // of their warp idled, a third of the 27.6 km view's pass. Where the
+        // halving's point is in cloud the sample is taken there (the clear
+        // end unread, the edge is the cloudy end); where the edge read in
+        // turn is clear or empty, at the step that landed (in cloud).
+        // No finer than the footprint the field is read at.
+        if (edge != 0) {
+            fine_until = edge_b;
+            t_prev = t;
+            occ = max(occ, 0.0031);
             // The step on from the edge is a half to one and a half of one,
             // by the pixel's offset, so as many samples cross the cloud
             // (stepped alike from an edge alike along rows, they drew a
             // layer's base as stripes).
+            dt = min(edge_dt, cloud_step) * (0.5 + jit);
+            edge = 0;
+        } else if (!in_cloud && t - t_prev > 1.0) {
+            if (t - t_prev > w) {
+                edge_b = t;
+                edge_eb = (fd.x - cloud_need(x.s)) / sqrt(fd.y + 1.0e-5);
+                edge_dt = dt;
+                edge = 1;
+                t = 0.5 * (t_prev + t);
+                continue;
+            }
+            fine_until = t;
+            t_prev = t;
             dt = min(dt, cloud_step) * (0.5 + jit);
         }
         in_cloud = true;
@@ -811,13 +810,7 @@ pub fn volume(ray: volume::Ray) -> volume::Light {
         // amount, not the detail here, which says nothing of the cloud above
         // (taken as if it did, the light drew its contours on every top).
         let descent = -dot(dir, x.up);
-        // The sun's tap is taken where the ray enters a cloud and kept while
-        // it stays in it: the steps after are seen through the cloud in
-        // front.
-        if (dot(inside, vec4<f32>(1.0)) == 0.0) {
-            tap_top = sun_tap(x.p, x.s, col.f, col.variance, w, to_sun, mu_s);
-        }
-        let sd = sun_depth(x.s, col.f, col.variance, mu_s, tap_top);
+        let sd = sun_depth(x.s, col.f, col.variance, mu_s);
         let rate = step(vec4<f32>(1.0e-30), sd.above) * (CLOUD_SIGMA * descent / mu_s);
         // A sub-column the ray came down into since the last sample is
         // integrated from the top it crossed, where the sun's depth is
@@ -980,8 +973,7 @@ pub fn medium(pos: vec3<f32>, dir: vec3<f32>, w: f32) -> volume::Medium {
     let extinction = CLOUD_SIGMA * fill;
     let to_sun = lighting::to_sun();
     let mu_s = max(dot(to_sun, x.up), 0.04);
-    let tap = sun_tap(x.p, x.s, col.f, col.variance, fw, to_sun, mu_s);
-    let sd = sun_depth(x.s, col.f, col.variance, mu_s, tap);
+    let sd = sun_depth(x.s, col.f, col.variance, mu_s);
     let tau = billow_tau(x.p, x.s, col.f, col.variance, fw, to_sun, mu_s, fill,
                          min(sd.tau, vec4<f32>(field_tau(cp, ct, x.s))));   // the march's
     let by_sun = phase(dot(dir, to_sun)) * exp(-tau) + sun_many(tau, mu_s);
