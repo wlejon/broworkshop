@@ -147,11 +147,18 @@ export function faceFrame(i) {
 // update() each frame with the eye about the planet's centre (f64), its
 // altitude, the unit direction to the sun and the view.
 export function createClouds(scene, radius, module, readers, seed, hook, maxGround) {
-    const node = scene.createVolume({
-        module: hook.source, file: 'clouds_volume.bk', modules: hook.modules, name: 'clouds',
-        uniforms: { radius, billow_mean: BILLOW_MEAN, billow_var: BILLOW_VAR, detail_var: CLOUD_DETAIL_VAR },
+    // The volume's module is built as the oracles it runs (clouds_volume.bk
+    // cloud_oracle): constants, so the shipped build carries neither; a
+    // change of oracle builds it again (setShaderModule) and binds its
+    // values anew (bind, below).
+    const volumeModules = (fine, sunMarch) => ({
+        ...hook.modules,
+        cloud_oracle: `module cloud_oracle;\npub const FINE: f32 = ${fine.toFixed(1)};\npub const SUN_MARCH: bool = ${sunMarch};\n`,
     });
-    node.setShaderTexture('noise', { data: NOISE, width: NOISE_TEXELS, height: NOISE_TEXELS, depth: NOISE_TEXELS, repeat: true });
+    let built = '1,false';
+    const node = scene.createVolume({
+        module: hook.source, file: 'clouds_volume.bk', modules: volumeModules(1, false), name: 'clouds',
+    });
     const toSun = [0, 0, 0];   // none yet: the first update lights them all
 
     // The lift, on the cube's faces, and each texel's direction for
@@ -232,16 +239,6 @@ export function createClouds(scene, radius, module, readers, seed, hook, maxGrou
         bounds.set([w, gradientBound(w * 0.35)], 4 * l);
     }
     const boundsBuffer = bro.kernel.createBuffer(bounds);
-    node.setShaderBuffer('lookup', cache.lookup);
-    // Read as a texture array, TILE_ATLAS x TILE_ATLAS slots a layer (GPUs
-    // commonly give 2048 layers), its two 16-bit halves filtered by the
-    // hardware; only the slots each update produces are copied into it.
-    node.setShaderTexture('columns', { buffer: cache.layer('column'), width: TILE_CELLS, height: TILE_CELLS,
-                                       layers: TILE_CAPACITY, atlas: TILE_ATLAS, channels: 2, format: 'unorm16' });
-    node.setShaderBuffer('bounds', boundsBuffer);
-    // The sun field alike: four depths a cell, 16 bits each.
-    node.setShaderTexture('sun_field', { buffer: cache.layer('sun'), width: TILE_CELLS, height: TILE_CELLS,
-                                         layers: TILE_CAPACITY, atlas: TILE_ATLAS, channels: 4, format: 'unorm16' });
 
     // The ground's light (k_cloud_ground), for the sun toward toSun:
     // produced again (TileCache.refresh) once the sun moves.
@@ -264,9 +261,31 @@ export function createClouds(scene, radius, module, readers, seed, hook, maxGrou
         n.setShaderUniform('cloud_w0', 4 * radius / GROUND_TILE);
     }
 
+    // The volume's values that hold: its constants, the detail's noise, the
+    // lift's faces, and the tile cache's lookup, pool (as a texture array,
+    // TILE_ATLAS x TILE_ATLAS slots a layer, GPUs commonly giving 2048
+    // layers, its 16-bit halves filtered by the hardware; only the slots each
+    // update produces are copied into it), levels' bounds and sun field (four
+    // depths a cell, 16 bits each).
+    function bind() {
+        node.setShaderUniform('radius', radius);
+        node.setShaderUniform('billow_mean', BILLOW_MEAN);
+        node.setShaderUniform('billow_var', BILLOW_VAR);
+        node.setShaderUniform('detail_var', CLOUD_DETAIL_VAR);
+        node.setShaderTexture('noise', { data: NOISE, width: NOISE_TEXELS, height: NOISE_TEXELS, depth: NOISE_TEXELS, repeat: true });
+        node.setShaderTexture('lift_faces', { data: liftCpu, width: FACE + 2, height: FACE + 2, layers: 6, channels: 1 });
+        node.setShaderBuffer('lookup', cache.lookup);
+        node.setShaderTexture('columns', { buffer: cache.layer('column'), width: TILE_CELLS, height: TILE_CELLS,
+                                           layers: TILE_CAPACITY, atlas: TILE_ATLAS, channels: 2, format: 'unorm16' });
+        node.setShaderBuffer('bounds', boundsBuffer);
+        node.setShaderTexture('sun_field', { buffer: cache.layer('sun'), width: TILE_CELLS, height: TILE_CELLS,
+                                             layers: TILE_CAPACITY, atlas: TILE_ATLAS, channels: 4, format: 'unorm16' });
+        node.setShaderUniform('lift_range', liftRange);
+    }
+    bind();
+
     let reference = false, sunReference = false;
     const hi = [0, 0, 0], lo = [0, 0, 0];
-    node.setShaderTexture('lift_faces', { data: liftCpu, width: FACE + 2, height: FACE + 2, layers: 6, channels: 1 });
     return {
         node,
         // The volume's tile cache, and the ground light's; the unit
@@ -274,6 +293,14 @@ export function createClouds(scene, radius, module, readers, seed, hook, maxGrou
         cache, ground, sun: toSun,
         // `view` is the camera as a tile cache takes it (TileCache.update).
         update(eye, altitude, sun, view) {
+            // The oracles asked for, built first: a module set anew holds
+            // none of the node's values until bound again.
+            const fine = reference === true ? REFERENCE_FINE : reference || 1;
+            if (`${fine},${sunReference}` !== built) {
+                built = `${fine},${sunReference}`;
+                node.setShaderModule(hook.source, 'clouds_volume.bk', volumeModules(fine, sunReference));
+                bind();
+            }
             // A sun moved by a tenth of a degree lights everything anew: the
             // tiles' sun fields and the ground's light, produced again.
             if (sun[0] * toSun[0] + sun[1] * toSun[1] + sun[2] * toSun[2] < Math.cos(0.1 * Math.PI / 180)) {
@@ -299,8 +326,6 @@ export function createClouds(scene, radius, module, readers, seed, hook, maxGrou
             const near = altitude > CLOUD_BASE + liftNear[0] - NEAR_MARGIN &&
                          altitude < CLOUD_BASE + CLOUD_DEPTH + liftNear[1] + NEAR_MARGIN;
             node.setShaderUniform('near_range', near && !reference ? NEAR_RANGE : 0);
-            node.setShaderUniform('fine', reference === true ? REFERENCE_FINE : reference || 1);
-            node.setShaderUniform('sun_march', sunReference ? 1 : 0);
         },
         // The sun's depth light-marched through the field itself at every
         // sample, its detail included, in place of the depth's model: what

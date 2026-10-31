@@ -13,33 +13,43 @@ pub const NOISE_VAR: f32 = 0.0728;  // perlin_split's variance (ground.bk PERLIN
 // The column at the unit direction q, resolved at a footprint of w metres:
 // an octave counts in full from 4 footprints a wavelength, not at all at 2,
 // and adds the variance of what it leaves out.
+// Each octave's point is the first's doubled (the wavelengths halve, so
+// radius over each is exactly twice the last's), and its weight a ratio
+// taken in f32: no division in f64 (a 4090 runs doubles at a 64th of its
+// floats' rate, a division a dozen of them), which was most of the column's
+// cost.
 pub fn column(q: vec3<f64>, w: f64, radius: f64) -> vec2<f32> {
     var f: f32 = F0;
     var v: f32 = 0.0;
+    let inv_w = 1.0 / (w as f32);
     // The weather: cloud systems from 2000 km down to fronts and cells of
     // 30 km, clear skies between them; each octave 0.6 of the last.
-    var wavelength: f64 = 2000000.0;
+    var wavelength: f32 = 2000000.0;
+    var p: vec3<f64> = q * (radius / 2000000.0);
     var amp: f32 = 0.48;
     for (var k: i32 = 0; k < 7; k += 1) {
-        let r = clamp(wavelength / w * 0.5 - 1.0, 0.0, 1.0) as f32;
+        let r = clamp(wavelength * inv_w * 0.5 - 1.0, 0.0, 1.0);
         if (r > 0.0) {
-            f += r * amp * perlin_split(q * (radius / wavelength), 101 + k);
+            f += r * amp * perlin_split(p, 101 + k);
         }
         v += (1.0 - r * r) * amp * amp * NOISE_VAR;
         wavelength *= 0.5;
+        p *= 2.0;
         amp *= 0.6;
     }
     // The cumuli: from 13 km to 25 m, each octave 0.62 of the last; past
     // the finest, the variance of yet finer ones.
     wavelength = 12800.0;
+    p = q * (radius / 12800.0);
     amp = 0.32;
     for (var k: i32 = 0; k < 10; k += 1) {
-        let r = clamp(wavelength / w * 0.5 - 1.0, 0.0, 1.0) as f32;
+        let r = clamp(wavelength * inv_w * 0.5 - 1.0, 0.0, 1.0);
         if (r > 0.0) {
-            f += r * amp * perlin_split(q * (radius / wavelength), 7 + k);
+            f += r * amp * perlin_split(p, 7 + k);
         }
         v += (1.0 - r * r) * amp * amp * NOISE_VAR;
         wavelength *= 0.5;
+        p *= 2.0;
         amp *= 0.62;
     }
     v += amp * amp * NOISE_VAR / (1.0 - 0.3844);
