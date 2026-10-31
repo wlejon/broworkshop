@@ -149,9 +149,13 @@ pub fn vertex(v_in: mesh::Vertex) -> mesh::Vertex {
     v.pos = rel + spine + across * (side * width * 0.5);
     var n = normalize(cross(across, dspine + up * 1e-5));
     if (dot(n, facing) < 0.0) { n = -n; }
-    // Rounded across the blade, and toward the sky: a field of blades
-    // lights as the soft cover it is, not as flat cards.
-    v.normal = normalize(n + across * side * 0.5 + up * 1.2);
+    // Rounded across the blade, and toward the ground's own normal: a
+    // field of blades lights as the soft cover it is, not as flat cards,
+    // and a canopy wider than it is tall shades with the slope under it,
+    // as the ground past the blades (their aggregate) does.
+    var slab = normalize(cross(fp10.p - fp00.p, fp01.p - fp00.p));
+    if (dot(slab, up) < 0.0) { slab = -slab; }
+    v.normal = normalize(n + across * side * 0.5 + slab * 1.2);
     seed = pcg(seed);
     let v_col = albedo * exp(0.3 * (rnd_val(seed) - 0.5));
     v.v0 = vec4<f32>(v_col, t);
