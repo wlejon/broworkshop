@@ -195,6 +195,49 @@ fn k_cloud_level(g: grid<2>, out: write_store<f32, 1>, base: i32, n: i32, x0: i3
     out[i + 1] = c.y;
 }
 
+// A column (amount, variance) in one word: the amount over [-2.5, 2.5]
+// (the octaves' amplitudes sum to under 2.2 about F0) and the variance over
+// [0, 0.05] (all of it is 0.038), 16 bits each, steps of 8e-5 and 8e-7.
+pub const COLUMN_F_RANGE: f32 = 2.5;
+pub const COLUMN_V_RANGE: f32 = 0.05;
+fn pack_column(c: vec2<f32>) -> i32 {
+    let f = (clamp(c.x / COLUMN_F_RANGE * 0.5 + 0.5, 0.0, 1.0) * 65535.0 + 0.5) as i32;
+    let v = (clamp(c.y / COLUMN_V_RANGE, 0.0, 1.0) * 65535.0 + 0.5) as i32;
+    return f | (v << 16);
+}
+
+// A batch of the column field's tiles (clouds.js createClouds' cache, read
+// by the view's volume through tiles.bk): cell (x, y) of each, `border`
+// cells beyond its edges included, at its centre on the sphere; the column
+// at a footprint of two cells, at the plane's stretch there as a level's
+// (k_cloud_level), a word a cell (pack_column) into the pool at the tile's
+// slot.
+@kernel @grid(3)
+fn k_cloud_tile(g: grid<3>, table: read_store<f64, 1>, pool: write_store<i32, 1>, cells: i32,
+                tile: f64, border: f64, radius: f64) {
+    let r = g.z() * 24;
+    let slot = table[r] as i32;
+    let root = table[r + 2] as i32;
+    let s = ((g.x() as f64) - border + 0.5) / tile;
+    let t = ((g.y() as f64) - border + 0.5) / tile;
+    let du = vec3<f64>(table[r + 11], table[r + 12], table[r + 13]);
+    let dv = vec3<f64>(table[r + 14], table[r + 15], table[r + 16]);
+    let b = vec3<f64>(table[r + 8], table[r + 9], table[r + 10]) + du * s + dv * t;
+    // The face plane's coordinates: the two axes other than the root's
+    // (its own is +-1 on the plane).
+    var u: f64 = b.y;
+    var v: f64 = b.z;
+    if (root == 2 || root == 3) {
+        u = b.x;
+    } else if (root == 4 || root == 5) {
+        u = b.x;
+        v = b.y;
+    }
+    let stretch = sqrt(1.0 + max(u * u, v * v)) / (1.0 + u * u + v * v);
+    let c = column(normalize(b), 2.0 * radius * (length(du) / tile) * stretch, radius);
+    pool[(slot * cells + g.y()) * cells + g.x()] = pack_column(c);
+}
+
 // 0 to 1 in 8 bits, rounded.
 fn unorm8(x: f32) -> i32 {
     return (clamp(x, 0.0, 1.0) * 255.0 + 0.5) as i32;

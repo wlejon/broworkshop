@@ -43,6 +43,17 @@ const DELTA0 = DELTA_GLOBE / 2 ** LEVELS;
 const GLOBE_BASE = LEVELS * N * N;     // the first globe texel
 const FACE_TEXELS = (FACE + 2) * (FACE + 2);
 
+// The view's volume reads the same field from a tile cache (bro.tiles,
+// clouds.bk k_cloud_tile): TILE cells a tile's edge and TILE_BORDER beyond
+// it, a cell's column at a footprint of two cells, refined wherever a cell
+// projects over TILE_PIXELS pixels, so every part of the view reads its own
+// footprint, where the clipmap's levels about the eye fell coarser past an
+// eighth of the eye's distance. TILE_LEVELS deep: 49 m footprints at a
+// face's centre, the clipmap's finest. The ground's light stays on the
+// clipmap (cloudGlsl) until its chunk is a module that can import tiles.bk.
+const TILE = 64, TILE_BORDER = 1, TILE_CELLS = TILE + 2 * TILE_BORDER, TILE_LEVELS = 13;
+const TILE_PIXELS = 1, TILE_CAPACITY = 6144, TILE_BUDGET_MS = 0.3, TILE_ATLAS = 2;
+
 // The column's octaves (clouds.bk column): wavelength and amplitude.
 const OCTAVES = [];
 for (let k = 0, w = 2.0e6, a = 0.48; k < 7; k++, w /= 2, a *= 0.6) OCTAVES.push([w, a]);
@@ -341,6 +352,34 @@ export function createClouds(scene, radius, module, readers, seed, hook) {
     }
     const liftNear = [0, 0];
 
+    const kTile = module.kernel('k_cloud_tile');
+    const cache = bro.tiles.createCache({
+        domain: { type: 'cubeSphere', radius, center: [0, 0, 0] },
+        tileSize: TILE, border: TILE_BORDER, capacity: TILE_CAPACITY, maxLevel: TILE_LEVELS,
+        minHeight: CLOUD_BASE, maxHeight: CLOUD_BASE + CLOUD_DEPTH + Math.max(...liftCpu),
+        pixelsPerCell: TILE_PIXELS, producePerUpdate: 64, produceBudgetMs: TILE_BUDGET_MS,
+        layers: { column: 4 },
+        produce(batch) {
+            kTile.dispatch([TILE_CELLS, TILE_CELLS, batch.count], batch.table, this.layer('column'),
+                           TILE_CELLS, TILE, TILE_BORDER, radius);
+        },
+    });
+    // Per tile level: its cells' footprint at a face's centre, and the
+    // column's gradient bound there (at the least stretch over a face).
+    const bounds = new Float32Array(4 * (TILE_LEVELS + 1));
+    for (let l = 0; l <= TILE_LEVELS; l++) {
+        const w = 2 * radius * (2 / 2 ** l / TILE);
+        bounds.set([w, gradientBound(w * 0.35)], 4 * l);
+    }
+    const boundsBuffer = bro.kernel.createBuffer(bounds);
+    node.setShaderBuffer('lookup', cache.lookup);
+    // Read as a texture array, TILE_ATLAS x TILE_ATLAS slots a layer (GPUs
+    // commonly give 2048 layers), its two 16-bit halves filtered by the
+    // hardware; only the slots each update produces are copied into it.
+    node.setShaderTexture('columns', { buffer: cache.layer('column'), width: TILE_CELLS, height: TILE_CELLS,
+                                       layers: TILE_CAPACITY, atlas: TILE_ATLAS, channels: 2, format: 'unorm16' });
+    node.setShaderBuffer('bounds', boundsBuffer);
+
     let face = -1;
     // Each level's grid origin in texels, and whether it holds anything.
     const origins = new Int32Array(2 * LEVELS);
@@ -362,9 +401,6 @@ export function createClouds(scene, radius, module, readers, seed, hook) {
         if (f !== face) {
             face = f;
             held.fill(0);
-            node.setShaderUniform('face_a', frame.a);
-            node.setShaderUniform('face_e', frame.e);
-            node.setShaderUniform('face_f', frame.f);
             for (const n of readers) {
                 n.setShaderUniform('u_cloudA', frame.a);
                 n.setShaderUniform('u_cloudE', frame.e);
@@ -408,13 +444,10 @@ export function createClouds(scene, radius, module, readers, seed, hook) {
     }
 
     headBuffer.write(head);
-    node.setShaderBuffer('map', map);
-    node.setShaderBuffer('head', headBuffer);
     for (const n of readers) {
         n.setShaderBuffer('u_cloudHead', headBuffer);
         n.setShaderBuffer('u_cloudLight', light);
     }
-    node.setShaderTexture('levels', { buffer: map, width: N, height: N, layers: LEVELS, channels: 2, repeat: true });
     node.setShaderTexture('lift_faces', { data: liftCpu, width: FACE + 2, height: FACE + 2, layers: 6, channels: 1 });
     return {
         node,
@@ -422,7 +455,11 @@ export function createClouds(scene, radius, module, readers, seed, hook) {
         // and layout, and the eye's face.
         map, head, layout: { levels: LEVELS, n: N, globe: GLOBE_BASE, faceTexels: FACE_TEXELS },
         get face() { return face; },
-        update(eye, altitude, sun) {
+        // The volume's tile cache.
+        cache,
+        // `view` is the camera as a tile cache takes it (TileCache.update).
+        update(eye, altitude, sun, view) {
+            cache.update(view);
             // A sun moved by a tenth of a degree lights everything anew.
             if (sun[0] * toSun[0] + sun[1] * toSun[1] + sun[2] * toSun[2] < Math.cos(0.1 * Math.PI / 180)) {
                 toSun[0] = sun[0];

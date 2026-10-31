@@ -15,22 +15,21 @@ import scene;
 import volume;
 import lighting;
 import custom;
+import tiles;
 from planet::clouds import NOISE_VAR, CLOUD_BASE, CLOUD_DEPTH, CLOUD_SIGMA, CLOUD_FLOOR, CLOUD_DETAIL_FULL,
-                           cloud_need, cloud_need_slope, cloud_top, cloud_occupancy;
+                           cloud_need, cloud_need_slope, cloud_top, cloud_occupancy, COLUMN_F_RANGE,
+                           COLUMN_V_RANGE;
 
 // The node's values (clouds.js update): the planet's radius; the detail's
 // billow statistics and variance (clouds.js noiseSlices, CLOUD_DETAIL_VAR);
-// the eye's cube face (faceFrame: its axis and plane axes); the eye about
-// the centre as an f32 and the rest; its altitude over the radius; the least
-// and most lift a ray from the eye can meet; the near grid's range (0 off).
+// the eye about the centre as an f32 and the rest; its altitude over the
+// radius; the least and most lift a ray from the eye can meet; the near
+// grid's range (0 off).
 struct Params {
     radius: f32,
     billow_mean: f32,
     billow_var: f32,
     detail_var: f32,
-    face_a: vec3<f32>,
-    face_e: vec3<f32>,
-    face_f: vec3<f32>,
     cam_hi: vec3<f32>,
     cam_lo: vec3<f32>,
     cam_alt: f32,
@@ -39,27 +38,28 @@ struct Params {
 }
 @binding(4, 0) var params: uniform<Params>;
 
-// The column field's clipmap (clouds.bk k_cloud_level): the levels as the
-// slices of a texture the engine copies from the map each render (amount,
-// variance), wrapping; the lift on the globe's six faces; the detail's
-// noise, a tiling 3D texture.
-@binding(4, 1) var levels: texture2d_array<vec4<f32>>;
+// The lift on the globe's six faces; the detail's noise, a tiling 3D
+// texture.
 @binding(4, 2) var lift_faces: texture2d_array<vec4<f32>>;
 @binding(4, 3) var noise: texture3d<vec4<f32>>;
-// Per level its plane origin, texel spacing and gradient bound; at
-// CLOUD_LEVELS the globe's spacing and bound; after it each level's origin in
-// texels (where its wrapped grid starts).
-@binding(4, 14) var head: read_buffer<vec4<f32>>;
-// The map itself, for the globe's faces (two floats a texel).
-@binding(4, 15) var map: read_buffer<vec2<f32>>;
+// The column field (clouds.bk k_cloud_tile): a tile cache over the
+// cube-sphere, each tile's cells the column (amount, variance) at a
+// footprint of two of them, found through its lookup (tiles.bk) and read
+// from a texture array of the cache's pool, 2 x 2 slots a layer; and per tile
+// level, the footprint of its cells at a face's centre and the gradient
+// bound of the column there (clouds.js gradientBound).
+@binding(4, 4) var columns: texture2d_array<vec4<f32>>;
+@binding(4, 14) var lookup: read_buffer<vec4<i32>>;
+@binding(4, 16) var bounds: read_buffer<vec4<f32>>;
 
-// The clipmap's layout (clouds.js LEVELS, N, FACE + 2, GLOBE_BASE,
-// FACE_TEXELS).
-const CLOUD_LEVELS: i32 = 11;
-const CLOUD_N: i32 = 512;
+// The cache's tiles (clouds.js TILE, TILE_BORDER, TILE_LEVELS), and the
+// lift's faces (FACE + 2 texels of LIFT_DELTA of the plane).
+const TILE: i32 = 64;
+const TILE_BORDER: i32 = 1;
+const TILE_LEVELS: i32 = 13;
+const TILE_ATLAS: i32 = 2;
 const CLOUD_FACE: i32 = 258;
-const CLOUD_GLOBE: i32 = 2883584;
-const CLOUD_FACE_TEXELS: i32 = 66564;
+const LIFT_DELTA: f32 = 0.007843137;
 // The finest footprint the column resolves (clouds.bk CLOUD_COLUMN_MIN).
 const CLOUD_COLUMN_MIN: f32 = 60.0;
 const CLOUD_LIFT_SLOPE: f32 = 0.05;   // a bound on the lift's gradient (m/m)
@@ -71,8 +71,8 @@ fn detail_scale(f: f32) -> f32 {
     return clamp(f / CLOUD_DETAIL_FULL, 0.0, 1.0);
 }
 
-// The globe level's face at the unit direction q (the largest axis), and q's
-// texel coordinates on it.
+// The lift's face at the unit direction q (the largest axis), and q's texel
+// coordinates on it.
 struct FacePoint {
     face: i32,
     t: vec2<f32>,
@@ -89,22 +89,13 @@ fn face_of(q: vec3<f32>) -> FacePoint {
         axis = 1;
     }
     let uv = r.yz / abs(r.x);
-    let delta = head[CLOUD_LEVELS].x;
+    let delta = LIFT_DELTA;
     let t = clamp((uv + 1.0 + delta) / delta, vec2<f32>(0.0), vec2<f32>((CLOUD_FACE as f32) - 1.001));
     var face: i32 = axis;
     if (r.x < 0.0) {
         face = axis + 3;
     }
     return FacePoint { face: face, t: t };
-}
-
-// The globe level at the unit direction q: bilinear over its face's texels.
-fn globe(q: vec3<f32>) -> vec2<f32> {
-    let p = face_of(q);
-    let c = floor(p.t);
-    let f = p.t - c;
-    let i = CLOUD_GLOBE + p.face * CLOUD_FACE_TEXELS + (c.y as i32) * CLOUD_FACE + (c.x as i32);
-    return mix(mix(map[i], map[i + 1], f.x), mix(map[i + CLOUD_FACE], map[i + CLOUD_FACE + 1], f.x), f.y);
 }
 
 // The layer's lift at the unit direction q (clouds.bk k_cloud_lift): its base
@@ -115,53 +106,24 @@ fn lift(q: vec3<f32>) -> f32 {
     return lift_faces.sample_lod(custom::linear, vec3<f32>(uv.x, uv.y, p.face as f32), 0.0).x;
 }
 
-// The level a footprint of w metres reads at the layer point q (0 the
-// finest, fractional between two, CLOUD_LEVELS the globe), q's point on the
-// eye's face plane (the globe off it), and the level's footprint there.
-struct LevelAt {
-    level: f32,
-    uv: vec2<f32>,
-}
-fn level_of(q: vec3<f32>, w: f32) -> LevelAt {
-    let z = dot(q, params.face_a);
-    if (z <= 0.1) {
-        return LevelAt { level: CLOUD_LEVELS as f32, uv: vec2<f32>(0.0) };
-    }
-    let uv = vec2<f32>(dot(q, params.face_e), dot(q, params.face_f)) / z;
-    let d = 1.0 + dot(uv, uv);
-    let stretch = sqrt(1.0 + max(uv.x * uv.x, uv.y * uv.y)) / d;
-    // The finest level's spacing: the globe's over 2^CLOUD_LEVELS.
-    let delta0 = head[CLOUD_LEVELS].x / 2048.0;
-    let l = log2(max(w, CLOUD_COLUMN_MIN) / (2.0 * params.radius * delta0 * stretch));
-    return LevelAt { level: clamp(l, 0.0, CLOUD_LEVELS as f32), uv: uv };
-}
-
-// Level k at the plane point uv; `held` false outside its grid. Its grid
-// wraps: texel p of it (from the plane's origin) is in slot p mod n, the
-// texture's repeat.
-struct Texel {
-    held: bool,
-    c: vec2<f32>,
-}
-fn level(k: i32, uv: vec2<f32>) -> Texel {
-    let h = head[k];
-    let t = (uv - h.xy) / h.z;
-    let top = (CLOUD_N as f32) - 1.001;
-    if (t.x < 0.0 || t.y < 0.0 || t.x >= top || t.y >= top) {
-        return Texel { held: false, c: vec2<f32>(0.0) };
-    }
-    let p = (t + head[CLOUD_LEVELS + 1 + k].xy + 0.5) / (CLOUD_N as f32);
-    let c = levels.sample_lod(custom::repeat, vec3<f32>(p.x, p.y, k as f32), 0.0);
-    return Texel { held: true, c: c.xy };
+// Tile t's column at p, filtered by the hardware from its layer (the
+// packed column's two 16-bit halves read as unorm16, clouds.bk
+// pack_column).
+fn tile_column(t: tiles::Tile, p: tiles::Point) -> vec2<f32> {
+    let w = columns.sample_lod(custom::linear, tiles::atlas_uvw(t, p, TILE, TILE_BORDER, TILE_ATLAS), 0.0);
+    return vec2<f32>(w.x * (2.0 * COLUMN_F_RANGE) - COLUMN_F_RANGE, w.y * COLUMN_V_RANGE);
 }
 
 // The column's amount F at the layer point q resolved at a footprint of w
-// metres, and the variance of what is finer: between the two levels whose
-// footprints bracket w, as a mip's levels blend, or the finest level holding
-// q if neither does. `cloud` false when even 3.4 deviations of what is finer
-// cannot lift it to need, with `clear` the distance (m) within which the
-// level's own amount cannot either, given that need falls by at most drop a
-// metre along the way: how far a ray may step and find no cloud.
+// metres, and the variance of what is finer: between the two tile levels
+// whose footprints bracket w, as a mip's levels blend, each from the finest
+// ready tile holding q at that level or coarser (where the cache has not
+// refined that far: out of view, or still producing). The cache refines
+// wherever the view's footprints need it, so the whole view reads its own
+// footprint. `cloud` false when even 3.4 deviations of what is finer cannot
+// lift it to need, with `clear` the distance (m) within which the level's
+// own amount cannot either, given that need falls by at most drop a metre
+// along the way: how far a ray may step and find no cloud.
 struct Column {
     cloud: bool,
     f: f32,
@@ -169,40 +131,34 @@ struct Column {
     clear: f32,
 }
 fn column(q: vec3<f32>, w: f32, need: f32, drop: f32) -> Column {
-    let at = level_of(q, w);
-    let k0 = at.level as i32;
-    var frac: f32 = at.level - (k0 as f32);
-    var c: vec2<f32> = vec2<f32>(0.0);
-    var k: i32 = k0;
-    while (k < CLOUD_LEVELS) {
-        let x = level(k, at.uv);
-        if (x.held) {
-            c = x.c;
-            break;
-        }
-        frac = 0.0;
-        k += 1;
+    let p = tiles::cube_point(q);
+    // The footprint of a level-0 tile's cells here: at a face's centre, by
+    // the plane's stretch (clouds.bk k_cloud_tile).
+    let uv = vec2<f32>(p.u, p.v) * 2.0 - 1.0;
+    let stretch = sqrt(1.0 + max(uv.x * uv.x, uv.y * uv.y)) / (1.0 + dot(uv, uv));
+    let l = tiles::level_for(max(w, CLOUD_COLUMN_MIN), bounds[0].x * stretch, TILE_LEVELS);
+    let k = min(l as i32, TILE_LEVELS - 1);
+    let fine = tiles::locate(lookup, p, k + 1);
+    if (fine.slot < 0) {
+        return Column { cloud: false, f: 0.0, variance: 0.0, clear: 1.0e6 };
     }
-    if (k < CLOUD_LEVELS && frac > 0.0) {
-        var c1: vec2<f32> = c;
-        if (k + 1 == CLOUD_LEVELS) {
-            c1 = globe(q);
-        } else {
-            let x = level(k + 1, at.uv);
-            if (x.held) {
-                c1 = x.c;
-            }
+    var c: vec2<f32> = tile_column(fine, p);
+    var level: i32 = fine.level;
+    if (fine.level == k + 1) {
+        // Its parent, as a mip's next level; found again only if it is not
+        // ready.
+        var coarse: tiles::Tile = tiles::parent_of(fine);
+        if (coarse.slot < 0) {
+            coarse = tiles::locate(lookup, p, k);
         }
-        c = mix(c, c1, frac);
-    }
-    if (k == CLOUD_LEVELS) {
-        c = globe(q);
+        c = mix(tile_column(coarse, p), c, l - (k as f32));
+        level = coarse.level;
     }
     let g = detail_scale(c.x);
     let variance = c.y + params.detail_var * g * g;
     let reach = 3.4 * sqrt(variance);
     if (c.x + reach < need) {
-        return Column { cloud: false, f: c.x, variance: variance, clear: (need - c.x - reach) / (head[k].w + drop) };
+        return Column { cloud: false, f: c.x, variance: variance, clear: (need - c.x - reach) / (bounds[level].y + drop) };
     }
     return Column { cloud: true, f: c.x, variance: variance, clear: 0.0 };
 }

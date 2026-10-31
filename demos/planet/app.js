@@ -680,7 +680,7 @@ const grass = createGrass(scene, RADIUS, grassMod, sunMod, TRUTH, SEED, rivers.n
 const treeMod = bro.kernel.compile(readApp('trees.bk'), { file: 'trees.bk', modules: MODULES });
 const trees = createTrees(scene, RADIUS, treeMod, sunMod, TRUTH, SEED, rivers.net, [ground]);
 const clouds = createClouds(scene, RADIUS, cloudMod, [ground], SEED,
-                            { source: readApp('clouds_volume.bk'), modules: MODULES });
+                            { source: readApp('clouds_volume.bk'), modules: { ...MODULES, tiles: bro.tiles.module } });
 
 // ── Camera: doubles about the planet's center ───────────────────────────────
 
@@ -744,7 +744,7 @@ function frame() {
     ground.setShaderUniform('u_time', performance.now() / 1000 % WAVE_CLOCK);
     ground.setShaderUniform('u_treesFar', trees.far);
     const d = sun.direction, dl = Math.hypot(d[0], d[1], d[2]);
-    clouds.update(f.pos, f.surface + cam.alt - RADIUS, [-d[0] / dl, -d[1] / dl, -d[2] / dl]);
+    clouds.update(f.pos, f.surface + cam.alt - RADIUS, [-d[0] / dl, -d[1] / dl, -d[2] / dl], lastView);
     const cone = Math.atan(Math.tan(FOV * Math.PI / 360) * Math.hypot(1, aspect));
     ground.setShaderUniform('u_toSun', [-d[0] / dl, -d[1] / dl, -d[2] / dl]);
     grass.update(f.pos, cam.alt, [-d[0] / dl, -d[1] / dl, -d[2] / dl], camHi, camLo, f.fwd, cone, performance.now() / 1000 % WAVE_CLOCK);
