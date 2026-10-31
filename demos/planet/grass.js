@@ -3,7 +3,7 @@
 // fixed to the world, so a blade stays where it grew as the eye moves.
 //
 // The field is a grid of points on the gnomonic plane of the eye's cube
-// face (as the clouds' clipmap, clouds.js), spaced about a metre (a power of
+// face (as sun.js's grids), spaced about a metre (a power of
 // two of the plane's units, so the lattice holds still), produced again when
 // the eye has moved SNAP points. Each point holds its place, how much of the
 // ground there grows grass (ground.bk grass_cover: grassland past the beach,
