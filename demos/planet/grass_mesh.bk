@@ -104,7 +104,21 @@ pub fn vertex(v_in: mesh::Vertex) -> mesh::Vertex {
     // blades taken in index order, the last shrinking into the ground.
     // Wider by the root of what was dropped, so the cover holds.
     let keep = min(1.0, THIN / max(d, 1e-6));
-    let share = keep * DENSE / params.blades * cover;
+    // Where the ground is partly bare the grass grows in tufts, not
+    // thinly everywhere: a blade stands where a noise over the cells
+    // (value noise of a metre, made uniform) falls under the cover, so
+    // the share of ground the tufts take is still the cover.
+    let wx = world.x as u32;
+    let wy = world.y as u32;
+    let n00 = rnd_val(pcg(wx * 73856093u ^ wy * 19349663u ^ 0x5bd1e995u));
+    let n10 = rnd_val(pcg((wx + 1u) * 73856093u ^ wy * 19349663u ^ 0x5bd1e995u));
+    let n01 = rnd_val(pcg(wx * 73856093u ^ (wy + 1u) * 19349663u ^ 0x5bd1e995u));
+    let n11 = rnd_val(pcg((wx + 1u) * 73856093u ^ (wy + 1u) * 19349663u ^ 0x5bd1e995u));
+    let sa = at * at * (vec2<f32>(3.0) - 2.0 * at);
+    let c = mix(mix(n00, n10, sa.x), mix(n01, n11, sa.x), sa.y);
+    let clump = c < 0.5 ? 2.0 * c * c : 1.0 - 2.0 * (1.0 - c) * (1.0 - c);
+    let tuft = clamp((cover - clump) * 8.0 + 0.5, 0.0, 1.0);
+    let share = keep * DENSE / params.blades * tuft;
     var grow = clamp((share - ((b as f32) + 0.5) / params.blades) * params.blades, 0.0, 1.0);
     // This node's band (the sparse cells take over at NEAR, where they
     // stand as many as the dense), and the last fifth before FAR fading.
