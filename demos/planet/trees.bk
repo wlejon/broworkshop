@@ -7,7 +7,7 @@
 // tree_cover, against the site's hash) and how large, and the ground's
 // colour variation there, which the crown takes.
 import std::noise::*;
-from planet::ground import terrain, tree_cover, variation, perlin_split;
+from planet::ground import terrain, tree_cover, variation, perlin_split, soil_gradient;
 from planet::rivers import water_at, water_share;
 
 // Site (x, y0 + y) of the field, lattice site (li + x, lj + y0 + y) on face
@@ -35,15 +35,9 @@ fn k_tree_field(g: grid<2>, out: write_store<f32, 1>,
     let dir = normalize(a + e * u + f * v);
     let h = terrain(dir, radius, octaves, seed, net);
     let p = dir * (radius + max(h, 0.0));
-    // The slope across a metre or so: the cover's rock.
-    let du = normalize(a + e * (u + 0.15 * delta) + f * v);
-    let dv = normalize(a + e * u + f * (v + 0.15 * delta));
-    let pu = du * (radius + max(terrain(du, radius, octaves, seed, net), 0.0)) - p;
-    let pv = dv * (radius + max(terrain(dv, radius, octaves, seed, net), 0.0)) - p;
-    var n = normalize(cross(pu, pv));
-    if (dot(n, dir) < 0.0) { n = -n; }
-    let cosine = clamp(dot(n, dir) as f32, 1e-3, 1.0);
-    let grad = sqrt(1.0 / (cosine * cosine) - 1.0);
+    // The cover's rock: the soil's slope (ground.bk soil_gradient), as the
+    // ground's colour lays it.
+    let grad = soil_gradient(dir, radius, seed, net);
     // None in the rivers and lakes, nor right on their banks.
     let cover = tree_cover(h as f32, grad) * (1.0 - water_share(h as f32, water_at(dir, radius, 6.0, net, seed), 0.0));
     // Forests grow in stands and glades: the cover scaled by zero-mean

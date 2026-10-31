@@ -3,9 +3,14 @@
 import { check, frames, test, done } from "/lib/kit/test.js";
 
 // Production spends the gap 360 fps frames leave (about a millisecond), so
-// a jump from orbit to 3 km takes a few hundred frames to refine.
+// a jump from orbit to 3 km takes a few hundred frames to refine. A level's
+// children are wanted only once it is ready, so nothing may be pending for a
+// frame between levels: settled is eight frames running with none.
 const settle = () => {
-    for (let i = 0; i < 600 && (i < 4 || planet.cache.pending > 0); i++) frames(1);
+    for (let i = 0, quiet = 0; i < 800 && quiet < 8; i++) {
+        frames(1);
+        quiet = i >= 4 && planet.cache.pending === 0 ? quiet + 1 : 0;
+    }
 };
 const deepest = () => Math.max(...planet.cache.drawn.map((t) => t.level));
 

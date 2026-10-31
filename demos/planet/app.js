@@ -77,6 +77,7 @@ const kRange = mod.kernel('k_range');
 const kAnchor = mod.kernel('k_anchor');
 const kDetailHeight = mod.kernel('k_detail_height');
 const kDetail = mod.kernel('k_detail');
+const kSoil = mod.kernel('k_soil');
 const kHorizonHeights = mod.kernel('k_horizon_heights');
 const kHorizon = mod.kernel('k_horizon');
 
@@ -98,6 +99,9 @@ const span = bro.kernel.createBuffer(PRODUCE_PER_UPDATE * 2 * 4);
 span.write(new Int32Array(PRODUCE_PER_UPDATE * 2));
 // The batch's texels, each its point and mean height, k_detail_height to k_detail.
 const texelHeights = bro.kernel.createBuffer(PRODUCE_PER_UPDATE * TEXELS * TEXELS * 16);
+// The batch's soil heights, k_soil to k_detail (planet.bk SOIL_STRIDE).
+const SOIL_STRIDE = 67;
+const soilGrid = bro.kernel.createBuffer(PRODUCE_PER_UPDATE * SOIL_STRIDE * SOIL_STRIDE * 4);
 // The batch's horizon heights, k_horizon_heights to k_horizon.
 const horizonHeights = bro.kernel.createBuffer(PRODUCE_PER_UPDATE * HZ_GRID * HZ_GRID * 4);
 // Each resident tile's relief anchors (planet.bk k_anchor), by slot.
@@ -151,7 +155,8 @@ function makeCache(pixelsPerTexel) {
             kHorizon.dispatch([HZ, HZ, batch.count], batch.table, horizonHeights, this.layer('horizon'), HZ_GRID, RADIUS, BORDER, 1 / TILE);
             const texels = [TEXELS, TEXELS, batch.count];
             kDetailHeight.dispatch(texels, batch.table, texelHeights, RADIUS, BORDER, 1 / TILE, DETAIL, SEED, rivers.net);
-            kDetail.dispatch(texels, batch.table, texelHeights, this.layer('detail'), RADIUS, BORDER, 1 / TILE, DETAIL, TRUTH, SEED, rivers.net);
+            kSoil.dispatch([SOIL_STRIDE, SOIL_STRIDE, batch.count], batch.table, soilGrid, TEXELS, RADIUS, BORDER, 1 / TILE, DETAIL, SEED, rivers.net);
+            kDetail.dispatch(texels, batch.table, texelHeights, this.layer('detail'), RADIUS, BORDER, 1 / TILE, DETAIL, TRUTH, SEED, rivers.net, soilGrid);
             kRange.dispatch([batch.count], batch.table, span, this.ranges, 1 / TILE, MAX_HEIGHT);
         },
     });

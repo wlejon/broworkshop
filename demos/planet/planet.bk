@@ -3,7 +3,8 @@
 // grid z is the tile's record in the batch table (tiles-api.js), whose slot
 // says where in the pools, viewed as [cells, cells, capacity], it goes.
 from planet::ground import terrain, terrain_shaped, cell_height, spread, expected_surface, expected_cover, gradient,
-                           variation, strata, octaves_for, range_margin, fresh_water, noise_at, simplex_anchor;
+                           variation, strata, octaves_for, range_margin, fresh_water, noise_at, simplex_anchor,
+                           soil_height, SOIL_OCTAVES, cell_width;
 from planet::relief import BASE_WAVELENGTH, RIDGE_FIRST, WARP_OCTAVE, WARP_DISPLACE, simplex_grad, SimplexAt;
 from planet::rivers import water_at, water_share;
 
@@ -73,6 +74,48 @@ fn texel_dir(table: read_store<f64, 1>, r: i32, tx: i32, ty: i32, border: f64, i
     return normalize(record_vec(table, r + 8) + record_vec(table, r + 11) * s + record_vec(table, r + 14) * t);
 }
 
+// The soil's height (ground.bk soil_height) over a tile finer than its
+// scale, at n x n points spanning the tile's texels corner texel to corner
+// texel and one point more about them, (n + 2)^2 in all, each tile
+// SOIL_STRIDE^2 floats of `out` in the batch's order. Its slope varies over
+// tens of metres, so k_detail takes it between the points from their
+// neighbours (soil_slope), not at every texel. n puts the points about
+// SOIL_SPACING apart, a quarter of the soil's shortest wavelength, from 3 on
+// a small tile to SOIL_FINE on one a kilometre across (soil_points); the
+// grid is SOIL_STRIDE square and the points a tile does not take return at
+// once. Tiles that do not resolve the soil take nothing (k_detail takes the
+// share of it under each texel instead).
+const SOIL_FINE: i32 = 65;
+pub const SOIL_STRIDE: i32 = 67;
+const SOIL_SPACING: f32 = 10.0;
+fn soil_points(octaves: f64, texels: i32) -> i32 {
+    let extent = ((texels - 1) as f32) * cell_width(octaves);
+    return clamp((ceil(extent / SOIL_SPACING) as i32) + 1, 3, SOIL_FINE);
+}
+@kernel @grid(3)
+fn k_soil(g: grid<3>, table: read_store<f64, 1>, out: write_store<f32, 1>, texels: i32,
+          radius: f64, border: f64, inv_size: f64, d: f64, seed: i32, net: read_store<f32, 1>) {
+    let r = g.z() * RECORD;
+    let octaves = octaves_for(table[r + 20], inv_size / d);
+    let n = soil_points(octaves, texels);
+    if (octaves <= SOIL_OCTAVES || g.x() >= n + 2 || g.y() >= n + 2) { return; }
+    let at = g.z() * SOIL_STRIDE * SOIL_STRIDE + g.y() * (n + 2) + g.x();
+    let span = ((texels - 1) as f64) / ((n - 1) as f64);
+    let s = (((g.x() - 1) as f64 * span + 0.5) / d - 0.5 - border) * inv_size;
+    let t = (((g.y() - 1) as f64 * span + 0.5) / d - 0.5 - border) * inv_size;
+    let dir = normalize(record_vec(table, r + 8) + record_vec(table, r + 11) * s + record_vec(table, r + 14) * t);
+    out[at] = soil_height(dir, radius, seed, net);
+}
+
+// The soil's gradient at point (i, j) of a tile's k_soil grid (its points
+// numbered from the border's, m a side), points `step` metres apart.
+fn soil_slope(soil: read_store<f32, 1>, base: i32, m: i32, i: i32, j: i32, step: f32) -> f32 {
+    let at = base + j * m + i;
+    let gu = soil[at + 1] - soil[at - 1];
+    let gv = soil[at + m] - soil[at - m];
+    return sqrt(gu * gu + gv * gv) / (2.0 * step);
+}
+
 // Each texel of a batch into `texels`, the batch's tiles one after another,
 // (n * d)^2 each: xyz its point of the mean surface relative to the tile's
 // center, w its mean height. k_detail reads every texel's point four times
@@ -113,7 +156,8 @@ fn unorm(x: f32, bits: i32) -> i32 {
 // normal.
 @kernel @grid(3)
 fn k_detail(g: grid<3>, table: read_store<f64, 1>, texels: read_store<vec4<f32>, 1>, out: write_store<i32, 1>,
-            radius: f64, border: f64, inv_size: f64, d: f64, truth: f32, seed: i32, net: read_store<f32, 1>) {
+            radius: f64, border: f64, inv_size: f64, d: f64, truth: f32, seed: i32, net: read_store<f32, 1>,
+            soil_grid: read_store<f32, 1>) {
     let r = g.z() * RECORD;
     let z = g.z();
     let w = g.width();
@@ -131,7 +175,32 @@ fn k_detail(g: grid<3>, table: read_store<f64, 1>, texels: read_store<vec4<f32>,
     let grad = gradient(du, dv, up);
     let trend = grad * length(du) * 0.5;
     let sd = sqrt(sp.x * sp.x + trend * trend / 12.0);
-    var col = expected_surface(h, grad, length(du) * 0.5, sp.x, sp.y, variation(dir, radius, octaves, seed),
+    // The soil's slope: a texel finer than its scale reads it at its point,
+    // a coarser one its own and the spread of the soil's octaves under it.
+    var soil = vec2<f32>(0.0);
+    if (octaves <= SOIL_OCTAVES) {
+        soil = vec2<f32>(grad, spread(dir, radius, octaves, min(truth, SOIL_OCTAVES as f32), seed).y);
+    } else {
+        let pts = soil_points(octaves, w);
+        let span = ((pts - 1) as f32) / ((w - 1) as f32);
+        let sx = (tx as f32) * span;
+        let sy = (ty as f32) * span;
+        let ix = min(floor(sx) as i32, pts - 2);
+        let iy = min(floor(sy) as i32, pts - 2);
+        let fx = sx - (ix as f32);
+        let fy = sy - (iy as f32);
+        // Points (ix, iy) on are (ix + 1, iy + 1) of the grid, its border
+        // about them; `step` metres apart (du spans two texels).
+        let base = z * SOIL_STRIDE * SOIL_STRIDE;
+        let m = pts + 2;
+        let step = length(du) * 0.5 / span;
+        let top = mix(soil_slope(soil_grid, base, m, ix + 1, iy + 1, step),
+                      soil_slope(soil_grid, base, m, ix + 2, iy + 1, step), fx);
+        let bottom = mix(soil_slope(soil_grid, base, m, ix + 1, iy + 2, step),
+                         soil_slope(soil_grid, base, m, ix + 2, iy + 2, step), fx);
+        soil = vec2<f32>(mix(top, bottom, fy), 0.0);
+    }
+    var col = expected_surface(h, grad, length(du) * 0.5, sp.x, soil, variation(dir, radius, octaves, seed),
                                strata(dir, radius, h, sd, seed));
     // The rivers and lakes: the share of the texel under their water, a
     // river as deep as its channel runs there (shallow at its banks, its bed
@@ -140,7 +209,7 @@ fn k_detail(g: grid<3>, table: read_store<f64, 1>, texels: read_store<vec4<f32>,
     let wa = water_at(dir, radius, length(du) * 0.5, net, seed);
     let water = water_share(h, wa, sd);
     col = vec4<f32>(mix(col.xyz, fresh_water(max(max(wa.near.w, wa.channel), 0.3)), water), max(col.w, water));
-    let cover = expected_cover(h, grad, length(du) * 0.5, sp.x, sp.y) * (1.0 - water);
+    let cover = expected_cover(h, grad, length(du) * 0.5, sp.x, soil) * (1.0 - water);
     var n = normalize(cross(du, dv));
     if (dot(n, up) < 0.0) { n = -n; }
     // Octahedral: the normal onto the octahedron |x| + |y| + |z| = 1, its
