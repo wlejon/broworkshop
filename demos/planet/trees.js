@@ -21,11 +21,12 @@
 // whose forest colour is what they average to (ground.bk tree_cover).
 import { faceFrame } from "/app/clouds.js";
 import { createSunGrid } from "/app/sun.js";
+import { stepped } from "/app/stepped.js";
 
 const N = 512;             // sites along an edge
 const B = 8;               // sites along a block's edge
 const SNAP = 16;           // sites the eye moves before the field is produced again
-const SLICES = 16;         // frames a field takes to produce
+const SLICES = 16;         // frames a field's production takes, a slice of rows each
 const SPACING = 8.0;       // metres between sites, about (a power of two of the plane's units)
 const NEAR = 220;          // metres: the full trees inside
 const MID = 800;           // the three-tier ones out to it
@@ -434,11 +435,12 @@ export function createTrees(scene, radius, module, sunModule, octaves, seed, net
     // The front field's block centres: unit directions, three a block.
     const centres = new Float64Array(3 * BLOCKS * BLOCKS);
 
-    // The field shown (front) and the one being produced; the jobs left of
-    // a production, one run a frame.
+    // The field shown (front); the production in flight, a step a frame
+    // beside the frames (stepped.js: a whole field and its sun grid in one
+    // frame lengthened it by 6 ms), shown once done.
     let front = 0, shown = false, ready = false;
     let face = -1, delta = 0, ui = NaN, vi = NaN;
-    let jobs = [];
+    let production = null;
     const sun = [0, 0, 0];
 
     function faceOf(eye) {
@@ -448,18 +450,20 @@ export function createTrees(scene, radius, module, sunModule, octaves, seed, net
         return best + (eye[best] < 0 ? 3 : 0);
     }
 
-    function sunJobs(plane, u0, v0, dl, toSun, lattice) {
+    // The sun grid's steps, and showing it.
+    function sunSteps(plane, u0, v0, dl, toSun) {
         sun.splice(0, 3, ...toSun);
-        const out = sunGrid.jobs(plane, u0, v0, dl * SUN_STRIDE, toSun, radius, octaves, seed);
-        const last = out.pop();
-        out.push(() => {
-            last();
-            for (const n of nodes) n.setShaderUniform('u_sunLattice', lattice);
-        });
-        return out;
+        return sunGrid.steps(plane, u0, v0, dl * SUN_STRIDE, toSun, radius, octaves, seed);
+    }
+    function showSun(lattice) {
+        const buffer = sunGrid.swap();
+        for (const n of nodes) {
+            n.setShaderBuffer('u_sun', buffer);
+            n.setShaderUniform('u_sunLattice', lattice);
+        }
     }
 
-    let current = null;   // the production in hand: its plane, origin, lattice
+    let current = null;   // the field shown or in flight: its plane, origin, lattice
     function plan(eye, toSun) {
         const fc = faceOf(eye), frame = faceFrame(fc);
         const z = eye[0] * frame.a[0] + eye[1] * frame.a[1] + eye[2] * frame.a[2];
@@ -470,10 +474,10 @@ export function createTrees(scene, radius, module, sunModule, octaves, seed, net
         const nu = Math.round(u / (SNAP * dl)) * SNAP, nv = Math.round(v / (SNAP * dl)) * SNAP;
         const plane = [...frame.a, ...frame.e, ...frame.f];
         const jumped = fc !== face || dl !== delta;
-        // A production begun is finished before the next (begun again at
-        // each of the field's steps, a fast eye would leave it never done),
-        // unless the eye left its face or spacing.
-        if ((jumped || nu !== ui || nv !== vi) && (jumped || jobs.length === 0)) {
+        // A production begun is shown before the next begins, unless the eye
+        // left its face or spacing: then the new one replaces it (background
+        // jobs run in order, so the back field ends as the new one's).
+        if ((jumped || nu !== ui || nv !== vi) && (jumped || !production)) {
             face = fc;
             delta = dl;
             ui = nu;
@@ -485,13 +489,14 @@ export function createTrees(scene, radius, module, sunModule, octaves, seed, net
             const li = ui - N / 2, lj = vi - N / 2, u0 = li * dl, v0 = lj * dl;
             const back = 1 - front, out = fields[back];
             const hi = origin.map(Math.fround), lo = origin.map((x, k) => x - hi[k]);
-            jobs = [];
+            const steps = [];
             for (let s = 0; s < SLICES; s++) {
                 const y0 = s * N / SLICES;
-                jobs.push(() => fieldKernel.dispatch([N, N / SLICES], out, ...plane, u0, v0, dl, ...origin,
-                                                     radius, octaves, seed, li, lj, fc, y0, net));
+                steps.push(() => fieldKernel.dispatch([N, N / SLICES], out, ...plane, u0, v0, dl, ...origin,
+                                                      radius, octaves, seed, li, lj, fc, y0, net));
             }
-            jobs.push(() => {
+            steps.push(...sunSteps(plane, u0, v0, dl, toSun));
+            production = stepped(steps, () => {
                 front = back;
                 for (let by = 0; by < BLOCKS; by++)
                     for (let bx = 0; bx < BLOCKS; bx++) {
@@ -520,18 +525,17 @@ export function createTrees(scene, radius, module, sunModule, octaves, seed, net
                     n.setShaderUniform('u_treeF', frame.f);
                     n.setShaderUniform('u_treeUV', [u0, v0, dl]);
                 }
+                showSun([li, lj]);
                 ready = true;
             });
-            jobs.push(...sunJobs(plane, u0, v0, dl, toSun, [li, lj]));
             current = { plane, u0, v0, dl, li, lj };
-            // A field from another face or spacing means nothing here: all
-            // of the new one at once.
-            if (jumped || !ready) while (jobs.length) jobs.shift()();
             return;
         }
         const turned = sun[0] * toSun[0] + sun[1] * toSun[1] + sun[2] * toSun[2] < 0.999999;
-        if (turned && jobs.length === 0 && current)
-            jobs = sunJobs(current.plane, current.u0, current.v0, current.dl, toSun, [current.li, current.lj]);
+        if (turned && !production && current) {
+            const { plane: p, u0, v0, dl: d, li, lj } = current;
+            production = stepped(sunSteps(p, u0, v0, d, toSun), () => showSun([li, lj]));
+        }
     }
 
     // The blocks each band draws: a block's trees stand within BLOCK_REACH
@@ -611,17 +615,18 @@ export function createTrees(scene, radius, module, sunModule, octaves, seed, net
         // How far off the trees are drawn (0: not at all), the last sixth of
         // it shrinking: beyond, the ground draws the forest's average.
         get far() { return shown ? FAR : 0; },
-        // cone: the half-angle of the view's diagonal, radians. `hold`: other
-        // production took this frame, so the field's slice waits a frame.
-        update(eye, altitude, toSun, camHi, camLo, forward, cone, time, hold = false) {
-            const show = altitude < SHOWN_BELOW;
-            if (show !== shown) {
-                shown = show;
-                if (!show) for (const n of nodes) n.setInstanceCount(0);
+        // cone: the half-angle of the view's diagonal, radians.
+        update(eye, altitude, toSun, camHi, camLo, forward, cone, time) {
+            const visible = altitude < SHOWN_BELOW;
+            if (visible !== shown) {
+                shown = visible;
+                if (!visible) for (const n of nodes) n.setInstanceCount(0);
             }
-            if (!show) return;
+            if (!visible) return;
+            if (production && production.advance()) production = null;
             plan(eye, toSun);
-            if (jobs.length && !hold) jobs.shift()();
+            // (None drawn until the first field is there.)
+            if (!ready) return;
             listBlocks(eye, altitude, forward, cone);
             for (const n of nodes) {
                 n.setShaderUniform('u_camHi', camHi);

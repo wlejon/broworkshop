@@ -26,6 +26,7 @@
 // a gusting breeze.
 import { faceFrame } from "/app/clouds.js";
 import { createSunGrid } from "/app/sun.js";
+import { stepped } from "/app/stepped.js";
 
 const N = 128;             // field cells along an edge
 const P = N + 1;           // field points along an edge
@@ -298,7 +299,9 @@ export function createGrass(scene, radius, module, sunModule, octaves, seed, net
         return node;
     });
 
-    let face = -1, delta = 0, ui = NaN, vi = NaN, sunDue = false, sunJobs = [];
+    // The sun grid follows the field, a step a frame beside the frames
+    // (stepped.js), shown once done.
+    let face = -1, delta = 0, ui = NaN, vi = NaN, sunDue = false, sunProduction = null;
     const sun = [0, 0, 0];
     const hi = [0, 0, 0], lo = [0, 0, 0];
 
@@ -355,7 +358,6 @@ export function createGrass(scene, radius, module, sunModule, octaves, seed, net
         }
     }
 
-    let fieldMade = false;   // this frame produced the field
     function produce(eye, toSun) {
         const fc = faceOf(eye), frame = faceFrame(fc);
         const z = eye[0] * frame.a[0] + eye[1] * frame.a[1] + eye[2] * frame.a[2];
@@ -381,7 +383,6 @@ export function createGrass(scene, radius, module, sunModule, octaves, seed, net
                                    radius, octaves, seed, net);
             fieldKernel.dispatch([P, P], field, heights, ...plane, (ui - N / 2) * dl, (vi - N / 2) * dl, dl,
                                  ...origin, radius, octaves, seed, net);
-            fieldMade = true;
             for (let k = 0; k < 3; k++) {
                 hi[k] = Math.fround(origin[k]);
                 lo[k] = origin[k] - hi[k];
@@ -398,34 +399,32 @@ export function createGrass(scene, radius, module, sunModule, octaves, seed, net
                 n.setShaderUniform('u_grassF', frame.f);
                 n.setShaderUniform('u_grassUV', [(ui - N / 2) * dl, (vi - N / 2) * dl, dl]);
             }
-            // The sun grid follows, a slice a frame from the next frame on,
-            // read about its own lattice meanwhile; all at once if the field
-            // changed face or spacing and the old grid means nothing.
+            // The sun grid follows, read about its own lattice until shown.
             sunDue = true;
-            if (jumped) sunJobs = [];
         }
+        if (sunProduction && sunProduction.advance()) sunProduction = null;
         const turned = sun[0] * toSun[0] + sun[1] * toSun[1] + sun[2] * toSun[2] < 0.999999;
-        if (sunJobs.length) { sunJobs.shift()(); return; }
-        if (!sunDue && !turned) return;
-        // A grid begun is finished before the next: begun again at each of
-        // the field's steps, a fast eye would leave it never done.
+        // A grid begun is shown before the next begins: begun again at each
+        // of the field's steps, a fast eye would leave it never shown.
+        if (sunProduction || (!sunDue && !turned)) return;
         sunDue = false;
         sun.splice(0, 3, ...toSun);
         const lattice = [ui - N / 2, vi - N / 2];
-        sunJobs = sunGrid.jobs(plane, lattice[0] * dl, lattice[1] * dl, dl * SUN_STRIDE, toSun, radius, octaves, seed);
-        sunJobs.push(() => { for (const n of nodes) n.setShaderUniform('u_sunLattice', lattice); });
-        if (jumped) while (sunJobs.length) sunJobs.shift()();
+        const steps = sunGrid.steps(plane, lattice[0] * dl, lattice[1] * dl, dl * SUN_STRIDE, toSun, radius, octaves, seed);
+        sunProduction = stepped(steps, () => {
+            const buffer = sunGrid.swap();
+            for (const n of nodes) {
+                n.setShaderBuffer('u_sun', buffer);
+                n.setShaderUniform('u_sunLattice', lattice);
+            }
+        });
     }
 
     return {
         nodes,
         field,
-        // Whether this frame's update produced the field (0.14 ms of GPU
-        // work), which other per-frame production can stand aside for.
-        get fieldMade() { return fieldMade; },
         // cone: the half-angle of the view's diagonal, radians.
         update(eye, altitude, toSun, camHi, camLo, forward, cone, time) {
-            fieldMade = false;
             // A band whose blades all stand farther than its reach (with a
             // quarter more for the ground rising about the eye) draws none.
             let any = false;
