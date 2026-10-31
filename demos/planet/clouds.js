@@ -20,8 +20,8 @@
 
 // The layer's shape is clouds.bk's (CLOUD_BASE, CLOUD_DEPTH), here for the
 // near grid's gate and the tests.
-export const CLOUD_BASE = 1500;       // m above the broad ground under it (clouds.bk k_cloud_lift)
-export const CLOUD_DEPTH = 2600;      // m from the base to the tallest tops
+export const CLOUD_BASE = 1100;       // m above the broad ground under it (clouds.bk k_cloud_lift): the layer's floor
+export const CLOUD_DEPTH = 3000;      // m from the floor to the tallest tops
 const NEAR_RANGE = 1500;              // m from the eye the engine's near grid integrates (userMedium)
 const NEAR_MARGIN = 300;              // m about the layer's heights the eye uses the grid within
 const NOISE_VAR = 0.0728;             // the Perlin noise's variance (ground.bk PERLIN_VAR)

@@ -50,8 +50,21 @@ fn column(q: vec3<f64>, w: f64, radius: f64) -> vec2<f32> {
 // height s (cloud_need); the finest footprint the column resolves, and the
 // amount up to which the detail's variance grows in (CLOUD_COLUMN_MIN,
 // CLOUD_DETAIL_FULL).
-pub const CLOUD_BASE: f32 = 1500.0;
-pub const CLOUD_DEPTH: f32 = 2600.0;
+//
+// A column is cloud from where the need falls to its amount to where it
+// rises past it again: least at CLOUD_BASE_SHARE, the base of the thinnest
+// cloud, rising toward the top and, steeper, toward the layer's floor
+// CLOUD_DIP metres below. A cumulus's base is where its rising air condenses,
+// and the stronger the column the moister its air and the lower it
+// condenses: a column reaching a share x of the way to the top dips x of
+// CLOUD_DIP below the thinnest's base, so bases differ cloud to cloud and
+// across the layer at every scale the amount does, and the detail billows
+// them (at one need for every column the base was a single plane, drawn as
+// a hard line where it met the horizon and as stripes seen edge-on).
+pub const CLOUD_DIP: f32 = 400.0;
+pub const CLOUD_BASE: f32 = 1100.0;    // the floor: the thinnest cloud's base, 1500 m, less CLOUD_DIP
+pub const CLOUD_DEPTH: f32 = 3000.0;
+pub const CLOUD_BASE_SHARE: f32 = 0.13333333;   // CLOUD_DIP / CLOUD_DEPTH
 pub const CLOUD_SIGMA: f32 = 0.03;
 pub const CLOUD_FLOOR: f32 = 0.02;
 pub const CLOUD_CURVE: f32 = 0.7;
@@ -59,19 +72,30 @@ pub const CLOUD_COLUMN_MIN: f64 = 60.0;
 pub const CLOUD_DETAIL_FULL: f32 = 0.04;
 const CLOUD_SHADOW_STEPS: i32 = 6;
 const LIFT_OCTAVES: f64 = 3.0;   // the lift's (k_cloud_lift)
+// Height share s as a share of the way from the thinnest base to the top
+// (above it) or to the floor (below it).
+fn need_x(s: f32) -> f32 {
+    let above = step(CLOUD_BASE_SHARE, s);
+    return mix((CLOUD_BASE_SHARE - s) / CLOUD_BASE_SHARE, (s - CLOUD_BASE_SHARE) / (1.0 - CLOUD_BASE_SHARE), above);
+}
 pub fn cloud_need(s: f32) -> f32 {
-    let s2 = min(s * s, 0.999);
-    return CLOUD_FLOOR + CLOUD_CURVE * s2 / (1.0 - s2);
+    let x = need_x(s);
+    let x2 = min(x * x, 0.999);
+    return CLOUD_FLOOR + CLOUD_CURVE * x2 / (1.0 - x2);
 }
-// Its rate per unit of s.
+// Its rate per unit of s: negative below the thinnest base, where the need
+// falls as the height rises.
 pub fn cloud_need_slope(s: f32) -> f32 {
-    let d = max(1.0 - s * s, 0.001);
-    return 2.0 * CLOUD_CURVE * s / (d * d);
+    let x = need_x(s);
+    let d = max(1.0 - x * x, 0.001);
+    let dx = mix(-1.0 / CLOUD_BASE_SHARE, 1.0 / (1.0 - CLOUD_BASE_SHARE), step(CLOUD_BASE_SHARE, s));
+    return 2.0 * CLOUD_CURVE * x / (d * d) * dx;
 }
-// The height share a column's cloud reaches: where cloud_need(s) = f.
+// The height share a column's cloud reaches: where cloud_need(s) = f above
+// the thinnest base.
 pub fn cloud_top(f: f32) -> f32 {
     let x = max(f - CLOUD_FLOOR, 0.0) / CLOUD_CURVE;
-    return sqrt(x / (1.0 + x));
+    return CLOUD_BASE_SHARE + (1.0 - CLOUD_BASE_SHARE) * sqrt(x / (1.0 + x));
 }
 // The chance of cloud at height s in a column of amount f with unresolved
 // variance v (cloudOccupancy's logistic).

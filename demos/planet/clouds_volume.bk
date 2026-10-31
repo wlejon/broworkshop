@@ -130,29 +130,67 @@ struct Column {
     variance: f32,
     clear: f32,
 }
-fn column(q: vec3<f32>, w: f32, need: f32, drop: f32) -> Column {
-    let p = tiles::cube_point(q);
+// The tiles a column at a point is read from: the level its footprint falls
+// at (l, between levels k and k + 1), the finest ready tile at k + 1 or
+// coarser, and the coarser of the two the column blends (the same tile when
+// fine is coarser than k + 1), with the root they are on.
+struct Tiles {
+    root: i32,
+    l: f32,
+    k: i32,
+    fine: tiles::Tile,
+    coarse: tiles::Tile,
+}
+fn level_at(p: tiles::Point, w: f32) -> f32 {
     // The footprint of a level-0 tile's cells here: at a face's centre, by
     // the plane's stretch (clouds.bk k_cloud_tile).
     let uv = vec2<f32>(p.u, p.v) * 2.0 - 1.0;
     let stretch = sqrt(1.0 + max(uv.x * uv.x, uv.y * uv.y)) / (1.0 + dot(uv, uv));
-    let l = tiles::level_for(max(w, CLOUD_COLUMN_MIN), bounds[0].x * stretch, TILE_LEVELS);
+    return tiles::level_for(max(w, CLOUD_COLUMN_MIN), bounds[0].x * stretch, TILE_LEVELS);
+}
+fn tiles_at(p: tiles::Point, w: f32) -> Tiles {
+    let l = level_at(p, w);
     let k = min(l as i32, TILE_LEVELS - 1);
     let fine = tiles::locate(lookup, p, k + 1);
-    if (fine.slot < 0) {
-        return Column { cloud: false, f: 0.0, variance: 0.0, clear: 1.0e6 };
-    }
-    var c: vec2<f32> = tile_column(fine, p);
-    var level: i32 = fine.level;
-    if (fine.level == k + 1) {
+    var coarse: tiles::Tile = fine;
+    if (fine.slot >= 0 && fine.level == k + 1) {
         // Its parent, as a mip's next level; found again only if it is not
         // ready.
-        var coarse: tiles::Tile = tiles::parent_of(fine);
+        coarse = tiles::parent_of(fine);
         if (coarse.slot < 0) {
             coarse = tiles::locate(lookup, p, k);
         }
-        c = mix(tile_column(coarse, p), c, l - (k as f32));
-        level = coarse.level;
+    }
+    return Tiles { root: p.root, l: l, k: k, fine: fine, coarse: coarse };
+}
+// The tiles at p given those found at a point near it on the same ray (the
+// edge search's, between the sample in cloud and the last point known
+// clear): the same tiles while p is in the fine one at the same level, else
+// found again, without the search's dependent loads. (Where fine is coarser
+// than k + 1, a tile at k + 1 holding p may be ready that the near point's
+// search did not meet; the edge is found in the near point's.)
+fn tiles_near(p: tiles::Point, w: f32, near: Tiles) -> Tiles {
+    let l = level_at(p, w);
+    let k = min(l as i32, TILE_LEVELS - 1);
+    let at = tiles::tile_at(p, near.fine.level);
+    if (near.fine.slot >= 0 && p.root == near.root && k == near.k && at.x == near.fine.x && at.y == near.fine.y) {
+        return Tiles { root: near.root, l: l, k: k, fine: near.fine, coarse: near.coarse };
+    }
+    return tiles_at(p, w);
+}
+fn column(q: vec3<f32>, w: f32, need: f32, drop: f32) -> Column {
+    let p = tiles::cube_point(q);
+    return column_in(p, tiles_at(p, w), need, drop);
+}
+fn column_in(p: tiles::Point, t: Tiles, need: f32, drop: f32) -> Column {
+    if (t.fine.slot < 0) {
+        return Column { cloud: false, f: 0.0, variance: 0.0, clear: 1.0e6 };
+    }
+    var c: vec2<f32> = tile_column(t.fine, p);
+    var level: i32 = t.fine.level;
+    if (t.fine.level == t.k + 1) {
+        c = mix(tile_column(t.coarse, p), c, t.l - (t.k as f32));
+        level = t.coarse.level;
     }
     let g = detail_scale(c.x);
     let variance = c.y + params.detail_var * g * g;
@@ -295,12 +333,15 @@ fn height_at(eye: vec3<f32>, dir: vec3<f32>, t: f32, hc: f32, mu: f32) -> Height
 // How far the column's amount passes what the height needs, in deviations
 // of what the footprint leaves unresolved (the occupancy's logistic argument
 // over 1.7), at distance t along the ray; -10 outside the layer.
-fn excess_at(eye: vec3<f32>, dir: vec3<f32>, t: f32, hc: f32, mu: f32, w: f32) -> f32 {
+// The column there is read from the tiles found at a point near it (near,
+// tiles_near).
+fn excess_at(eye: vec3<f32>, dir: vec3<f32>, t: f32, hc: f32, mu: f32, w: f32, near: Tiles) -> f32 {
     let x = height_at(eye, dir, t, hc, mu);
     if (x.s < 0.0 || x.s > 1.0) {
         return -10.0;
     }
-    let col = column(x.up, w, cloud_need(x.s), 0.0);
+    let p = tiles::cube_point(x.up);
+    let col = column_in(p, tiles_near(p, w, near), cloud_need(x.s), 0.0);
     let fd = detailed(x.p, w, col.f, col.variance);
     return (fd.x - cloud_need(x.s)) / sqrt(fd.y + 1.0e-5);
 }
@@ -393,6 +434,16 @@ fn skip_outside(s: f32, climb: f32) -> f32 {
         return gap / -a;
     }
     return 1.0e9;
+}
+
+// How fast what a ray's height needs can fall a metre along it, at height
+// share s rising at `climb` a metre: above the thinnest base it falls as the
+// ray descends, below it as the ray rises, and as fast again as the lift's
+// slope moves the layer under it either way.
+fn need_drop(s: f32, climb: f32) -> f32 {
+    let slope = cloud_need_slope(s);
+    let toward = mix(max(-climb, 0.0), max(climb, 0.0), step(slope, 0.0));
+    return abs(slope) * (toward + CLOUD_LIFT_SLOPE) / CLOUD_DEPTH;
 }
 
 fn max4(v: vec4<f32>) -> f32 {
@@ -548,8 +599,10 @@ pub fn volume(ray: volume::Ray) -> volume::Light {
         // the ray, rising at most by its gradient bound along the layer while
         // what the ray's height needs falls as it descends, or as the lift
         // rises under it.
-        let drop = cloud_need_slope(x.s) * (max(-dot(dir, x.up), 0.0) + CLOUD_LIFT_SLOPE) / CLOUD_DEPTH;
-        var col: Column = column(x.up, w, cloud_need(x.s), drop);
+        let drop = need_drop(x.s, dot(dir, x.up));
+        let xp = tiles::cube_point(x.up);
+        let xt = tiles_at(xp, w);
+        var col: Column = column_in(xp, xt, cloud_need(x.s), drop);
         if (!col.cloud) {
             kinds.x += 1.0;
             t_prev = t + col.clear;   // proved empty this far
@@ -576,28 +629,40 @@ pub fn volume(ray: volume::Ray) -> volume::Light {
         }
         kinds.z += 1.0;
         // A step that lands in cloud has passed its edge since the last
-        // point known clear: the gap halved (up to five times, down to the
-        // footprint) finds it, and the
-        // cloud is taken from there, so its edge is where the field puts it
-        // and not where the step fell.
+        // point known clear: the gap halved (up to four times, down to the
+        // footprint) brackets it, and the cloud is taken from where the
+        // excess read at the bracket's ends crosses the edge between them
+        // (or its cloudy end, where its clear end was never read), so its
+        // edge is where the field puts it and not where the step fell. The
+        // crossing places it closer to eight halvings' edge than a fifth
+        // halving did, for a fifth fewer reads.
         if (!in_cloud && t - t_prev > 1.0) {
             var a: f32 = t_prev;
             var b: f32 = t;
+            var ea: f32 = 1.0e9;   // not read
+            var eb: f32 = (fd.x - cloud_need(x.s)) / sqrt(fd.y + 1.0e-5);
             // No finer than the footprint the field is read at.
-            for (var k: i32 = 0; k < 5 && b - a > w; k += 1) {
+            for (var k: i32 = 0; k < 4 && b - a > w; k += 1) {
                 let m = 0.5 * (a + b);
-                if (excess_at(eye, dir, m, hc, mu, w) > CLOUD_EDGE) {
+                let e = excess_at(eye, dir, m, hc, mu, w, xt);
+                if (e > CLOUD_EDGE) {
                     b = m;
+                    eb = e;
                 } else {
                     a = m;
+                    ea = e;
                 }
+            }
+            if (ea < 1.0e8) {
+                b = a + (b - a) * clamp((CLOUD_EDGE - ea) / max(eb - ea, 1.0e-6), 0.0, 1.0);
             }
             // The sample is taken there, at the same footprint.
             fine_until = t;
             t = b;
             t_prev = b;
             x = height_at(eye, dir, t, hc, mu);
-            col = column(x.up, w, cloud_need(x.s), 0.0);
+            let bp = tiles::cube_point(x.up);
+            col = column_in(bp, tiles_near(bp, w, xt), cloud_need(x.s), 0.0);
             fd = detailed(x.p, w, col.f, col.variance);
             occ = max(cloud_occupancy(fd.x, fd.y, x.s), 0.0031);
             // The step on from the edge is a half to one and a half of one,
@@ -720,6 +785,11 @@ pub fn volume(ray: volume::Ray) -> volume::Light {
     if (SCENE_DEBUG(cloudStepKinds)) {
         out.debug = vec4<f32>(kinds / max(marched as f32, 1.0), 1.0);
     }
+    // The depth the air in front is taken to (red, a 150 km of it), and the
+    // transmittance (green).
+    if (SCENE_DEBUG(cloudDepth)) {
+        out.debug = vec4<f32>(depth / 150000.0, transmittance, 0.0, 1.0);
+    }
     return out;
 }
 
@@ -749,7 +819,7 @@ pub fn medium(pos: vec3<f32>, dir: vec3<f32>, w: f32) -> volume::Medium {
     }
     let fw = max(w, 1.0);
     // As far as the column provably stays short of cloud (the march's).
-    let drop = cloud_need_slope(x.s) * (max(-climb, 0.0) + CLOUD_LIFT_SLOPE) / CLOUD_DEPTH;
+    let drop = need_drop(x.s, climb);
     let col = column(x.up, fw, cloud_need(x.s), drop);
     if (!col.cloud) {
         none.clear = col.clear;
