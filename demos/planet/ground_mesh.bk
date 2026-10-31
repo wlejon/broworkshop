@@ -447,7 +447,8 @@ pub fn fragment(v: mesh::Vertex, s_in: mesh::Surface) -> mesh::Surface {
     if (max(abs(v.uv.x), abs(v.uv.y)) > 0.002 && a0.w < o_end) {
         let a1 = anchors[a + 1];
         let oct_tex = bitcast<f32>(a1.w);
-        var at = SimplexAt { cell: a0.xyz, sk: bitcast<vec4<f32>>(a1).xyz };
+        // (Its cell is about the tile's texels: what sk lost is nothing.)
+        var at = SimplexAt { cell: a0.xyz, sk: bitcast<vec4<f32>>(a1).xyz, res: vec3<f32>(0.0) };
         let dq = vec3<f32>(v.v1.w, v.v2.w, v.v3.w);
         var lattice = exp2(a0.w as f32);
         var gq = vec3<f32>(0.0);

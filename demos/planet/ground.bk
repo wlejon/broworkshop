@@ -26,140 +26,14 @@ const RIDGE_GRAD_VAR: f32 = 4.586;
 // which every octave shares, so the steps of all of them line up into one
 // (a 4 cm ledge along the cube's +Y/+Z edge, seen as a line to the horizon).
 //
-// It is std supersimplex3d with the f64 work only in finding q's lattice
-// cell (the skew and its floor): the rest runs in f32 on the offset inside
-// the cell, which needs no more, and the GPU runs f64 at a small fraction of
-// f32's rate. The same as std's to f32 rounding.
+// It is std supersimplex3d (relief.bk simplex_grad) with the f64 work only
+// in finding q's lattice cell (simplex_anchor: the skew and its floor): the
+// rest runs in f32 on the offset inside the cell, and the GPU runs f64 at a
+// small fraction of f32's rate. What the f32 offset loses (2^-24 of a cell,
+// 8 cm of the 1400 km range mask's) is put back to first order by the
+// noise's own gradient, or the ground stood in stairs that size.
 fn noise(q: vec3<f64>, seed: i32) -> f64 {
-    let sum = q.x + q.y + q.z;
-    let s3: f64 = (0.3333333432674407958984375 as f32) as f64;
-    let sx = q.x + s3 * sum;
-    let sy = q.y + s3 * sum;
-    let sz = q.z + s3 * sum;
-    let cx = floor(sx);
-    let cy = floor(sy);
-    let cz = floor(sz);
-    let so0: i32 = (cx as i64) as i32;
-    let so1: i32 = (cy as i64) as i32;
-    let so2: i32 = (cz as i64) as i32;
-    var dx_skewed: f32 = (sx - cx) as f32;
-    var dy_skewed: f32 = (sy - cy) as f32;
-    var dz_skewed: f32 = (sz - cz) as f32;
-    var x_base: i32 = 0;
-    var y_base: i32 = 0;
-    var z_base: i32 = 0;
-
-    let tu0: f32 = -0.25 * (dx_skewed + dy_skewed + dz_skewed);
-    let xn0: f32 = dx_skewed + tu0;
-    let yn0: f32 = dy_skewed + tu0;
-    let zn0: f32 = dz_skewed + tu0;
-    let xyzn0: f32 = -tu0;
-
-    var max_score: f32 = 0.375;
-    var move_bits: i32 = (xyzn0 > max_score) ? -1 : 0;
-    max_score = max(max_score, xyzn0);
-    if xn0 > max_score { move_bits = 1; max_score = xn0; }
-    if yn0 > max_score { move_bits = 2; max_score = yn0; }
-    if zn0 > max_score { move_bits = 4; max_score = zn0; }
-    max_score += 0.125 - xyzn0;
-    if (-zn0) > max_score { move_bits = 3; max_score = -zn0; }
-    if (-yn0) > max_score { move_bits = 5; max_score = -yn0; }
-    if (-xn0) > max_score { move_bits = 6; max_score = -xn0; }
-
-    if (move_bits & 1) != 0 { x_base += 1; dx_skewed -= 1.0; }
-    if (move_bits & 2) != 0 { y_base += 1; dy_skewed -= 1.0; }
-    if (move_bits & 4) != 0 { z_base += 1; dz_skewed -= 1.0; }
-
-    let x_primed: i32 = (x_base + so0) * PRIME_X;
-    let y_primed: i32 = (y_base + so1) * PRIME_Y;
-    let z_primed: i32 = (z_base + so2) * PRIME_Z;
-
-    let sk_sum: f32 = dx_skewed + dy_skewed + dz_skewed;
-    let tu: f32 = -0.25 * sk_sum;
-    let xn: f32 = dx_skewed + tu;
-    let yn: f32 = dy_skewed + tu;
-    let zn: f32 = dz_skewed + tu;
-    let xyzn: f32 = -tu;
-
-    let unskew_d: f32 = -0.5 * sk_sum;
-    let dx_b: f32 = dx_skewed + unskew_d;
-    let dy_b: f32 = dy_skewed + unskew_d;
-    let dz_b: f32 = dz_skewed + unskew_d;
-    let coord_sum: f32 = -0.5 * sk_sum;
-
-    let g0: f32 = grad_dot_common3d<f32>(hash_primes3d(seed, x_primed, y_primed, z_primed), dx_b, dy_b, dz_b);
-    let fb0: f32 = (((0.75 - dx_b * dx_b) - dy_b * dy_b) - dz_b * dz_b) * 0.5;
-    let stem_a: f32 = fb0 - 0.375;
-    let stem_b: f32 = fb0 - 0.5;
-    var value: f32 = ((fb0 * fb0) * (fb0 * fb0)) * g0;
-
-    // <1,1,1> or <-1,-1,-1>
-    let sm1: bool = xyzn < 0.0;
-    let off1: f32 = sm1 ? 0.5 : -0.5;
-    let g1: f32 = grad_dot_common3d<f32>(
-        hash_primes3d(seed,
-            x_primed + (sm1 ? -PRIME_X : PRIME_X),
-            y_primed + (sm1 ? -PRIME_Y : PRIME_Y),
-            z_primed + (sm1 ? -PRIME_Z : PRIME_Z)),
-        dx_b - off1, dy_b - off1, dz_b - off1);
-    let fb1: f32 = max(off1 * coord_sum + stem_a, 0.0);
-    value += ((fb1 * fb1) * (fb1 * fb1)) * g1;
-
-    // <1,1,0> or <-1,-1,0>
-    let sm2: bool = xyzn < zn;
-    let off2: f32 = sm2 ? 1.0 : -1.0;
-    let g2: f32 = grad_dot_common3d<f32>(
-        hash_primes3d(seed, x_primed + (sm2 ? -PRIME_X : PRIME_X), y_primed + (sm2 ? -PRIME_Y : PRIME_Y), z_primed),
-        dx_b, dy_b, dz_b - off2);
-    let fb2: f32 = min((sm2 ? -dz_b : dz_b) - stem_b, 0.0);
-    value += ((fb2 * fb2) * (fb2 * fb2)) * g2;
-
-    // <1,0,1> or <-1,0,-1>
-    let sm3: bool = xyzn < yn;
-    let off3: f32 = sm3 ? 1.0 : -1.0;
-    let g3: f32 = grad_dot_common3d<f32>(
-        hash_primes3d(seed, x_primed + (sm3 ? -PRIME_X : PRIME_X), y_primed, z_primed + (sm3 ? -PRIME_Z : PRIME_Z)),
-        dx_b, dy_b - off3, dz_b);
-    let fb3: f32 = min((sm3 ? -dy_b : dy_b) - stem_b, 0.0);
-    value += ((fb3 * fb3) * (fb3 * fb3)) * g3;
-
-    // <0,1,1> or <0,-1,-1>
-    let sm4: bool = xyzn < xn;
-    let off4: f32 = sm4 ? 1.0 : -1.0;
-    let g4: f32 = grad_dot_common3d<f32>(
-        hash_primes3d(seed, x_primed, y_primed + (sm4 ? -PRIME_Y : PRIME_Y), z_primed + (sm4 ? -PRIME_Z : PRIME_Z)),
-        dx_b - off4, dy_b, dz_b);
-    let fb4: f32 = min((sm4 ? -dx_b : dx_b) - stem_b, 0.0);
-    value += ((fb4 * fb4) * (fb4 * fb4)) * g4;
-
-    // <1,0,0> or <-1,0,0>
-    let sm5: bool = xn < 0.0;
-    let off5: f32 = sm5 ? 0.5 : -0.5;
-    let g5: f32 = grad_dot_common3d<f32>(
-        hash_primes3d(seed, x_primed + (sm5 ? -PRIME_X : PRIME_X), y_primed, z_primed),
-        dx_b + off5, dy_b - off5, dz_b - off5);
-    let fb5: f32 = max((off5 * coord_sum + stem_a) + (sm5 ? -dx_b : dx_b), 0.0);
-    value += ((fb5 * fb5) * (fb5 * fb5)) * g5;
-
-    // <0,1,0> or <0,-1,0>
-    let sm6: bool = yn < 0.0;
-    let off6: f32 = sm6 ? 0.5 : -0.5;
-    let g6: f32 = grad_dot_common3d<f32>(
-        hash_primes3d(seed, x_primed, y_primed + (sm6 ? -PRIME_Y : PRIME_Y), z_primed),
-        dx_b - off6, dy_b + off6, dz_b - off6);
-    let fb6: f32 = max((off6 * coord_sum + stem_a) + (sm6 ? -dy_b : dy_b), 0.0);
-    value += ((fb6 * fb6) * (fb6 * fb6)) * g6;
-
-    // <0,0,1> or <0,0,-1>
-    let sm7: bool = zn < 0.0;
-    let off7: f32 = sm7 ? 0.5 : -0.5;
-    let g7: f32 = grad_dot_common3d<f32>(
-        hash_primes3d(seed, x_primed, y_primed, z_primed + (sm7 ? -PRIME_Z : PRIME_Z)),
-        dx_b - off7, dy_b - off7, dz_b + off7);
-    let fb7: f32 = max((off7 * coord_sum + stem_a) + (sm7 ? -dz_b : dz_b), 0.0);
-    value += ((fb7 * fb7) * (fb7 * fb7)) * g7;
-
-    return scale_output<f32>(value, -0.0069091119803488254547119140625, 0.0069091119803488254547119140625) as f64;
+    return simplex_grad(simplex_anchor(q), seed).x as f64;
 }
 pub fn noise_at(q: vec3<f64>, seed: i32) -> f64 {
     return noise(q, seed);
@@ -174,9 +48,15 @@ pub fn simplex_anchor(q: vec3<f64>) -> SimplexAt {
     let s = q + vec3<f64>(s3 * sum);
     let c = floor(s);
     let f = s - c;
+    let sk = vec3<f32>(f.x as f32, f.y as f32, f.z as f32);
+    // What the f32 offset lost, unskewed into the noise's coordinates (the
+    // skew adds a third of the sum, so its inverse takes a sixth).
+    let lost = f - vec3<f64>(sk.x as f64, sk.y as f64, sk.z as f64);
+    let r = lost - vec3<f64>((lost.x + lost.y + lost.z) / 6.0);
     return SimplexAt {
         cell: vec3<i32>((c.x as i64) as i32, (c.y as i64) as i32, (c.z as i64) as i32),
-        sk: vec3<f32>(f.x as f32, f.y as f32, f.z as f32),
+        sk: sk,
+        res: vec3<f32>(r.x as f32, r.y as f32, r.z as f32),
     };
 }
 

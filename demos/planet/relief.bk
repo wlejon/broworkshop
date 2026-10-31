@@ -101,6 +101,12 @@ pub fn ridge_cell_slope(n: f32, f: f32) -> f32 {
 pub struct SimplexAt {
     cell: vec3<i32>,
     sk: vec3<f32>,
+    // What sk lost to f32, in the noise's coordinates (ground.bk
+    // simplex_anchor): 2^-24 of a cell, which for the broad octaves' 150 km
+    // cells is 9 mm, so every point within 9 mm read the same value and a
+    // steep slope stood in 9 mm stairs (the regular stripes its lighting
+    // showed close up). simplex_grad adds its gradient's share of it.
+    res: vec3<f32>,
 }
 // The skew onto the lattice, of an offset in the noise's coordinates.
 pub fn skew(x: vec3<f32>) -> vec3<f32> {
@@ -110,15 +116,17 @@ pub fn skew(x: vec3<f32>) -> vec3<f32> {
 pub fn simplex_past(at: SimplexAt, offset: vec3<f32>) -> SimplexAt {
     let s = at.sk + skew(offset);
     let fl = floor(s);
-    return SimplexAt { cell: at.cell + vec3<i32>(fl.x as i32, fl.y as i32, fl.z as i32), sk: s - fl };
+    return SimplexAt { cell: at.cell + vec3<i32>(fl.x as i32, fl.y as i32, fl.z as i32), sk: s - fl, res: at.res };
 }
 
 // The same point an octave finer: q doubled lands at twice the cell plus
-// the floor of twice the offset, exactly (the skew is linear).
+// the floor of twice the offset, exactly (the skew is linear), and what the
+// offset lost doubles with it.
 pub fn simplex_twice(at: SimplexAt) -> SimplexAt {
     let twice = at.sk * 2.0;
     let fl = floor(twice);
-    return SimplexAt { cell: at.cell * 2 + vec3<i32>(fl.x as i32, fl.y as i32, fl.z as i32), sk: twice - fl };
+    return SimplexAt { cell: at.cell * 2 + vec3<i32>(fl.x as i32, fl.y as i32, fl.z as i32), sk: twice - fl,
+                       res: at.res * 2.0 };
 }
 
 // One lattice point's share and its gradient: its falloff f = (0.75 -
@@ -219,5 +227,7 @@ pub fn simplex_grad(at: SimplexAt, seed: i32) -> vec4<f32> {
     // gradient in the input is the same reflection of the offsets'. And
     // noise()'s output scale: its value over 0.0069091.
     let g = sum.yzw - vec3<f32>((2.0 / 3.0) * (sum.y + sum.z + sum.w));
-    return vec4<f32>(sum.x, g) * (1.0 / 0.0069091119803488254547119140625);
+    let out = vec4<f32>(sum.x, g) * (1.0 / 0.0069091119803488254547119140625);
+    // At the point itself, not where f32 put it: first order in what sk lost.
+    return vec4<f32>(out.x + dot(out.yzw, at.res), out.yzw);
 }
