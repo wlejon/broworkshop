@@ -2,7 +2,7 @@
 //
 // Tests `bro.net.createRollbackSession` (and `/lib/kit/rollback.js` +
 // `/lib/arcade/netplay.js`):
-//   1. Compile-time determinism proof gate (`deterministic === true`,
+//   1. Compile-time determinism audit gate (`determinismLintPassed === true`,
 //      `certificateHash`, rejection of `Math.random()` / `Date.now()`).
 //   2. Two simulated peers advancing 10 frames with input prediction,
 //      receiving delayed/divergent remote inputs from 6 frames ago, rolling
@@ -62,7 +62,7 @@ t("RollbackSession determinism proof gate certifies clean tick and rejects non-d
         playerCount: 2,
         maxRollbackFrames: 64,
     });
-    truthy(session.deterministic === true, "clean tick must be certified deterministic");
+    truthy(session.determinismLintPassed === true, "clean tick must pass the replay determinism audit");
     truthy(typeof session.certificateHash === "string" && session.certificateHash.length >= 16,
         "certificateHash must be a non-empty hex string");
     truthy(Array.isArray(session.hazards) && session.hazards.length === 0, "clean tick has 0 hazards");
