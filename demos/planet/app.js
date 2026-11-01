@@ -279,7 +279,7 @@ function frame() {
     const aspect = (canvas.clientWidth || 1920) * devicePixelRatio / height;
     const near = Math.min(1e5, Math.max(0.2, cam.alt * 0.05));
     const horizon = Math.sqrt(Math.max(0, (f.surface + cam.alt) ** 2 - RADIUS * RADIUS)) + 2e5;
-    scene.setCamera({ eye: [0, 0, 0], target: f.fwd, up: f.camUp, fov: FOV, near, far: horizon + 1e5 });
+    scene.setCamera({ eye: [0, 0, 0], target: f.fwd, up: f.camUp, fov: FOV, near, far: horizon + 1e5, origin: f.pos });
 
     // The cache culls to the frustum and the horizon: what it draws is seen.
     lastView = { position: f.pos, forward: f.fwd, up: f.camUp, fov: FOV,
