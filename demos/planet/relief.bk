@@ -28,7 +28,9 @@ pub const WARP_DISPLACE: f32 = 0.0013;
 pub const CREST: f32 = 0.08;
 
 // A ridge octave's amplitude, metres at full uplift: peaking at octave 8,
-// the finer falling off by 0.45 (ground.bk relief).
+// held high through octave 11 (wavelengths 4.7 to 1.2 km), where alpine
+// ranges carve their horns, arêtes and walls, and the finer falling off by
+// 0.45 (ground.bk relief).
 pub fn ridge_amp(o: i32) -> f32 {
     if (o < 8) {
         if (o == 4) { return 200.0; }
@@ -36,7 +38,10 @@ pub fn ridge_amp(o: i32) -> f32 {
         if (o == 6) { return 600.0; }
         return 900.0;
     }
-    return 1200.0 * pow(0.45, (o - 8) as f32);
+    if (o == 8) { return 1200.0; }
+    if (o == 9) { return 1000.0; }
+    if (o == 10) { return 750.0; }
+    return 500.0 * pow(0.45, (o - 11) as f32);
 }
 
 // Octave o's span over a cell carrying `octaves` (ground.bk span_of), and

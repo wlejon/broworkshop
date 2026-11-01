@@ -305,7 +305,7 @@ fn k_anchor(g: grid<1>, table: read_store<f64, 1>, out: write_store<i32, 1>, rad
 // its cells, HZ_MARGIN cells past the tile on every side, at the octaves the
 // tile shades with (k_horizon_heights): a height a cell holds is shared by
 // every ray that passes it, where sampling the ground per ray cost each tile
-// six times the evaluations. Steps are 2^(1/8) apart from a cell out: the
+// six times the evaluations. Steps are 2^(1/12) apart from a cell out: the
 // near band to 8 cells, the far band from 8 to 16 cells.
 //
 // The far horizon, over distances from 8 cells out, is what a child
@@ -318,8 +318,9 @@ fn k_anchor(g: grid<1>, table: read_store<f64, 1>, out: write_store<i32, 1>, rad
 // band, marched from the point itself: interpolated, a near ridge's horizon
 // would spill onto the valley beside it.
 const HZ_DIRS: i32 = 8;
-const HZ_STEPS: i32 = 32;    // a cell to 16 cells, a factor 2^(1/8) apart
-const HZ_NEAR: i32 = 24;     // of them, the near band's
+const HZ_PER_OCTAVE: i32 = 12;   // steps a doubling of distance: at 8 a crest between two stood low
+const HZ_STEPS: i32 = 48;    // a cell to 16 cells, a factor 2^(1/12) apart
+const HZ_NEAR: i32 = 36;     // of them, the near band's (to 8 cells)
 const HZ_MARGIN: i32 = 16;   // cells of heights past the tile, beyond the farthest step from its points
 const HZ_WORDS: i32 = 16;    // a point's: 4 of full horizons, 8 of far ones, its height, 3 unused
 
@@ -329,23 +330,29 @@ fn cell_dir(table: read_store<f64, 1>, r: i32, cx: f64, cy: f64, inv_size: f64) 
                      + record_vec(table, r + 14) * (cy * inv_size));
 }
 
-// The heights the horizons march through: an e^2 grid a tile, point (x, y)
-// at cell (x, y) - HZ_MARGIN, the surface at the tile's octaves plus one.
+// The heights the horizons march through: an e^2 grid a tile, HZ_DENSITY
+// points a cell, point (x, y) at cell (x, y) / HZ_DENSITY - HZ_MARGIN, the
+// surface at the tile's octaves plus two. Sharp crests stand between the
+// points, and a ridge read between them stands low, so every horizon behind
+// one did: at a point a cell (and 8 steps an octave) the horizons of alpine
+// ranges sat 1.6 degrees low on average, at two (and 12) 0.5.
+const HZ_DENSITY: i32 = 2;
 @kernel @grid(3)
 fn k_horizon_heights(g: grid<3>, table: read_store<f64, 1>, heights: write_store<f32, 1>,
                      radius: f64, inv_size: f64, seed: i32, net: read_store<f32, 1>) {
     let r = g.z() * RECORD;
     let e = g.width();
     let m = HZ_MARGIN as f64;
-    let dir = cell_dir(table, r, g.x() as f64 - m, g.y() as f64 - m, inv_size);
+    let d = HZ_DENSITY as f64;
+    let dir = cell_dir(table, r, (g.x() as f64) / d - m, (g.y() as f64) / d - m, inv_size);
     let octaves = octaves_for(table[r + 20], inv_size) + 2.0;
     heights[(g.z() * e + g.y()) * e + g.x()] = max(terrain(dir, radius, octaves, seed, net), 0.0) as f32;
 }
 
 // The height grid bilinearly at cell coordinate (cx, cy).
 fn grid_height(heights: read_store<f32, 1>, base: i32, e: i32, cx: f32, cy: f32) -> f32 {
-    let gx = cx + (HZ_MARGIN as f32);
-    let gy = cy + (HZ_MARGIN as f32);
+    let gx = (cx + (HZ_MARGIN as f32)) * (HZ_DENSITY as f32);
+    let gy = (cy + (HZ_MARGIN as f32)) * (HZ_DENSITY as f32);
     let ix = min(floor(gx) as i32, e - 2);
     let iy = min(floor(gy) as i32, e - 2);
     let fx = gx - (ix as f32);
@@ -442,7 +449,7 @@ fn k_horizon(g: grid<3>, table: read_store<f64, 1>, heights: read_store<f32, 1>,
         }
         var near: f32 = -1.0;
         for (var i: i32 = 0; i < HZ_STEPS; i += 1) {
-            let d = exp2((i as f32) * 0.125);
+            let d = exp2((i as f32) / (HZ_PER_OCTAVE as f32));
             let dx = ca * d;
             let dy = sa * d;
             let hq = grid_height(heights, hbase, e, (cx as f32) + dx, (cy as f32) + dy);
