@@ -389,6 +389,37 @@ fn perlin_grad(x: vec3<f32>, cells: i32, seed: i32) -> vec4<f32> {
     return vec4<f32>(value, grad);
 }
 
+// Bare rock in its beds at a point (metres about the planet's centre), as
+// ground.bk bedded_surface lays it with strata: three scales of bed level
+// along a surface folded by low-frequency noise, in log-luminance, each
+// fading as the pixel's footprint spans it.
+// A bed is a function of height alone: gradient noise along one axis, its
+// gradients hashed from the lattice point (its variance is 0.0194; scaled to
+// about 0.7 of a unit, as its even bands read stronger than 3D noise's).
+fn bed_slope(i: f32, seed: i32) -> f32 {
+    var h: u32 = ((i as i32) as u32) * 0x27d4eb2du ^ (seed as u32) * 0x165667b1u;
+    h = (h ^ (h >> 15u)) * 0x85ebca6bu;
+    h = h ^ (h >> 13u);
+    return ((h & 65535u) as f32) / 32767.5 - 1.0;
+}
+fn cliff_band(level: f32, length: f32, footprint: f32, seed: i32) -> f32 {
+    let x = level / length;
+    let i = floor(x);
+    let f = x - i;
+    let s = f * f * f * (f * (f * 6.0 - 15.0) + 10.0);
+    let n = mix(bed_slope(i, seed) * f, bed_slope(i + 1.0, seed) * (f - 1.0), s);
+    let t = 6.2831853 * footprint / length;
+    return n * 5.0 * exp(-0.5 * t * t);
+}
+fn cliff_rock(p: vec3<f32>, footprint: f32) -> vec3<f32> {
+    let h = length(p) - FACE_EXTENT * 0.63661977;   // FACE_EXTENT is a quarter of the circumference
+    let level = h + perlin_grad(p * (1.0 / 3500.0), 4096, SEED + 307).x * 1600.0;
+    let bed = 0.10 * cliff_band(level, 9.0, footprint, SEED + 311)
+            + 0.16 * cliff_band(level, 41.0, footprint, SEED + 313)
+            + 0.18 * cliff_band(level, 130.0, footprint, SEED + 317);
+    return vec3<f32>(0.20, 0.20, 0.205) * exp(bed) + vec3<f32>(0.03, 0.012, -0.012) * bed;
+}
+
 struct SeaResult {
     slope: vec3<f32>,
     variance: f32,
@@ -479,7 +510,7 @@ pub fn fragment(v: mesh::Vertex, s_in: mesh::Surface) -> mesh::Surface {
     let d10 = detail_texel(v_slot, t0 + vec2<i32>(1, 0));
     let d01 = detail_texel(v_slot, t0 + vec2<i32>(0, 1));
     let d11 = detail_texel(v_slot, t0 + vec2<i32>(1, 1));
-    let col = mix(mix(d00.col, d10.col, f.x), mix(d01.col, d11.col, f.x), f.y);
+    var col = mix(mix(d00.col, d10.col, f.x), mix(d01.col, d11.col, f.x), f.y);
     let forest = mix(mix(d00.cover, d10.cover, f.x), mix(d01.cover, d11.cover, f.x), f.y);
     var n = normalize(mix(mix(d00.nrm, d10.nrm, f.x), mix(d01.nrm, d11.nrm, f.x), f.y));
     var water = col.w;
@@ -500,10 +531,25 @@ pub fn fragment(v: mesh::Vertex, s_in: mesh::Surface) -> mesh::Surface {
 
     // The octaves a pixel resolves: full weight from 4 pixels a
     // wavelength, none at 2.
+    // A wall too steep to hold snow (from about 63 degrees, bare by 78) is
+    // rock, its beds level along their folds at the pixel's own height,
+    // where the texels' colours (snow on one, rock on the next across the
+    // face) would run down it as stripes.
+    let shed = (1.0 - smoothstep(0.2, 0.45, dot(n, normalize(v_up)))) * (1.0 - water);
+    if (shed > 0.0) {
+        let cliff = cliff_rock((params.cam_hi + params.cam_lo) + v.world_pos, footprint);
+        col = vec4<f32>(mix(col.xyz, cliff, shed), col.w);
+    }
     var lum: f32 = 0.0;
     var lum_var: f32 = 0.0;
     var wavelength: f32 = 0.125;
-    var slope = ridges;
+    // Where the ground stands steep, a texel spans more height than width,
+    // and what is laid out across the sphere (the ridges' finer octaves, the
+    // texels' colours) is drawn down the face as streaks. There the face
+    // takes its relief from the 3D detail below, which varies down it as
+    // across it, and the ridges' octaves fade.
+    let steep = 1.0 - smoothstep(0.35, 0.75, dot(n, normalize(v_up)));
+    var slope = ridges * (1.0 - steep);
     let hi_c = max(col.x, max(col.y, col.z));
     let lo_c = min(col.x, min(col.y, col.z));
     let rock = (1.0 - smoothstep(0.15, 0.45, (hi_c - lo_c) / max(hi_c, 1e-3))) * (1.0 - smoothstep(0.35, 0.6, hi_c));
@@ -516,9 +562,10 @@ pub fn fragment(v: mesh::Vertex, s_in: mesh::Surface) -> mesh::Surface {
         if (w > 0.0) {
             let far = coarse >= 1.0;
             let x = (far ? v_swell : v_q) / coarse;
-            let g = perlin_grad(x, ((far ? SWELL_PERIOD : DETAIL_PERIOD) / coarse) as i32, 41 + k).x;
+            let pg = perlin_grad(x, ((far ? SWELL_PERIOD : DETAIL_PERIOD) / coarse) as i32, 41 + k);
             let a = VARY_LUM * lum_gain * w;
-            lum += g * a;
+            lum += pg.x * a;
+            slope += pg.yzw * (RELIEF * relief_gain * w * steep);
             lum_var += a * a * PERLIN_VAR;
         }
         coarse *= 0.5;

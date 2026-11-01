@@ -5,9 +5,11 @@ import { check, frames, test, done } from "/lib/kit/test.js";
 // Production spends the gap 360 fps frames leave (about a millisecond), so
 // a jump from orbit to 3 km takes a few hundred frames to refine. A level's
 // children are wanted only once it is ready, so nothing may be pending for a
-// frame between levels: settled is eight frames running with none.
+// frame between levels: settled is eight frames running with none. (The
+// alpine ranges take about 20% more than the cap of 800 these frames held
+// before them: more tiles, each with denser horizons.)
 const settle = () => {
-    for (let i = 0, quiet = 0; i < 800 && quiet < 8; i++) {
+    for (let i = 0, quiet = 0; i < 1000 && quiet < 8; i++) {
         frames(1);
         quiet = i >= 4 && planet.cache.pending === 0 ? quiet + 1 : 0;
     }
