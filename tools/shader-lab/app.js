@@ -1,5 +1,6 @@
-// tools/shader-lab/app.js — live GLSL editor over a fullscreen-quad WebGL2 runtime.
-import { GLRuntime } from './gl-runtime.js';
+// tools/shader-lab/app.js — live brokernel editor: the source's main_image
+// kernel drawn over the canvas every frame (kernel-runtime.js).
+import { KernelRuntime } from './kernel-runtime.js';
 import { ShaderEditor } from './editor.js';
 import { boot } from "/lib/kit/app.js";
 import { ids } from "/lib/kit/dom.js";
@@ -8,16 +9,16 @@ import { params, bindControl } from "/lib/kit/params.js";
 
 boot();
 
-const dom = ids('glCanvas', 'presetSelect', 'compileBtn', 'formatBtn', 'copyBtn', 'shaderCode',
+const dom = ids('viewCanvas', 'presetSelect', 'compileBtn', 'formatBtn', 'copyBtn', 'shaderCode',
                 'logStatus', 'logOutput', 'playBtn', 'resetTimeBtn', 'badgeFps', 'badgeRes');
 
-// Shader uniforms u_param1..4, edited in the panel under the viewport.
+// The kernel's param.x .. param.w, edited in the panel under the viewport.
 const uniforms = { param1: 1.0, param2: 3.0, param3: 0.5, param4: 1.0 };
 params('#uniforms', uniforms, {
-    param1: { min: 0, max: 5,  step: 0.05, label: 'u_param1 (Speed / Scale)' },
-    param2: { min: 0, max: 10, step: 0.1,  label: 'u_param2 (Detail / Iterations)', fmt: (v) => v.toFixed(2) },
-    param3: { min: 0, max: 1,  step: 0.01, label: 'u_param3 (Color Morph / Palette)' },
-    param4: { min: 0, max: 2,  step: 0.05, label: 'u_param4 (Lighting / Roughness)' },
+    param1: { min: 0, max: 5,  step: 0.05, label: 'param.x (Speed / Scale)' },
+    param2: { min: 0, max: 10, step: 0.1,  label: 'param.y (Detail / Iterations)', fmt: (v) => v.toFixed(2) },
+    param3: { min: 0, max: 1,  step: 0.01, label: 'param.z (Color Morph / Palette)' },
+    param4: { min: 0, max: 2,  step: 0.05, label: 'param.w (Lighting / Roughness)' },
 });
 
 let elapsedTime = 0;
@@ -27,26 +28,26 @@ const mouse = [0, 0, 0, 0];   // [currX, currY, clickX, clickY]
 let mouseDown = false;
 const fps = fpsMeter();
 
-let glRuntime;
+let runtime;
 try {
-    glRuntime = new GLRuntime(dom.glCanvas);
+    runtime = new KernelRuntime(dom.viewCanvas);
 } catch (err) {
-    console.error('Failed to initialize WebGL2:', err);
+    console.error('Failed to start the kernel runtime:', err);
 }
 
-if (glRuntime) {
-    new ShaderEditor(dom, (code) => glRuntime.setFragmentShader(code));
+if (runtime) {
+    new ShaderEditor(dom, (code) => runtime.setSource(code));
 
     const playing = toggleButton(dom.playBtn, { on: true, labels: ['▶ Resume', '⏸ Pause'] });
     dom.resetTimeBtn.addEventListener('click', () => { elapsedTime = 0; });
     bindControl('#scaleSelect', { onChange: (v) => { resolutionScale = parseFloat(v) || 1.0; resize(); } });
 
-    // Mouse tracking for u_mouse (GL convention: origin bottom-left).
+    // Mouse tracking for `mouse` (origin bottom-left, like `frag`).
     const toCanvas = (e) => {
-        const rect = dom.glCanvas.getBoundingClientRect();
+        const rect = dom.viewCanvas.getBoundingClientRect();
         return [e.clientX - rect.left, rect.height - (e.clientY - rect.top)];
     };
-    dom.glCanvas.addEventListener('mousedown', (e) => {
+    dom.viewCanvas.addEventListener('mousedown', (e) => {
         mouseDown = true;
         const [x, y] = toCanvas(e);
         mouse[0] = mouse[2] = x;
@@ -65,7 +66,7 @@ if (glRuntime) {
         lastFrameTime = now;
         if (playing.on) elapsedTime += dt;
         dom.badgeFps.textContent = Math.round(fps.tick()) + ' FPS';
-        glRuntime.render({ time: elapsedTime, mouse, ...uniforms });
+        runtime.render({ time: elapsedTime, mouse, ...uniforms });
         requestAnimationFrame(loop);
     };
     requestAnimationFrame(loop);
@@ -73,12 +74,12 @@ if (glRuntime) {
 
 function resize() {
     const dpr = window.devicePixelRatio || 1;
-    const rect = dom.glCanvas.getBoundingClientRect();
+    const rect = dom.viewCanvas.getBoundingClientRect();
     if (rect.width > 0 && rect.height > 0) {
         const w = Math.round(rect.width * dpr * resolutionScale);
         const h = Math.round(rect.height * dpr * resolutionScale);
-        dom.glCanvas.width = w;
-        dom.glCanvas.height = h;
+        dom.viewCanvas.width = w;
+        dom.viewCanvas.height = h;
         dom.badgeRes.textContent = `${w} × ${h}`;
     }
 }

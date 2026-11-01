@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>Shader Lab — WebGL2 GLSL 3.0 ES</title>
+    <title>Shader Lab — brokernel</title>
     <link rel="stylesheet" href="/lib/kit/kit.css">
     <style>
         .k-side { width: 50%; min-width: 0; padding: 0; gap: 0; }   /* editor | viewport, 1:1 */
@@ -15,12 +15,12 @@
         #logOutput { margin: 0; padding: 8px 10px; height: 110px; overflow: auto; background: #080a0d; white-space: pre-wrap; }
         #uniforms { border-radius: 0; border-width: 1px 0 0 0; }
         #uniforms .k-field > span:first-child { width: 240px; }
-        #glCanvas { cursor: crosshair; }
+        #viewCanvas { cursor: crosshair; }
     </style>
 </head>
 <body class="k-app">
     <header class="k-header">
-        <h1>WebGL2 Shader Lab</h1>
+        <h1>brokernel Shader Lab</h1>
         <label class="k-field">Preset
             <select id="presetSelect">
                 <option value="raymarch">SDF Raymarching Shapes</option>
@@ -33,7 +33,7 @@
         <button id="compileBtn" class="primary">▶ Compile (Ctrl+S)</button>
         <div class="k-spacer"></div>
         <span class="k-stats">
-            <span id="badgeGl" class="ok">WebGL 2.0 (GLSL 3.0)</span>
+            <span id="badgeKernel" class="ok">brokernel · bro.kernel</span>
             <span><b id="badgeFps">60 FPS</b></span>
             <span><b id="badgeRes">1280 × 800</b></span>
         </span>
@@ -42,7 +42,7 @@
     <div class="k-body">
         <aside class="k-side">
             <div class="pane-head">
-                <h2>Fragment Shader (GLSL 300 es)</h2>
+                <h2>Image Kernel (brokernel: main_image)</h2>
                 <button id="formatBtn" class="small">Reset to Preset</button>
                 <button id="copyBtn" class="small">Copy Code</button>
             </div>
@@ -64,8 +64,8 @@
                     <option value="2">2.0x HiDPI</option>
                 </select>
             </div>
-            <div class="k-viewport"><canvas id="glCanvas"></canvas></div>
-            <div class="k-panel" id="uniforms"><h2>Dynamic Uniform Controls</h2></div>
+            <div class="k-viewport"><canvas id="viewCanvas"></canvas></div>
+            <div class="k-panel" id="uniforms"><h2>Kernel Parameters</h2></div>
         </main>
     </div>
 

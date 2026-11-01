@@ -1,272 +1,225 @@
-// tools/shader-lab/presets.js
+// tools/shader-lab/presets.js — brokernel image kernels. Each is a grid
+// kernel `main_image` run once per canvas pixel (kernel-runtime.js):
+//
+//   out         the canvas's pixels, RGBA in 0..1, row 0 at the top
+//   resolution  the canvas's size in pixels
+//   time        seconds since start (paused with the clock)
+//   mouse       (x, y, clickX, clickY), y up from the bottom; z > 0 while held
+//   param       the four sliders under the viewport (x, y, z, w)
+
+const SIGNATURE = `@kernel @grid(2)
+fn main_image(g: grid<2>, out: write_store<vec4<f32>, 2>,
+              resolution: vec2<f32>, time: f32, mouse: vec4<f32>, param: vec4<f32>) {
+    // The pixel's centre, y up from the bottom.
+    let frag = vec2<f32>(g.x() as f32 + 0.5, resolution.y - (g.y() as f32) - 0.5);`;
 
 export const PRESETS = {
-    raymarch: `#version 300 es
-precision highp float;
+    raymarch: `// SDF raymarching: a torus morphing into a sphere over a checker floor.
+// param.x speed, param.y shape morph, param.z palette, param.w gloss.
 
-out vec4 fragColor;
-
-uniform vec2 u_resolution;
-uniform float u_time;
-uniform vec4 u_mouse;
-uniform float u_param1; // Speed
-uniform float u_param2; // Shape morph
-uniform float u_param3; // Color palette
-uniform float u_param4; // Gloss / specular
-
-float sdSphere(vec3 p, float s) {
-    return length(p) - s;
+fn rot(v: vec2<f32>, a: f32) -> vec2<f32> {
+    let c = cos(a);
+    let s = sin(a);
+    return vec2<f32>(v.x * c - v.y * s, v.x * s + v.y * c);
 }
 
-float sdTorus(vec3 p, vec2 t) {
-    vec2 q = vec2(length(p.xz) - t.x, p.y);
+// Turn v about y by ax, then about x by ay.
+fn orbit(v: vec3<f32>, ax: f32, ay: f32) -> vec3<f32> {
+    let xz = rot(vec2<f32>(v.x, v.z), ax);
+    let yz = rot(vec2<f32>(v.y, xz.y), ay);
+    return vec3<f32>(xz.x, yz.x, yz.y);
+}
+
+fn sd_torus(p: vec3<f32>, t: vec2<f32>) -> f32 {
+    let q = vec2<f32>(length(vec2<f32>(p.x, p.z)) - t.x, p.y);
     return length(q) - t.y;
 }
 
-float map(vec3 p) {
-    float t = u_time * u_param1;
-    vec3 q = p;
-    q.xz *= mat2(cos(t * 0.5), -sin(t * 0.5), sin(t * 0.5), cos(t * 0.5));
-    q.yz *= mat2(cos(t * 0.3), -sin(t * 0.3), sin(t * 0.3), cos(t * 0.3));
-
-    float d1 = sdTorus(q, vec2(1.2, 0.45));
-    float d2 = sdSphere(p - vec3(0.0, sin(t * 1.5) * 0.4, 0.0), 0.7);
-    float blend = mix(d1, d2, sin(u_param2) * 0.5 + 0.5);
-
-    float plane = p.y + 1.8;
-    return min(blend, plane);
+fn map(p: vec3<f32>, t: f32, morph: f32) -> f32 {
+    let q = orbit(p, t * 0.5, t * 0.3);
+    let d1 = sd_torus(q, vec2<f32>(1.2, 0.45));
+    let d2 = length(p - vec3<f32>(0.0, sin(t * 1.5) * 0.4, 0.0)) - 0.7;
+    let blend = mix(d1, d2, sin(morph) * 0.5 + 0.5);
+    return min(blend, p.y + 1.8);
 }
 
-vec3 calcNormal(vec3 p) {
-    float eps = 0.001;
-    vec2 h = vec2(eps, 0.0);
-    return normalize(vec3(
-        map(p + h.xyy) - map(p - h.xyy),
-        map(p + h.yxy) - map(p - h.yxy),
-        map(p + h.yyx) - map(p - h.yyx)
-    ));
+fn calc_normal(p: vec3<f32>, t: f32, morph: f32) -> vec3<f32> {
+    let e = 0.001;
+    return normalize(vec3<f32>(
+        map(p + vec3<f32>(e, 0.0, 0.0), t, morph) - map(p - vec3<f32>(e, 0.0, 0.0), t, morph),
+        map(p + vec3<f32>(0.0, e, 0.0), t, morph) - map(p - vec3<f32>(0.0, e, 0.0), t, morph),
+        map(p + vec3<f32>(0.0, 0.0, e), t, morph) - map(p - vec3<f32>(0.0, 0.0, e), t, morph)));
 }
 
-void main() {
-    vec2 uv = (gl_FragCoord.xy - 0.5 * u_resolution.xy) / u_resolution.y;
-    vec3 ro = vec3(0.0, 0.5, 4.0);
-    vec3 rd = normalize(vec3(uv, -1.5));
-
-    // Mouse orbit
-    if (u_mouse.z > 0.0) {
-        float angX = (u_mouse.x / u_resolution.x - 0.5) * 4.0;
-        float angY = (u_mouse.y / u_resolution.y - 0.5) * 2.0;
-        ro.xz *= mat2(cos(angX), -sin(angX), sin(angX), cos(angX));
-        ro.yz *= mat2(cos(angY), -sin(angY), sin(angY), cos(angY));
-        rd = normalize(vec3(uv, -1.5));
-        rd.xz *= mat2(cos(angX), -sin(angX), sin(angX), cos(angX));
-        rd.yz *= mat2(cos(angY), -sin(angY), sin(angY), cos(angY));
+${SIGNATURE}
+    let uv = (frag - resolution * 0.5) / resolution.y;
+    let t = time * param.x;
+    var ro = vec3<f32>(0.0, 0.5, 4.0);
+    var rd = normalize(vec3<f32>(uv.x, uv.y, -1.5));
+    if mouse.z > 0.0 {
+        let ax = (mouse.x / resolution.x - 0.5) * 4.0;
+        let ay = (mouse.y / resolution.y - 0.5) * 2.0;
+        ro = orbit(ro, ax, ay);
+        rd = orbit(rd, ax, ay);
     }
 
-    float t = 0.0;
-    float d = 0.0;
-    for (int i = 0; i < 96; i++) {
-        vec3 p = ro + rd * t;
-        d = map(p);
-        if (d < 0.001 || t > 25.0) break;
-        t += d;
-    }
-
-    vec3 col = vec3(0.05, 0.07, 0.1) - rd.y * 0.05; // Sky gradient
-
-    if (t < 25.0) {
-        vec3 p = ro + rd * t;
-        vec3 n = calcNormal(p);
-        vec3 light = normalize(vec3(0.8, 1.2, 0.9));
-
-        float diff = max(dot(n, light), 0.0);
-        float spec = pow(max(dot(reflect(rd, n), light), 0.0), 32.0 * u_param4);
-        float ao = clamp(map(p + n * 0.2) / 0.2, 0.0, 1.0);
-
-        vec3 matCol = 0.5 + 0.5 * cos(u_time * 0.2 + u_param3 * 6.28 + vec3(0.0, 2.0, 4.0));
-        if (p.y < -1.79) {
-            // Checker ground
-            vec2 c = floor(p.xz * 1.5);
-            float check = mod(c.x + c.y, 2.0);
-            matCol = mix(vec3(0.2), vec3(0.6), check);
+    var dist: f32 = 0.0;
+    for i in 0..96 {
+        let d = map(ro + rd * dist, t, param.y);
+        if d < 0.001 || dist > 25.0 {
+            break;
         }
-
-        col = matCol * (diff * 0.8 + 0.15) * ao + spec * 0.6;
+        dist += d;
     }
 
-    col = pow(col, vec3(1.0 / 2.2)); // Gamma correction
-    fragColor = vec4(col, 1.0);
-}`,
+    var col = vec3<f32>(0.05, 0.07, 0.1) - rd.y * 0.05;   // sky
+    if dist < 25.0 {
+        let p = ro + rd * dist;
+        let n = calc_normal(p, t, param.y);
+        let light = normalize(vec3<f32>(0.8, 1.2, 0.9));
+        let diff = max(dot(n, light), 0.0);
+        let refl = rd - n * (2.0 * dot(n, rd));
+        let spec = pow(max(dot(refl, light), 0.0), 32.0 * param.w);
+        let ao = clamp(map(p + n * 0.2, t, param.y) / 0.2, 0.0, 1.0);
+        var mat = cos(vec3<f32>(0.0, 2.0, 4.0) + (time * 0.2 + param.z * 6.28)) * 0.5 + 0.5;
+        if p.y < -1.79 {
+            // Checker ground.
+            let c = floor(vec2<f32>(p.x, p.z) * 1.5);
+            let s = c.x + c.y;
+            let check = s - floor(s * 0.5) * 2.0;
+            mat = mix(vec3<f32>(0.2, 0.2, 0.2), vec3<f32>(0.6, 0.6, 0.6), vec3<f32>(check, check, check));
+        }
+        col = mat * ((diff * 0.8 + 0.15) * ao) + spec * 0.6;
+    }
+    col = pow(max(col, vec3<f32>(0.0, 0.0, 0.0)), vec3<f32>(1.0 / 2.2, 1.0 / 2.2, 1.0 / 2.2));   // gamma
+    out[g.x(), g.y()] = vec4<f32>(col.x, col.y, col.z, 1.0);
+}
+`,
 
-    fractal: `#version 300 es
-precision highp float;
+    fractal: `// A Mandelbrot zoom into Seahorse Valley.
+// param.x zoom speed, param.y iterations, param.z palette.
 
-out vec4 fragColor;
+${SIGNATURE}
+    let uv = (frag - resolution * 0.5) / resolution.y;
+    let zoom = pow(0.75, time * param.x * 0.5);
+    let c = uv * (zoom * 2.5) + vec2<f32>(-0.743643887, 0.131825904);
 
-uniform vec2 u_resolution;
-uniform float u_time;
-uniform float u_param1;
-uniform float u_param2;
-uniform float u_param3;
-uniform float u_param4;
-
-void main() {
-    vec2 uv = (gl_FragCoord.xy - 0.5 * u_resolution.xy) / u_resolution.y;
-
-    float zoom = pow(0.75, u_time * u_param1 * 0.5);
-    vec2 c = uv * zoom * 2.5 + vec2(-0.743643887037158704752191506114774, 0.131825904205311970493132056385139);
-
-    vec2 z = vec2(0.0);
-    int maxIter = int(60.0 + u_param2 * 20.0);
-    int iter = 0;
-
-    for (int i = 0; i < 180; i++) {
-        if (i >= maxIter) break;
-        if (dot(z, z) > 4.0) break;
-        z = vec2(z.x * z.x - z.y * z.y, 2.0 * z.x * z.y) + c;
+    var z = vec2<f32>(0.0, 0.0);
+    let max_iter = (60.0 + param.y * 20.0) as i32;
+    var iter: i32 = 0;
+    for i in 0..180 {
+        if i >= max_iter || dot(z, z) > 4.0 {
+            break;
+        }
+        z = vec2<f32>(z.x * z.x - z.y * z.y, 2.0 * z.x * z.y) + c;
         iter = i;
     }
 
-    vec3 col = vec3(0.0);
-    if (iter < maxIter - 1) {
-        float f = float(iter) - log2(max(1.0, log2(dot(z, z))));
-        col = 0.5 + 0.5 * sin(f * 0.15 + u_param3 * 6.28 + vec3(0.0, 1.2, 2.4));
+    var col = vec3<f32>(0.0, 0.0, 0.0);
+    if iter < max_iter - 1 {
+        let f = (iter as f32) - log2(max(1.0, log2(dot(z, z))));
+        col = sin(vec3<f32>(0.0, 1.2, 2.4) + (f * 0.15 + param.z * 6.28)) * 0.5 + 0.5;
     }
+    out[g.x(), g.y()] = vec4<f32>(col.x, col.y, col.z, 1.0);
+}
+`,
 
-    fragColor = vec4(col, 1.0);
-}`,
+    voronoi: `// Voronoi cells whose seeds drift.
+// param.x drift speed, param.y density, param.z palette.
 
-    voronoi: `#version 300 es
-precision highp float;
-
-out vec4 fragColor;
-
-uniform vec2 u_resolution;
-uniform float u_time;
-uniform float u_param1;
-uniform float u_param2;
-uniform float u_param3;
-uniform float u_param4;
-
-vec2 hash2(vec2 p) {
-    p = vec2(dot(p, vec2(127.1, 311.7)), dot(p, vec2(269.5, 183.3)));
-    return fract(sin(p) * 43758.5453);
+fn hash2(p: vec2<f32>) -> vec2<f32> {
+    let q = vec2<f32>(dot(p, vec2<f32>(127.1, 311.7)), dot(p, vec2<f32>(269.5, 183.3)));
+    return fract(sin(q) * 43758.5453);
 }
 
-void main() {
-    vec2 uv = (gl_FragCoord.xy - 0.5 * u_resolution.xy) / u_resolution.y;
-    vec2 p = uv * (4.0 + u_param2);
+${SIGNATURE}
+    let uv = (frag - resolution * 0.5) / resolution.y;
+    let p = uv * (4.0 + param.y);
+    let n = floor(p);
+    let f = p - n;
 
-    vec2 n = floor(p);
-    vec2 f = fract(p);
-
-    float m_dist = 8.0;
-    vec2 m_point = vec2(0.0);
-
-    for (int j = -1; j <= 1; j++) {
-        for (int i = -1; i <= 1; i++) {
-            vec2 g = vec2(float(i), float(j));
-            vec2 o = hash2(n + g);
-            o = 0.5 + 0.5 * sin(u_time * u_param1 + 6.2831 * o);
-            vec2 r = g + o - f;
-            float d = dot(r, r);
-            if (d < m_dist) {
+    var m_dist: f32 = 8.0;
+    var m_point = vec2<f32>(0.0, 0.0);
+    for jj in 0..3 {
+        for ii in 0..3 {
+            let cell = vec2<f32>((ii - 1) as f32, (jj - 1) as f32);
+            let o = sin(hash2(n + cell) * 6.2831 + time * param.x) * 0.5 + 0.5;
+            let r = cell + o - f;
+            let d = dot(r, r);
+            if d < m_dist {
                 m_dist = d;
                 m_point = o;
             }
         }
     }
 
-    vec3 col = vec3(m_dist * 0.8);
-    col += 0.3 * sin(m_point.x * 12.0 + u_param3 * 6.28 + vec3(0.0, 2.0, 4.0));
-    fragColor = vec4(col, 1.0);
-}`,
+    let col = sin(vec3<f32>(0.0, 2.0, 4.0) + (m_point.x * 12.0 + param.z * 6.28)) * 0.3 + m_dist * 0.8;
+    out[g.x(), g.y()] = vec4<f32>(col.x, col.y, col.z, 1.0);
+}
+`,
 
-    plasma: `#version 300 es
-precision highp float;
+    plasma: `// Interfering sine waves.
+// param.x speed, param.z palette.
 
-out vec4 fragColor;
+${SIGNATURE}
+    let uv = frag / resolution;
+    let t = time * param.x * 0.8;
+    let v1 = sin(uv.x * 10.0 + t);
+    let v2 = sin(10.0 * (uv.x * sin(t / 2.0) + uv.y * cos(t / 3.0)) + t);
+    let cx = uv.x + 0.5 * sin(t / 5.0);
+    let cy = uv.y + 0.5 * cos(t / 3.0);
+    let v3 = sin(sqrt(100.0 * (cx * cx + cy * cy) + 1.0) + t);
+    let v = (v1 + v2 + v3) * 3.14159;
+    let col = vec3<f32>(sin(v + param.z * 6.28), sin(v + 2.0), sin(v + 4.0)) * 0.5 + 0.5;
+    out[g.x(), g.y()] = vec4<f32>(col.x, col.y, col.z, 1.0);
+}
+`,
 
-uniform vec2 u_resolution;
-uniform float u_time;
-uniform float u_param1;
-uniform float u_param2;
-uniform float u_param3;
-uniform float u_param4;
+    fire: `// A flame: value-noise FBm warped by itself, scrolling up.
+// param.x speed.
 
-void main() {
-    vec2 uv = gl_FragCoord.xy / u_resolution.xy;
-    float t = u_time * u_param1 * 0.8;
-
-    float v1 = sin(uv.x * 10.0 + t);
-    float v2 = sin(10.0 * (uv.x * sin(t / 2.0) + uv.y * cos(t / 3.0)) + t);
-    float cx = uv.x + 0.5 * sin(t / 5.0);
-    float cy = uv.y + 0.5 * cos(t / 3.0);
-    float v3 = sin(sqrt(100.0 * (cx * cx + cy * cy) + 1.0) + t);
-
-    float v = v1 + v2 + v3;
-    vec3 col = vec3(
-        sin(v * 3.14159 + u_param3 * 6.28),
-        sin(v * 3.14159 + 2.0),
-        sin(v * 3.14159 + 4.0)
-    ) * 0.5 + 0.5;
-
-    fragColor = vec4(col, 1.0);
-}`,
-
-    fire: `#version 300 es
-precision highp float;
-
-out vec4 fragColor;
-
-uniform vec2 u_resolution;
-uniform float u_time;
-uniform float u_param1;
-uniform float u_param2;
-uniform float u_param3;
-uniform float u_param4;
-
-float hash(vec2 p) {
-    return fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.5453);
+fn hash(p: vec2<f32>) -> f32 {
+    return fract(sin(dot(p, vec2<f32>(12.9898, 78.233))) * 43758.5453);
 }
 
-float noise(vec2 p) {
-    vec2 i = floor(p);
-    vec2 f = fract(p);
-    float a = hash(i);
-    float b = hash(i + vec2(1.0, 0.0));
-    float c = hash(i + vec2(0.0, 1.0));
-    float d = hash(i + vec2(1.0, 1.0));
-    vec2 u = f * f * (3.0 - 2.0 * f);
+fn value_noise(p: vec2<f32>) -> f32 {
+    let i = floor(p);
+    let f = p - i;
+    let a = hash(i);
+    let b = hash(i + vec2<f32>(1.0, 0.0));
+    let c = hash(i + vec2<f32>(0.0, 1.0));
+    let d = hash(i + vec2<f32>(1.0, 1.0));
+    let u = f * f * (vec2<f32>(3.0, 3.0) - f * 2.0);
     return mix(a, b, u.x) + (c - a) * u.y * (1.0 - u.x) + (d - b) * u.x * u.y;
 }
 
-float fbm(vec2 p) {
-    float v = 0.0;
-    float a = 0.5;
-    for (int i = 0; i < 4; i++) {
-        v += a * noise(p);
-        p *= 2.0;
+fn fbm(p0: vec2<f32>) -> f32 {
+    var v: f32 = 0.0;
+    var a: f32 = 0.5;
+    var p = p0;
+    for i in 0..4 {
+        v += a * value_noise(p);
+        p = p * 2.0;
         a *= 0.5;
     }
     return v;
 }
 
-void main() {
-    vec2 uv = (gl_FragCoord.xy - 0.5 * u_resolution.xy) / u_resolution.y;
-    vec2 p = uv * 3.0;
+${SIGNATURE}
+    let uv = (frag - resolution * 0.5) / resolution.y;
+    let p = uv * 3.0;
+    let t = time * param.x * 2.0;
+    let q = vec2<f32>(p.x, p.y + t);
+    let n = fbm(q * 1.5 + fbm(q * 2.0 - t * 0.5));
 
-    float t = u_time * u_param1 * 2.0;
-    vec2 q = vec2(p.x, p.y + t);
-    float n = fbm(q * 1.5 + fbm(q * 2.0 - t * 0.5));
-
-    float shape = 1.0 - length(vec2(p.x * 2.0, p.y + 0.6));
-    float fire = clamp(shape + n * 0.8, 0.0, 1.0);
-
-    vec3 col = mix(vec3(0.0), vec3(1.0, 0.2, 0.0), fire);
-    col = mix(col, vec3(1.0, 0.8, 0.1), pow(fire, 3.0));
-    col = mix(col, vec3(1.0, 1.0, 0.9), pow(fire, 6.0));
-
-    fragColor = vec4(col, 1.0);
-}`
+    let shape = 1.0 - length(vec2<f32>(p.x * 2.0, p.y + 0.6));
+    let fire = clamp(shape + n * 0.8, 0.0, 1.0);
+    let f3 = pow(fire, 3.0);
+    let f6 = pow(fire, 6.0);
+    var col = vec3<f32>(1.0, 0.2, 0.0) * fire;
+    col = mix(col, vec3<f32>(1.0, 0.8, 0.1), vec3<f32>(f3, f3, f3));
+    col = mix(col, vec3<f32>(1.0, 1.0, 0.9), vec3<f32>(f6, f6, f6));
+    out[g.x(), g.y()] = vec4<f32>(col.x, col.y, col.z, 1.0);
+}
+`,
 };

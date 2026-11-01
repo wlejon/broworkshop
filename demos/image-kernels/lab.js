@@ -36,7 +36,7 @@ export const view = {
     cards: null,
 };
 
-let el = null, gl = null, cpuCtx = null, histCtx = null, imgData = null, cpuResampled = null;
+let el = null, cpuCtx = null, histCtx = null, imgData = null, cpuResampled = null;
 
 function colorizeCPU(buf, eqActive) {
     const cw = el.cpu.width, ch = el.cpu.height;
@@ -57,8 +57,10 @@ function colorizeCPU(buf, eqActive) {
     view.drawn.cpu++;
 }
 
+// bro.image.gpu's kernels on the canvas's 'kernel' context: the time is the
+// field's upload and the dispatches being recorded; the GPU runs them with
+// the frame.
 function colorizeGPU(buf, eqActive) {
-    if (!gl) gl = el.gpu.getContext('webgl2');
     const lut = eqActive ? buildEqLut(buf, view.range.min, view.range.max, view.eqLut) : view.lut;
     const t0 = performance.now();
     const params = { srcW: field.w, srcH: field.h };
@@ -68,7 +70,6 @@ function colorizeGPU(buf, eqActive) {
     const winW = Math.max(8, field.w - 48);
     params.viewRect = { x: Math.floor((Math.sin(view.scroll) * 0.5 + 0.5) * (field.w - winW)), y: 0, w: winW, h: field.h };
     bro.image.gpu.colormap(el.gpu, buf, lut, params);
-    if (gl) gl.finish();          // time the GPU work, not just its submission
     view.gpuMs = performance.now() - t0;
     view.drawn.gpu++;
 }

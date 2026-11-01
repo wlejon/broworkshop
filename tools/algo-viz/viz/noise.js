@@ -1,6 +1,6 @@
 // FBm decomposition. FBm = sum_i gain^i * noise(lacunarity^i * x).
 //
-// LEFT  The full FBm sum. For 'Simplex' it is one GPU draw
+// LEFT  The full FBm sum. For 'Simplex' it is made on the GPU
 //       (bro.image.gpu.fbm2D: no CPU buffer, no upload); the other types
 //       generate on the CPU with FastNoise2 in a Worker (noise-worker.js)
 //       and upload through bro.image.gpu.colormap. Either way a tile wider
@@ -37,8 +37,8 @@ register({
         stage.appendChild(h('div.av-split', null,
             h('div.av-col.av-grow', null, mainBox, formula), octCol));
 
-        const gl = mainCanvas.getContext('webgl2');
-        if (!gl) throw new Error('noise: webgl2 is not available on this canvas');
+        if (!bro.kernel.gpu || !mainCanvas.getContext('kernel'))
+            throw new Error("noise: the canvas has no 'kernel' context (bro.image.gpu needs the GPU)");
 
         const state = {
             type: 'Simplex', frequency: 0.008, octaves: 4, gain: 0.5, lacunarity: 2.0,
@@ -58,8 +58,8 @@ register({
 
         // Thumbnails sample the base noise here (tiny 96x96 reads at 1 Hz);
         // the FBm tile's own nodes live in the worker.
-        // Feature Scale 1: `frequency` is features per unit, as in the GPU
-        // shader (FastNoise2's default scale is ~100 units per feature).
+        // Feature Scale 1: `frequency` is features per unit, as in
+        // bro.image.gpu.fbm2D (FastNoise2's default scale is ~100 units per feature).
         const makeBase = (type) => { const n = FastNoise.create(type); n.set('Feature Scale', 1); return n; };
         let baseNode = makeBase(state.type);
         const thumbs = [];

@@ -115,8 +115,10 @@ test('lookup: min → black, max → white, opaque, wrap ≠ clamp', () => {
 
 test('gpu.colormap / gpu.fbm2D draw pixels', () => {
     const cv = document.createElement('canvas'); cv.width = 64; cv.height = 64;
-    const gl = cv.getContext('webgl2');
-    check(!!gl, 'webgl2');
+    cv.style.cssText = 'position:fixed;left:0;top:0;width:64px;height:64px;z-index:100000';
+    document.body.appendChild(cv);
+    flush();
+    check(!!cv.getContext('kernel'), "a 'kernel' canvas");
     const lut = buildGradient('gray'), fld = bro.image.alloc(64, 64, 1);
     for (let i = 0; i < fld.length; i++) fld[i] = (i % 64) / 63;
     bro.image.gpu.colormap(cv, fld, lut, { autoRange: true, ema: 0.5, srcW: 64, srcH: 64 });
@@ -124,8 +126,8 @@ test('gpu.colormap / gpu.fbm2D draw pixels', () => {
     bro.image.gpu.fbm2D(cv, lut, { frequency: 0.05, octaves: 4, gain: 0.5, lacunarity: 2, seed: 1337, autoRange: true });
     bro.image.gpu.fbm2D(cv, lut, { regenerate: false, autoRange: true, viewRect: { x: 2, y: 0, w: 60, h: 64 } });
     bro.image.gpu.colormap(cv, fld, lut, { lo: 0, hi: 1, srcW: 64, srcH: 64 });
-    const px = new Uint8Array(64 * 64 * 4);
-    gl.readPixels(0, 0, 64, 64, gl.RGBA, gl.UNSIGNED_BYTE, px);
+    const px = getPixels(0, 0, 64, 64).data;
+    cv.remove();
     // The ramp comes through in order (non-decreasing, brighter on the right).
     const at = (x) => px[(32 * 64 + x) * 4];
     let mono = true;
