@@ -1,16 +1,19 @@
 // Planet: an Earth-radius world drawn from a bro.tiles cube-sphere cache.
 //
 // The ground is one height function (ground.bk) evaluated per tile on the
-// GPU in f64. Each tile's cells are written relative to the tile's center,
-// and every tile is drawn camera-relative: the scene's camera sits at the
-// origin and each tile instance is placed at (tile center - camera), both in
-// doubles on the CPU, so nothing ever holds a planet-sized f32.
+// GPU in f32: each tile's noise lattices are found on the CPU in f64 at the
+// tile's anchor (anchor.bk, planet.bk k_anchors), and a cell is an f32
+// offset from it. Each tile's cells are written relative to the tile's
+// center, and every tile is drawn camera-relative: the scene's camera sits at
+// the origin and each tile instance is placed at (tile center - camera), both
+// in doubles on the CPU, so nothing ever holds a planet-sized f32.
 import { boot } from "/lib/kit/app.js";
 import { bindControl, logMap } from "/lib/kit/params.js";
 import { GROUND_LIGHT, createClouds } from "/app/clouds.js";
 import { createGrass, grassModules } from "/app/grass.js";
 import { createTrees, treeModules } from "/app/trees.js";
 import { createRivers } from "/app/rivers.js";
+import { createAnchors } from "/app/anchors.js";
 import { constants, readApp } from "/app/shaders.js";
 
 boot();
@@ -68,7 +71,7 @@ const WAVES = (() => {
     return { list, residual, swell: list.filter((w) => w.period === SWELL_PERIOD).length, fresh, freshScale };
 })();
 const MODULES = { 'planet::ground': readApp('ground.bk'), 'planet::relief': readApp('relief.bk'), 'planet::rivers': readApp('rivers.bk'),
-                  'planet::clouds': readApp('clouds.bk'), tiles: bro.tiles.module };
+                  'planet::clouds': readApp('clouds.bk'), 'planet::anchor': readApp('anchor.bk'), tiles: bro.tiles.module };
 const mod = bro.kernel.compile(readApp('planet.bk'), { file: 'planet.bk', modules: MODULES });
 const rivers = createRivers(bro.kernel.compile(readApp('riverbuild.bk'), { file: 'riverbuild.bk', modules: MODULES }), RADIUS, SEED);
 const kTile = mod.kernel('k_tile');
@@ -80,6 +83,7 @@ const kDetail = mod.kernel('k_detail');
 const kSoil = mod.kernel('k_soil');
 const kHorizonHeights = mod.kernel('k_horizon_heights');
 const kHorizon = mod.kernel('k_horizon');
+const kAnchors = mod.kernel('k_anchors');
 
 // The octaves a tile's cells can carry: down to a wavelength of 2.5 cells
 // (the tile kernels take theirs from ground.bk octaves_for, the same).
@@ -106,6 +110,8 @@ const soilGrid = bro.kernel.createBuffer(PRODUCE_PER_UPDATE * SOIL_STRIDE * SOIL
 const horizonHeights = bro.kernel.createBuffer(PRODUCE_PER_UPDATE * HZ_GRID * HZ_GRID * 4);
 // Each resident tile's relief anchors (planet.bk k_anchor), by slot.
 const anchors = bro.kernel.createBuffer(CAPACITY * 20 * 4);
+// The batch's tiles' anchors (anchors.js), by record.
+const batchAnchors = createAnchors(kAnchors, PRODUCE_PER_UPDATE, RADIUS);
 
 const canvas = document.querySelector('#stage');
 const scene = canvas.getContext('scene');
@@ -148,15 +154,17 @@ function makeCache(pixelsPerTexel) {
         // The whole batch in six dispatches: the GPU fills up on the
         // batch's cells together, where a tile's own were a few warps.
         produce(batch) {
-            const grid = [CELLS, CELLS, batch.count], pos = this.layer('position');
-            kTile.dispatch(grid, batch.table, pos, this.layer('relief'), span, RADIUS, BORDER, 1 / TILE, TRUTH, SEED, rivers.net);
-            kAnchor.dispatch([batch.count], batch.table, anchors, RADIUS, 1 / TILE, DETAIL, SEED);
-            kHorizonHeights.dispatch([HZ_GRID, HZ_GRID, batch.count], batch.table, horizonHeights, RADIUS, 1 / TILE, SEED, rivers.net);
+            batch.tiles.forEach((t, i) => batchAnchors.set(i, t.anchor.base, t.anchor.dir));
+            batchAnchors.write(batch.count);
+            const grid = [CELLS, CELLS, batch.count], pos = this.layer('position'), at = batchAnchors.buffer;
+            kTile.dispatch(grid, batch.table, at, pos, this.layer('relief'), span, RADIUS, BORDER, 1 / TILE, TRUTH, SEED, rivers.net);
+            kAnchor.dispatch([batch.count], batch.table, at, anchors, RADIUS, 1 / TILE, DETAIL, SEED);
+            kHorizonHeights.dispatch([HZ_GRID, HZ_GRID, batch.count], batch.table, at, horizonHeights, RADIUS, 1 / TILE, SEED, rivers.net);
             kHorizon.dispatch([HZ, HZ, batch.count], batch.table, horizonHeights, this.layer('horizon'), HZ_GRID, RADIUS, BORDER, 1 / TILE);
             const texels = [TEXELS, TEXELS, batch.count];
-            kDetailHeight.dispatch(texels, batch.table, texelHeights, RADIUS, BORDER, 1 / TILE, DETAIL, SEED, rivers.net);
-            kSoil.dispatch([SOIL_STRIDE, SOIL_STRIDE, batch.count], batch.table, soilGrid, TEXELS, RADIUS, BORDER, 1 / TILE, DETAIL, SEED, rivers.net);
-            kDetail.dispatch(texels, batch.table, texelHeights, this.layer('detail'), RADIUS, BORDER, 1 / TILE, DETAIL, TRUTH, SEED, rivers.net, soilGrid);
+            kDetailHeight.dispatch(texels, batch.table, at, texelHeights, RADIUS, BORDER, 1 / TILE, DETAIL, SEED, rivers.net);
+            kSoil.dispatch([SOIL_STRIDE, SOIL_STRIDE, batch.count], batch.table, at, soilGrid, TEXELS, RADIUS, BORDER, 1 / TILE, DETAIL, SEED, rivers.net);
+            kDetail.dispatch(texels, batch.table, at, texelHeights, this.layer('detail'), RADIUS, BORDER, 1 / TILE, DETAIL, TRUTH, SEED, rivers.net, soilGrid);
             kRange.dispatch([batch.count], batch.table, span, this.ranges, 1 / TILE, MAX_HEIGHT);
         },
     });
@@ -231,9 +239,9 @@ makeCache(Number(document.querySelector('#detail').value));
 const cloudMod = bro.kernel.compile(readApp('clouds.bk'), { file: 'clouds.bk', modules: MODULES });
 const sunMod = bro.kernel.compile(readApp('sun.bk'), { file: 'sun.bk', modules: MODULES });
 const grassMod = bro.kernel.compile(readApp('grass.bk'), { file: 'grass.bk', modules: MODULES });
-const grass = createGrass(scene, RADIUS, grassMod, sunMod, TRUTH, SEED, rivers.net, [ground]);
+const grass = createGrass(scene, RADIUS, grassMod, sunMod, TRUTH, SEED, rivers.net, kAnchors, [ground]);
 const treeMod = bro.kernel.compile(readApp('trees.bk'), { file: 'trees.bk', modules: MODULES });
-const trees = createTrees(scene, RADIUS, treeMod, sunMod, TRUTH, SEED, rivers.net, [ground]);
+const trees = createTrees(scene, RADIUS, treeMod, sunMod, TRUTH, SEED, rivers.net, kAnchors, [ground]);
 const clouds = createClouds(scene, RADIUS, cloudMod, [ground], SEED,
                             { source: readApp('clouds_volume.bk'), modules: MODULES }, MAX_HEIGHT);
 

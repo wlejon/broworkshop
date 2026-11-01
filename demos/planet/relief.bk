@@ -1,8 +1,8 @@
 // The mountains' ridged relief, shared by the truth (ground.bk relief) and
 // the ground's shader (ground_mesh.bk), which adds per pixel the octaves
 // finer than a tile's texels: the octaves and their amplitudes, a ridge
-// octave's mean over a cell, and the ground's noise in f32 with its
-// gradient, from a lattice cell found in f64 (ground.bk simplex_anchor).
+// octave's mean over a cell, and the ground's noise with its gradient at a
+// lattice cell and an offset in it (anchor.bk simplex_from finds them).
 module planet::relief;
 import std::noise::*;
 
@@ -102,12 +102,12 @@ pub fn ridge_cell_slope(n: f32, f: f32) -> f32 {
 }
 
 // Where a point is on the noise's lattice: its skewed cell and the offset
-// inside it (ground.bk simplex_anchor finds them in f64).
+// inside it (anchor.bk simplex_from finds them).
 pub struct SimplexAt {
     cell: vec3<i32>,
     sk: vec3<f32>,
-    // What sk lost to f32, in the noise's coordinates (ground.bk
-    // simplex_anchor): 2^-24 of a cell, which for the broad octaves' 150 km
+    // What sk lost to f32, in the noise's coordinates (anchor.bk
+    // simplex_from): 2^-24 of a cell, which for the broad octaves' 150 km
     // cells is 9 mm, so every point within 9 mm read the same value and a
     // steep slope stood in 9 mm stairs (the regular stripes its lighting
     // showed close up). simplex_grad adds its gradient's share of it.

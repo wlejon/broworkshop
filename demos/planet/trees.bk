@@ -5,57 +5,58 @@
 // whichever field holds it. Each holds the ground's true surface at that
 // spot, whether a tree stands there (the forest's cover, ground.bk
 // tree_cover, against the site's hash) and how large, and the ground's
-// colour variation there, which the crown takes.
+// colour variation there, which the crown takes. The field is anchored at
+// its centre (anchor.bk, found on the CPU): cell (x, y)'s corner is the plane
+// offset lost + e (du0 + x delta) + f (dv0 + y delta) from it.
 import std::noise::*;
-from planet::ground import terrain, tree_cover, variation, perlin_split, soil_gradient;
+from planet::ground import terrain, tree_cover, variation, perlin_at, soil_gradient;
 from planet::rivers import water_at, water_share;
+from planet::anchor import read_anchor, plane_offset, perlin_from, STAND, GLADE;
 
 // Site (x, y0 + y) of the field, lattice site (li + x, lj + y0 + y) on face
-// `face`, cell (u0 + x delta, v0 + (y0 + y) delta), seven floats at `out`
-// (row * width + x) * 7: its position about `origin` (xyz), its size (0: no
-// tree) and the colour variation (rgb).
+// `face`, seven floats at `out` (row * width + x) * 7: its position about
+// `origin` (xyz), its size (0: no tree) and the colour variation (rgb).
+// `point` is the anchor's surface point (its direction times the radius)
+// less the origin.
 @kernel @grid(2)
-fn k_tree_field(g: grid<2>, out: write_store<f32, 1>,
-                ax: f64, ay: f64, az: f64, ex: f64, ey: f64, ez: f64, fx: f64, fy: f64, fz: f64,
-                u0: f64, v0: f64, delta: f64, ox: f64, oy: f64, oz: f64, radius: f64, octaves: f64, seed: i32,
+fn k_tree_field(g: grid<2>, out: write_store<f32, 1>, anchor: read_store<vec4<i32>, 1>,
+                ex: f32, ey: f32, ez: f32, fx: f32, fy: f32, fz: f32,
+                du0: f32, dv0: f32, delta: f32, px: f32, py: f32, pz: f32, radius: f32, octaves: f32, seed: i32,
                 li: i32, lj: i32, face: i32, y0: i32, net: read_store<f32, 1>) {
-    let a = vec3<f64>(ax, ay, az);
-    let e = vec3<f64>(ex, ey, ez);
-    let f = vec3<f64>(fx, fy, fz);
+    let a = read_anchor(anchor, 0);
     let row = y0 + g.y();
     let hx = hash_primes3d(seed + 977, (li + g.x()) * PRIME_X, (lj + row) * PRIME_Y, face * PRIME_Z);
     let hy = hash_primes3d(seed + 1979, (li + g.x()) * PRIME_X, (lj + row) * PRIME_Y, face * PRIME_Z);
     let hp = hash_primes3d(seed + 2971, (li + g.x()) * PRIME_X, (lj + row) * PRIME_Y, face * PRIME_Z);
     // Inside the middle 70% of the cell, so neighbours do not touch.
-    let jx = 0.15 + 0.7 * (((hx >> 8) & 65535) as f64) / 65536.0;
-    let jy = 0.15 + 0.7 * (((hy >> 8) & 65535) as f64) / 65536.0;
+    let jx = 0.15 + 0.7 * (((hx >> 8) & 65535) as f32) / 65536.0;
+    let jy = 0.15 + 0.7 * (((hy >> 8) & 65535) as f32) / 65536.0;
     let pick = (((hp >> 8) & 65535) as f32) / 65536.0;
-    let u = u0 + ((g.x() as f64) + jx) * delta;
-    let v = v0 + ((row as f64) + jy) * delta;
-    let dir = normalize(a + e * u + f * v);
-    let h = terrain(dir, radius, octaves, seed, net);
-    let p = dir * (radius + max(h, 0.0));
+    let du = du0 + ((g.x() as f32) + jx) * delta;
+    let dv = dv0 + ((row as f32) + jy) * delta;
+    let e = plane_offset(a, a.lost + vec3<f32>(ex, ey, ez) * du + vec3<f32>(fx, fy, fz) * dv);
+    let h = terrain(a, e, radius, octaves, seed, net);
     // The cover's rock: the soil's slope (ground.bk soil_gradient), as the
     // ground's colour lays it.
-    let grad = soil_gradient(dir, radius, seed, net);
+    let grad = soil_gradient(a, e, radius, seed, net);
     // None in the rivers and lakes, nor right on their banks.
-    let cover = tree_cover(h as f32, grad) * (1.0 - water_share(h as f32, water_at(dir, radius, 6.0, net, seed), 0.0));
+    let cover = tree_cover(h, grad) * (1.0 - water_share(h, water_at(a.dir, e, radius, 6.0, net, seed), 0.0));
     // Forests grow in stands and glades: the cover scaled by zero-mean
-    // noise across ~70 m and ~20 m, so the forest's average stays the
-    // cover the ground's colour takes. A tree stands where the site's pick
-    // is under it; at a thinning edge the ones left are smaller.
-    let stands = perlin_split(dir * (radius / 70.0), seed + 4111) * 2.2
-               + perlin_split(dir * (radius / 20.0), seed + 4127) * 1.1;
+    // noise across STAND and GLADE metres, so the forest's average stays
+    // the cover the ground's colour takes. A tree stands where the site's
+    // pick is under it; at a thinning edge the ones left are smaller.
+    let stands = perlin_at(perlin_from(a.stand, e * (radius / STAND)), seed + 4111) * 2.2
+               + perlin_at(perlin_from(a.glade, e * (radius / GLADE)), seed + 4127) * 1.1;
     let local = clamp(cover * (1.0 + stands), 0.0, 1.0);
     var size: f32 = 0.0;
     if (pick < local) { size = 0.6 + 0.4 * local; }
-    let vary = variation(dir, radius, octaves, seed);
+    let vary = variation(a, e, radius, octaves, seed);
 
     let i = (row * g.width() + g.x()) * 7;
-    let rel = p - vec3<f64>(ox, oy, oz);
-    out[i] = rel.x as f32;
-    out[i + 1] = rel.y as f32;
-    out[i + 2] = rel.z as f32;
+    let rel = vec3<f32>(px, py, pz) + e * radius + (a.dir + e) * max(h, 0.0);
+    out[i] = rel.x;
+    out[i + 1] = rel.y;
+    out[i + 2] = rel.z;
     out[i + 3] = size;
     out[i + 4] = vary.x;
     out[i + 5] = vary.y;

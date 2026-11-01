@@ -21,6 +21,7 @@
 // whose forest colour is what they average to (ground.bk tree_cover).
 import { faceFrame } from "/app/clouds.js";
 import { createSunGrid } from "/app/sun.js";
+import { anchorPoint, createAnchors, planeAnchor } from "/app/anchors.js";
 import { stepped } from "/app/stepped.js";
 import { constants, readApp } from "/app/shaders.js";
 
@@ -92,10 +93,13 @@ const BLOCK_REACH = 0.7072 * B * 1.4143 * SPACING + 30 + 250;
 // are nodes whose hooks import treeModules, bound to theirs.
 // update() each frame with the eye about the planet's centre (f64), its
 // altitude, the unit direction to the sun and the view's forward.
-export function createTrees(scene, radius, module, sunModule, octaves, seed, net, readers = []) {
+export function createTrees(scene, radius, module, sunModule, octaves, seed, net, kAnchors, readers = []) {
     const fieldKernel = module.kernel('k_tree_field');
     const fields = [bro.kernel.createBuffer(N * N * 7 * 4), bro.kernel.createBuffer(N * N * 7 * 4)];
-    const sunGrid = createSunGrid(sunModule, SUN_P, net, 14);
+    // The field's anchor (anchors.js), at its centre. (One: background jobs
+    // run in order.)
+    const anchor = createAnchors(kAnchors, 1, radius);
+    const sunGrid = createSunGrid(sunModule, SUN_P, net, 14, kAnchors, radius);
     const bands = [
         { tiers: 7, rim: 7, trunk: true, band: [0, NEAR], ragged: true },
         { tiers: 3, rim: 5, trunk: false, band: [NEAR, MID], ragged: false },
@@ -145,7 +149,7 @@ export function createTrees(scene, radius, module, sunModule, octaves, seed, net
     // The sun grid's steps, and showing it.
     function sunSteps(plane, u0, v0, dl, toSun) {
         sun.splice(0, 3, ...toSun);
-        return sunGrid.steps(plane, u0, v0, dl * SUN_STRIDE, toSun, radius, octaves, seed);
+        return sunGrid.steps(plane, u0, v0, dl * SUN_STRIDE, toSun, octaves, seed);
     }
     function showSun(lattice) {
         const buffer = sunGrid.swap();
@@ -181,11 +185,18 @@ export function createTrees(scene, radius, module, sunModule, octaves, seed, net
             const li = ui - N / 2, lj = vi - N / 2, u0 = li * dl, v0 = lj * dl;
             const back = 1 - front, out = fields[back];
             const hi = origin.map(Math.fround), lo = origin.map((x, k) => x - hi[k]);
+            const at = planeAnchor(plane, ui * dl, vi * dl), point = anchorPoint(at.dir, radius, origin);
             const steps = [];
             for (let s = 0; s < SLICES; s++) {
                 const y0 = s * N / SLICES;
-                steps.push(() => fieldKernel.dispatch([N, N / SLICES], out, ...plane, u0, v0, dl, ...origin,
-                                                      radius, octaves, seed, li, lj, fc, y0, net));
+                steps.push(() => {
+                    if (s === 0) {
+                        anchor.set(0, at.base, at.dir);
+                        anchor.write(1);
+                    }
+                    fieldKernel.dispatch([N, N / SLICES], out, anchor.buffer, ...frame.e, ...frame.f, -N / 2 * dl, -N / 2 * dl, dl,
+                                         ...point, radius, octaves, seed, li, lj, fc, y0, net);
+                });
             }
             steps.push(...sunSteps(plane, u0, v0, dl, toSun));
             production = stepped(steps, () => {

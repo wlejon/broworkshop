@@ -4,34 +4,33 @@
 // the cell's footprint, and the variance of the octaves too fine for it.
 // And what the clouds leave of the ground's light, in a second cache
 // (k_cloud_ground).
-from planet::ground import perlin_split, terrain_base, octaves_for;
+// In f32 throughout: a direction in f32 is good to half a metre, and the
+// column's finest footprint is CLOUD_COLUMN_MIN.
+from planet::ground import perlin_f32, terrain_base_near, octaves_for;
 from std::noise import cellular_distance3d, perlin3d;
 import tiles;
 
 const F0: f32 = -0.12;          // the mean amount: clear more than cloudy
-pub const NOISE_VAR: f32 = 0.0728;  // perlin_split's variance (ground.bk PERLIN_VAR)
+pub const NOISE_VAR: f32 = 0.0728;  // perlin_f32's variance (ground.bk PERLIN_VAR)
 
 // The column at the unit direction q, resolved at a footprint of w metres:
 // an octave counts in full from 4 footprints a wavelength, not at all at 2,
-// and adds the variance of what it leaves out.
-// Each octave's point is the first's doubled (the wavelengths halve, so
-// radius over each is exactly twice the last's), and its weight a ratio
-// taken in f32: no division in f64 (a 4090 runs doubles at a 64th of its
-// floats' rate, a division a dozen of them), which was most of the column's
-// cost.
-pub fn column(q: vec3<f64>, w: f64, radius: f64) -> vec2<f32> {
+// and adds the variance of what it leaves out. Each octave's point is the
+// first's doubled (the wavelengths halve, so radius over each is exactly
+// twice the last's).
+pub fn column(q: vec3<f32>, w: f32, radius: f32) -> vec2<f32> {
     var f: f32 = F0;
     var v: f32 = 0.0;
-    let inv_w = 1.0 / (w as f32);
+    let inv_w = 1.0 / w;
     // The weather: cloud systems from 2000 km down to fronts and cells of
     // 30 km, clear skies between them; each octave 0.6 of the last.
     var wavelength: f32 = 2000000.0;
-    var p: vec3<f64> = q * (radius / 2000000.0);
+    var p: vec3<f32> = q * (radius / 2000000.0);
     var amp: f32 = 0.48;
     for (var k: i32 = 0; k < 7; k += 1) {
         let r = clamp(wavelength * inv_w * 0.5 - 1.0, 0.0, 1.0);
         if (r > 0.0) {
-            f += r * amp * perlin_split(p, 101 + k);
+            f += r * amp * perlin_f32(p, 101 + k);
         }
         v += (1.0 - r * r) * amp * amp * NOISE_VAR;
         wavelength *= 0.5;
@@ -44,12 +43,12 @@ pub fn column(q: vec3<f64>, w: f64, radius: f64) -> vec2<f32> {
     // from orbit over the sea), in place of most of the cumuli's coarsest
     // two octaves' random clusters. The ring is zero-mean (RING_MEAN) and
     // resolved as an octave CELL_RESOLVE long is, its variance where not.
-    let qf = vec3<f32>(q.x as f32, q.y as f32, q.z as f32);
+    let qf = q;
     let cells = cell_strength(q, radius);
     if (cells > 0.0) {
         let r = clamp(CELL_RESOLVE * inv_w * 0.5 - 1.0, 0.0, 1.0);
         if (r > 0.0) {
-            f += r * cells * CELL_AMP * (cell_ring(qf * ((radius as f32) / CELL_SIZE)) - RING_MEAN);
+            f += r * cells * CELL_AMP * (cell_ring(qf * (radius / CELL_SIZE)) - RING_MEAN);
         }
         v += (1.0 - r * r) * cells * cells * CELL_AMP * CELL_AMP * RING_VAR;
     }
@@ -62,7 +61,7 @@ pub fn column(q: vec3<f64>, w: f64, radius: f64) -> vec2<f32> {
         let r = clamp(wavelength * inv_w * 0.5 - 1.0, 0.0, 1.0);
         let a = amp * (1.0 - CELL_TAKE * cells * step(k as f32, 1.5));
         if (r > 0.0) {
-            f += r * a * perlin_split(p, 7 + k);
+            f += r * a * perlin_f32(p, 7 + k);
         }
         v += (1.0 - r * r) * a * a * NOISE_VAR;
         wavelength *= 0.5;
@@ -98,12 +97,12 @@ const CELL_AMP: f32 = 0.22;
 const RING_WIDTH: f32 = 0.22;
 const CELL_RESOLVE: f32 = 8000.0;
 const CELL_TAKE: f32 = 0.35;
-const CELL_REGION: f64 = 1500000.0;
+const CELL_REGION: f32 = 1500000.0;
 const CELL_WARP: f32 = 0.5;   // cell units, of Perlin noise 1 / 0.6 cells long
 const RING_MEAN: f32 = 0.5349;
 const RING_VAR: f32 = 0.1313;
-fn cell_strength(q: vec3<f64>, radius: f64) -> f32 {
-    return clamp(perlin_split(q * (radius / CELL_REGION), 227) * 4.0 - 0.2, 0.0, 1.0);
+fn cell_strength(q: vec3<f32>, radius: f32) -> f32 {
+    return clamp(perlin_f32(q * (radius / CELL_REGION), 227) * 4.0 - 0.2, 0.0, 1.0);
 }
 // 1 on a cell's wall, falling to 0 within RING_WIDTH of it: of cellular
 // noise's gap between its nearest two points (cell units), its domain
@@ -121,24 +120,24 @@ fn cell_ring(p: vec3<f32>) -> f32 {
 // gradient bound has the same numbers.
 const STREET_SPACING: f32 = 4000.0;
 const STREET_AMP: f32 = 0.09;
-const STREET_REGION: f64 = 800000.0;
-const STREET_WARP: f64 = 80000.0;
+const STREET_REGION: f32 = 800000.0;
+const STREET_WARP: f32 = 80000.0;
 const STREET_WARP_ROWS: f32 = 3.0;
 // How strongly a region's cumuli line up, 0 to 1, fading toward the poles
 // where the parallels close. Streets are a particular weather's (cold air
 // over warmer sea, the trades): some in about an eighth of the regions
 // (Perlin over 0.3, its deviation 0.27), full in one in fifty. Over half of
 // them had rows, and from orbit the field read as stripes, not cumulus.
-fn street_strength(q: vec3<f64>, radius: f64, qf: vec3<f32>) -> f32 {
-    let s = clamp(perlin_split(q * (radius / STREET_REGION), 211) * 4.0 - 1.2, 0.0, 1.0);
+fn street_strength(q: vec3<f32>, radius: f32, qf: vec3<f32>) -> f32 {
+    let s = clamp(perlin_f32(q * (radius / STREET_REGION), 211) * 4.0 - 1.2, 0.0, 1.0);
     return s * clamp((0.95 - abs(qf.y)) * 10.0, 0.0, 1.0);
 }
 // The row a point is in, counted from the equator, its fraction the place
 // across the row.
-fn street_phase(q: vec3<f64>, radius: f64, qf: vec3<f32>) -> f32 {
+fn street_phase(q: vec3<f32>, radius: f32, qf: vec3<f32>) -> f32 {
     let lat = atan2(qf.y, length(vec2<f32>(qf.x, qf.z)));
-    let warp = STREET_WARP_ROWS * perlin_split(q * (radius / STREET_WARP), 223);
-    return lat * ((radius as f32) / STREET_SPACING) + warp;
+    let warp = STREET_WARP_ROWS * perlin_f32(q * (radius / STREET_WARP), 223);
+    return lat * (radius / STREET_SPACING) + warp;
 }
 
 // The layer's shape (also read by the view's volume, clouds_volume.bk, and
@@ -165,10 +164,10 @@ pub const CLOUD_BASE_SHARE: f32 = 0.13333333;   // CLOUD_DIP / CLOUD_DEPTH
 pub const CLOUD_SIGMA: f32 = 0.03;
 pub const CLOUD_FLOOR: f32 = 0.02;
 pub const CLOUD_CURVE: f32 = 0.7;
-pub const CLOUD_COLUMN_MIN: f64 = 60.0;
+pub const CLOUD_COLUMN_MIN: f32 = 60.0;
 pub const CLOUD_DETAIL_FULL: f32 = 0.04;
 const CLOUD_SHADOW_STEPS: i32 = 6;
-const LIFT_OCTAVES: f64 = 3.0;   // the lift's (k_cloud_lift)
+const LIFT_OCTAVES: f32 = 3.0;   // the lift's (k_cloud_lift)
 // Height share s as a share of the way from the thinnest base to the top
 // (above it) or to the floor (below it).
 fn need_x(s: f32) -> f32 {
@@ -223,13 +222,13 @@ fn cloud_sub(occ: f32, rank: f32, len: f32) -> f32 {
 // clouds' three-dimensional detail at full amount (clouds.js
 // CLOUD_DETAIL_VAR). The ground reads it from a tile cache (k_cloud_ground),
 // the grass and the trees from their sun grids (sun.bk).
-pub fn cloud_light(dir: vec3<f64>, h: f32, to_sun: vec3<f64>, w: f64, radius: f64, seed: i32,
+pub fn cloud_light(dir: vec3<f32>, h: f32, to_sun: vec3<f32>, w: f32, radius: f32, seed: i32,
                    detail_var: f32) -> vec3<f32> {
     let fw = max(w, CLOUD_COLUMN_MIN);
-    let base = CLOUD_BASE + max(terrain_base(dir, radius, LIFT_OCTAVES, seed), 0.0) as f32;
+    let base = CLOUD_BASE + max(terrain_base_near(dir, radius, LIFT_OCTAVES, seed), 0.0);
     let s0 = clamp((h - base) / CLOUD_DEPTH, 0.0, 1.0);
     let ds = (1.0 - s0) / (CLOUD_SHADOW_STEPS as f32);
-    let g = dir * (radius + (h as f64));
+    let g = dir * (radius + h);
     // The sky's: straight up, every step in the column over the point.
     let up = column(dir, fw, radius);
     let gu = clamp(up.x / CLOUD_DETAIL_FULL, 0.0, 1.0);
@@ -248,7 +247,7 @@ pub fn cloud_light(dir: vec3<f64>, h: f32, to_sun: vec3<f64>, w: f64, radius: f6
     }
     let sky = 0.25 * (1.0 / (1.0 + 0.1125 * k0) + 1.0 / (1.0 + 0.1125 * k1)
                     + 1.0 / (1.0 + 0.1125 * k2) + 1.0 / (1.0 + 0.1125 * k3));
-    let mu = dot(to_sun, dir) as f32;
+    let mu = dot(to_sun, dir);
     if (mu <= 0.02) {
         return vec3<f32>(1.0, 0.0, sky);
     }
@@ -260,7 +259,7 @@ pub fn cloud_light(dir: vec3<f64>, h: f32, to_sun: vec3<f64>, w: f64, radius: f6
     let len = ds * CLOUD_DEPTH / mu;
     for (var i: i32 = 0; i < CLOUD_SHADOW_STEPS; i += 1) {
         let s = s0 + ((i as f32) + 0.5) * ds;
-        let q = normalize(g + to_sun * (((base + s * CLOUD_DEPTH - h) / mu) as f64));
+        let q = normalize(g + to_sun * ((base + s * CLOUD_DEPTH - h) / mu));
         let c = column(q, fw, radius);
         let gq = clamp(c.x / CLOUD_DETAIL_FULL, 0.0, 1.0);
         let occ = cloud_occupancy(c.x, c.y + detail_var * gq * gq, s);
@@ -284,41 +283,41 @@ pub fn cloud_light(dir: vec3<f64>, h: f32, to_sun: vec3<f64>, w: f64, radius: f6
 // row at plane point (o + x delta, o + y delta), into `out` at base.
 @kernel @grid(2)
 fn k_cloud_lift(g: grid<2>, out: write_store<f32, 1>, base: i32, n: i32,
-                ax: f64, ay: f64, az: f64, ex: f64, ey: f64, ez: f64, fx: f64, fy: f64, fz: f64,
-                o: f64, delta: f64, radius: f64, seed: i32) {
-    let u = o + (g.x() as f64) * delta;
-    let v = o + (g.y() as f64) * delta;
-    let p = vec3<f64>(ax, ay, az) + vec3<f64>(ex, ey, ez) * u + vec3<f64>(fx, fy, fz) * v;
-    out[base + g.y() * n + g.x()] = max(terrain_base(normalize(p), radius, LIFT_OCTAVES, seed), 0.0) as f32;
+                ax: f32, ay: f32, az: f32, ex: f32, ey: f32, ez: f32, fx: f32, fy: f32, fz: f32,
+                o: f32, delta: f32, radius: f32, seed: i32) {
+    let u = o + (g.x() as f32) * delta;
+    let v = o + (g.y() as f32) * delta;
+    let p = vec3<f32>(ax, ay, az) + vec3<f32>(ex, ey, ez) * u + vec3<f32>(fx, fy, fz) * v;
+    out[base + g.y() * n + g.x()] = max(terrain_base_near(normalize(p), radius, LIFT_OCTAVES, seed), 0.0);
 }
 
-// Cell (x, y) of the tile at record r of a batch table (bro.tiles), its
+// Cell (x, y) of the tile at record z of a batch table (bro.tiles), its
 // border's cells included: the unit direction of its centre, and the
 // footprint of two cells there, at the face plane's stretch (the larger of
 // how far the sphere moves for a step along either of the plane's axes).
 struct TileCell {
-    dir: vec3<f64>,
-    w: f64,
+    dir: vec3<f32>,
+    w: f32,
 }
-fn tile_cell<B>(table: B, r: i32, x: i32, y: i32, tile: f64, border: f64, radius: f64) -> TileCell {
-    let root = table[r + 2] as i32;
-    let s = ((x as f64) - border + 0.5) / tile;
-    let t = ((y as f64) - border + 0.5) / tile;
-    let du = vec3<f64>(table[r + 11], table[r + 12], table[r + 13]);
-    let dv = vec3<f64>(table[r + 14], table[r + 15], table[r + 16]);
-    let b = vec3<f64>(table[r + 8], table[r + 9], table[r + 10]) + du * s + dv * t;
+fn tile_cell<B>(table: B, z: i32, x: i32, y: i32, tile: f32, border: f32, radius: f32) -> TileCell {
+    let rec = tiles::record(table, z);
+    let s = ((x as f32) - border + 0.5) / tile;
+    let t = ((y as f32) - border + 0.5) / tile;
+    let d = tiles::frame_offset(rec, s, t);
+    let b = rec.anchor + d;
     // The face plane's coordinates: the two axes other than the root's
     // (its own is +-1 on the plane).
-    var u: f64 = b.y;
-    var v: f64 = b.z;
-    if (root == 2 || root == 3) {
+    var u: f32 = b.y;
+    var v: f32 = b.z;
+    if (rec.root == 2 || rec.root == 3) {
         u = b.x;
-    } else if (root == 4 || root == 5) {
+    } else if (rec.root == 4 || rec.root == 5) {
         u = b.x;
         v = b.y;
     }
     let stretch = sqrt(1.0 + max(u * u, v * v)) / (1.0 + u * u + v * v);
-    return TileCell { dir: normalize(b), w: 2.0 * radius * (length(du) / tile) * stretch };
+    let dir = normalize(rec.dir_hi + (rec.dir_lo + tiles::sphere_offset(rec, d)));
+    return TileCell { dir: dir, w: 2.0 * radius * (length(rec.u) / tile) * stretch };
 }
 
 // A column (amount, variance) in one word: the amount over [-2.5, 2.5]
@@ -337,11 +336,10 @@ fn pack_column(c: vec2<f32>) -> i32 {
 // footprint (tile_cell), a word a cell (pack_column) into the pool at the
 // tile's slot.
 @kernel @grid(3)
-fn k_cloud_tile(g: grid<3>, table: read_store<f64, 1>, pool: write_store<i32, 1>, cells: i32,
-                tile: f64, border: f64, radius: f64) {
-    let r = g.z() * 24;
-    let slot = table[r] as i32;
-    let cell = tile_cell(table, r, g.x(), g.y(), tile, border, radius);
+fn k_cloud_tile(g: grid<3>, table: read_store<vec4<i32>, 1>, pool: write_store<i32, 1>, cells: i32,
+                tile: f32, border: f32, radius: f32) {
+    let slot = tiles::record(table, g.z()).slot;
+    let cell = tile_cell(table, g.z(), g.x(), g.y(), tile, border, radius);
     pool[(slot * cells + g.y()) * cells + g.x()] = pack_column(column(cell.dir, cell.w, radius));
 }
 
@@ -421,24 +419,20 @@ fn far_column<P, B>(pool: P, lookup: B, own: tiles::Tile, root: i32, tile: i32, 
 }
 
 @kernel @grid(3)
-fn k_cloud_sun(g: grid<3>, table: read_store<f64, 1>, lookup: read_store<vec4<i32>, 1>, pool: read_store<i32, 1>,
+fn k_cloud_sun(g: grid<3>, table: read_store<vec4<i32>, 1>, lookup: read_store<vec4<i32>, 1>, pool: read_store<i32, 1>,
                out: write_store<i32, 1>, out_far: write_store<i32, 1>, cells: i32, tile: i32, border: i32, levels: i32, w0: f32,
-               radius: f64, seed: i32, sx: f32, sy: f32, sz: f32, detail_var: f32) {
-    let r = g.z() * 24;
-    let slot = table[r] as i32;
-    let root = table[r + 2] as i32;
-    let own = tiles::Tile { slot: slot, level: table[r + 3] as i32, x: table[r + 4] as i32, y: table[r + 5] as i32,
-                            parent: -1 };
-    let s = ((g.x() - border) as f64 + 0.5) / (tile as f64);
-    let t = ((g.y() - border) as f64 + 0.5) / (tile as f64);
-    let du = vec3<f64>(table[r + 11], table[r + 12], table[r + 13]);
-    let dv = vec3<f64>(table[r + 14], table[r + 15], table[r + 16]);
-    let q = normalize(vec3<f64>(table[r + 8], table[r + 9], table[r + 10]) + du * s + dv * t);
-    let base = CLOUD_BASE + max(terrain_base(q, radius, LIFT_OCTAVES, seed), 0.0) as f32;
-    let up = vec3<f32>(q.x as f32, q.y as f32, q.z as f32);
+               radius: f32, seed: i32, sx: f32, sy: f32, sz: f32, detail_var: f32) {
+    let rec = tiles::record(table, g.z());
+    let slot = rec.slot;
+    let root = rec.root;
+    let own = tiles::Tile { slot: slot, level: rec.level, x: rec.x, y: rec.y, parent: -1 };
+    let s = (((g.x() - border) as f32) + 0.5) / (tile as f32);
+    let t = (((g.y() - border) as f32) + 0.5) / (tile as f32);
+    let up = normalize(rec.dir_hi + (rec.dir_lo + tiles::sphere_offset(rec, tiles::frame_offset(rec, s, t))));
+    let base = CLOUD_BASE + max(terrain_base_near(up, radius, LIFT_OCTAVES, seed), 0.0);
     let to_sun = vec3<f32>(sx, sy, sz);
     let mu = dot(to_sun, up);
-    let rf = radius as f32;
+    let rf = radius;
     var taus: vec4<f32> = vec4<f32>(SUN_TAU_MAX);
     if (mu > -0.2) {
         // The four heights' rays, stepped alike from the lowest's: each
@@ -474,7 +468,7 @@ fn k_cloud_sun(g: grid<3>, table: read_store<f64, 1>, lookup: read_store<vec4<i3
                 let p = tiles::cube_point(qx);
                 let uv = vec2<f32>(p.u, p.v) * 2.0 - 1.0;
                 let stretch = sqrt(1.0 + max(uv.x * uv.x, uv.y * uv.y)) / (1.0 + dot(uv, uv));
-                let w = max(CLOUD_COLUMN_MIN as f32, SUN_W_SHARE * len);
+                let w = max(CLOUD_COLUMN_MIN, SUN_W_SHARE * len);
                 let lk = min(tiles::level_for(w, w0 * stretch, levels) as i32, levels);
                 let at = tiles::tile_at(p, own.level);
                 var c: vec2<f32> = vec2<f32>(-COLUMN_F_RANGE, 0.0);
@@ -519,16 +513,15 @@ fn unorm8(x: f32) -> i32 {
 // the sun toward (sx, sy, sz); into the pool at the tile's slot as one word
 // a cell, the sun straight through, scattered down and the sky's, 8 bits
 // each from the lowest (a unorm8 texture's x, y, z).
-pub fn ground_light(dir: vec3<f64>, w: f64, to_sun: vec3<f64>, radius: f64, seed: i32, detail_var: f32) -> vec3<f32> {
-    let h = max(terrain_base(dir, radius, octaves_for(w, 1.0), seed), 0.0) as f32;
+pub fn ground_light(dir: vec3<f32>, w: f32, to_sun: vec3<f32>, radius: f32, seed: i32, detail_var: f32) -> vec3<f32> {
+    let h = max(terrain_base_near(dir, radius, octaves_for(w, 1.0), seed), 0.0);
     return cloud_light(dir, h, to_sun, w, radius, seed, detail_var);
 }
 @kernel @grid(3)
-fn k_cloud_ground(g: grid<3>, table: read_store<f64, 1>, pool: write_store<i32, 1>, cells: i32,
-                  tile: f64, border: f64, radius: f64, seed: i32, sx: f64, sy: f64, sz: f64, detail_var: f32) {
-    let r = g.z() * 24;
-    let slot = table[r] as i32;
-    let cell = tile_cell(table, r, g.x(), g.y(), tile, border, radius);
-    let c = ground_light(cell.dir, cell.w, normalize(vec3<f64>(sx, sy, sz)), radius, seed, detail_var);
+fn k_cloud_ground(g: grid<3>, table: read_store<vec4<i32>, 1>, pool: write_store<i32, 1>, cells: i32,
+                  tile: f32, border: f32, radius: f32, seed: i32, sx: f32, sy: f32, sz: f32, detail_var: f32) {
+    let slot = tiles::record(table, g.z()).slot;
+    let cell = tile_cell(table, g.z(), g.x(), g.y(), tile, border, radius);
+    let c = ground_light(cell.dir, cell.w, normalize(vec3<f32>(sx, sy, sz)), radius, seed, detail_var);
     pool[(slot * cells + g.y()) * cells + g.x()] = unorm8(c.x) | (unorm8(c.y) << 8) | (unorm8(c.z) << 16);
 }

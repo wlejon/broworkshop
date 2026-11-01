@@ -24,35 +24,35 @@ pub const RIV_REC: i32 = 11;   // height (m), downstream point (-1 none), catchm
 // The octaves the lattice resolves, which its points' heights are the
 // ground at: about 20 km between points, a wavelength of 2.5 of them
 // (ground.bk octaves_for).
-pub const RIV_OCTAVES: f64 = 5.6;
+pub const RIV_OCTAVES: f32 = 5.6;
 // A point drains a river once at least this many points drain through it.
 const MIN_CATCHMENT: f32 = 2.0;
 const PI4: f32 = 0.78539816;
 
 // Face `face`'s frame: a its axis (outward), e and f its plane's axes
 // (clouds.js faceFrame, the same).
-pub fn face_a(face: i32) -> vec3<f64> {
-    let s: f64 = face < 3 ? 1.0 : -1.0;
+pub fn face_a(face: i32) -> vec3<f32> {
+    let s: f32 = face < 3 ? 1.0 : -1.0;
     let axis = face % 3;
-    if (axis == 0) { return vec3<f64>(s, 0.0, 0.0); }
-    if (axis == 1) { return vec3<f64>(0.0, s, 0.0); }
-    return vec3<f64>(0.0, 0.0, s);
+    if (axis == 0) { return vec3<f32>(s, 0.0, 0.0); }
+    if (axis == 1) { return vec3<f32>(0.0, s, 0.0); }
+    return vec3<f32>(0.0, 0.0, s);
 }
-pub fn face_e(face: i32) -> vec3<f64> {
+pub fn face_e(face: i32) -> vec3<f32> {
     let axis = face % 3;
-    if (axis == 0) { return vec3<f64>(0.0, 1.0, 0.0); }
-    if (axis == 1) { return vec3<f64>(0.0, 0.0, 1.0); }
-    return vec3<f64>(1.0, 0.0, 0.0);
+    if (axis == 0) { return vec3<f32>(0.0, 1.0, 0.0); }
+    if (axis == 1) { return vec3<f32>(0.0, 0.0, 1.0); }
+    return vec3<f32>(1.0, 0.0, 0.0);
 }
-pub fn face_f(face: i32) -> vec3<f64> {
+pub fn face_f(face: i32) -> vec3<f32> {
     let axis = face % 3;
-    if (axis == 0) { return vec3<f64>(0.0, 0.0, 1.0); }
-    if (axis == 1) { return vec3<f64>(1.0, 0.0, 0.0); }
-    return vec3<f64>(0.0, 1.0, 0.0);
+    if (axis == 0) { return vec3<f32>(0.0, 0.0, 1.0); }
+    if (axis == 1) { return vec3<f32>(1.0, 0.0, 0.0); }
+    return vec3<f32>(0.0, 1.0, 0.0);
 }
 
 // The face whose side of the cube `d` points through.
-pub fn face_of(d: vec3<f64>) -> i32 {
+pub fn face_of(d: vec3<f32>) -> i32 {
     let ax = abs(d.x);
     let ay = abs(d.y);
     let az = abs(d.z);
@@ -63,18 +63,18 @@ pub fn face_of(d: vec3<f64>) -> i32 {
 
 // The direction at equal-angle coordinates (x, y) of a face (-1 to 1 across
 // it; beyond, the plane carries on past its edge).
-pub fn alpha_dir(face: i32, x: f32, y: f32) -> vec3<f64> {
-    let u = tan(x * PI4) as f64;
-    let v = tan(y * PI4) as f64;
+pub fn alpha_dir(face: i32, x: f32, y: f32) -> vec3<f32> {
+    let u = tan(x * PI4);
+    let v = tan(y * PI4);
     return normalize(face_a(face) + face_e(face) * u + face_f(face) * v);
 }
 
 // The cell (face, i, j) that `d` lies in.
-pub fn cell_of(d: vec3<f64>) -> vec3<i32> {
+pub fn cell_of(d: vec3<f32>) -> vec3<i32> {
     let face = face_of(d);
     let z = dot(d, face_a(face));
-    let x = atan((dot(d, face_e(face)) / z) as f32) / PI4;
-    let y = atan((dot(d, face_f(face)) / z) as f32) / PI4;
+    let x = atan(dot(d, face_e(face)) / z) / PI4;
+    let y = atan(dot(d, face_f(face)) / z) / PI4;
     let n = RIV_N as f32;
     let i = clamp(floor((x + 1.0) * 0.5 * n) as i32, 0, RIV_N - 1);
     let j = clamp(floor((y + 1.0) * 0.5 * n) as i32, 0, RIV_N - 1);
@@ -89,7 +89,7 @@ pub fn point_cell(k: i32) -> vec3<i32> {
 }
 
 // The point of cell c: at a spot hashed inside the middle 70% of it.
-pub fn point_dir(c: vec3<i32>, seed: i32) -> vec3<f64> {
+pub fn point_dir(c: vec3<i32>, seed: i32) -> vec3<f32> {
     let hx = hash_primes3d(seed + 5003, c.y * PRIME_X, c.z * PRIME_Y, c.x * PRIME_Z);
     let hy = hash_primes3d(seed + 6007, c.y * PRIME_X, c.z * PRIME_Y, c.x * PRIME_Z);
     let jx = 0.15 + 0.7 * (((hx >> 8) & 65535) as f32) / 65536.0;
@@ -167,9 +167,10 @@ fn valley_rise(x: f32) -> f32 {
 // root mean square over a cell) and holds its water as the share of it the
 // channel covers.
 //
-// The points' offsets from `dir` are in f32: each point's direction as its
-// record stores it (f32, so the same wherever it is read), less `dir` split
-// into its nearest f32 and the remainder, exact to millimetres.
+// The points' offsets from here are in f32: each point's direction as its
+// record stores it (f32, so the same wherever it is read), less here as an
+// anchor's direction `hi` (anchor.bk) and the offset `lo` from it, exact to
+// millimetres.
 fn point_offset(net: read_store<f32, 1>, k: i32, hi: vec3<f32>, lo: vec3<f32>, r: f32) -> vec3<f32> {
     return ((vec3<f32>(net[k + 4], net[k + 5], net[k + 6]) - hi) - lo) * r;
 }
@@ -283,19 +284,16 @@ fn in_block(c: vec3<i32>, p: i32) -> bool {
     return found;
 }
 
-// Every reach whose valley can reach `dir` is searched: the reaches from the
-// 3x3 points about its cell, and the reaches into them from the ring of 16
-// beyond. A reach between two points outside the 3x3 passes at least half a
-// cell (10 km) away, where its valley stands kilometres over any ground; one
-// left out nearer would end its valley along a cell's edge, a straight crease
-// across the land.
-pub fn water_at(dir: vec3<f64>, radius: f64, cell: f32, net: read_store<f32, 1>, seed: i32) -> Water {
-    let c = cell_of(dir);
-    let hi = vec3<f32>(dir.x as f32, dir.y as f32, dir.z as f32);
-    let rest = dir - vec3<f64>(hi.x as f64, hi.y as f64, hi.z as f64);
-    let lo = vec3<f32>(rest.x as f32, rest.y as f32, rest.z as f32);
-    let r = radius as f32;
-    let up = normalize(hi);
+// Every reach whose valley can reach the direction hi + lo is searched: the
+// reaches from the 3x3 points about its cell, and the reaches into them from
+// the ring of 16 beyond. A reach between two points outside the 3x3 passes
+// at least half a cell (10 km) away, where its valley stands kilometres over
+// any ground; one left out nearer would end its valley along a cell's edge,
+// a straight crease across the land.
+pub fn water_at(hi: vec3<f32>, lo: vec3<f32>, radius: f32, cell: f32, net: read_store<f32, 1>, seed: i32) -> Water {
+    let up = normalize(hi + lo);
+    let c = cell_of(up);
+    let r = radius;
     var cut: f32 = 1.0e9;
     var share: f32 = 0.0;
     var channel: f32 = 0.0;

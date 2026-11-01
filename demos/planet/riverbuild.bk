@@ -2,7 +2,7 @@
 // water stands at over each, their downstream neighbours and their
 // catchments, into the network's records. Each kernel runs over every
 // point, as grid (i, j, face).
-from planet::ground import terrain_base;
+from planet::ground import terrain_base_near;
 from planet::rivers import RIV_N, RIV_REC, RIV_OCTAVES, point_index, point_cell, point_dir, cell_next;
 
 // The fall from a lake's point to the next toward its outlet (m): a lake's
@@ -16,12 +16,12 @@ const LAKE_MAX: f32 = 30.0;
 // fill's start: the sea at its own height, land as high as can be.
 @kernel @grid(3)
 fn k_river_height(g: grid<3>, net: write_store<f32, 1>, level: write_store<f32, 1>,
-                  radius: f64, seed: i32) {
+                  radius: f32, seed: i32) {
     let c = vec3<i32>(g.z(), g.x(), g.y());
     let p = point_index(c);
     let k = p * RIV_REC;
     let dir = point_dir(c, seed);
-    let h = terrain_base(dir, radius, RIV_OCTAVES, seed) as f32;
+    let h = terrain_base_near(dir, radius, RIV_OCTAVES, seed);
     net[k] = h;
     net[k + 1] = -1.0;
     net[k + 2] = 1.0;
@@ -79,7 +79,7 @@ fn k_river_down(g: grid<3>, net: rw_store<f32, 1>, level: read_store<f32, 1>, se
                 let n = point_index(nc);
                 let fall = w - level[n];
                 if (fall > 0.0) {
-                    let slope = fall / (length(point_dir(nc, seed) - dir) as f32);
+                    let slope = fall / length(point_dir(nc, seed) - dir);
                     if (slope > best) {
                         best = slope;
                         down = n;
@@ -123,19 +123,19 @@ fn k_river_catchment(g: grid<3>, net: read_store<f32, 1>, src: read_store<f32, 1
 // its deepest floor and its outlet cuts a gorge through the rim at that
 // level (Lindsay 2016, filling and breaching together).
 const FLOOR_SAMPLES: i32 = 9;
-const FLOOR_OCTAVES: f64 = 12.0;
+const FLOOR_OCTAVES: f32 = 12.0;
 @kernel @grid(3)
-fn k_river_floor(g: grid<3>, net: read_store<f32, 1>, dst: write_store<f32, 1>, radius: f64, seed: i32) {
+fn k_river_floor(g: grid<3>, net: read_store<f32, 1>, dst: write_store<f32, 1>, radius: f32, seed: i32) {
     let c = vec3<i32>(g.z(), g.x(), g.y());
     let k = point_index(c);
     let dir = point_dir(c, seed);
-    var floor = max(terrain_base(dir, radius, FLOOR_OCTAVES, seed) as f32, 0.0);
+    var floor = max(terrain_base_near(dir, radius, FLOOR_OCTAVES, seed), 0.0);
     let down = net[k * RIV_REC + 1] as i32;
     if (down >= 0) {
         let b = point_dir(point_cell(down), seed);
         for (var i: i32 = 1; i < FLOOR_SAMPLES; i += 1) {
-            let t = (i as f64) / ((FLOOR_SAMPLES - 1) as f64);
-            let h = terrain_base(normalize(dir + (b - dir) * t), radius, FLOOR_OCTAVES, seed) as f32;
+            let t = (i as f32) / ((FLOOR_SAMPLES - 1) as f32);
+            let h = terrain_base_near(normalize(dir + (b - dir) * t), radius, FLOOR_OCTAVES, seed);
             floor = min(floor, max(h, 0.0));
         }
     }

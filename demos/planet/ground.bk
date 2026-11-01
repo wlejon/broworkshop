@@ -1,10 +1,12 @@
-// The planet's ground: one height function of the unit direction, evaluated
-// in f64 so a cell lands exactly at any scale, Earth radius included, and the
+// The planet's ground: one height function of the unit direction, and the
 // colour of the truth under a cell. planet.bk's kernels fill tiles with it;
-// the tests measure it.
+// the tests measure it. GPU code is f32: a direction is an anchor's (anchor.bk,
+// its noise lattices found in f64 on the CPU) plus an f32 offset e from it, so
+// a cell lands exactly at any scale, Earth radius included.
 module planet::ground;
 
 import std::noise::*;
+import tiles;
 from planet::rivers import water_at, lake_surface, Water;
 // The ridged relief's octaves and statistics, which the ground's shader
 // shares (relief.bk): BASE_WAVELENGTH the first octave's wavelength, metres;
@@ -13,7 +15,9 @@ from planet::rivers import water_at, lake_surface, Water;
 // per unit of input.
 from planet::relief import BASE_WAVELENGTH, RIDGE_MEAN, NOISE_VAR, NOISE_GRAD_VAR, NOISE_BOX, RIDGE_FIRST, RIDGE_LAST,
     RIDGE_PAST, FINE_FIRST, WARP_OCTAVE, WARP_DISPLACE, ridge_amp, normal_cdf, ridge_cell_mean, span_at, mean_factor, SimplexAt,
-    simplex_grad, simplex_twice;
+    simplex_grad;
+from planet::anchor import Anchor, Lattice, PerlinAt, RANGE, VARY_FIRST, STRATA_FOLD, twice, doubled, simplex_from,
+    perlin_from, moved, anchor_near;
 
 // Var((1 - |noise|)^2), and the variance of its gradient along one axis per
 // unit of input, measured the same way.
@@ -26,38 +30,11 @@ const RIDGE_GRAD_VAR: f32 = 4.586;
 // which every octave shares, so the steps of all of them line up into one
 // (a 4 cm ledge along the cube's +Y/+Z edge, seen as a line to the horizon).
 //
-// It is std supersimplex3d (relief.bk simplex_grad) with the f64 work only
-// in finding q's lattice cell (simplex_anchor: the skew and its floor): the
-// rest runs in f32 on the offset inside the cell, and the GPU runs f64 at a
-// small fraction of f32's rate. What the f32 offset loses (2^-24 of a cell,
-// 8 cm of the 1400 km range mask's) is put back to first order by the
-// noise's own gradient, or the ground stood in stairs that size.
-fn noise(q: vec3<f64>, seed: i32) -> f64 {
-    return simplex_grad(simplex_anchor(q), seed).x as f64;
-}
-pub fn noise_at(q: vec3<f64>, seed: i32) -> f64 {
-    return noise(q, seed);
-}
-
-// Where q is on the noise's lattice, as noise() finds it: the f64 half, from
-// which relief.bk's simplex_grad runs the rest in f32, and simplex_past
-// moves to points near by.
-pub fn simplex_anchor(q: vec3<f64>) -> SimplexAt {
-    let s3: f64 = (0.3333333432674407958984375 as f32) as f64;
-    let sum = q.x + q.y + q.z;
-    let s = q + vec3<f64>(s3 * sum);
-    let c = floor(s);
-    let f = s - c;
-    let sk = vec3<f32>(f.x as f32, f.y as f32, f.z as f32);
-    // What the f32 offset lost, unskewed into the noise's coordinates (the
-    // skew adds a third of the sum, so its inverse takes a sixth).
-    let lost = f - vec3<f64>(sk.x as f64, sk.y as f64, sk.z as f64);
-    let r = lost - vec3<f64>((lost.x + lost.y + lost.z) / 6.0);
-    return SimplexAt {
-        cell: vec3<i32>((c.x as i64) as i32, (c.y as i64) as i32, (c.z as i64) as i32),
-        sk: sk,
-        res: vec3<f32>(r.x as f32, r.y as f32, r.z as f32),
-    };
+// It is std supersimplex3d (relief.bk simplex_grad) at a lattice point and
+// an offset from it (anchor.bk simplex_from): octave k of lattice l at the
+// point `off` from l's point (in the noise's units at l's own octave).
+fn noise_on(l: Lattice, k: i32, off: vec3<f32>, seed: i32) -> f32 {
+    return simplex_grad(simplex_from(doubled(l, k), off * exp2(k as f32)), seed).x;
 }
 
 // A cell holds the mean of the ground over it, not the value at its centre:
@@ -75,13 +52,13 @@ pub fn simplex_anchor(q: vec3<f64>) -> SimplexAt {
 // curvature a box removes, so its factor falls by exp(-0.9 span) as cells
 // widen. Both within a few hundredths of the measured slopes.
 const RIDGE_BOX: f32 = 2.0 * RIDGE_GRAD_VAR / RIDGE_VAR / 24.0;
-fn span_of(o: i32, octaves: f64) -> f32 {
-    return span_at(o, octaves as f32);
+fn span_of(o: i32, octaves: f32) -> f32 {
+    return span_at(o, octaves);
 }
-fn noise_mean_factor(o: i32, octaves: f64) -> f32 {
-    return mean_factor(o, octaves as f32);
+fn noise_mean_factor(o: i32, octaves: f32) -> f32 {
+    return mean_factor(o, octaves);
 }
-fn ridge_mean_factor(o: i32, octaves: f64) -> f32 {
+fn ridge_mean_factor(o: i32, octaves: f32) -> f32 {
     let s = span_of(o, octaves);
     return exp(-RIDGE_BOX * s * s * exp(-0.9 * s));
 }
@@ -89,42 +66,35 @@ fn ridge_mean_factor(o: i32, octaves: f64) -> f32 {
 // cell `NOISE_PAST` octaves finer is 2.3 wavelengths wide, factor 0.003; the
 // ridge's 1.1, factor 0.08), the last fading out over its final octave so
 // the sum is continuous in `octaves`.
-const NOISE_PAST: f64 = 2.5;
+const NOISE_PAST: f32 = 2.5;
 
-// The octaves first to last - 1 of noise, each at the factor of its mean
-// over one of the tile's cells (noise_mean_factor): a tile holds the average
-// of what its children hold plus zero-mean detail.
-fn fbm_to(p: vec3<f64>, octaves: f64, first: i32, last: i32, seed: i32) -> f64 {
+// The octaves first to last - 1 of noise on lattice l at `off` from its
+// point (the noise's units at octave 0), each at the factor of its mean over
+// one of the tile's cells (noise_mean_factor): a tile holds the average of
+// what its children hold plus zero-mean detail. Each octave's lattice point
+// is the last's doubled (anchor.bk twice), exactly.
+fn fbm_to(l: Lattice, off: vec3<f32>, octaves: f32, first: i32, last: i32, seed: i32) -> f32 {
     var sum: f32 = 0.0;
     var amp: f32 = 1.0;
-    let q = p * pow(2.0, first as f64);
-    var at = simplex_anchor(q);
-    let past = (octaves + NOISE_PAST) as f32;
+    let past = octaves + NOISE_PAST;
     let n = min(ceil(past) as i32, last);
+    var lat = doubled(l, first);
+    var d = off * exp2(first as f32);
     for (var o: i32 = first; o < n; o += 1) {
-        let k = o - first;
-        if (k > 0 && (k & (ANCHOR_EVERY - 1)) == 0) { at = simplex_anchor(q * exp2(k as f64)); }
         let w = clamp(past - (o as f32), 0.0, 1.0) * noise_mean_factor(o, octaves);
-        sum += simplex_grad(at, seed + o).x * amp * w;
+        sum += simplex_grad(simplex_from(lat, d), seed + o).x * amp * w;
         amp *= 0.5;
-        at = simplex_twice(at);
+        lat = twice(lat);
+        d *= 2.0;
     }
-    return sum as f64;
+    return sum;
 }
-
-// The octaves past an anchor are on its lattice, a doubling each (relief.bk
-// simplex_twice), all in f32: the f64 skew and floor of noise() would be
-// most of an octave's cost at the GPU's f64 rate. The doubling keeps the
-// anchor's f32 offset, a bit less of it each octave, so a point anchors
-// again from f64 every ANCHOR_EVERY octaves: the offset is then good to
-// 2^-16 of a cell, under a millimetre of the finest octaves' relief.
-const ANCHOR_EVERY: i32 = 8;
 
 // The octaves a tile `extent` wide with cells of `inv_size` of its edge can
 // carry: down to a wavelength of 2.5 cells (app.js octavesFor, the same).
-pub fn octaves_for(extent: f64, inv_size: f64) -> f64 {
-    let ratio = ((BASE_WAVELENGTH as f64) / (2.5 * extent * inv_size)) as f32;
-    return clamp(log2(ratio), 1.0, 30.0) as f64;
+pub fn octaves_for(extent: f32, inv_size: f32) -> f32 {
+    let ratio = BASE_WAVELENGTH / (2.5 * extent * inv_size);
+    return clamp(log2(ratio), 1.0, 30.0);
 }
 
 // The mountains' relief: ridged octaves RIDGE_FIRST to RIDGE_LAST - 1, each
@@ -140,7 +110,7 @@ pub fn octaves_for(extent: f64, inv_size: f64) -> f64 {
 // RIDGE_LAST, ridge_amp.)
 // Where ranges are, their ground is lifted this far (metres): the belt the
 // relief stands on.
-const UPLIFT: f64 = 2500.0;
+const UPLIFT: f32 = 2500.0;
 // The detail fbm's first amplitude (octave 4), metres: the plains', and
 // what the ranges add on top.
 const DETAIL_PLAINS: f32 = 250.0;
@@ -151,7 +121,7 @@ const DETAIL_RANGES: f32 = 300.0;
 // octave the tile resolves (a peak between its cells), with a quarter more
 // for the noise's reach toward 1. Below the continents' octaves it is
 // everything (`top`).
-pub fn range_margin(octaves: f64, top: f32) -> f32 {
+pub fn range_margin(octaves: f32, top: f32) -> f32 {
     let k = (floor(octaves) as i32) - 1;
     if (k < 4) { return top; }
     var m: f32 = (DETAIL_PLAINS + DETAIL_RANGES) * 2.0 * exp2(4.0 - (k as f32));
@@ -163,8 +133,7 @@ pub fn range_margin(octaves: f64, top: f32) -> f32 {
 
 // The shares of an octave's variance that lie inside one of a tile's cells,
 // about the cell's value: `f` the octave's mean factor at the cell, `box`
-// its k^2 / 24. f32 here and below: the statistics need no more, and Vulkan
-// has no f64 exp.
+// its k^2 / 24.
 //
 // within_share: all of it the cell does not hold, 1 - f^2.
 fn within_share(f: f32) -> f32 {
@@ -199,28 +168,27 @@ fn ramp_mean(m: f32, s: f32, k: f32) -> f32 {
 }
 
 // E[clamp(X, lo, hi)] for X ~ N(m, s^2).
-fn clamp_mean(m: f64, s: f64, lo: f32, hi: f32) -> f64 {
-    let mf = m as f32;
-    let sf = s as f32;
-    return (lo + ramp_mean(mf, sf, lo) - ramp_mean(mf, sf, hi)) as f64;
+fn clamp_mean(m: f32, s: f32, lo: f32, hi: f32) -> f32 {
+    return lo + ramp_mean(m, s, lo) - ramp_mean(m, s, hi);
 }
 
-// The broad masks at p (= dir * radius / BASE_WAVELENGTH): x the continents,
-// y what they vary by inside one of the tile's cells as Gaussian noise (the
-// coastline clamps take their mean over it, so a coarse tile holds what its
-// descendants average to), z where mountain ranges rise, w how much is land.
-fn masks(p: vec3<f64>, octaves: f64, seed: i32) -> vec4<f64> {
-    let continents = fbm_to(p, octaves, 0, 4, seed);
+// The broad masks at `off` from the anchor's p (p = dir * radius /
+// BASE_WAVELENGTH): x the continents, y what they vary by inside one of the
+// tile's cells as Gaussian noise (the coastline clamps take their mean over
+// it, so a coarse tile holds what its descendants average to), z where
+// mountain ranges rise, w how much is land.
+fn masks(a: Anchor, off: vec3<f32>, octaves: f32, seed: i32) -> vec4<f32> {
+    let continents = fbm_to(a.p, off, octaves, 0, 4, seed);
     var unresolved: f32 = 0.0;
-    var a: f32 = 1.0;
+    var amp: f32 = 1.0;
     for (var o: i32 = 0; o < 4; o += 1) {
-        unresolved += a * a * NOISE_VAR * within_share(noise_mean_factor(o, octaves));
-        a *= 0.5;
+        unresolved += amp * amp * NOISE_VAR * within_share(noise_mean_factor(o, octaves));
+        amp *= 0.5;
     }
-    let sc = sqrt(unresolved) as f64;
+    let sc = sqrt(unresolved);
     let onLand = clamp_mean(continents * 6.0 + 0.3, sc * 6.0, 0.0, 1.0);
-    let ranges = clamp(noise(p * 1.7, seed + 300) * 2.2 - 0.35, 0.0, 1.0);
-    return vec4<f64>(continents, sc, ranges, onLand);
+    let ranges = clamp(noise_on(a.r, 0, off * RANGE, seed + 300) * 2.2 - 0.35, 0.0, 1.0);
+    return vec4<f32>(continents, sc, ranges, onLand);
 }
 
 // The relief reads its octaves through a warp: a smooth displacement (one
@@ -233,61 +201,77 @@ fn masks(p: vec3<f64>, octaves: f64, seed: i32) -> vec4<f64> {
 // Where it compresses the ground a cell spans more of an octave than its
 // size says, which the mean factors do not follow. (WARP_OCTAVE and
 // WARP_DISPLACE, in p units per unit of noise, are relief.bk's.)
+//
+// The relief's point at `off` from the anchor's p: off moved by the warp (p
+// units), from which the relief's octaves run on the p lattice.
+pub fn relief_offset(a: Anchor, off: vec3<f32>, seed: i32) -> vec3<f32> {
+    let at = simplex_from(doubled(a.p, WARP_OCTAVE), off * exp2(WARP_OCTAVE as f32));
+    let warp = vec3<f32>(simplex_grad(at, seed + 400).x, simplex_grad(at, seed + 401).x, simplex_grad(at, seed + 402).x);
+    return off + warp * WARP_DISPLACE;
+}
 
-// The relief at p, metres at full uplift: the ridged octaves, each its mean
-// over one of the tile's cells (relief.bk ridge_cell_mean) less the ridge's
-// mean. x the octaves below FINE_FIRST, y those from it on: the ground's
-// fine relief (a 1.2 km wavelength on), spurs, gullies and knolls, which a
-// valley's sides carry on (terrain) instead of being planed away.
-fn relief(p: vec3<f64>, octaves: f64, seed: i32) -> vec2<f64> {
-    let n = min(ceil(octaves + (RIDGE_PAST as f64)) as i32, RIDGE_LAST);
-    if (n <= RIDGE_FIRST) { return vec2<f64>(0.0, 0.0); }
-    let wq = p * exp2(WARP_OCTAVE as f64);
-    let warp = vec3<f64>(noise(wq, seed + 400), noise(wq, seed + 401), noise(wq, seed + 402));
-    let q = (p + warp * (WARP_DISPLACE as f64)) * exp2(RIDGE_FIRST as f64);
-    var at = simplex_anchor(q);
+// The relief at `off`, metres at full uplift: the ridged octaves, each its
+// mean over one of the tile's cells (relief.bk ridge_cell_mean) less the
+// ridge's mean. x the octaves below FINE_FIRST, y those from it on: the
+// ground's fine relief (a 1.2 km wavelength on), spurs, gullies and knolls,
+// which a valley's sides carry on (terrain) instead of being planed away.
+fn relief(a: Anchor, off: vec3<f32>, octaves: f32, seed: i32) -> vec2<f32> {
+    let n = min(ceil(octaves + RIDGE_PAST) as i32, RIDGE_LAST);
+    if (n <= RIDGE_FIRST) { return vec2<f32>(0.0, 0.0); }
+    var lat = doubled(a.p, RIDGE_FIRST);
+    var d = relief_offset(a, off, seed) * exp2(RIDGE_FIRST as f32);
     var broad: f32 = 0.0;
     var fine: f32 = 0.0;
-    let past = (octaves as f32) + RIDGE_PAST;
+    let past = octaves + RIDGE_PAST;
     for (var o: i32 = RIDGE_FIRST; o < n; o += 1) {
-        let k = o - RIDGE_FIRST;
-        if (k > 0 && (k & (ANCHOR_EVERY - 1)) == 0) { at = simplex_anchor(q * exp2(k as f64)); }
         let fade = clamp(past - (o as f32), 0.0, 1.0);
-        let mean = ridge_cell_mean(simplex_grad(at, seed + 100 + o).x, noise_mean_factor(o, octaves));
+        let mean = ridge_cell_mean(simplex_grad(simplex_from(lat, d), seed + 100 + o).x, noise_mean_factor(o, octaves));
         let v = (mean - RIDGE_MEAN) * ridge_amp(o) * fade;
         if (o < FINE_FIRST) { broad += v; } else { fine += v; }
-        at = simplex_twice(at);
+        lat = twice(lat);
+        d *= 2.0;
     }
-    return vec2<f64>(broad as f64, fine as f64);
+    return vec2<f32>(broad, fine);
 }
 
-// The ground before the water cuts it, metres above the sphere at `dir`: x
-// its broad shape, y the fine relief over it (FINE_FIRST). Continents from
-// the broad octaves, ranges where a broad mask allows them on land (lifted,
-// and carrying the ridged relief), and the fine octaves over both, rougher
-// in the ranges. z the uplift, which scales the relief.
-pub fn terrain_parts(dir: vec3<f64>, radius: f64, octaves: f64, seed: i32) -> vec3<f64> {
-    let p = dir * (radius / (BASE_WAVELENGTH as f64));
-    let m = masks(p, octaves, seed);
+// The anchor's offset e in p units.
+fn p_offset(e: vec3<f32>, radius: f32) -> vec3<f32> {
+    return e * (radius / BASE_WAVELENGTH);
+}
+
+// The ground before the water cuts it, metres above the sphere at offset e
+// from the anchor's direction: x its broad shape, y the fine relief over it
+// (FINE_FIRST). Continents from the broad octaves, ranges where a broad mask
+// allows them on land (lifted, and carrying the ridged relief), and the fine
+// octaves over both, rougher in the ranges. z the uplift, which scales the
+// relief.
+pub fn terrain_parts(a: Anchor, e: vec3<f32>, radius: f32, octaves: f32, seed: i32) -> vec3<f32> {
+    let off = p_offset(e, radius);
+    let m = masks(a, off, octaves, seed);
     let land = clamp_mean(m.x * 3.0 + 0.15, m.y * 3.0, -1.0, 1.0);
     let uplift = m.z * m.w;
-    let r = relief(p, octaves, seed);
-    let amp = (DETAIL_PLAINS + DETAIL_RANGES * (uplift as f32)) as f64;
-    let broad = fbm_to(p, octaves, 4, FINE_FIRST, seed + 200);
-    let fine = fbm_to(p, octaves, FINE_FIRST, 64, seed + 200) * exp2((4 - FINE_FIRST) as f64);
-    return vec3<f64>(land * 1100.0 + uplift * (UPLIFT + r.x) + broad * amp, uplift * r.y + fine * amp, uplift);
+    let r = relief(a, off, octaves, seed);
+    let amp = DETAIL_PLAINS + DETAIL_RANGES * uplift;
+    let broad = fbm_to(a.p, off, octaves, 4, FINE_FIRST, seed + 200);
+    let fine = fbm_to(a.p, off, octaves, FINE_FIRST, 64, seed + 200) * exp2((4 - FINE_FIRST) as f32);
+    return vec3<f32>(land * 1100.0 + uplift * (UPLIFT + r.x) + broad * amp, uplift * r.y + fine * amp, uplift);
 }
-pub fn terrain_base(dir: vec3<f64>, radius: f64, octaves: f64, seed: i32) -> f64 {
-    let t = terrain_parts(dir, radius, octaves, seed);
+pub fn terrain_base(a: Anchor, e: vec3<f32>, radius: f32, octaves: f32, seed: i32) -> f32 {
+    let t = terrain_parts(a, e, radius, octaves, seed);
     return t.x + t.y;
+}
+// The same at a direction known only to f32 (anchor.bk anchor_near): for the
+// clouds' and the rivers' coarse work, good to about a metre.
+pub fn terrain_base_near(dir: vec3<f32>, radius: f32, octaves: f32, seed: i32) -> f32 {
+    return terrain_base(anchor_near(dir, radius), vec3<f32>(0.0), radius, octaves, seed);
 }
 
 // The width of a cell that carries `octaves` (octaves_for, inverted).
-pub fn cell_width(octaves: f64) -> f32 {
-    return (BASE_WAVELENGTH as f32) / (2.5 * exp2(octaves as f32));
+pub fn cell_width(octaves: f32) -> f32 {
+    return BASE_WAVELENGTH / (2.5 * exp2(octaves));
 }
 
-// The ground at `dir`, metres above the sphere, or the water over it: the
+// The ground at offset e, metres above the sphere, or the water over it: the
 // ground cut down by the rivers' valleys (rivers.bk), and a lake's level
 // where it stands over that. A valley cuts the broad shape, and its sides
 // carry the fine relief on, faded out over the last VALLEY_FLOOR metres down
@@ -302,28 +286,28 @@ const CUT_BLEND: f32 = 40.0;
 // the uplift where the ground stands, less where a valley cuts it (the
 // fine part as its sides carry it on), none under a lake. The ground's
 // shader scales the octaves finer than its texels by them (ground_mesh.bk).
-pub fn terrain_shaped(dir: vec3<f64>, radius: f64, octaves: f64, seed: i32, net: read_store<f32, 1>) -> vec3<f64> {
-    return shaped_by(terrain_parts(dir, radius, octaves, seed), water_at(dir, radius, cell_width(octaves), net, seed));
+pub fn terrain_shaped(a: Anchor, e: vec3<f32>, radius: f32, octaves: f32, seed: i32, net: read_store<f32, 1>) -> vec3<f32> {
+    return shaped_by(terrain_parts(a, e, radius, octaves, seed), water_at(a.dir, e, radius, cell_width(octaves), net, seed));
 }
 // The ground's parts (terrain_parts) cut by the water w found for them.
-fn shaped_by(t: vec3<f64>, w: Water) -> vec3<f64> {
+fn shaped_by(t: vec3<f32>, w: Water) -> vec3<f32> {
     let h = t.x + t.y;
     let side = smoothstep(0.0, VALLEY_FLOOR, w.near.x - w.bed);
-    let valley = w.near.x + (t.y as f32) * side;
-    let x = (h as f32) - valley;
+    let valley = w.near.x + t.y * side;
+    let x = h - valley;
     let m = max(CUT_BLEND - abs(x), 0.0) / CUT_BLEND;
-    let cut = min(h, (valley - m * m * CUT_BLEND * 0.25) as f64);
-    let lake = lake_surface(cut as f32, w);
-    if (lake > (cut as f32)) { return vec3<f64>(lake as f64, 0.0, 0.0); }
-    let u = t.z as f32;
-    if (cut >= h) { return vec3<f64>(cut, t.z, t.z); }
+    let cut = min(h, valley - m * m * CUT_BLEND * 0.25);
+    let lake = lake_surface(cut, w);
+    if (lake > cut) { return vec3<f32>(lake, 0.0, 0.0); }
+    let u = t.z;
+    if (cut >= h) { return vec3<f32>(cut, t.z, t.z); }
     // On the cut: d cut / d h and d cut / d valley.
     let sx = x >= 0.0 ? 1.0 : -1.0;
     let dh = 0.5 * m * sx;
-    return vec3<f64>(cut, (u * dh) as f64, (u * (dh + (1.0 - dh) * side)) as f64);
+    return vec3<f32>(cut, u * dh, u * (dh + (1.0 - dh) * side));
 }
-pub fn terrain(dir: vec3<f64>, radius: f64, octaves: f64, seed: i32, net: read_store<f32, 1>) -> f64 {
-    return terrain_shaped(dir, radius, octaves, seed, net).x;
+pub fn terrain(a: Anchor, e: vec3<f32>, radius: f32, octaves: f32, seed: i32, net: read_store<f32, 1>) -> f32 {
+    return terrain_shaped(a, e, radius, octaves, seed, net).x;
 }
 
 // Whether the ground holds soil, grass and trees or lies bare as rock is
@@ -333,50 +317,57 @@ pub fn terrain(dir: vec3<f64>, radius: f64, octaves: f64, seed: i32, net: read_s
 // to about 37 m), decided there once, so every scale reads the same rock:
 // a cell finer than that takes it at its point (soil_gradient), a coarser
 // one the share of it under the cell (spread to SOIL_OCTAVES).
-pub const SOIL_OCTAVES: f64 = 17.0;
-// The ground through SOIL_OCTAVES at `dir`, its water's cut included.
-pub fn soil_height(dir: vec3<f64>, radius: f64, seed: i32, net: read_store<f32, 1>) -> f32 {
-    let w = water_at(dir, radius, cell_width(SOIL_OCTAVES), net, seed);
-    return shaped_by(terrain_parts(dir, radius, SOIL_OCTAVES, seed), w).x as f32;
+pub const SOIL_OCTAVES: f32 = 17.0;
+// The ground through SOIL_OCTAVES at offset e, its water's cut included.
+pub fn soil_height(a: Anchor, e: vec3<f32>, radius: f32, seed: i32, net: read_store<f32, 1>) -> f32 {
+    let w = water_at(a.dir, e, radius, cell_width(SOIL_OCTAVES), net, seed);
+    return shaped_by(terrain_parts(a, e, radius, SOIL_OCTAVES, seed), w).x;
 }
-pub fn soil_gradient(dir: vec3<f64>, radius: f64, seed: i32, net: read_store<f32, 1>) -> f32 {
-    let axis = abs(dir.y) < 0.9 ? vec3<f64>(0.0, 1.0, 0.0) : vec3<f64>(1.0, 0.0, 0.0);
-    let t1 = normalize(cross(dir, axis));
-    let t2 = cross(dir, t1);
-    let e: f64 = 2.0;   // metres either side
-    let w = water_at(dir, radius, cell_width(SOIL_OCTAVES), net, seed);
-    let k = e / radius;
-    let hu = shaped_by(terrain_parts(normalize(dir + t1 * k), radius, SOIL_OCTAVES, seed), w).x
-           - shaped_by(terrain_parts(normalize(dir - t1 * k), radius, SOIL_OCTAVES, seed), w).x;
-    let hv = shaped_by(terrain_parts(normalize(dir + t2 * k), radius, SOIL_OCTAVES, seed), w).x
-           - shaped_by(terrain_parts(normalize(dir - t2 * k), radius, SOIL_OCTAVES, seed), w).x;
-    return (sqrt(hu * hu + hv * hv) / (2.0 * e)) as f32;
+pub fn soil_gradient(a: Anchor, e: vec3<f32>, radius: f32, seed: i32, net: read_store<f32, 1>) -> f32 {
+    let n = a.dir + e;
+    let axis = abs(n.y) < 0.9 ? vec3<f32>(0.0, 1.0, 0.0) : vec3<f32>(1.0, 0.0, 0.0);
+    let t1 = normalize(cross(n, axis));
+    let t2 = cross(n, t1);
+    let step: f32 = 2.0;   // metres either side
+    let w = water_at(a.dir, e, radius, cell_width(SOIL_OCTAVES), net, seed);
+    let k = step / radius;
+    let hu = shaped_by(terrain_parts(a, moved(a.dir, e, t1 * k), radius, SOIL_OCTAVES, seed), w).x
+           - shaped_by(terrain_parts(a, moved(a.dir, e, -t1 * k), radius, SOIL_OCTAVES, seed), w).x;
+    let hv = shaped_by(terrain_parts(a, moved(a.dir, e, t2 * k), radius, SOIL_OCTAVES, seed), w).x
+           - shaped_by(terrain_parts(a, moved(a.dir, e, -t2 * k), radius, SOIL_OCTAVES, seed), w).x;
+    return sqrt(hu * hu + hv * hv) / (2.0 * step);
 }
 
 // Below this many octaves a cell is wide enough that the next octaves vary
 // a lot inside it, through the coastline clamps and the ridges: such a cell
 // averages SUB x SUB samples taken with two more octaves instead of reading
 // one, so it is the aggregate of the finer truth, not a guess at it.
-const SUPERSAMPLE_BELOW: f64 = 7.0;
+const SUPERSAMPLE_BELOW: f32 = 7.0;
 const SUB: i32 = 4;
 
-// The height a cell holds: at (s, t) of the frame (corner c, axes u, v in
-// base coordinates), `cell` wide in (s, t).
-pub fn cell_height(c: vec3<f64>, u: vec3<f64>, v: vec3<f64>, s: f64, t: f64, cell: f64,
-                   radius: f64, octaves: f64, seed: i32, net: read_store<f32, 1>) -> f64 {
+// A tile's point at (s, t) of its frame: its offset from the anchor's
+// direction (the tile's record, tiles.bk).
+pub fn frame_dir(rec: tiles::Record, s: f32, t: f32) -> vec3<f32> {
+    return rec.dir_lo + tiles::sphere_offset(rec, tiles::frame_offset(rec, s, t));
+}
+
+// The height a cell holds: at (s, t) of the tile's frame, `cell` wide in
+// (s, t).
+pub fn cell_height(a: Anchor, rec: tiles::Record, s: f32, t: f32, cell: f32,
+                   radius: f32, octaves: f32, seed: i32, net: read_store<f32, 1>) -> f32 {
     if (octaves >= SUPERSAMPLE_BELOW) {
-        return terrain(normalize(c + u * s + v * t), radius, octaves, seed, net);
+        return terrain(a, frame_dir(rec, s, t), radius, octaves, seed, net);
     }
-    let w = water_at(normalize(c + u * s + v * t), radius, cell_width(octaves), net, seed);
-    var sum: f64 = 0.0;
+    let w = water_at(a.dir, frame_dir(rec, s, t), radius, cell_width(octaves), net, seed);
+    var sum: f32 = 0.0;
     for (var j: i32 = 0; j < SUB; j += 1) {
         for (var i: i32 = 0; i < SUB; i += 1) {
-            let ds = (((i as f64) + 0.5) / (SUB as f64) - 0.5) * cell;
-            let dt = (((j as f64) + 0.5) / (SUB as f64) - 0.5) * cell;
-            sum += shaped_by(terrain_parts(normalize(c + u * (s + ds) + v * (t + dt)), radius, octaves + 2.0, seed), w).x;
+            let ds = (((i as f32) + 0.5) / (SUB as f32) - 0.5) * cell;
+            let dt = (((j as f32) + 0.5) / (SUB as f32) - 0.5) * cell;
+            sum += shaped_by(terrain_parts(a, frame_dir(rec, s + ds, t + dt), radius, octaves + 2.0, seed), w).x;
         }
     }
-    return sum / ((SUB * SUB) as f64);
+    return sum / ((SUB * SUB) as f32);
 }
 
 // ── Colour ──────────────────────────────────────────────────────────────────
@@ -392,30 +383,29 @@ pub fn cell_height(c: vec3<f64>, u: vec3<f64>, v: vec3<f64>, s: f64, t: f64, cel
 // gradient_share in gradient, down to `truth`, the finest octaves anything
 // draws. With gain 0.5 and lacunarity 2 every octave adds the same slope,
 // so the fine octaves matter to the gradient as much as the broad ones.
-pub fn spread(dir: vec3<f64>, radius: f64, octaves: f64, truth: f32, seed: i32) -> vec2<f32> {
-    let m = masks(dir * (radius / (BASE_WAVELENGTH as f64)), octaves, seed);
-    let oct = octaves as f32;
+pub fn spread(a: Anchor, e: vec3<f32>, radius: f32, octaves: f32, truth: f32, seed: i32) -> vec2<f32> {
+    let m = masks(a, p_offset(e, radius), octaves, seed);
     // The continents through the coastline clamp, which passes them where
     // it is linear: 1100 * 3 metres of height per unit of noise.
-    let mc = (m.x * 3.0 + 0.15) as f32;
-    let sc = max((m.y * 3.0) as f32, 1e-6);
+    let mc = m.x * 3.0 + 0.15;
+    let sc = max(m.y * 3.0, 1e-6);
     let land = 3300.0 * (normal_cdf((1.0 - mc) / sc) - normal_cdf((-1.0 - mc) / sc));
     var ch: f32 = 0.0;
     var cg: f32 = 0.0;
-    var a: f32 = 1.0;
+    var amp: f32 = 1.0;
     for (var o: i32 = 0; o < 4; o += 1) {
         let f = noise_mean_factor(o, octaves);
         let s = span_of(o, octaves);
-        ch += a * a * NOISE_VAR * unresolved_share(f, NOISE_BOX, s);
+        ch += amp * amp * NOISE_VAR * unresolved_share(f, NOISE_BOX, s);
         cg += NOISE_GRAD_VAR * gradient_share(f, s);   // amplitude * frequency = 1
-        a *= 0.5;
+        amp *= 0.5;
     }
     // The relief, in metres already (ridge_amp), under the uplift.
-    let mount = (m.z * m.w) as f32;
+    let mount = m.z * m.w;
     var rh: f32 = 0.0;
     var rg: f32 = 0.0;
     for (var o: i32 = RIDGE_FIRST; o < RIDGE_LAST; o += 1) {
-        let f = ridge_mean_factor(o, octaves) * clamp(oct + (RIDGE_PAST as f32) - (o as f32), 0.0, 1.0);
+        let f = ridge_mean_factor(o, octaves) * clamp(octaves + RIDGE_PAST - (o as f32), 0.0, 1.0);
         let s = span_of(o, octaves);
         let ra = ridge_amp(o);
         let rf = ra * exp2(o as f32);   // amplitude * frequency
@@ -424,21 +414,21 @@ pub fn spread(dir: vec3<f64>, radius: f64, octaves: f64, truth: f32, seed: i32) 
         rg += rf * rf * RIDGE_GRAD_VAR * gradient_share(f, s) * w * w;
     }
     // The detail, octave 4 up at amplitude 0.5^(o - 4), to the truth's last.
-    let detail = DETAIL_PLAINS + DETAIL_RANGES * (m.z * m.w) as f32;
+    let detail = DETAIL_PLAINS + DETAIL_RANGES * mount;
     var dh: f32 = 0.0;
     var dg: f32 = 0.0;
-    a = 1.0;
+    amp = 1.0;
     let n = ceil(truth) as i32;
     for (var o: i32 = 4; o < n; o += 1) {
         let w = clamp(truth - (o as f32), 0.0, 1.0);
-        let f = noise_mean_factor(o, octaves) * clamp(oct + (NOISE_PAST as f32) - (o as f32), 0.0, 1.0);
+        let f = noise_mean_factor(o, octaves) * clamp(octaves + NOISE_PAST - (o as f32), 0.0, 1.0);
         let s = span_of(o, octaves);
-        dh += a * a * NOISE_VAR * unresolved_share(f, NOISE_BOX, s) * w * w;
+        dh += amp * amp * NOISE_VAR * unresolved_share(f, NOISE_BOX, s) * w * w;
         dg += 256.0 * NOISE_GRAD_VAR * gradient_share(f, s) * w * w;   // amplitude * frequency = 16
-        a *= 0.5;
+        amp *= 0.5;
     }
     let h2 = land * land * ch + mount * mount * rh + detail * detail * dh;
-    let wl = BASE_WAVELENGTH as f32;
+    let wl = BASE_WAVELENGTH;
     let g2 = (land * land * cg + mount * mount * rg + detail * detail * dg) / (wl * wl);
     return vec2<f32>(sqrt(h2), sqrt(g2));
 }
@@ -481,9 +471,8 @@ pub fn surface(h: f32, grad: f32) -> vec4<f32> {
 // heights spread by sd, an octave of wavelength L averages to about itself
 // times exp(-(2 pi sd / L)^2 / 2) (a sinusoid's mean under a normal), so a
 // bed fades out where the texel spans it, and the far ground keeps the
-// beds' mean.
-const STRATA_FOLD: f64 = 3500.0;          // the folds' wavelength, metres
-const STRATA_FOLD_HEIGHT: f64 = 1600.0;   // their height, per unit of noise
+// beds' mean. (The folds' wavelength, STRATA_FOLD metres, is anchor.bk's.)
+const STRATA_FOLD_HEIGHT: f32 = 1600.0;   // the folds' height, per unit of noise
 const STRATA_L0: f32 = 9.0;
 const STRATA_L1: f32 = 41.0;
 const STRATA_L2: f32 = 130.0;
@@ -491,15 +480,15 @@ const STRATA_A0: f32 = 0.10;
 const STRATA_A1: f32 = 0.16;
 const STRATA_A2: f32 = 0.18;
 
-fn strata_band(level: f64, length: f32, track: f64, sd: f32, seed: i32) -> f32 {
-    let n = perlin_split(vec3<f64>(level / (length as f64), track, 0.5 * track), seed);
+fn strata_band(level: f32, length: f32, track: f32, sd: f32, seed: i32) -> f32 {
+    let n = perlin_f32(vec3<f32>(level / length, track, 0.5 * track), seed);
     let t = 6.2831853 * sd / length;
     return n / sqrt(PERLIN_VAR) * exp(-0.5 * t * t);
 }
 
-pub fn strata(dir: vec3<f64>, radius: f64, h: f32, sd: f32, seed: i32) -> f32 {
-    let fold = perlin_split(dir * (radius / STRATA_FOLD), seed + 307) as f64 * STRATA_FOLD_HEIGHT;
-    let level = (h as f64) + fold;
+pub fn strata(a: Anchor, e: vec3<f32>, radius: f32, h: f32, sd: f32, seed: i32) -> f32 {
+    let fold = perlin_at(perlin_from(a.f, e * (radius / STRATA_FOLD)), seed + 307) * STRATA_FOLD_HEIGHT;
+    let level = h + fold;
     return STRATA_A0 * strata_band(level, STRATA_L0, 0.37, sd, seed + 311)
          + STRATA_A1 * strata_band(level, STRATA_L1, 0.61, sd, seed + 313)
          + STRATA_A2 * strata_band(level, STRATA_L2, 0.29, sd, seed + 317);
@@ -546,41 +535,42 @@ pub fn grass_cover(h: f32, grad: f32) -> f32 {
     return c;
 }
 
-// The sun's disc over the terrain from the ground at `dir`: the highest the
-// ground rises toward the sun, out to 1.8 km at SUN_STEPS steps 1.3 apart,
-// against the sun's elevation, over the disc's 0.53 degrees. The steps are
-// independent, so a kernel takes them in parallel (sun_step_height) and
-// another gathers them (sun_seen). Far steps read coarser octaves: what is
-// finer than the step does not cast its shadow.
+// The sun's disc over the terrain from the ground at offset e: the highest
+// the ground rises toward the sun, out to 1.8 km at SUN_STEPS steps 1.3
+// apart, against the sun's elevation, over the disc's 0.53 degrees. The
+// steps are independent, so a kernel takes them in parallel
+// (sun_step_height) and another gathers them (sun_seen). Far steps read
+// coarser octaves: what is finer than the step does not cast its shadow.
 pub const SUN_STEPS: i32 = 28;
-pub fn sun_step_dist(k: i32) -> f64 { return 1.5 * pow(1.3, k as f64); }
+pub fn sun_step_dist(k: i32) -> f32 { return 1.5 * pow(1.3, k as f32); }
 
 // The ground's height (sea level and up) at step k toward the sun.
-pub fn sun_step_height(dir: vec3<f64>, toSun: vec3<f64>, k: i32, radius: f64, octaves: f64, seed: i32,
-                           net: read_store<f32, 1>) -> f32 {
-    let sunUp = dot(toSun, dir);
-    let level = normalize(toSun - dir * sunUp);
+pub fn sun_step_height(a: Anchor, e: vec3<f32>, toSun: vec3<f32>, k: i32, radius: f32, octaves: f32, seed: i32,
+                       net: read_store<f32, 1>) -> f32 {
+    let n = a.dir + e;
+    let sunUp = dot(toSun, n);
+    let level = normalize(toSun - n * sunUp);
     let dist = sun_step_dist(k);
-    let q = normalize(dir + level * (dist / radius));
-    let o = max(octaves - (log2(max(dist as f32, 1.0)) * 0.7) as f64, 8.0);
-    return max(terrain(q, radius, o, seed, net), 0.0) as f32;
+    let q = moved(a.dir, e, level * (dist / radius));
+    let o = max(octaves - log2(max(dist, 1.0)) * 0.7, 8.0);
+    return max(terrain(a, q, radius, o, seed, net), 0.0);
 }
 
-// The share of the disc seen from `dir` over ground rising to the angle
+// The share of the disc seen from `up` over ground rising to the angle
 // `highest` (the largest of sun_step_angle's).
-pub fn sun_elevation_seen(dir: vec3<f64>, toSun: vec3<f64>, highest: f32) -> f32 {
-    let sunUp = dot(toSun, dir);
+pub fn sun_elevation_seen(up: vec3<f32>, toSun: vec3<f32>, highest: f32) -> f32 {
+    let sunUp = dot(toSun, up);
     if (sunUp <= -0.01) { return 0.0; }
-    let sunElev = asin(clamp(sunUp as f32, -1.0, 1.0));
+    let sunElev = asin(clamp(sunUp, -1.0, 1.0));
     return clamp((sunElev - highest) / 0.0093 + 0.5, 0.0, 1.0);
 }
 
 // Step k's elevation angle seen from `h` up: above the point's tangent
 // plane, the sphere's fall included.
-pub fn sun_step_angle(h: f32, hk: f32, k: i32, radius: f64) -> f32 {
+pub fn sun_step_angle(h: f32, hk: f32, k: i32, radius: f32) -> f32 {
     let dist = sun_step_dist(k);
-    let rise = hk - max(h, 0.0) - (dist * dist / (2.0 * radius)) as f32;
-    return atan(rise / (dist as f32));
+    let rise = hk - max(h, 0.0) - dist * dist / (2.0 * radius);
+    return atan(rise / dist);
 }
 
 // The share of the ground at one height and gradient under forest (the
@@ -631,9 +621,9 @@ fn gh3(i: i32) -> vec2<f32> {
 // cell takes the octaves it resolves (the last weighted by its fraction),
 // exp(S - var(S) / 2), which is the mean of the factor over all the octaves
 // below, so a cell's factor is the average of its children's. The ground
-// shader carries the octaves finer than any tile on per pixel.
-const VARY_FIRST: i32 = 5;
-// Var(perlin_split), measured over 200k samples.
+// shader carries the octaves finer than any tile on per pixel. (VARY_FIRST
+// is anchor.bk's: the anchor holds its lattice.)
+// Var(perlin_at), measured over 200k samples.
 const PERLIN_VAR: f32 = 0.0728;
 const VARY_LUM: f32 = 0.11;    // log-luminance, per octave
 const VARY_TINT: f32 = 0.05;   // ochre (tint_axis, log per channel), per octave
@@ -661,29 +651,12 @@ fn tint_amp(o: i32) -> f32 {
     return VARY_TINT;
 }
 
-// Perlin noise at q with the f64 work only in finding q's lattice cell: the
-// rest runs in f32 on the offset inside the cell, which needs no more (the
-// GPU runs f64 at a small fraction of f32's rate).
-pub fn perlin_split(q: vec3<f64>, seed: i32) -> f32 {
-    return perlin_at(perlin_anchor(q), seed);
-}
-// q's lattice cell and the offset in it: the f64 half of perlin_split.
-pub struct PerlinAt {
-    cell: vec3<i32>,
-    f: vec3<f32>,
-}
-pub fn perlin_anchor(q: vec3<f64>) -> PerlinAt {
+// Perlin noise at a lattice cell and the offset in it (anchor.bk
+// perlin_from), or at an f32 point (perlin_f32: the strata's bands, the
+// clouds' octaves, coarse beside f32's step there).
+pub fn perlin_f32(q: vec3<f32>, seed: i32) -> f32 {
     let c = floor(q);
-    return PerlinAt {
-        cell: vec3<i32>((c.x as i64) as i32, (c.y as i64) as i32, (c.z as i64) as i32),
-        f: vec3<f32>((q.x - c.x) as f32, (q.y - c.y) as f32, (q.z - c.z) as f32),
-    };
-}
-// The same point an octave finer, in f32 (relief.bk simplex_twice).
-pub fn perlin_twice(at: PerlinAt) -> PerlinAt {
-    let twice = at.f * 2.0;
-    let fl = floor(twice);
-    return PerlinAt { cell: at.cell * 2 + vec3<i32>(fl.x as i32, fl.y as i32, fl.z as i32), f: twice - fl };
+    return perlin_at(PerlinAt { cell: vec3<i32>(c.x as i32, c.y as i32, c.z as i32), f: q - c }, seed);
 }
 pub fn perlin_at(at: PerlinAt, seed: i32) -> f32 {
     let xf0 = at.f.x;
@@ -712,21 +685,17 @@ pub fn perlin_at(at: PerlinAt, seed: i32) -> f32 {
     return mix(g0, g1, w);
 }
 
-pub fn variation(dir: vec3<f64>, radius: f64, octaves: f64, seed: i32) -> vec3<f32> {
-    let q = dir * (radius / (BASE_WAVELENGTH as f64)) * pow(2.0, VARY_FIRST as f64);
-    var pa = perlin_anchor(q);
+pub fn variation(a: Anchor, e: vec3<f32>, radius: f32, octaves: f32, seed: i32) -> vec3<f32> {
+    var lat = a.v;
+    var d = p_offset(e, radius) * exp2(VARY_FIRST as f32);
     var lum: f32 = 0.0;
     var tint: f32 = 0.0;
     var vl: f32 = 0.0;
     var vt: f32 = 0.0;
-    let oct = octaves as f32;
-    let n = ceil(oct) as i32;
+    let n = ceil(octaves) as i32;
     for (var o: i32 = VARY_FIRST; o < n; o += 1) {
-        // On the anchor's lattice in f32, anchored again from f64 every
-        // ANCHOR_EVERY octaves (fbm_to).
-        let k = o - VARY_FIRST;
-        if (k > 0 && (k & (ANCHOR_EVERY - 1)) == 0) { pa = perlin_anchor(q * exp2(k as f64)); }
-        let w = clamp(oct - (o as f32), 0.0, 1.0);
+        let pa = perlin_from(lat, d);
+        let w = clamp(octaves - (o as f32), 0.0, 1.0);
         let al = lum_amp(o) * w;
         let nl = perlin_at(pa, seed + 101 + o);
         lum += nl * al;
@@ -741,7 +710,8 @@ pub fn variation(dir: vec3<f64>, radius: f64, octaves: f64, seed: i32) -> vec3<f
             tint += nt * at;
             vt += at * at * PERLIN_VAR;
         }
-        pa = perlin_twice(pa);
+        lat = twice(lat);
+        d *= 2.0;
     }
     let axis = tint_axis();
     let s = vec3<f32>(lum, lum, lum) + axis * tint;

@@ -26,6 +26,7 @@
 // a gusting breeze.
 import { faceFrame } from "/app/clouds.js";
 import { createSunGrid } from "/app/sun.js";
+import { anchorPoint, createAnchors, planeAnchor } from "/app/anchors.js";
 import { stepped } from "/app/stepped.js";
 import { constants, readApp } from "/app/shaders.js";
 
@@ -109,9 +110,11 @@ const HOOK = readApp('grass_mesh.bk');
 // nodes whose hooks import grassModules, bound to its field. update() each
 // frame with the eye about the planet's centre (f64), its altitude and the
 // unit direction to the sun.
-export function createGrass(scene, radius, module, sunModule, octaves, seed, net, readers = []) {
+export function createGrass(scene, radius, module, sunModule, octaves, seed, net, kAnchors, readers = []) {
     const fieldKernel = module.kernel('k_grass_field'), heightsKernel = module.kernel('k_grass_heights');
-    const sunGrid = createSunGrid(sunModule, SUN_P, net, 4);
+    // The field's anchor (anchors.js), at its centre.
+    const anchor = createAnchors(kAnchors, 1, radius);
+    const sunGrid = createSunGrid(sunModule, SUN_P, net, 4, kAnchors, radius);
     const field = bro.kernel.createBuffer(P * P * 7 * 4), heights = bro.kernel.createBuffer((P + 2) * (P + 2) * 4);
     const bands = [
         { blades: DENSE, band: [0, NEAR], ring: cellRing(0, NEAR) },
@@ -220,10 +223,14 @@ export function createGrass(scene, radius, module, sunModule, octaves, seed, net
             for (let k = 0; k < 3; k++) c[k] = frame.a[k] + frame.e[k] * ui * dl + frame.f[k] * vi * dl;
             const len = Math.hypot(c[0], c[1], c[2]);
             const origin = c.map((x) => x / len * radius);
-            heightsKernel.dispatch([P + 2, P + 2], heights, ...plane, (ui - N / 2) * dl, (vi - N / 2) * dl, dl,
+            const at = planeAnchor(plane, ui * dl, vi * dl);
+            anchor.set(0, at.base, at.dir);
+            anchor.write(1);
+            const d0 = -N / 2 * dl;
+            heightsKernel.dispatch([P + 2, P + 2], heights, anchor.buffer, ...frame.e, ...frame.f, d0, d0, dl,
                                    radius, octaves, seed, net);
-            fieldKernel.dispatch([P, P], field, heights, ...plane, (ui - N / 2) * dl, (vi - N / 2) * dl, dl,
-                                 ...origin, radius, octaves, seed, net);
+            fieldKernel.dispatch([P, P], field, heights, anchor.buffer, ...frame.e, ...frame.f, d0, d0, dl,
+                                 ...anchorPoint(at.dir, radius, origin), radius, octaves, seed, net);
             for (let k = 0; k < 3; k++) {
                 hi[k] = Math.fround(origin[k]);
                 lo[k] = origin[k] - hi[k];
@@ -251,7 +258,7 @@ export function createGrass(scene, radius, module, sunModule, octaves, seed, net
         sunDue = false;
         sun.splice(0, 3, ...toSun);
         const lattice = [ui - N / 2, vi - N / 2];
-        const steps = sunGrid.steps(plane, lattice[0] * dl, lattice[1] * dl, dl * SUN_STRIDE, toSun, radius, octaves, seed);
+        const steps = sunGrid.steps(plane, lattice[0] * dl, lattice[1] * dl, dl * SUN_STRIDE, toSun, octaves, seed);
         sunProduction = stepped(steps, () => {
             const buffer = sunGrid.swap();
             for (const n of nodes) {

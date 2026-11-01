@@ -1,44 +1,74 @@
-// Kernels for measuring the ground (CPU eval): one cell as the tile kernels
-// compute it, at (0, 0) of a frame (corner c, axes u, v), `cell` wide.
+// Kernels for measuring the ground (on the CPU: @cpu, f64 in and out): one
+// cell as the tile kernels compute it, at the centre of a frame (corner c,
+// axes u, v), `cell` wide, anchored as a tile is (anchor.bk).
+import std::noise::*;
+import tiles;
 from planet::ground import cell_height, spread, expected_surface, gradient, variation, strata, terrain, octaves_for,
-    noise_at, simplex_anchor;
-from planet::relief import simplex_grad, simplex_past, ridge_cell_mean, ridge_cell_slope;
+    frame_dir, SOIL_OCTAVES;
+from planet::relief import simplex_grad, ridge_cell_mean, ridge_cell_slope;
+from planet::anchor import Anchor, anchor_of, anchor_at, lattice_of, simplex_from, plane_offset;
 
 // A ridge octave's mean over a cell at noise n and factor f (`ch` 0), and
 // its slope in n (1).
-@kernel @grid(1)
+@kernel @cpu @grid(1)
 fn k_ridge(g: grid<1>, n: f32, f: f32, ch: i32) -> f64 {
     if (ch == 0) { return ridge_cell_mean(n, f) as f64; }
     return ridge_cell_slope(n, f) as f64;
 }
 
-// The ground's noise at q + o: `ch` 0 as noise() takes it in f64, 1-4 as
-// simplex_grad takes it from q's lattice cell moved by o (1 its value, 2-4
-// its gradient).
-@kernel @grid(1)
+// The ground's noise at q + o: `ch` 0 std supersimplex3d in f64, 1-4 as the
+// ground takes it, simplex_grad from q's lattice point (found in f64) and the
+// f32 offset o (1 its value, 2-4 its gradient).
+@kernel @cpu @grid(1)
 fn k_simplex(g: grid<1>, qx: f64, qy: f64, qz: f64, ox: f32, oy: f32, oz: f32, seed: i32, ch: i32) -> f64 {
     let q = vec3<f64>(qx, qy, qz);
-    if (ch == 0) { return noise_at(q + vec3<f64>(ox as f64, oy as f64, oz as f64), seed); }
-    let r = simplex_grad(simplex_past(simplex_anchor(q), vec3<f32>(ox, oy, oz)), seed);
+    if (ch == 0) { return supersimplex3d(q + vec3<f64>(ox as f64, oy as f64, oz as f64), seed); }
+    let r = simplex_grad(simplex_from(lattice_of(q, true), vec3<f32>(ox, oy, oz)), seed);
     if (ch == 1) { return r.x as f64; }
     if (ch == 2) { return r.y as f64; }
     if (ch == 3) { return r.z as f64; }
     return r.w as f64;
 }
 
-// The cell's height.
-@kernel @grid(1)
-fn k_cell(g: grid<1>, cx: f64, cy: f64, cz: f64, ux: f64, uy: f64, uz: f64, vx: f64, vy: f64, vz: f64,
-          cell: f64, radius: f64, octaves: f64, seed: i32, net: read_store<f32, 1>) -> f64 {
-    return cell_height(vec3<f64>(cx, cy, cz), vec3<f64>(ux, uy, uz), vec3<f64>(vx, vy, vz),
-                       0.0, 0.0, cell, radius, octaves, seed, net);
+// A frame about direction c whose cells are `cell` (direction units) along
+// unit axes u and v, as a tile's record holds it: anchored at c rounded to
+// f32, s and t in cells from the corner the record's frame puts at -0.5.
+struct Frame {
+    rec: tiles::Record,
+    a: Anchor,
+}
+fn frame_at(c: vec3<f64>, u: vec3<f64>, v: vec3<f64>, cell: f64, radius: f64) -> Frame {
+    let b = vec3<f32>(c.x as f32, c.y as f32, c.z as f32);
+    let bd = vec3<f64>(b.x as f64, b.y as f64, b.z as f64);
+    let lost = c - bd;
+    let n = normalize(bd);
+    let hi = vec3<f32>(n.x as f32, n.y as f32, n.z as f32);
+    let lo = n - vec3<f64>(hi.x as f64, hi.y as f64, hi.z as f64);
+    let su = u * cell;
+    let sv = v * cell;
+    let z = vec3<f32>(0.0);
+    let rec = tiles::Record {
+        slot: 0, parent: -1, root: 0, level: 0, x: 0, y: 0, quadrant: vec2<i32>(0, 0),
+        anchor: b, extent: 0.0, lost: vec3<f32>(lost.x as f32, lost.y as f32, lost.z as f32), radius: radius as f32,
+        u: vec3<f32>(su.x as f32, su.y as f32, su.z as f32), v: vec3<f32>(sv.x as f32, sv.y as f32, sv.z as f32),
+        dir_hi: hi, dir_lo: vec3<f32>(lo.x as f32, lo.y as f32, lo.z as f32), point: z,
+    };
+    return Frame { rec: rec, a: anchor_of(bd, hi, radius) };
 }
 
-// The cell's surface point at (s, t) of the frame.
-fn point(c: vec3<f64>, u: vec3<f64>, v: vec3<f64>, s: f64, t: f64, cell: f64,
-         radius: f64, octaves: f64, seed: i32, net: read_store<f32, 1>) -> vec3<f64> {
-    let h = cell_height(c, u, v, s, t, cell, radius, octaves, seed, net);
-    return normalize(c + u * s + v * t) * (radius + max(h, 0.0));
+// The cell's height.
+@kernel @cpu @grid(1)
+fn k_cell(g: grid<1>, cx: f64, cy: f64, cz: f64, ux: f64, uy: f64, uz: f64, vx: f64, vy: f64, vz: f64,
+          cell: f64, radius: f64, octaves: f64, seed: i32, net: read_store<f32, 1>) -> f64 {
+    let f = frame_at(vec3<f64>(cx, cy, cz), vec3<f64>(ux, uy, uz), vec3<f64>(vx, vy, vz), cell, radius);
+    return cell_height(f.a, f.rec, 0.5, 0.5, 1.0, radius as f32, octaves as f32, seed, net) as f64;
+}
+
+// The surface point of the cell (i, j) cells from the frame's, relative to
+// the anchor's.
+fn point(f: Frame, i: f32, j: f32, radius: f32, octaves: f32, seed: i32, net: read_store<f32, 1>) -> vec3<f32> {
+    let h = cell_height(f.a, f.rec, 0.5 + i, 0.5 + j, 1.0, radius, octaves, seed, net);
+    return tiles::sphere_vertex(f.rec, tiles::frame_offset(f.rec, 0.5 + i, 0.5 + j), radius, max(h, 0.0));
 }
 
 // The cell's colour as k_detail computes a texel's, its gradient from the
@@ -47,50 +77,55 @@ fn point(c: vec3<f64>, u: vec3<f64>, v: vec3<f64>, s: f64, t: f64, cell: f64,
 // the variation's luminance factor alone (it refines on its own). `naive` 1
 // drops the spreads, the colour of the cell's mean instead of the mean
 // colour under it.
-@kernel @grid(1)
+@kernel @cpu @grid(1)
 fn k_cell_color(g: grid<1>, cx: f64, cy: f64, cz: f64, ux: f64, uy: f64, uz: f64, vx: f64, vy: f64, vz: f64,
                 cell: f64, radius: f64, octaves: f64, truth: f32, seed: i32, ch: i32, naive: i32, net: read_store<f32, 1>) -> f64 {
-    let c = vec3<f64>(cx, cy, cz);
-    let u = vec3<f64>(ux, uy, uz);
-    let v = vec3<f64>(vx, vy, vz);
-    let h = cell_height(c, u, v, 0.0, 0.0, cell, radius, octaves, seed, net);
-    let o = point(c, u, v, 0.0, 0.0, cell, radius, octaves, seed, net);
-    let du = point(c, u, v, cell, 0.0, cell, radius, octaves, seed, net) - point(c, u, v, -cell, 0.0, cell, radius, octaves, seed, net);
-    let dv = point(c, u, v, 0.0, cell, cell, radius, octaves, seed, net) - point(c, u, v, 0.0, -cell, cell, radius, octaves, seed, net);
-    let up = normalize(o);
-    let grad = gradient(vec3<f32>(du.x as f32, du.y as f32, du.z as f32),
-                        vec3<f32>(dv.x as f32, dv.y as f32, dv.z as f32),
-                        vec3<f32>(up.x as f32, up.y as f32, up.z as f32));
-    var sp = spread(normalize(c), radius, octaves, truth, seed);
+    let f = frame_at(vec3<f64>(cx, cy, cz), vec3<f64>(ux, uy, uz), vec3<f64>(vx, vy, vz), cell, radius);
+    let r = radius as f32;
+    let oct = octaves as f32;
+    let h = cell_height(f.a, f.rec, 0.5, 0.5, 1.0, r, oct, seed, net);
+    let du = point(f, 1.0, 0.0, r, oct, seed, net) - point(f, -1.0, 0.0, r, oct, seed, net);
+    let dv = point(f, 0.0, 1.0, r, oct, seed, net) - point(f, 0.0, -1.0, r, oct, seed, net);
+    let e = frame_dir(f.rec, 0.5, 0.5);
+    let up = normalize(f.a.dir + e);
+    let grad = gradient(du, dv, up);
+    var sp = spread(f.a, e, r, oct, truth, seed);
+    var soil = vec2<f32>(grad, spread(f.a, e, r, oct, min(truth, SOIL_OCTAVES), seed).y);
     // du spans two cells.
-    var width = (length(du) * 0.5) as f32;
-    if (naive == 1) { sp = vec2<f32>(0.0, 0.0); width = 0.0; }
-    let vary = variation(normalize(c), radius, octaves, seed);
+    var width = length(du) * 0.5;
+    if (naive == 1) { sp = vec2<f32>(0.0, 0.0); soil = vec2<f32>(grad, 0.0); width = 0.0; }
+    let vary = variation(f.a, e, r, oct, seed);
     if (ch == 2) { return (vary.x * 0.2126 + vary.y * 0.7152 + vary.z * 0.0722) as f64; }
     let trend = grad * width;
-    let bed = strata(normalize(c), radius, h as f32, sqrt(sp.x * sp.x + trend * trend / 12.0), seed);
-    let e = expected_surface(h as f32, grad, width, sp.x, sp.y, vec3<f32>(1.0, 1.0, 1.0), bed);
-    if (ch == 0) { return (e.x * 0.2126 + e.y * 0.7152 + e.z * 0.0722) as f64; }
-    return e.w as f64;
+    let bed = strata(f.a, e, r, h, sqrt(sp.x * sp.x + trend * trend / 12.0), seed);
+    let c = expected_surface(h, grad, width, sp.x, soil, vec3<f32>(1.0, 1.0, 1.0), bed);
+    if (ch == 0) { return (c.x * 0.2126 + c.y * 0.7152 + c.z * 0.0722) as f64; }
+    return c.w as f64;
+}
+
+// The ground's height at direction `dir`, anchored there.
+fn height_at(dir: vec3<f64>, radius: f64, octaves: f64, seed: i32, net: read_store<f32, 1>) -> f64 {
+    let a = anchor_at(dir, radius);
+    return terrain(a, plane_offset(a, a.lost), radius as f32, octaves as f32, seed, net) as f64;
 }
 
 // The sine of the horizon's elevation from the ground at `dir`, toward the
 // tangent `t`: the ground marched from a cell out to `reach` metres, steps 5%
 // apart, each at the octaves its spacing resolves and at most `octaves`, seen
 // from the point's own height at `octaves`. The horizon layer's reference.
-@kernel @grid(1)
+@kernel @cpu @grid(1)
 fn k_horizon_truth(g: grid<1>, x: f64, y: f64, z: f64, tx: f64, ty: f64, tz: f64, cell: f64, reach: f64, ratio: f64, filter: f64,
                    radius: f64, octaves: f64, seed: i32, net: read_store<f32, 1>) -> f64 {
     let dir = normalize(vec3<f64>(x, y, z));
     let t = normalize(vec3<f64>(tx, ty, tz));
-    let h = max(terrain(dir, radius, octaves, seed, net), 0.0);
+    let h = max(height_at(dir, radius, octaves, seed, net), 0.0);
     var best: f64 = -1.0;
     var d = cell;
     while (d < reach) {
         let ang = d / radius;
         let q = normalize(dir * cos(ang) + t * sin(ang));
-        let oct = min(octaves_for(d * filter, 1.0), octaves);
-        let hq = max(terrain(q, radius, oct, seed, net), 0.0);
+        let oct = min(octaves_for((d * filter) as f32, 1.0) as f64, octaves);
+        let hq = max(height_at(q, radius, oct, seed, net), 0.0);
         best = max(best, dot(normalize(q * (radius + hq) - dir * (radius + h)), dir));
         d = d * ratio;
     }
