@@ -17,6 +17,7 @@ import lighting;
 import custom;
 import tiles;
 from planet::clouds import NOISE_VAR, CLOUD_BASE, CLOUD_DEPTH, CLOUD_SIGMA, CLOUD_DETAIL_FULL,
+                           CLOUD_FLOOR, CLOUD_CURVE, CLOUD_BASE_SHARE,
                            cloud_need, cloud_need_slope, cloud_top, cloud_occupancy, COLUMN_F_RANGE,
                            COLUMN_V_RANGE, SUN_TAU_MAX, SUN_LOWEST, SUN_SPACING, SUN_FAR_NEAR, SUN_FAR_OUT;
 // The oracles the module is built as (clouds.js oracleModule): FINE, how
@@ -620,6 +621,146 @@ fn skip_to(t: f32, dt: f32, clear: f32, jit: f32, mu: f32, dt_max: f32) -> f32 {
     return max(t + dt, clear + jit * level * level * clamp(clear * STEP_RATIO, STEP_MIN, dt_max));
 }
 
+// The layer crossed within a footprint: from orbit a pixel spans kilometres
+// and the ray crosses the 3 km layer inside one of them, so the march's steps
+// (a dozen across the layer, each landing on a top by the pixel's offset)
+// set what each top shone by where they fell, drawn as contours that crawled
+// as the footprint shrank, and sixteen times finer steps were still 34 dB
+// away. Here the column is read once, at the crossing's middle (it is one
+// column across the footprint), and its four sub-columns integrated along
+// the ray in SLAB_STEPS even steps over the heights its cloud can reach: the
+// march's integrand (its cover, sun depth, billows, many-scattered light and
+// sky) at no offset, so nothing crawls. The detail is unresolved at such a
+// footprint (its finest octave needs footprints under 240 m), its variance in
+// the column's. Descending from 12,000 km toward a dawn terminator, against
+// the sixteen-times-finer march: the march 38.0 dB, the slab 48.1 (32 steps
+// 46.2); the space view's volume 0.355 -> 0.440 ms.
+//
+// SLAB_W0 to SLAB_W1: the footprints over which the detail goes unresolved,
+// where the slab takes over; SLAB_CROSS: footprints of the crossing along
+// the layer, over which one column stands for the whole of it (to twice
+// that, the march's again).
+const SLAB_STEPS: i32 = 16;
+const SLAB_W0: f32 = 300.0;
+const SLAB_W1: f32 = 600.0;
+const SLAB_CROSS: f32 = 1.0;
+struct Slab {
+    l: vec3<f32>,
+    transmittance: f32,
+    depth: f32,
+}
+// How much of the ray between t0 and t1 the slab takes: 1 where it alone
+// does, 0 where the march does.
+fn slab_share(ray: volume::Ray, t0: f32, t1: f32, mu: f32) -> f32 {
+    let w = volume::footprint(ray, 0.5 * (t0 + t1));
+    let along = (t1 - t0) * sqrt(max(1.0 - mu * mu, 0.0));
+    let by_w = clamp((w - SLAB_W0) / (SLAB_W1 - SLAB_W0), 0.0, 1.0);
+    let by_cross = clamp(2.0 - along / (SLAB_CROSS * w), 0.0, 1.0);
+    return by_w * by_cross;
+}
+// The heights (share of the layer) a column of amount F can hold cloud
+// between: where cloud_need falls to F, below the thinnest base and above.
+fn reach_heights(f: f32) -> vec2<f32> {
+    let e = max(f - CLOUD_FLOOR, 0.0);
+    let x = sqrt(e / (CLOUD_CURVE + e));
+    return vec2<f32>(CLOUD_BASE_SHARE * (1.0 - x), CLOUD_BASE_SHARE + (1.0 - CLOUD_BASE_SHARE) * x);
+}
+// What the composite takes as the transmittance: none under 0.004.
+fn select_transmittance(tm: f32) -> f32 {
+    return tm * step(0.004, tm);
+}
+fn slab(ray: volume::Ray, eye: vec3<f32>, dir: vec3<f32>, hc: f32, mu: f32, t0: f32, t1: f32,
+        to_sun: vec3<f32>, ph: f32) -> Slab {
+    var out: Slab = Slab { l: vec3<f32>(0.0), transmittance: 1.0, depth: 0.0 };
+    let tm = 0.5 * (t0 + t1);
+    let w = max(volume::footprint(ray, tm), 1.0);
+    let xm = height_at(eye, dir, tm, hc, mu);
+    let cp = tiles::cube_point(xm.up);
+    let ct = tiles_at(cp, w);
+    let col = column_in(cp, ct, CLOUD_FLOOR, 0.0);
+    if (!col.cloud) {
+        return out;
+    }
+    let f = col.f;
+    let v = col.variance;
+    // The heights its cloud can reach (3.4 deviations of what is finer), as
+    // distances along the ray: s runs evenly enough across a slab this short.
+    let reach = reach_heights(f + 3.4 * sqrt(v));
+    let s0 = height_at(eye, dir, t0, hc, mu).s;
+    let s1 = height_at(eye, dir, t1, hc, mu).s;
+    var a: f32 = t0;
+    var b: f32 = t1;
+    if (abs(s1 - s0) > 1.0e-4) {
+        let ta = t0 + (t1 - t0) * clamp((reach.x - s0) / (s1 - s0), 0.0, 1.0);
+        let tb = t0 + (t1 - t0) * clamp((reach.y - s0) / (s1 - s0), 0.0, 1.0);
+        a = min(ta, tb);
+        b = max(ta, tb);
+    }
+    if (b <= a) {
+        return out;
+    }
+    let mu_s = max(dot(to_sun, xm.up), 0.04);
+    let descent = -dot(dir, xm.up);
+    let fc = far_columns(cp, ct);
+    let sun = volume::sun_light(dir * tm);
+    let sky = 0.5 * volume::sky_light(dir * tm, xm.up);
+    let dt = (b - a) / (SLAB_STEPS as f32);
+    var tr: vec4<f32> = vec4<f32>(1.0);
+    var cover: vec4<f32> = vec4<f32>(0.0);
+    var tc: vec4<f32> = vec4<f32>(1.0);
+    var inside: vec4<f32> = vec4<f32>(0.0);
+    var l: vec3<f32> = vec3<f32>(0.0);
+    var sum_t: f32 = 0.0;
+    var sum_w: f32 = 0.0;
+    for (var i: i32 = 0; i < SLAB_STEPS; i += 1) {
+        let t = a + ((i as f32) + 0.5) * dt;
+        let x = height_at(eye, dir, t, hc, mu);
+        let occ = cloud_occupancy(f, v, x.s);
+        let fill = clamp(occ * 4.0 - CLOUD_RANK, vec4<f32>(0.0), vec4<f32>(1.0));
+        // The march's cover: a sub-column out of cloud again folds its
+        // mixture; more cover adds columns clear so far.
+        let gone = (vec4<f32>(1.0) - step(vec4<f32>(1.0e-30), fill)) * step(vec4<f32>(1.0e-30), cover);
+        tr *= mix(vec4<f32>(1.0), 1.0 - cover + cover * tc, gone);
+        cover *= 1.0 - gone;
+        tc = mix(tc, vec4<f32>(1.0), gone);
+        let grown = max(cover, fill);
+        tc = mix(vec4<f32>(1.0), (cover * tc + grown - cover) / max(grown, vec4<f32>(1.0e-4)), step(vec4<f32>(1.0e-30), grown));
+        cover = grown;
+        if (max4(fill) <= 0.0) {
+            inside = vec4<f32>(0.0);
+            continue;
+        }
+        let sigma = CLOUD_SIGMA * fill / max(cover, vec4<f32>(1.0e-4));
+        let sd = sun_depth(x.s, f, v, mu_s);
+        let rate = step(vec4<f32>(1.0e-30), sd.above) * (CLOUD_SIGMA * descent / mu_s);
+        // A sub-column entered within this step is lit from its top: half
+        // the step back on average, as the march's.
+        let back = (1.0 - inside) * min(sd.above / max(descent, 1.0e-6), vec4<f32>(0.5 * dt));
+        let kept = max(sd.tau - rate * back, vec4<f32>(0.0)) / max(sd.tau, vec4<f32>(1.0e-6));
+        let tau0 = min(sd.tau, vec4<f32>(field_tau(cp, ct, x.s))) * kept;
+        let tau_sun = billow_tau(x.p, x.s, f, v, w, to_sun, mu_s, fill, tau0, fc);
+        let len = dt + back;
+        let step_t = exp(-sigma * len);
+        let fill_step = step_light(sigma, vec4<f32>(0.0), len);
+        let by_sun = ph * sun_step(sigma, tau_sun, rate, len) + sun_many(tau_sun, mu_s) * fill_step;
+        let by_sky = sky_many(tau_sun, mu_s) * fill_step;
+        let wt = tr * cover * tc;
+        l += 0.25 * (sun * dot(wt, by_sun) + sky * dot(wt, by_sky));
+        let wgt = 0.25 * dot(wt, 1.0 - step_t);
+        sum_t += wgt * t;
+        sum_w += wgt;
+        tc *= step_t;
+        inside = step(vec4<f32>(1.0e-30), fill);
+    }
+    tr *= 1.0 - cover + cover * tc;
+    out.l = l;
+    out.transmittance = 0.25 * (tr.x + tr.y + tr.z + tr.w);
+    if (sum_w > 0.0) {
+        out.depth = sum_t / sum_w;
+    }
+    return out;
+}
+
 pub fn volume(ray: volume::Ray) -> volume::Light {
     let dir = ray.dir;
     let eye = params.cam_hi + params.cam_lo;
@@ -661,6 +802,24 @@ pub fn volume(ray: volume::Ray) -> volume::Light {
 
     let to_sun = lighting::to_sun();
     let ph = phase(dot(dir, to_sun));
+    // The layer crossed within a footprint: the slab's, blended into the
+    // march's over a band of footprints.
+    // (The reference march takes none: it is what the slab is measured against.)
+    var share: f32 = slab_share(ray, t0, t1, mu);
+    if (FINE > 1) {
+        share = 0.0;
+    }
+    var sl: Slab = Slab { l: vec3<f32>(0.0), transmittance: 1.0, depth: 0.0 };
+    if (share > 0.0) {
+        sl = slab(ray, eye, dir, hc, mu, t0, t1, to_sun, ph);
+        if (share >= 1.0) {
+            var only: volume::Light = volume::light(sl.l, select_transmittance(sl.transmittance), sl.depth);
+            if (SCENE_DEBUG(cloudSteps)) {
+                only.debug = vec4<f32>(0.0, 0.0, 0.5, 1.0);
+            }
+            return only;
+        }
+    }
     var sun: vec3<f32> = vec3<f32>(0.0);
     var sky: vec3<f32> = vec3<f32>(0.0);
     var lit_at: f32 = -1.0e9;
@@ -945,15 +1104,17 @@ pub fn volume(ray: volume::Ray) -> volume::Light {
         t += dt;
     }
     tr *= 1.0 - cover + cover * tc;
-    let tm = 0.25 * (tr.x + tr.y + tr.z + tr.w);
-    var transmittance: f32 = tm;
-    if (tm < 0.004) {
-        transmittance = 0.0;
-    }
+    var tm: f32 = 0.25 * (tr.x + tr.y + tr.z + tr.w);
     var depth: f32 = 0.0;
     if (sum_w > 0.0) {
         depth = sum_t / sum_w;
     }
+    if (share > 0.0) {
+        l = mix(l, sl.l, share);
+        tm = mix(tm, sl.transmittance, share);
+        depth = mix(depth, sl.depth, share);
+    }
+    let transmittance = select_transmittance(tm);
     var out: volume::Light = volume::light(l, transmittance, depth);
     // Debug views: the steps a pixel marched, a 96th of white each; the
     // steps by kind as shares of them: red proved empty, green sampled
