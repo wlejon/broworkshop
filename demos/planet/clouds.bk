@@ -367,8 +367,7 @@ fn k_cloud_tile(g: grid<3>, table: read_store<vec4<i32>, 1>, pool: write_store<i
 // occupancy's mean density, every low sun's ray was dark: 28 km of a
 // third's cover is a depth of 250. Taken a step at a time instead, the
 // gaps of a kilometres-long step lined up whole: the deck's faces toward a
-// dusk sun were lit where the light-marched sun, clouds.sunReference, finds
-// them dark.) Beside it, out_far holds the columns SUN_FAR_NEAR and
+// dusk sun were lit where they belong in shade.) Beside it, out_far holds the columns SUN_FAR_NEAR and
 // SUN_FAR_OUT metres toward the sun at the tile's own footprint, from which
 // a reader takes the neighbours' shade at its own height (clouds_volume.bk
 // billow_tau): at the field's four heights, 750 m apart, a top's shade came

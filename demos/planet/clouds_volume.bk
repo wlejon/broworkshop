@@ -20,14 +20,6 @@ from planet::clouds import NOISE_VAR, CLOUD_BASE, CLOUD_DEPTH, CLOUD_SIGMA, CLOU
                            CLOUD_FLOOR, CLOUD_CURVE, CLOUD_BASE_SHARE,
                            cloud_need, cloud_need_slope, cloud_top, cloud_occupancy, COLUMN_F_RANGE,
                            COLUMN_V_RANGE, SUN_TAU_MAX, SUN_LOWEST, SUN_SPACING, SUN_FAR_NEAR, SUN_FAR_OUT;
-// The oracles the module is built as (clouds.js oracleModule): FINE, how
-// many times finer than its own the march steps in cloud (1; the reference,
-// clouds.reference, 16); SUN_MARCH, the sun's depth light-marched through
-// the field itself (sun_march_tau; clouds.sunReference), what the depth's
-// model is measured against. Constants, so the shipped build carries
-// neither (the light march's loop in every cloud step held a 168 KB stage
-// at 48 bytes of spilled registers; without it 137 KB and none).
-from cloud_oracle import FINE, SUN_MARCH;
 
 // The node's values (clouds.js update): the planet's radius; the detail's
 // billow statistics and variance (clouds.js noiseSlices, CLOUD_DETAIL_VAR);
@@ -451,8 +443,7 @@ fn soft_tops(s: f32, f: f32, v: f32) -> vec4<f32> {
 // and how far each top is above. A top's far side shaded behind the bumps
 // toward the sun is the billows' taps' (billow_tau) and the sun field's: a
 // tap of the column the sun's ray reached 200 m over the highest top, read
-// where the ray entered each cloud, came to the same against the
-// light-marched sun (RMS within 0.2 in every view) for 0.15 ms a frame.
+// where the ray entered each cloud, for 0.15 ms a frame.
 struct SunDepth {
     tau: vec4<f32>,
     above: vec4<f32>,
@@ -471,11 +462,8 @@ fn sun_depth(s: f32, f: f32, v: f32, mu_s: f32) -> SunDepth {
 // crease shaded through the lobe beside it, and deep in, every tap in cloud,
 // the depth is the column's. The rest is added even where the far tap is
 // clear: a ray out through a crease meets the cloud's body again (weighted
-// by the far tap's fill, a big cloud's lower half shone gold where the
-// light-marched sun leaves it dark). Against that march (clouds.sunReference)
-// the column alone was RMS 11.5 / 12.5 / 20.5 / 13.5 off at 800 m, sunrise,
-// sunset and 27.6 km; this is 8.3 / 8.1 / 15.8 / 8.5, a third tap no closer,
-// one at 160 m alone 9.3 / 9.4 / 15.7 / 8.6. The far tap reads at a footprint
+// by the far tap's fill, a big cloud's lower half shone gold where it
+// belongs in shade). The far tap reads at a footprint
 // of half its distance (only the shape that far matters). The column is the
 // sample's over the taps' few metres across; the detail carries their shape.
 //
@@ -488,10 +476,7 @@ fn sun_depth(s: f32, f: f32, v: f32, mu_s: f32) -> SunDepth {
 // whole and the rest through its cloud, as the sun field's segments do (at
 // the mean density instead, partial cover at a coarse footprint dimmed every
 // near cloud grey); the depth is the larger of that and the column's, so a
-// neighbour only ever adds shade. Against the light-marched sun this took
-// RMS 7.2 / 2.5 / 5.4 at 120 km dawn and noon and 30 km to 4.4 / 1.9 / 5.0,
-// and 7.9 / 7.4 / 4.4 / 8.0 at 800 m, sunrise, sunset and 27.6 km to
-// 6.2 / 6.2 / 4.1 / 6.4, for 0.06 to 0.14 ms a frame.
+// neighbour only ever adds shade, for 0.06 to 0.14 ms a frame.
 fn tap_fill(p: vec3<f32>, s: f32, f: f32, v: f32, w: f32, to_sun: vec3<f32>, mu_s: f32, d: f32) -> vec4<f32> {
     let fd = detailed(p + to_sun * d, w, f, v);
     let occ = cloud_occupancy(fd.x, fd.y, s + d * mu_s / CLOUD_DEPTH);
@@ -508,35 +493,6 @@ fn billow_tau(p: vec3<f32>, s: f32, f: f32, v: f32, w: f32, to_sun: vec3<f32>, m
     let pass4 = vec4<f32>(1.0) - 0.5 * (o3 + o4) * (1.0 - exp(-CLOUD_SIGMA * 0.5 * (SUN_FAR_OUT - SUN_FAR_NEAR)));
     let far = -log(max(pass3, vec4<f32>(1.0e-6))) - 2.0 * log(max(pass4, vec4<f32>(1.0e-6)));
     return max(near, local + far);
-}
-
-// The sun's depth from P marched through the field, its detail included, at
-// the footprint w: steps from 10 m growing by 15%, to the layer's top. The
-// oracle of the depth's model (SUN_MARCH); never shipped on.
-fn sun_march_tau(p: vec3<f32>, w: f32, to_sun: vec3<f32>) -> vec4<f32> {
-    var tau: vec4<f32> = vec4<f32>(0.0);
-    var d: f32 = 0.0;
-    var ds: f32 = 10.0;
-    for (var k: i32 = 0; k < 96; k += 1) {
-        let q = p + to_sun * (d + 0.5 * ds);
-        let rq = length(q);
-        let up = q / rq;
-        let s = (rq - params.radius - CLOUD_BASE - lift(up)) / CLOUD_DEPTH;
-        if (s > 1.0 || min(min(tau.x, tau.y), min(tau.z, tau.w)) > 40.0) {
-            break;
-        }
-        if (s >= 0.0) {
-            let col = column(up, w, cloud_need(s), 0.0);
-            if (col.cloud) {
-                let fd = detailed(q, w, col.f, col.variance);
-                let occ = cloud_occupancy(fd.x, fd.y, s);
-                tau += CLOUD_SIGMA * ds * clamp(occ * 4.0 - CLOUD_RANK, vec4<f32>(0.0), vec4<f32>(1.0));
-            }
-        }
-        d += ds;
-        ds *= 1.15;
-    }
-    return tau;
 }
 
 // How far on a ray outside the layer's heights here can first meet them
@@ -804,11 +760,7 @@ pub fn volume(ray: volume::Ray) -> volume::Light {
     let ph = phase(dot(dir, to_sun));
     // The layer crossed within a footprint: the slab's, blended into the
     // march's over a band of footprints.
-    // (The reference march takes none: it is what the slab is measured against.)
-    var share: f32 = slab_share(ray, t0, t1, mu);
-    if (FINE > 1) {
-        share = 0.0;
-    }
+    let share = slab_share(ray, t0, t1, mu);
     var sl: Slab = Slab { l: vec3<f32>(0.0), transmittance: 1.0, depth: 0.0 };
     if (share > 0.0) {
         sl = slab(ray, eye, dir, hc, mu, t0, t1, to_sun, ph);
@@ -841,9 +793,9 @@ pub fn volume(ray: volume::Ray) -> volume::Light {
     // not hit or missed by the jitter of one step.
     let dt_max = clamp((t1 - t0) / 12.0, 20.0, 4000.0);
     var t: f32 = t0 + clamp(t0 * STEP_RATIO, STEP_MIN, dt_max) * jit;
-    let cloud_step = CLOUD_STEP / FINE;
-    let in_ratio = IN_RATIO / FINE;
-    let max_steps = MAX_STEPS * (FINE as i32);
+    let cloud_step = CLOUD_STEP;
+    let in_ratio = IN_RATIO;
+    let max_steps = MAX_STEPS;
     var in_step: f32 = cloud_step;
     var t_prev: f32 = t;
     var fine_until: f32 = -1.0;
@@ -963,9 +915,8 @@ pub fn volume(ray: volume::Ray) -> volume::Light {
         // the footprint) brackets it, and the cloud is taken from where the
         // excess read at the bracket's ends crosses the edge between them
         // (or its cloudy end, where its clear end was never read), so its
-        // edge is where the field puts it and not where the step fell.
-        // Against the reference march (clouds.reference) one halving is as
-        // close as four, for a quarter of the reads.
+        // edge is where the field puts it and not where the step fell. One
+        // halving looks as good as four, for a quarter of the reads.
         // The halving's point and the edge are read as the march's own
         // steps, the loop's next iterations (edge 1, then 2 where the
         // halving's point is clear), not in a search inside this one: there,
@@ -1039,9 +990,7 @@ pub fn volume(ray: volume::Ray) -> volume::Light {
         }
         let kept = max(sd.tau - rate * back, vec4<f32>(0.0)) / max(sd.tau, vec4<f32>(1.0e-6));
         var tau_sun: vec4<f32> = min(sd.tau, vec4<f32>(tf)) * kept;
-        if (SUN_MARCH) {
-            tau_sun = sun_march_tau(x.p, w, to_sun);
-        } else if (seen_now > 0.05) {
+        if (seen_now > 0.05) {
             tau_sun = billow_tau(x.p, x.s, col.f, col.variance, w, to_sun, mu_s, fill, tau_sun, far_columns(sp, st));
         }
         let len = dt + back;

@@ -20,12 +20,9 @@
 
 // The layer's shape is clouds.bk's (CLOUD_BASE, CLOUD_DEPTH), here for the
 // near grid's gate and the tests.
-import { constants } from "/app/shaders.js";
-
 export const CLOUD_BASE = 1100;      // m above the broad ground under it (clouds.bk k_cloud_lift): the layer's floor
 export const CLOUD_DEPTH = 3000;      // m from the floor to the tallest tops
 const NEAR_RANGE = 1500;              // m from the eye the engine's near grid integrates (userMedium)
-const REFERENCE_FINE = 16;            // the reference march's steps, this many times finer
 const NEAR_MARGIN = 300;              // m about the layer's heights the eye uses the grid within
 const NOISE_VAR = 0.0728;             // the Perlin noise's variance (ground.bk PERLIN_VAR)
 const NOISE_SLOPE = 2.5;              // a bound on its gradient, per lattice unit
@@ -164,17 +161,8 @@ export function faceFrame(i) {
 // update() each frame with the eye about the planet's centre (f64), its
 // altitude, the unit direction to the sun and the view.
 export function createClouds(scene, radius, module, readers, seed, hook, maxGround) {
-    // The volume's module is built as the oracles it runs (clouds_volume.bk
-    // cloud_oracle): constants, so the shipped build carries neither; a
-    // change of oracle builds it again (setShaderModule) and binds its
-    // values anew (bind, below).
-    const volumeModules = (fine, sunMarch) => ({
-        ...hook.modules,
-        cloud_oracle: constants('cloud_oracle', { FINE: ['f32', fine], SUN_MARCH: ['bool', sunMarch] }),
-    });
-    let built = '1,false';
     const node = scene.createVolume({
-        module: hook.source, file: 'clouds_volume.bk', modules: volumeModules(1, false), name: 'clouds',
+        module: hook.source, file: 'clouds_volume.bk', modules: hook.modules, name: 'clouds',
     });
     const toSun = [0, 0, 0];   // none yet: the first update lights them all
 
@@ -303,7 +291,6 @@ export function createClouds(scene, radius, module, readers, seed, hook, maxGrou
     }
     bind();
 
-    let reference = false, sunReference = false;
     const hi = [0, 0, 0], lo = [0, 0, 0];
     return {
         node,
@@ -312,14 +299,6 @@ export function createClouds(scene, radius, module, readers, seed, hook, maxGrou
         cache, ground, sun: toSun,
         // `view` is the camera as a tile cache takes it (TileCache.update).
         update(eye, altitude, sun, view) {
-            // The oracles asked for, built first: a module set anew holds
-            // none of the node's values until bound again.
-            const fine = reference === true ? REFERENCE_FINE : reference || 1;
-            if (`${fine},${sunReference}` !== built) {
-                built = `${fine},${sunReference}`;
-                node.setShaderModule(hook.source, 'clouds_volume.bk', volumeModules(fine, sunReference));
-                bind();
-            }
             // A sun moved by a tenth of a degree lights everything anew: the
             // tiles' sun fields and the ground's light, produced again.
             if (sun[0] * toSun[0] + sun[1] * toSun[1] + sun[2] * toSun[2] < Math.cos(0.1 * Math.PI / 180)) {
@@ -344,19 +323,7 @@ export function createClouds(scene, radius, module, readers, seed, hook, maxGrou
             // off, it crosses the air to the layer in one.
             const near = altitude > CLOUD_BASE + liftNear[0] - NEAR_MARGIN &&
                          altitude < CLOUD_BASE + CLOUD_DEPTH + liftNear[1] + NEAR_MARGIN;
-            node.setShaderUniform('near_range', near && !reference ? NEAR_RANGE : 0);
+            node.setShaderUniform('near_range', near ? NEAR_RANGE : 0);
         },
-        // The sun's depth light-marched through the field itself at every
-        // sample, its detail included, in place of the depth's model: what
-        // that model is measured against (a look change's oracle, with
-        // `reference` for the march's steps; never shipped on).
-        get sunReference() { return sunReference; },
-        set sunReference(on) { sunReference = !!on; },
-        // The reference: the whole march in steps 16 times finer (or a
-        // number, that many: a convergence sweep), no near grid, at many
-        // times the cost, what the march and the grid are measured against
-        // (a look change's oracle; never shipped on).
-        get reference() { return reference; },
-        set reference(on) { reference = typeof on === 'number' ? Math.max(1, Math.round(on)) : !!on; },
     };
 }
