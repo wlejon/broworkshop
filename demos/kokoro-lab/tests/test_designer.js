@@ -4,13 +4,17 @@
 // (KK/BS are renamed off kokoro/basis only to avoid colliding with app.js,
 // which the headless runtime auto-loads into the same global scope first.)
 //   bro-headless ../broworkshop/demos/kokoro-lab ../broworkshop/demos/kokoro-lab/_smoke_designer.js
+import { kokoro } from "/app/lib/state.js";
 const fs = require('fs');
 // Weights root: $BRO_WEIGHTS, else the directory holding the bro* siblings.
 import { weightsRoot } from "/lib/kit/weights.js";
 const WROOT = weightsRoot();
 const MODEL = WROOT + '/brosoundml/weights/kokoro';
 bro.tts.setAssetRoot(WROOT + '/brosoundml');
-const KK = bro.tts.loadKokoro(MODEL);
+// The app's init() kicks off its own async Kokoro load; let it settle before we
+// load ours, so the two don't race brotensor's device default (CUDA vs CPU).
+let _wait = 0; while (!kokoro && _wait++ < 6000) advanceTime(16);
+const KK = kokoro || bro.tts.loadKokoro(MODEL);
 const BS = JSON.parse(fs.readFileSync(MODEL + '/voice_basis.json', 'utf8'));
 assert(BS.k === 20 && BS.dim === 256, 'BS shape');
 assert(BS.axisKind && BS.axisKind.filter((x) => x === 'attr').length === 6, 'six attribute axes');

@@ -26,9 +26,9 @@ PASS test ai/voice-pipeline/tests/test_setup.js
 PASS test ai/voice-pipeline/tests/test_stream.js 
 PASS test ai/voice-pipeline/tests/test_turn.js 
 PASS smoke demos/ai-arena 
-FAIL test demos/ai-arena/tests/test_agents.js rc=1: evalScriptFileJit: uncaught Error: 1 failed: live: layered_planner drives the red capsules
+PASS test demos/ai-arena/tests/test_agents.js 
 PASS test demos/ai-arena/tests/test_replay.js 
-FAIL test demos/ai-arena/tests/test_ui.js rc=1: evalScriptFileJit: uncaught Error: 1 failed: combat reaches the log, roster, reward and observation panels
+PASS test demos/ai-arena/tests/test_ui.js 
 PASS smoke demos/anim-lab 
 PASS test demos/anim-lab/tests/test_blend.js 
 PASS test demos/anim-lab/tests/test_clips.js 
@@ -65,7 +65,7 @@ PASS test demos/instanced-crowd/tests/test_crowd.js
 PASS smoke demos/kokoro-lab 
 PASS test demos/kokoro-lab/tests/test_align_cells.js
 PASS test demos/kokoro-lab/tests/test_align_commit.js
-FAIL test demos/kokoro-lab/tests/test_designer.js rc=1: evalScriptFileJit: uncaught Error: synthesizeTraced: brotensor: dispatch: operand 2 is on CUDA but the op resolved to CPU
+PASS test demos/kokoro-lab/tests/test_designer.js
 PASS test demos/kokoro-lab/tests/test_edit.js
 PASS test demos/kokoro-lab/tests/test_emotion.js
 PASS test demos/kokoro-lab/tests/test_inplace.js
@@ -76,7 +76,7 @@ PASS test demos/krea2-lab/tests/test_explore.js
 PASS test demos/krea2-lab/tests/test_expression.js 
 PASS test demos/krea2-lab/tests/test_gate.js 
 PASS test demos/krea2-lab/tests/test_generate.js 
-FAIL test demos/krea2-lab/tests/test_lora.js rc=1: ASSERTION FAILED: LoRA restore finished
+PASS test demos/krea2-lab/tests/test_lora.js 
 PASS test demos/krea2-lab/tests/test_mouth.js 
 PASS test demos/krea2-lab/tests/test_reference.js 
 PASS test demos/krea2-lab/tests/test_save_all.js 
@@ -152,7 +152,7 @@ PASS test demos/qwen-image-lab/tests/test_spatial.js
 PASS test demos/qwen-image-lab/tests/test_ui.js 
 PASS test demos/qwen-image-lab/tests/test_x0.js 
 PASS smoke demos/qwen-tts-lab 
-FAIL test demos/qwen-tts-lab/tests/test_live_stream.js rc=1: ASSERTION FAILED: timed out waiting for stream onDone
+PASS test demos/qwen-tts-lab/tests/test_live_stream.js
 PASS test demos/qwen-tts-lab/tests/test_smoke.js
 PASS smoke demos/ragdoll-blender 
 PASS test demos/ragdoll-blender/tests/test_blend.js 

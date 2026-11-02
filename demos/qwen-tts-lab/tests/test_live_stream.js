@@ -10,7 +10,7 @@ import { setQwen, setVariant, adaptToVariant, qwen, variant } from "/app/lib/mod
 import { bargeIn, voiceSteerVector } from "/app/lib/synth.js";
 import { mascFemBasis, setMfAlpha, resetMascFem } from "/app/lib/mascfem.js";
 import { voiceBasis, designedXvec, seedVoice, snapToPoint } from "/app/lib/designer.js";
-import { currentVoice } from "/app/lib/voice.js";
+import { currentVoice, usedPreset } from "/app/lib/voice.js";
 
 // Weights root: $BRO_WEIGHTS, else the directory holding the bro* siblings.
 import { weightsRoot } from "/lib/kit/weights.js";
@@ -19,23 +19,23 @@ const ROOT = WROOT + '/brosoundml/weights/qwen-tts';
 const TEXT = 'Hello there. This is a test of the streaming pipeline.';
 
 // app.js init() kicks an ASYNC model load (the persisted dir) on a worker thread.
-// Its onReady would clobber our variant/qwen mid-test once we start pumping. The
-// worker needs real wall-time to finish (advanceTime is CPU-fast, not a sleep), so
-// drain on a wall-clock bound: spin the async pump for ~8 s real, by which point
-// the load has settled and fired onReady — then we own the state with sync loads.
-const _t0 = performance.now();
-while (performance.now() - _t0 < 8000) advanceTime(50);
+// Its onReady would clobber our variant/qwen mid-test once we start pumping. Wait
+// on real wall-clock time (Date.now, since performance.now advances with virtual
+// advanceTime) until the initial load settles and sets `qwen`.
+const _t0 = Date.now();
+while (!qwen && Date.now() - _t0 < 30000) { sleep(10); advanceTime(16); }
 bargeIn();   // drop anything that load queued
 
 // Pump the headless tick until `flag()` is true (or the budget runs out). Each
 // advanceTime call ticks the async poll; the worker runs concurrently, so real
-// wall-time accrues across iterations and the generation completes.
+// wall-time (Date.now) accrues across iterations and the generation completes.
 function pump(flag, label) {
-  const t0 = performance.now();                       // wall-clock bound: advanceTime is
-  while (performance.now() - t0 < 30000) {             // CPU-fast (no sleep), so iteration
-    if (flag()) return true;                           // counts don't track the worker's
-    advanceTime(50);                                   // real generation time — wait in
-  }                                                    // real seconds instead.
+  const t0 = Date.now();
+  while (Date.now() - t0 < 60000) {
+    if (flag()) return true;
+    sleep(10);
+    advanceTime(16);
+  }
   assert(false, 'timed out waiting for ' + label);
   return false;
 }

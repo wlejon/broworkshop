@@ -113,6 +113,13 @@ export function initLora(ctx) {
   ctx.renderLoraList = renderLoraList;
   ctx.restoreLoras = restoreLoras;
   ctx.loraScales = () => loras.map((l) => +l.scale);
+  ctx.setPersistedLoras = (list) => {
+    loras = Array.isArray(list)
+      ? list.filter((l) => l && l.path)
+            .map((l) => ({ path: l.path, scale: typeof l.scale === 'number' ? l.scale : 1 }))
+      : [];
+    renderLoraList();
+  };
   ctx.onRefreshButtons((busyOrUnloaded) => {
     $('btn-lora-add').disabled = busyOrUnloaded;
   });
