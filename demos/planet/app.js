@@ -84,6 +84,8 @@ const kSoil = mod.kernel('k_soil');
 const kHorizonHeights = mod.kernel('k_horizon_heights');
 const kHorizon = mod.kernel('k_horizon');
 const kAnchors = mod.kernel('k_anchors');
+const kSplitDetail = mod.kernel('k_split_detail');
+const kTexelSpread = mod.kernel('k_texel_spread');
 
 // The octaves a tile's cells can carry: down to a wavelength of 2.5 cells
 // (the tile kernels take theirs from ground.bk octaves_for, the same).
@@ -108,6 +110,8 @@ const SOIL_STRIDE = 67;
 const soilGrid = bro.kernel.createBuffer(PRODUCE_PER_UPDATE * SOIL_STRIDE * SOIL_STRIDE * 4);
 // The batch's horizon heights, k_horizon_heights to k_horizon.
 const horizonHeights = bro.kernel.createBuffer(PRODUCE_PER_UPDATE * HZ_GRID * HZ_GRID * 4);
+// The batch's texel spreads, k_texel_spread to k_split_detail (which zeroes them).
+const texelSpread = bro.kernel.createBuffer(PRODUCE_PER_UPDATE * 4);
 // Each resident tile's relief anchors (planet.bk k_anchor), by slot.
 const anchors = bro.kernel.createBuffer(CAPACITY * 20 * 4);
 // The batch's tiles' anchors (anchors.js), by record.
@@ -143,14 +147,18 @@ const atmosphere = { planetRadius: RADIUS, turbidity: 10, groundAlbedo: [0.08, 0
 let cache = null;
 // `pixelsPerTexel`: how large a detail texel may project, what the ground
 // shades at; a tile's vertices are DETAIL texels apart.
-function makeCache(pixelsPerTexel) {
-    const pixelsPerCell = pixelsPerTexel * DETAIL;
+function makeCache(pixelsPerTexel, select = {}) {
+    const pixelsPerCell = select.pixelsPerCell ?? pixelsPerTexel * DETAIL;
+    const detail = select.pixelsPerDetail > 0;
+    const contrast = select.contrast ?? 0.03;
+    // The old cache's pools (about a gigabyte) go now, not at a collection.
+    if (cache) cache.destroy();
     cache = bro.tiles.createCache({
         domain: { type: 'cubeSphere', radius: RADIUS, center: [0, 0, 0] },
         tileSize: TILE, border: BORDER, capacity: CAPACITY, maxLevel: MAX_LEVEL,
         minHeight: 0, maxHeight: MAX_HEIGHT, pixelsPerCell, producePerUpdate: PRODUCE_PER_UPDATE,
         layers: { position: 16, relief: 16, detail: DETAIL * DETAIL * 8, horizon: 16 },
-        ranges: true,
+        ranges: true, detail, pixelsPerDetail: select.pixelsPerDetail,
         // The whole batch in six dispatches: the GPU fills up on the
         // batch's cells together, where a tile's own were a few warps.
         produce(batch) {
@@ -166,6 +174,12 @@ function makeCache(pixelsPerTexel) {
             kSoil.dispatch([SOIL_STRIDE, SOIL_STRIDE, batch.count], batch.table, at, soilGrid, TEXELS, RADIUS, BORDER, 1 / TILE, DETAIL, SEED, rivers.net);
             kDetail.dispatch(texels, batch.table, at, texelHeights, this.layer('detail'), RADIUS, BORDER, 1 / TILE, DETAIL, TRUTH, SEED, rivers.net, soilGrid);
             kRange.dispatch([batch.count], batch.table, span, this.ranges, 1 / TILE, MAX_HEIGHT);
+            if (this.detail) {
+                const half = TILE * DETAIL / 2;
+                kTexelSpread.dispatch([half, half, batch.count], batch.table, this.layer('detail'), texelSpread, TEXELS, BORDER * DETAIL);
+                kSplitDetail.dispatch([batch.count], batch.table, pos, this.detail, texelSpread, TILE, BORDER,
+                                      (TILE * DETAIL) ** 2, contrast);
+            }
         },
     });
     if (ground) {
@@ -391,4 +405,4 @@ function loop() {
 requestAnimationFrame(loop);
 
 // For tests and tools.
-globalThis.planet = { cam, setHour, ground, get cache() { return cache; }, clouds, grass, trees, rivers, groundHeight, get stats() { return lastStats; }, get lastView() { return lastView; }, frame };
+globalThis.planet = { cam, setHour, ground, makeCache, get cache() { return cache; }, clouds, grass, trees, rivers, groundHeight, get stats() { return lastStats; }, get lastView() { return lastView; }, frame };

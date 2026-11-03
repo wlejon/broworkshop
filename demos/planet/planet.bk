@@ -473,6 +473,100 @@ fn k_range(g: grid<1>, table: read_store<vec4<i32>, 1>, span: rw_store<i32, 1>, 
     ranges[2 * slot + 1] = min(hi + margin, top);
 }
 
+// The error splitting a tile would take away, into the cache's detail at
+// slot: what its children's new vertices add to its surface (metres, rms).
+// The ground is self-similar, so the tile's own cells say it beforehand: the
+// rms of its odd vertices less the mean of the even ones about them (its
+// own split, seen from inside) times DETAIL_RATIO, the next split's share of
+// it, which falls from 0.85 at level 6 to 0.46 from level 11 on as the
+// alpine octaves give out (measured over leaf quads; within 10% at a level).
+fn detail_ratio(level: i32) -> f32 {
+    return 0.46 + 0.39 * clamp((11.0 - (level as f32)) / 5.0, 0.0, 1.0);
+}
+
+// A store is shaped like its kernel's grid, so the pool (cells x cells a
+// slot) is read flat here.
+fn surface_at(pos: read_store<vec4<f32>, 1>, base: i32, cells: i32, border: i32, i: i32, j: i32) -> f32 {
+    return max(pos[base + (j + border) * cells + i + border].w, 0.0);
+}
+
+// What the texels hold beyond the means of their 2x2 blocks (the tile's own
+// texels seen at half their count): colour and forest cover, each 0 to 1,
+// and the mean surface's normal (octahedral, -1 to 1: what lights the relief
+// a texel's vertices are too far apart to carry),
+// squared and summed over the tile's interior into `spread` at the batch
+// record, in fixed point (SPREAD_ONE a unit), for k_split_detail. A thread a
+// block, so the sum gathers by atomics rather than one serial loop a tile.
+const SPREAD_ONE: f32 = 16384.0;
+
+fn texel_channels(det: read_store<i32, 1>, at: i32) -> vec4<f32> {
+    let c = det[at];
+    let n = det[at + 1];
+    return vec4<f32>((c & 255) as f32, ((c >> 8) & 255) as f32, ((c >> 16) & 255) as f32, ((n >> 24) & 255) as f32) / 255.0;
+}
+
+// The texel's normal as its octahedral coordinates, -1 to 1 (k_detail).
+fn texel_normal(det: read_store<i32, 1>, at: i32) -> vec2<f32> {
+    let n = det[at + 1];
+    return vec2<f32>((n & 4095) as f32, ((n >> 12) & 4095) as f32) / 4095.0 * 2.0 - 1.0;
+}
+
+@kernel @grid(3)
+fn k_texel_spread(g: grid<3>, table: read_store<vec4<i32>, 1>, det: read_store<i32, 1>, spread: rw_store<i32, 1>,
+                  texels: i32, first: i32) {
+    let rec = tiles::record(table, g.z());
+    let tx = first + 2 * g.x();
+    let ty = first + 2 * g.y();
+    let base = rec.slot * texels * texels;
+    let a = texel_channels(det, (base + ty * texels + tx) * 2);
+    let b = texel_channels(det, (base + ty * texels + tx + 1) * 2);
+    let c = texel_channels(det, (base + (ty + 1) * texels + tx) * 2);
+    let d = texel_channels(det, (base + (ty + 1) * texels + tx + 1) * 2);
+    let m = (a + b + c + d) * 0.25;
+    let na = texel_normal(det, (base + ty * texels + tx) * 2);
+    let nb = texel_normal(det, (base + ty * texels + tx + 1) * 2);
+    let nc = texel_normal(det, (base + (ty + 1) * texels + tx) * 2);
+    let nd = texel_normal(det, (base + (ty + 1) * texels + tx + 1) * 2);
+    let nm = (na + nb + nc + nd) * 0.25;
+    let s = dot(a - m, a - m) + dot(b - m, b - m) + dot(c - m, c - m) + dot(d - m, d - m) +
+            dot(na - nm, na - nm) + dot(nb - nm, nb - nm) + dot(nc - nm, nc - nm) + dot(nd - nm, nd - nm);
+    spread.atomic_add(g.z(), (s * SPREAD_ONE + 0.5) as i32);
+}
+
+// A tile's detail: the larger of what its split takes from its surface
+// (metres) and from its colour, the texels' spread as a length: a texel's
+// width times its rms spread over `contrast` (a spread of `contrast` counts
+// as a whole texel wrong). Clears `spread` for the next batch.
+@kernel @grid(1)
+fn k_split_detail(g: grid<1>, table: read_store<vec4<i32>, 1>, pos: read_store<vec4<f32>, 1>, detail: write_store<f32, 1>,
+                  spread: rw_store<i32, 1>, tile: i32, border: i32, texel_count: f32, contrast: f32) {
+    let rec = tiles::record(table, g.x());
+    let slot = rec.slot;
+    let cells = tile + 2 * border;
+    let base = slot * cells * cells;
+    var sum = 0.0;
+    var n = 0.0;
+    for (var j = 0; j <= tile; j = j + 1) {
+        for (var i = 0; i <= tile; i = i + 1) {
+            if ((i & 1) == 0 && (j & 1) == 0) { continue; }
+            let x0 = i & -2;
+            let y0 = j & -2;
+            let x1 = min(x0 + 2, tile);
+            let y1 = min(y0 + 2, tile);
+            let fx = ((i - x0) as f32) * 0.5;
+            let fy = ((j - y0) as f32) * 0.5;
+            let e = mix(mix(surface_at(pos, base, cells, border, x0, y0), surface_at(pos, base, cells, border, x1, y0), fx),
+                        mix(surface_at(pos, base, cells, border, x0, y1), surface_at(pos, base, cells, border, x1, y1), fx), fy);
+            let r = surface_at(pos, base, cells, border, i, j) - e;
+            sum = sum + r * r;
+            n = n + 1.0;
+        }
+    }
+    let colour = sqrt((spread[g.x()] as f32) / SPREAD_ONE / texel_count) / contrast * rec.extent / sqrt(texel_count);
+    spread[g.x()] = 0;
+    detail[slot] = max(detail_ratio(rec.level) * sqrt(sum / n), colour);
+}
+
 // ── On the CPU ──────────────────────────────────────────────────────────────
 
 // Anchors (anchor.bk) for the GPU's work, found in f64: anchor i at the base
