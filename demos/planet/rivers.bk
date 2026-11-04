@@ -107,9 +107,32 @@ pub fn cell_next(c: vec3<i32>, di: i32, dj: i32) -> vec3<i32> {
     return cell_of(alpha_dir(c.x, -1.0 + ((i as f32) + 0.5) * step, -1.0 + ((j as f32) + 0.5) * step));
 }
 
-// A river `catchment` points large: its width (m).
+// A river `catchment` points large: its width (m). A point drains about
+// 400 km^2, so the smallest rivers are streams a few metres across and the
+// greatest (16000 points, an Amazon's basin) kilometres wide, seen from
+// orbit: the width grows faster than the root of the catchment, as a
+// river gathering a continent is broad and shallow.
 pub fn river_width(catchment: f32) -> f32 {
-    return 6.0 * sqrt(catchment);
+    return 3.0 * pow(catchment, 0.75);
+}
+
+// The floodplain a river lays down about its channel: flat ground at its
+// bed, a few times its width across, on which it wanders and floods (half
+// its width from the channel's middle, m). A stream has none; a great
+// river's is tens of kilometres, the green ribbon a desert river draws
+// from orbit. Held under PLAIN_MAX, as the reaches whose valleys can reach
+// here are searched out to half a lattice cell.
+const PLAIN_MAX: f32 = 6000.0;
+pub fn plain_half(catchment: f32) -> f32 {
+    let half = 0.5 * river_width(catchment);
+    return min(half * (1.0 + 7.0 * smoothstep(20.0, 3000.0, catchment)), PLAIN_MAX);
+}
+
+// How steeply a river's valley sides rise for its size: a stream cuts a
+// narrow notch, a great river a broad valley, so the small rivers' valleys
+// stay under what orbit can see while the trunks' fill the view.
+fn valley_steepness(catchment: f32) -> f32 {
+    return mix(3.0, 1.0, smoothstep(5.0, 800.0, catchment));
 }
 // A river's water stands over its bed as a lake from this deep (m).
 const LAKE_DEPTH: f32 = 1.0;
@@ -187,6 +210,10 @@ pub struct Water {
     channel: f32,
     bed: f32,
     lake: f32,
+    // The share of the cell on a great river's floodplain (plain_half), and
+    // its old courses there, to -1 in a grown-over swale.
+    plain: f32,
+    tone: f32,
 }
 const CHANNEL_DEPTH: f32 = 0.04;   // of the width, at the middle
 // The reach from point k (record offset) to its downstream point, at offset
@@ -215,6 +242,29 @@ fn erf_approx(x: f32) -> f32 {
 struct Reach {
     v: vec4<f32>,
     surface: f32,
+    plain: f32,
+    tone: f32,
+}
+// A floodplain's rise from its channel outward, m a metre.
+const PLAIN_RISE: f32 = 0.003;
+// How much a channel's width wanders along its reach, and the catchments
+// from which a channel holds islands and a floodplain.
+const WIDTH_VARY: f32 = 0.3;
+const ISLAND_MIN: f32 = 150.0;
+const PLAIN_MIN: f32 = 20.0;
+// 0 to 1, hashed from (p, i).
+fn hash01(seed: i32, p: i32, i: i32) -> f32 {
+    let h = hash_primes3d(seed, p * PRIME_X, i * PRIME_Y, 0);
+    return (((h >> 8) & 65535) as f32) / 65536.0;
+}
+// Smooth gradient noise along a reach, about -1 to 1, at `wavelength` m.
+fn wobble(seed: i32, p: i32, s: f32, wavelength: f32) -> f32 {
+    let x = s / max(wavelength, 1.0);
+    let c = floor(x);
+    let f = x - c;
+    let i = c as i32;
+    return 2.0 * mix(meander_gradient(seed, p, i, 9) * f, meander_gradient(seed, p, i + 1, 9) * (f - 1.0),
+                     f * f * (3.0 - 2.0 * f));
 }
 // The reach's bend: its channel's offset across its line (m) at t (0 to 1)
 // of a reach `len` long, a cubic Hermite from nothing at either point whose
@@ -244,12 +294,19 @@ fn reach(net: read_store<f32, 1>, k: i32, af: vec3<f32>, hi: vec3<f32>, lo: vec3
     let side = normalize(cross(along, up));
     let s = clamp(-dot(af, along), 0.0, len);
     let t = s / len;
-    let half = 0.5 * river_width(catchment);
+    let p = k / RIV_REC;
+    let width = river_width(catchment);
+    // The channel widens and narrows along its reach, back to its width at
+    // the points, where the next reach takes it on.
+    let taper = smoothstep(0.0, 1.0, min(s, len - s) / max(3.0 * width, 1.0));
+    let half = 0.5 * width * (1.0 + WIDTH_VARY * wobble(seed + 11, p, s, 3.0 * width) * taper);
     // From here to the reach's line, and across it to the channel: the
     // meanders about the reach's bend to its points' tangents.
     let q = af + along * s;
-    let off = bend(net, k, down * RIV_REC, along, side, t, len) + meander(k / RIV_REC, s, len, 2.0 * half, seed);
-    let d = length(vec2<f32>(dot(q, along), -dot(q, side) - off));
+    let bent = bend(net, k, down * RIV_REC, along, side, t, len);
+    let x = -dot(q, side) - bent - meander(p, s, len, width, seed);
+    let ahead = dot(q, along);
+    let d = length(vec2<f32>(ahead, x));
     let downLevel = net[down * RIV_REC + 3];
     let bed = mix(min(net[k + 7], level), min(net[down * RIV_REC + 7], downLevel), t);
     // The cell's share inside |d| < half: the strip under a Gaussian of
@@ -262,10 +319,61 @@ fn reach(net: read_store<f32, 1>, k: i32, af: vec3<f32>, hi: vec3<f32>, lo: vec3
     // between carry on.
     let sg = SHARE_SIGMA * max(cell, 1e-3) * 1.4142136;
     let across = d / half;
+    // The floodplain: from the channel's bank out to `plain`, rising a few
+    // metres a kilometre; the valley's sides from its edge.
+    let plain = max(plain_half(catchment), half);
+    let ds = sqrt(d * d + spread);
+    let floor_rise = PLAIN_RISE * clamp(ds - half, 0.0, plain - half);
+    var share = clamp(0.5 * (erf_approx((half - d) / sg) - erf_approx((-half - d) / sg)), 0.0, 1.0);
+    var depth = CHANNEL_DEPTH * 2.0 * half * max(1.0 - across * across, 0.0);
     var out: Reach;
-    out.v = vec4<f32>(bed + valley_rise(sqrt(d * d + spread) - half),
-                      clamp(0.5 * (erf_approx((half - d) / sg) - erf_approx((-half - d) / sg)), 0.0, 1.0),
-                      CHANNEL_DEPTH * 2.0 * half * max(1.0 - across * across, 0.0), bed);
+    out.plain = 0.0;
+    out.tone = 0.0;
+    // Bars and islands stand in a broad river's channel: lenses a few
+    // widths long, one in about half of the stretches of five widths, off
+    // its middle; land the colour of the floodplain.
+    if (d < half + 2.0 * sg && catchment >= ISLAND_MIN) {
+        let stretch = 10.0 * half;
+        let u = s / stretch;
+        let ci = floor(u) as i32;
+        let h1 = hash01(seed + 13, p, ci);
+        if (h1 < 0.55) {
+            let h2 = hash01(seed + 17, p, ci);
+            let lens = 0.22 + 0.3 * h1;
+            let ex = (u - (ci as f32) - 0.5) / 0.38;
+            let ey = (x / half - (h2 - 0.5) * 0.9) / lens;
+            let island = smoothstep(-sg, sg, (1.0 - sqrt(ex * ex + ey * ey)) * lens * half);
+            share *= 1.0 - island;
+            depth *= 1.0 - island;
+        }
+    }
+    // The floodplain, for a river large enough to have one: its edge
+    // softened over a fifth of its width and wandering, and over it the
+    // river's old courses, tighter meanders than its own: oxbow lakes along
+    // some stretches of one, and the others' swales.
+    let soft = 0.2 * plain + sg;
+    if (catchment >= PLAIN_MIN && d < plain + soft) {
+        let edge = plain * (1.0 + 0.25 * wobble(seed + 23, p, s, 2.0 * plain) * taper);
+        out.plain = (1.0 - smoothstep(edge - soft, edge + soft, d)) * smoothstep(PLAIN_MIN, 300.0, catchment);
+        let old_width = min(0.7 * width, 0.5 * len / MEANDER_WAVES);
+        let xo = -dot(q, side) - bent - meander(p + 7919, s, len, old_width, seed + 101);
+        let ho = 0.5 * old_width;
+        let stretch = smoothstep(0.1, 0.35, wobble(seed + 19, p, s, 8.0 * old_width)) * taper * out.plain;
+        let oxbow = stretch * clamp(0.5 * (erf_approx((ho - xo) / sg) - erf_approx((-ho - xo) / sg)), 0.0, 1.0);
+        share = max(share, oxbow);
+        depth = max(depth, 3.0 * oxbow);
+        // Older courses still, silted up and grown over: darker swales
+        // along other meanders, fading in and out along the plain.
+        var swale: f32 = 0.0;
+        for (var o: i32 = 0; o < 2; o += 1) {
+            let xs = -dot(q, side) - bent - meander(p + 104729 * (o + 2), s, len, old_width * (1.3 + 0.5 * (o as f32)), seed + 211 + o);
+            let along_s = smoothstep(-0.2, 0.3, wobble(seed + 29 + o, p, s, 6.0 * old_width));
+            let wide = ho * 1.6 + sg;
+            swale = max(swale, along_s * exp(-(xs * xs) / (wide * wide)));
+        }
+        out.tone = -swale * taper * out.plain;
+    }
+    out.v = vec4<f32>(bed + floor_rise + valley_rise(ds - plain) * valley_steepness(catchment), share, depth, bed);
     out.surface = downLevel;
     return out;
 }
@@ -301,6 +409,8 @@ pub fn water_at(hi: vec3<f32>, lo: vec3<f32>, radius: f32, cell: f32, net: read_
     var top: f32 = -1.0e9;
     var level: f32 = -1.0e9;
     var depth: f32 = 0.0;
+    var plain: f32 = 0.0;
+    var tone: f32 = 0.0;
     let spread = cell * cell / 6.0;
     for (var dj: i32 = -1; dj <= 1; dj += 1) {
         for (var di: i32 = -1; di <= 1; di += 1) {
@@ -319,6 +429,10 @@ pub fn water_at(hi: vec3<f32>, lo: vec3<f32>, radius: f32, cell: f32, net: read_
                 }
                 share = max(share, rc.v.y);
                 channel = max(channel, rc.v.z);
+                if (rc.plain > plain) {
+                    plain = rc.plain;
+                    tone = rc.tone;
+                }
             }
         }
     }
@@ -341,6 +455,10 @@ pub fn water_at(hi: vec3<f32>, lo: vec3<f32>, radius: f32, cell: f32, net: read_
                     }
                     share = max(share, rc.v.y);
                     channel = max(channel, rc.v.z);
+                    if (rc.plain > plain) {
+                        plain = rc.plain;
+                        tone = rc.tone;
+                    }
                 }
             }
         }
@@ -350,6 +468,8 @@ pub fn water_at(hi: vec3<f32>, lo: vec3<f32>, radius: f32, cell: f32, net: read_
     w.channel = channel;
     w.bed = bed;
     w.lake = top;
+    w.plain = plain;
+    w.tone = tone;
     return w;
 }
 
