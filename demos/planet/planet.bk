@@ -151,7 +151,7 @@ fn unorm(x: f32, bits: i32) -> i32 {
 const RIPARIAN_MOIST: f32 = 0.45;
 const RIPARIAN: f32 = 0.8;
 const RIVER_SILT = vec3<f32>(0.065, 0.052, 0.034);
-const BAR_SAND = vec3<f32>(0.52, 0.47, 0.38);
+const BAR_SAND = vec3<f32>(0.44, 0.40, 0.32);
 
 @kernel @grid(3)
 fn k_detail(g: grid<3>, table: read_store<vec4<i32>, 1>, anchors: read_store<vec4<i32>, 1>, texels: read_store<vec4<f32>, 1>,

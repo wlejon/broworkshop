@@ -75,6 +75,7 @@ const PERLIN_VAR: f32 = 0.0728;  // ground.bk PERLIN_VAR
 const RELIEF: f32 = 0.08;        // slope per octave, per unit of the noise's gradient
 const ROCK_LUM: f32 = 1.8;
 const ROCK_RELIEF: f32 = 3.0;
+const FRESH_GLOSS: f32 = 0.35;   // fresh water's roughness, of its ripples'
 
 // What the clouds leave of the light at the ground point g (about the
 // planet's centre) over a footprint of w metres, from clouds.js's ground
@@ -621,7 +622,10 @@ pub fn fragment(v: mesh::Vertex, s_in: mesh::Surface) -> mesh::Surface {
         sea_variance = sr.variance * calm * calm;
     }
     s.normal = normalize(mix(n, sea, water));
-    s.roughness = mix(0.9, sqrt(sqrt(sea_variance)), water);
+    // Fresh water is smoother than its ripples' slopes say: a river or a
+    // lake mirrors its sky and its banks, which is what reads as water from
+    // low over it (at the slopes' roughness it was a dull grey sheet).
+    s.roughness = mix(0.9, sqrt(sqrt(sea_variance)) * mix(1.0, FRESH_GLOSS, fresh), water);
     s.metallic = 0.0;
 
     s.sun_visibility *= v_light.x;
