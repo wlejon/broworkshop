@@ -124,6 +124,26 @@ pub fn simplex_past(at: SimplexAt, offset: vec3<f32>) -> SimplexAt {
     return SimplexAt { cell: at.cell + vec3<i32>(fl.x as i32, fl.y as i32, fl.z as i32), sk: s - fl, res: at.res };
 }
 
+// The ground's noise at an f32 point q (noise coordinates), for broad
+// fields whose wavelengths are hundreds of kilometres and more, where f32's
+// step is nothing: no anchor, the lattice cell taken from q itself. (The
+// std supersimplex3d is the same noise, at several times the cost on the
+// GPU.)
+pub fn simplex_f32(q: vec3<f32>, seed: i32) -> f32 {
+    return simplex_grad_f32(q, seed).x;
+}
+// The same with its gradient (yzw), whose components are themselves fields
+// of the noise's scale, decorrelated from its value and each other: a
+// broad field's call gives four (GRAD_TO_VALUE scales one to the value's
+// spread), or a warp's displacement in one call instead of three.
+pub const GRAD_TO_VALUE: f32 = 0.272;   // sqrt(NOISE_VAR / NOISE_GRAD_VAR)
+pub fn simplex_grad_f32(q: vec3<f32>, seed: i32) -> vec4<f32> {
+    let s = skew(q);
+    let fl = floor(s);
+    let at = SimplexAt { cell: vec3<i32>(fl.x as i32, fl.y as i32, fl.z as i32), sk: s - fl, res: vec3<f32>(0.0) };
+    return simplex_grad(at, seed);
+}
+
 // The same point an octave finer: q doubled lands at twice the cell plus
 // the floor of twice the offset, exactly (the skew is linear), and what the
 // offset lost doubles with it.

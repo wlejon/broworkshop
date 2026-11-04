@@ -1,0 +1,152 @@
+// The planet's climate: what the land is like where it is, from space to the
+// ground. Temperature falls with latitude and with height; moisture follows
+// Earth's bands (wet at the equator and in the mid-latitudes, dry in the
+// subtropics and at the poles) bent by broad weather noise. Together they
+// choose the land's colour: deserts in sand, ochre and red, golden steppe
+// and savanna, temperate grassland and forest, deep rainforest, dark boreal
+// forest, brown tundra and ice. The regions are hundreds to thousands of
+// kilometres across, so their contrast is what the planet shows from orbit.
+// Rock takes a region's stone too: grey granite, red sandstone, pale
+// limestone, dark basalt.
+//
+// Everything here is f32 on the unit direction: the fields vary over
+// hundreds of kilometres, where its 0.4 m step is nothing.
+module planet::climate;
+
+from planet::relief import simplex_grad_f32, GRAD_TO_VALUE;
+
+pub struct Climate {
+    // Sea-level temperature (deg C) and moisture (0 dry to 1 wet).
+    temp: f32,
+    moist: f32,
+    // The region's sand / dry ground and its rock.
+    sand: vec3<f32>,
+    rock: vec3<f32>,
+}
+
+// Temperature lapse with height, deg C a metre.
+const LAPSE: f32 = 0.0065;
+
+// The ground's noise (relief.bk) at `scale` cycles a radian, about +-1 in
+// x, and in yzw three more fields of its scale (its gradient, to the
+// value's spread): a call yields four.
+fn n4(dir: vec3<f32>, scale: f32, seed: i32) -> vec4<f32> {
+    let g = simplex_grad_f32(dir * scale, seed);
+    return vec4<f32>(g.x, g.yzw * GRAD_TO_VALUE);
+}
+
+// An octave at `scale` (noise units per radian) seen over a cell `cell`
+// radians wide: whole while the cell is under a quarter of its wavelength,
+// gone past 0.6, so a far texel holds the regions and none of their mottle,
+// and the mottle comes in as the ground nears instead of sparkling.
+fn fine(scale: f32, cell: f32) -> f32 {
+    return 1.0 - smoothstep(0.25, 0.6, cell * scale);
+}
+
+// The climate at unit direction `dir_in`, over a cell `cell` radians wide
+// (0 for a point).
+pub fn climate_at(dir_in: vec3<f32>, cell: f32, seed: i32) -> Climate {
+    // The regions' edges are ragged, not round: the fields are read through
+    // a warp of ~150 km noise (its gradient, one call), and finer moisture
+    // octaves fray the borders into fingers and outliers tens of kilometres
+    // across.
+    let dir = dir_in + n4(dir_in, 42.0, seed + 531).yzw * 0.006;
+    let s = clamp(dir.y, -1.0, 1.0);
+    let lat = asin(s);
+    // Weather wanders the bands: broad noise at ~4000, ~1200, ~370 and
+    // ~70 km. The desert's hues and the rock's provinces are the same
+    // calls' other fields.
+    let a = n4(dir, 1.6, seed + 501);
+    let b = n4(dir, 5.3, seed + 502);
+    let c = n4(dir, 17.0, seed + 503);
+    let d = n4(dir, 95.0, seed + 504);
+    let temp = 30.0 - 46.0 * s * s + 5.0 * a.x + 2.0 * c.x;
+    // cos(6 lat): wet at 0 and 60 degrees, dry at 30 and 90.
+    let band = cos(6.0 * (lat + 0.06 * b.x));
+    // A finer octave (~25 km, two of its fields) mottles the transitions,
+    // so a region's edge is a mosaic of the two, not nested contours of one
+    // smooth field; a texel too wide for it holds its mean, none.
+    var mottle: f32 = 0.0;
+    if (cell * 260.0 < 0.6) {
+        let e = n4(dir_in, 260.0, seed + 505);
+        mottle = 0.07 * (e.x + e.y) * fine(260.0, cell);
+    }
+    let moist = clamp(0.5 + 0.24 * band + 0.38 * b.x + 0.16 * c.x + 0.1 * a.x + 0.08 * d.x * fine(95.0, cell) + mottle,
+                      0.0, 1.0);
+
+    // Desert ground: pale sand, ochre and red, in regions of ~800 km.
+    let d1 = b.y;
+    let d2 = c.y;
+    let pale = vec3<f32>(0.60, 0.50, 0.36);
+    let ochre = vec3<f32>(0.55, 0.36, 0.18);
+    let red = vec3<f32>(0.46, 0.20, 0.09);
+    var sand = mix(ochre, pale, smoothstep(-0.2, 0.4, d1 + 0.3 * d2));
+    sand = mix(sand, red, smoothstep(0.15, 0.55, -d1 + 0.4 * d2));
+
+    // Rock: granite by default, sandstone where it is dry, limestone and
+    // basalt in their own provinces (~300 km).
+    let r1 = c.z;
+    let r2 = c.w;
+    let granite = vec3<f32>(0.24, 0.22, 0.21);
+    let sandstone = vec3<f32>(0.42, 0.22, 0.12);
+    let limestone = vec3<f32>(0.42, 0.39, 0.33);
+    let basalt = vec3<f32>(0.10, 0.095, 0.09);
+    var rock = granite;
+    rock = mix(rock, limestone, smoothstep(0.1, 0.4, r1));
+    rock = mix(rock, basalt, smoothstep(0.2, 0.5, r2));
+    let dry = 1.0 - smoothstep(0.15, 0.45, moist);
+    rock = mix(rock, sandstone, dry * smoothstep(-0.1, 0.3, -r1) * smoothstep(12.0, 20.0, temp));
+    return Climate { temp: temp, moist: moist, sand: sand, rock: rock };
+}
+
+// The temperature `h` metres up.
+pub fn temp_at(c: Climate, h: f32) -> f32 {
+    return c.temp - LAPSE * max(h, 0.0);
+}
+
+// The land's living cover at temperature t, moisture m: x its colour, y its
+// forest share, z its grass share (of the ground soil can hold).
+pub struct Cover {
+    colour: vec3<f32>,
+    forest: f32,
+    grass: f32,
+}
+
+pub fn cover_at(c: Climate, h: f32) -> Cover {
+    let t = temp_at(c, h);
+    // Ranges wring rain from the air: their slopes are wetter than the
+    // lowland around, so dry lands carry forested mountains.
+    let m = clamp(c.moist + 0.12 * smoothstep(400.0, 2200.0, h), 0.0, 1.0);
+    // Hot: desert, savanna, rainforest. Temperate: steppe, grassland,
+    // forest. Cold: tundra, boreal forest.
+    // The forests' are their floors: the ground's shader darkens them by
+    // the crowns over them (ground_mesh.bk TREE_TINT), to about 0.6 of these
+    // seen from above.
+    let savanna = vec3<f32>(0.33, 0.27, 0.12);
+    let rainforest = vec3<f32>(0.055, 0.15, 0.04);
+    let steppe = vec3<f32>(0.30, 0.27, 0.15);
+    let grassland = vec3<f32>(0.12, 0.20, 0.06);
+    let forest = vec3<f32>(0.09, 0.17, 0.055);
+    let tundra = vec3<f32>(0.21, 0.18, 0.12);
+    let boreal = vec3<f32>(0.06, 0.10, 0.06);
+
+    let hot = mix(mix(c.sand, savanna, smoothstep(0.14, 0.40, m)), rainforest, smoothstep(0.42, 0.74, m));
+    let mild = mix(mix(mix(c.sand, steppe, smoothstep(0.08, 0.30, m)), grassland, smoothstep(0.26, 0.52, m)),
+                   forest, smoothstep(0.46, 0.74, m));
+    let cold = mix(tundra, boreal, smoothstep(0.35, 0.55, m) * smoothstep(-2.0, 3.0, t));
+    let warm_share = smoothstep(14.0, 22.0, t);
+    let cold_share = 1.0 - smoothstep(-1.0, 7.0, t);
+    var colour = mix(mix(mild, hot, warm_share), cold, cold_share);
+
+    // Forest: wet enough, above the treeline (about -2 deg C annual).
+    let wet_forest = mix(smoothstep(0.46, 0.74, m), smoothstep(0.42, 0.74, m), warm_share);
+    let forest_share = mix(wet_forest, smoothstep(0.35, 0.55, m), cold_share) * smoothstep(-3.0, 1.0, t);
+    // Grass: anything not desert, up to the alpine meadows.
+    let grass_share = smoothstep(0.14, 0.32, m) * smoothstep(-8.0, -3.0, t);
+    return Cover { colour: colour, forest: forest_share, grass: grass_share };
+}
+
+// Snow lies where it is cold enough (deg C at height).
+pub fn snow_at(c: Climate, h: f32) -> f32 {
+    return 1.0 - smoothstep(-9.0, -4.0, temp_at(c, h));
+}

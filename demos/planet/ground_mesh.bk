@@ -65,7 +65,7 @@ struct Params {
 // the relief's noise and its scales (planet.bk k_tile).
 @binding(4, 20) var anchors: read_buffer<vec4<i32>>;
 @binding(4, 21) var relief: read_buffer<vec4<f32>>;
-const ANCHOR_VEC4S: i32 = 5;
+const ANCHOR_VEC4S: i32 = 6;
 
 const GROUND_PI: f32 = 3.14159265;
 const TREE_CROWNS: f32 = 0.55;
@@ -312,7 +312,9 @@ struct DetailTexel {
 fn detail_texel(slot: i32, t_in: vec2<i32>) -> DetailTexel {
     let t = clamp(t_in, vec2<i32>(0), vec2<i32>(TEXELS - 1));
     let k = ((slot * TEXELS + t.y) * TEXELS + t.x) * 2;
-    let col = unpack_unorm4x8(det[k]);
+    // The colour is stored square-rooted (planet.bk k_detail).
+    let raw = unpack_unorm4x8(det[k]);
+    let col = vec4<f32>(raw.xyz * raw.xyz, raw.w);
     let w = det[k + 1];
     let ox = ((w & 4095u) as f32) * (2.0 / 4095.0) - 1.0;
     let oy = (((w >> 12u) & 4095u) as f32) * (2.0 / 4095.0) - 1.0;
@@ -411,13 +413,25 @@ fn cliff_band(level: f32, length: f32, footprint: f32, seed: i32) -> f32 {
     let t = 6.2831853 * footprint / length;
     return n * 5.0 * exp(-0.5 * t * t);
 }
-fn cliff_rock(p: vec3<f32>, footprint: f32) -> vec3<f32> {
+// The region's stone at detail texel coordinate `tex` of tile `slot`: the
+// four corners k_anchor stored (planet.bk), bilinear over the tile.
+fn region_rock(slot: i32, tex: vec2<f32>) -> vec3<f32> {
+    let w = bitcast<vec4<u32>>(anchors[slot * ANCHOR_VEC4S + 5]);
+    let st = clamp(((tex + vec2<f32>(0.5)) / (DETAIL as f32) - vec2<f32>(0.5 + (BORDER as f32))) / (TILE as f32),
+                   vec2<f32>(0.0), vec2<f32>(1.0));
+    let r = mix(mix(unpack_unorm4x8(w.x).xyz, unpack_unorm4x8(w.y).xyz, st.x),
+                mix(unpack_unorm4x8(w.z).xyz, unpack_unorm4x8(w.w).xyz, st.x), st.y);
+    return r * r;
+}
+fn cliff_rock(p: vec3<f32>, footprint: f32, stone: vec3<f32>) -> vec3<f32> {
     let h = length(p) - FACE_EXTENT * 0.63661977;   // FACE_EXTENT is a quarter of the circumference
     let level = h + perlin_grad(p * (1.0 / 3500.0), 4096, SEED + 307).x * 1600.0;
     let bed = 0.10 * cliff_band(level, 9.0, footprint, SEED + 311)
             + 0.16 * cliff_band(level, 41.0, footprint, SEED + 313)
             + 0.18 * cliff_band(level, 130.0, footprint, SEED + 317);
-    return vec3<f32>(0.20, 0.20, 0.205) * exp(bed) + vec3<f32>(0.03, 0.012, -0.012) * bed;
+    // The region's stone (climate.bk, region_rock), as ground.bk
+    // bedded_surface lays it.
+    return stone * exp(bed) + vec3<f32>(0.03, 0.012, -0.012) * bed;
 }
 
 struct SeaResult {
@@ -537,7 +551,7 @@ pub fn fragment(v: mesh::Vertex, s_in: mesh::Surface) -> mesh::Surface {
     // face) would run down it as stripes.
     let shed = (1.0 - smoothstep(0.2, 0.45, dot(n, normalize(v_up)))) * (1.0 - water);
     if (shed > 0.0) {
-        let cliff = cliff_rock((params.cam_hi + params.cam_lo) + v.world_pos, footprint);
+        let cliff = cliff_rock((params.cam_hi + params.cam_lo) + v.world_pos, footprint, region_rock(v_slot, v_tex));
         col = vec4<f32>(mix(col.xyz, cliff, shed), col.w);
     }
     var lum: f32 = 0.0;

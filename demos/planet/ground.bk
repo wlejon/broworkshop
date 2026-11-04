@@ -8,6 +8,7 @@ module planet::ground;
 import std::noise::*;
 import tiles;
 from planet::rivers import water_at, lake_surface, Water;
+from planet::climate import Climate, climate_at, cover_at, temp_at, snow_at;
 // The ridged relief's octaves and statistics, which the ground's shader
 // shares (relief.bk): BASE_WAVELENGTH the first octave's wavelength, metres;
 // RIDGE_MEAN E[(1 - |noise|)^2] and NOISE_VAR Var(noise), measured over 200k
@@ -15,7 +16,7 @@ from planet::rivers import water_at, lake_surface, Water;
 // per unit of input.
 from planet::relief import BASE_WAVELENGTH, RIDGE_MEAN, NOISE_VAR, NOISE_GRAD_VAR, NOISE_BOX, RIDGE_FIRST, RIDGE_LAST,
     RIDGE_PAST, FINE_FIRST, WARP_OCTAVE, WARP_DISPLACE, ridge_amp, normal_cdf, ridge_cell_mean, span_at, mean_factor, SimplexAt,
-    simplex_grad;
+    simplex_grad, simplex_f32, simplex_grad_f32, GRAD_TO_VALUE;
 from planet::anchor import Anchor, Lattice, PerlinAt, RANGE, VARY_FIRST, STRATA_FOLD, twice, doubled, simplex_from,
     perlin_from, moved, anchor_near;
 
@@ -177,17 +178,53 @@ fn clamp_mean(m: f32, s: f32, lo: f32, hi: f32) -> f32 {
 // tile's cells as Gaussian noise (the coastline clamps take their mean over
 // it, so a coarse tile holds what its descendants average to), z where
 // mountain ranges rise, w how much is land.
-fn masks(a: Anchor, off: vec3<f32>, octaves: f32, seed: i32) -> vec4<f32> {
-    let continents = fbm_to(a.p, off, octaves, 0, 4, seed);
+//
+// The continents read through a broad warp (octaves 1 and 3: 1200 and
+// 300 km wavelengths, displacing up to a few hundred kilometres), which
+// bends their coasts into peninsulas, capes and gulfs: unwarped, a coast
+// was the zero line of a few smooth octaves, and ran straight for a
+// thousand kilometres. Its octaves go on to 6 (a 37 km wavelength), so
+// the coast is ragged at every scale a continent is seen at.
+const CONTINENT_OCTAVES: i32 = 7;
+// Each octave's displacement is one noise's gradient (relief.bk
+// GRAD_TO_VALUE), a field per axis at the cost of one.
+fn continent_offset(a: Anchor, off: vec3<f32>, seed: i32) -> vec3<f32> {
+    let broad = simplex_grad(simplex_from(doubled(a.p, 1), off * 2.0), seed + 420).yzw;
+    let fine = simplex_grad(simplex_from(doubled(a.p, 3), off * 8.0), seed + 423).yzw;
+    return off + (broad * 0.1 + fine * 0.025) * GRAD_TO_VALUE;
+}
+// Under them, the continents' own scale: one octave twice the base
+// wavelength (about 5000 km), which gathers the land into a few great
+// masses with oceans between, where the base octaves alone scattered it
+// over the planet in even blobs. At that wavelength f32 directions (half a
+// metre) are exact enough to read it without a lattice.
+const CONTINENT_SCALE: f32 = 0.55;     // noise cycles per p unit: ~4400 km
+const CONTINENT_WEIGHT: f32 = 1.4;
+const BELT_SCALE: f32 = 0.8;           // the ranges' belts: ~3000 km
+// Lowers the continents field: about a third of the planet is land.
+const SEA_SHARE_BIAS: f32 = -0.3;
+fn masks(a: Anchor, off: vec3<f32>, radius: f32, octaves: f32, seed: i32) -> vec4<f32> {
+    let warped = continent_offset(a, off, seed);
+    let p = a.dir * (radius / BASE_WAVELENGTH) + warped;
+    let big = simplex_f32(p * CONTINENT_SCALE, seed + 430) * CONTINENT_WEIGHT;
+    let continents = big + fbm_to(a.p, warped, octaves, 0, CONTINENT_OCTAVES, seed) + SEA_SHARE_BIAS;
     var unresolved: f32 = 0.0;
     var amp: f32 = 1.0;
-    for (var o: i32 = 0; o < 4; o += 1) {
+    for (var o: i32 = 0; o < CONTINENT_OCTAVES; o += 1) {
         unresolved += amp * amp * NOISE_VAR * within_share(noise_mean_factor(o, octaves));
         amp *= 0.5;
     }
     let sc = sqrt(unresolved);
     let onLand = clamp_mean(continents * 6.0 + 0.3, sc * 6.0, 0.0, 1.0);
-    let ranges = clamp(noise_on(a.r, 0, off * RANGE, seed + 300) * 2.2 - 0.35, 0.0, 1.0);
+    // Ranges stand in belts, as a planet's do along its plates' margins:
+    // where a broad noise (~3000 km, warped with the continents) crosses
+    // zero, a few hundred kilometres wide and thousands long, broken into
+    // chains along their length by a field of the same call (its gradient),
+    // with lowlands and plains between.
+    let belt = simplex_grad_f32(p * BELT_SCALE, seed + 300);
+    let rn = belt.x;
+    let gate = belt.y * GRAD_TO_VALUE;
+    let ranges = smoothstep(0.8, 0.95, 1.0 - abs(rn)) * smoothstep(-0.35, 0.1, gate);
     return vec4<f32>(continents, sc, ranges, onLand);
 }
 
@@ -246,8 +283,14 @@ fn p_offset(e: vec3<f32>, radius: f32) -> vec3<f32> {
 // octaves over both, rougher in the ranges. z the uplift, which scales the
 // relief.
 pub fn terrain_parts(a: Anchor, e: vec3<f32>, radius: f32, octaves: f32, seed: i32) -> vec3<f32> {
+    return terrain_parts_over(a, e, masks(a, p_offset(e, radius), radius, octaves, seed), radius, octaves, seed);
+}
+// The same over masks `m` already read: a supersampled cell reads them once
+// at its centre, at its own octaves, where they are the mean over the cell
+// (their finest octave is tens of kilometres; the coast's clamps take their
+// mean over the rest, masks y).
+fn terrain_parts_over(a: Anchor, e: vec3<f32>, m: vec4<f32>, radius: f32, octaves: f32, seed: i32) -> vec3<f32> {
     let off = p_offset(e, radius);
-    let m = masks(a, off, octaves, seed);
     let land = clamp_mean(m.x * 3.0 + 0.15, m.y * 3.0, -1.0, 1.0);
     let uplift = m.z * m.w;
     let r = relief(a, off, octaves, seed);
@@ -359,12 +402,13 @@ pub fn cell_height(a: Anchor, rec: tiles::Record, s: f32, t: f32, cell: f32,
         return terrain(a, frame_dir(rec, s, t), radius, octaves, seed, net);
     }
     let w = water_at(a.dir, frame_dir(rec, s, t), radius, cell_width(octaves), net, seed);
+    let m = masks(a, p_offset(frame_dir(rec, s, t), radius), radius, octaves, seed);
     var sum: f32 = 0.0;
     for (var j: i32 = 0; j < SUB; j += 1) {
         for (var i: i32 = 0; i < SUB; i += 1) {
             let ds = (((i as f32) + 0.5) / (SUB as f32) - 0.5) * cell;
             let dt = (((j as f32) + 0.5) / (SUB as f32) - 0.5) * cell;
-            sum += shaped_by(terrain_parts(a, frame_dir(rec, s + ds, t + dt), radius, octaves + 2.0, seed), w).x;
+            sum += shaped_by(terrain_parts_over(a, frame_dir(rec, s + ds, t + dt), m, radius, octaves + 2.0, seed), w).x;
         }
     }
     return sum / ((SUB * SUB) as f32);
@@ -384,7 +428,7 @@ pub fn cell_height(a: Anchor, rec: tiles::Record, s: f32, t: f32, cell: f32,
 // draws. With gain 0.5 and lacunarity 2 every octave adds the same slope,
 // so the fine octaves matter to the gradient as much as the broad ones.
 pub fn spread(a: Anchor, e: vec3<f32>, radius: f32, octaves: f32, truth: f32, seed: i32) -> vec2<f32> {
-    let m = masks(a, p_offset(e, radius), octaves, seed);
+    let m = masks(a, p_offset(e, radius), radius, octaves, seed);
     // The continents through the coastline clamp, which passes them where
     // it is linear: 1100 * 3 metres of height per unit of noise.
     let mc = m.x * 3.0 + 0.15;
@@ -393,7 +437,7 @@ pub fn spread(a: Anchor, e: vec3<f32>, radius: f32, octaves: f32, truth: f32, se
     var ch: f32 = 0.0;
     var cg: f32 = 0.0;
     var amp: f32 = 1.0;
-    for (var o: i32 = 0; o < 4; o += 1) {
+    for (var o: i32 = 0; o < CONTINENT_OCTAVES; o += 1) {
         let f = noise_mean_factor(o, octaves);
         let s = span_of(o, octaves);
         ch += amp * amp * NOISE_VAR * unresolved_share(f, NOISE_BOX, s);
@@ -457,8 +501,8 @@ pub fn fresh_water(depth: f32) -> vec3<f32> {
 
 // The ground at one height and gradient (tan of the angle from up): its
 // albedo, and w = 1 for water.
-pub fn surface(h: f32, grad: f32) -> vec4<f32> {
-    return bedded_surface(h, grad, 0.0);
+pub fn surface(h: f32, grad: f32, c: Climate) -> vec4<f32> {
+    return bedded_surface(h, grad, 0.0, c);
 }
 
 // Bedded rock: a cliff's face shows its beds as bands, lighter and warmer
@@ -495,43 +539,41 @@ pub fn strata(a: Anchor, e: vec3<f32>, radius: f32, h: f32, sd: f32, seed: i32) 
 }
 
 // surface with the rock's beds at `bed` (strata, log-luminance).
-pub fn bedded_surface(h: f32, grad: f32, bed: f32) -> vec4<f32> {
+pub fn bedded_surface(h: f32, grad: f32, bed: f32, cl: Climate) -> vec4<f32> {
     if (h <= 0.0) {
         let through = exp(WATER_ATTENUATION * (2.0 * h));
         return vec4<f32>(mix(DEEP_WATER, SEA_BED, through), 1.0);
     }
-    // Beach at the shore; grassland, forest up to the treeline, alpine
-    // meadow above it, bare scree higher still, snow on top; rock wherever
-    // the ground is too steep to hold soil (from about 38 degrees), snow
-    // where it is not too steep to hold snow.
+    // Beach at the shore; the climate's cover (climate.bk: desert, steppe,
+    // savanna, grassland, forest, tundra by temperature and moisture) up to
+    // the treeline, alpine meadow above it, bare scree higher still, snow
+    // where it is cold enough; the region's rock wherever the ground is too
+    // steep to hold soil (from about 38 degrees), snow where it is not too
+    // steep to hold snow.
     let slope = 1.0 - 1.0 / sqrt(1.0 + grad * grad);
-    let sand = vec3<f32>(0.44, 0.39, 0.29);
-    // A sward's canopy with its thatch and its shade between the blades:
-    // olive, not the lime of a lawn's blades alone.
-    let grass = vec3<f32>(0.13, 0.21, 0.075);
-    // The floor between the trees (trees.js draws them over it, and the
-    // ground shader the forest's average where they are not drawn).
-    let forest = vec3<f32>(0.11, 0.19, 0.06);
-    let alpine = vec3<f32>(0.13, 0.17, 0.08);
-    let rock = vec3<f32>(0.20, 0.20, 0.205) * exp(bed) + vec3<f32>(0.03, 0.012, -0.012) * bed;
+    let t = temp_at(cl, h);
+    let beach = mix(vec3<f32>(0.50, 0.45, 0.34), cl.sand, 0.5);
+    let cover = cover_at(cl, h);
+    let alpine = mix(vec3<f32>(0.16, 0.17, 0.09), vec3<f32>(0.24, 0.21, 0.15), 1.0 - smoothstep(0.2, 0.5, cl.moist));
+    let rock = cl.rock * exp(bed) + vec3<f32>(0.03, 0.012, -0.012) * bed;
     let snow = vec3<f32>(0.92, 0.94, 0.97);
-    var c = mix(sand, grass, smoothstep(1.0, 4.0, h));
-    c = mix(c, forest, smoothstep(150.0, 600.0, h) * (1.0 - smoothstep(2300.0, 2900.0, h)));
-    c = mix(c, alpine, smoothstep(2300.0, 2900.0, h));
-    c = mix(c, rock, max(smoothstep(0.2, 0.4, slope), smoothstep(3600.0, 4300.0, h)));
-    c = mix(c, snow, smoothstep(4200.0, 4800.0, h) * (1.0 - smoothstep(0.35, 0.6, slope)));
+    var c = mix(beach, cover.colour, smoothstep(1.0, 4.0, h));
+    // Above the trees: alpine meadow, then scree.
+    c = mix(c, alpine, (1.0 - smoothstep(-4.0, 0.0, t)) * smoothstep(0.15, 0.35, cl.moist));
+    c = mix(c, rock, max(smoothstep(0.2, 0.4, slope), 1.0 - smoothstep(-8.0, -4.5, t)));
+    c = mix(c, snow, snow_at(cl, h) * (1.0 - smoothstep(0.35, 0.6, slope)));
     return vec4<f32>(c, 0.0);
 }
 
 // The share of the ground at one height and gradient that grows grass (the
 // grass blades' density, demos/planet/grass.js): surface's land past the
 // beach, less the rock and the snow it lays over it.
-pub fn grass_cover(h: f32, grad: f32) -> f32 {
+pub fn grass_cover(h: f32, grad: f32, cl: Climate) -> f32 {
     if (h <= 0.0) { return 0.0; }
     let slope = 1.0 - 1.0 / sqrt(1.0 + grad * grad);
-    var c = smoothstep(1.0, 4.0, h);
-    c *= 1.0 - max(smoothstep(0.2, 0.4, slope), smoothstep(3600.0, 4300.0, h));
-    c *= 1.0 - smoothstep(4200.0, 4800.0, h) * (1.0 - smoothstep(0.35, 0.6, slope));
+    var c = smoothstep(1.0, 4.0, h) * cover_at(cl, h).grass;
+    c *= 1.0 - max(smoothstep(0.2, 0.4, slope), 1.0 - smoothstep(-8.0, -4.5, temp_at(cl, h)));
+    c *= 1.0 - snow_at(cl, h) * (1.0 - smoothstep(0.35, 0.6, slope));
     return c;
 }
 
@@ -578,12 +620,12 @@ pub fn sun_step_angle(h: f32, hk: f32, k: i32, radius: f32) -> f32 {
 // rock and the snow it lays over it. Where the trees are not drawn the
 // ground shader lays their average over surface's floor by this share
 // (expected_cover, over a texel).
-pub fn tree_cover(h: f32, grad: f32) -> f32 {
+pub fn tree_cover(h: f32, grad: f32, cl: Climate) -> f32 {
     if (h <= 0.0) { return 0.0; }
     let slope = 1.0 - 1.0 / sqrt(1.0 + grad * grad);
-    var c = smoothstep(150.0, 600.0, h) * (1.0 - smoothstep(2300.0, 2900.0, h));
-    c *= 1.0 - max(smoothstep(0.2, 0.4, slope), smoothstep(3600.0, 4300.0, h));
-    c *= 1.0 - smoothstep(4200.0, 4800.0, h) * (1.0 - smoothstep(0.35, 0.6, slope));
+    var c = smoothstep(4.0, 30.0, h) * cover_at(cl, h).forest;
+    c *= 1.0 - smoothstep(0.2, 0.4, slope);
+    c *= 1.0 - snow_at(cl, h);
     return c;
 }
 
@@ -732,7 +774,8 @@ pub fn variation(a: Anchor, e: vec3<f32>, radius: f32, octaves: f32, seed: i32) 
 // mean over the cell (`bed`, strata). The rock and snow are by the soil's
 // slope (SOIL_OCTAVES): `soil` its gradient and spread, which for a cell
 // finer than the soil's scale are its point's and 0.
-pub fn expected_surface(h: f32, grad: f32, cell: f32, sh: f32, soil: vec2<f32>, vary: vec3<f32>, bed: f32) -> vec4<f32> {
+pub fn expected_surface(h: f32, grad: f32, cell: f32, sh: f32, soil: vec2<f32>, vary: vec3<f32>, bed: f32,
+                        cl: Climate) -> vec4<f32> {
     var sum = vec4<f32>(0.0, 0.0, 0.0, 0.0);
     let trend = grad * cell;
     let sd = max(sqrt(sh * sh + trend * trend / 12.0), 1e-6);
@@ -742,7 +785,7 @@ pub fn expected_surface(h: f32, grad: f32, cell: f32, sh: f32, soil: vec2<f32>, 
         for (var i: i32 = 0; i < 5; i += 1) {
             let nh = gl5(i);
             let depth = min(h + sd * normal_quantile(wet * nh.x), 0.0);
-            sum += surface(depth, 0.0) * (wet * nh.y);
+            sum += surface(depth, 0.0, cl) * (wet * nh.y);
         }
     }
     let dry = 1.0 - wet;
@@ -756,7 +799,7 @@ pub fn expected_surface(h: f32, grad: f32, cell: f32, sh: f32, soil: vec2<f32>, 
                     let gy = gh3(k);
                     let ex = soil.x + soil.y * gx.x;
                     let ey = soil.y * gy.x;
-                    let s = bedded_surface(height, sqrt(ex * ex + ey * ey), bed);
+                    let s = bedded_surface(height, sqrt(ex * ex + ey * ey), bed, cl);
                     sum += vec4<f32>(s.xyz * vary, 0.0) * (dry * nh.y * gx.y * gy.y);
                 }
             }
@@ -767,7 +810,7 @@ pub fn expected_surface(h: f32, grad: f32, cell: f32, sh: f32, soil: vec2<f32>, 
 
 // tree_cover's mean over a cell, by expected_surface's quadrature over the
 // heights and soil gradients the cell holds.
-pub fn expected_cover(h: f32, grad: f32, cell: f32, sh: f32, soil: vec2<f32>) -> f32 {
+pub fn expected_cover(h: f32, grad: f32, cell: f32, sh: f32, soil: vec2<f32>, cl: Climate) -> f32 {
     let trend = grad * cell;
     let sd = max(sqrt(sh * sh + trend * trend / 12.0), 1e-6);
     let wet = normal_cdf(-h / sd);
@@ -783,7 +826,7 @@ pub fn expected_cover(h: f32, grad: f32, cell: f32, sh: f32, soil: vec2<f32>) ->
                     let gy = gh3(k);
                     let ex = soil.x + soil.y * gx.x;
                     let ey = soil.y * gy.x;
-                    sum += tree_cover(height, sqrt(ex * ex + ey * ey)) * (dry * nh.y * gx.y * gy.y);
+                    sum += tree_cover(height, sqrt(ex * ex + ey * ey), cl) * (dry * nh.y * gx.y * gy.y);
                 }
             }
         }

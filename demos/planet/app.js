@@ -71,7 +71,8 @@ const WAVES = (() => {
     return { list, residual, swell: list.filter((w) => w.period === SWELL_PERIOD).length, fresh, freshScale };
 })();
 const MODULES = { 'planet::ground': readApp('ground.bk'), 'planet::relief': readApp('relief.bk'), 'planet::rivers': readApp('rivers.bk'),
-                  'planet::clouds': readApp('clouds.bk'), 'planet::anchor': readApp('anchor.bk'), tiles: bro.tiles.module };
+                  'planet::clouds': readApp('clouds.bk'), 'planet::anchor': readApp('anchor.bk'),
+                  'planet::climate': readApp('climate.bk'), tiles: bro.tiles.module };
 const mod = bro.kernel.compile(readApp('planet.bk'), { file: 'planet.bk', modules: MODULES });
 const rivers = createRivers(bro.kernel.compile(readApp('riverbuild.bk'), { file: 'riverbuild.bk', modules: MODULES }), RADIUS, SEED);
 const kTile = mod.kernel('k_tile');
@@ -113,7 +114,7 @@ const horizonHeights = bro.kernel.createBuffer(PRODUCE_PER_UPDATE * HZ_GRID * HZ
 // The batch's texel spreads, k_texel_spread to k_split_detail (which zeroes them).
 const texelSpread = bro.kernel.createBuffer(PRODUCE_PER_UPDATE * 4);
 // Each resident tile's relief anchors (planet.bk k_anchor), by slot.
-const anchors = bro.kernel.createBuffer(CAPACITY * 20 * 4);
+const anchors = bro.kernel.createBuffer(CAPACITY * 24 * 4);
 // The batch's tiles' anchors (anchors.js), by record.
 const batchAnchors = createAnchors(kAnchors, PRODUCE_PER_UPDATE, RADIUS);
 
@@ -132,7 +133,9 @@ function setHour(hour) {
     const a = (hour - 12) / 24 * 2 * Math.PI, c = Math.cos(a), s = Math.sin(a);
     sun.direction = [NOON[0] * c + NOON[2] * s, NOON[1], -NOON[0] * s + NOON[2] * c];
 }
-scene.setExposure({ mode: 'auto', meter: 'incident' });
+// A touch under the meter: the land's colour reads richer than metered
+// grey, as a photographer exposes a landscape.
+scene.setExposure({ mode: 'auto', meter: 'incident', compensation: -0.6 });
 // Water mirrors its banks: screen-space reflections out to 600 m (the
 // engine weighs them by Fresnel at the angle the water is seen at and skips
 // rough ground).
@@ -172,7 +175,7 @@ function makeCache(pixelsPerTexel, select = {}) {
             const texels = [TEXELS, TEXELS, batch.count];
             kDetailHeight.dispatch(texels, batch.table, at, texelHeights, RADIUS, BORDER, 1 / TILE, DETAIL, SEED, rivers.net);
             kSoil.dispatch([SOIL_STRIDE, SOIL_STRIDE, batch.count], batch.table, at, soilGrid, TEXELS, RADIUS, BORDER, 1 / TILE, DETAIL, SEED, rivers.net);
-            kDetail.dispatch(texels, batch.table, at, texelHeights, this.layer('detail'), RADIUS, BORDER, 1 / TILE, DETAIL, TRUTH, SEED, rivers.net, soilGrid);
+            kDetail.dispatch(texels, batch.table, at, texelHeights, this.layer('detail'), RADIUS, BORDER, 1 / TILE, DETAIL, TRUTH, SEED, rivers.net, soilGrid, anchors);
             kRange.dispatch([batch.count], batch.table, span, this.ranges, 1 / TILE, MAX_HEIGHT);
             if (this.detail) {
                 const half = TILE * DETAIL / 2;

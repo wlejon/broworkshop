@@ -9,6 +9,7 @@
 from planet::ground import terrain, terrain_shaped, cell_height, spread, expected_surface, expected_cover, gradient,
                            variation, strata, octaves_for, range_margin, fresh_water, relief_offset, frame_dir,
                            soil_height, SOIL_OCTAVES, cell_width;
+from planet::climate import climate_at;
 from planet::relief import BASE_WAVELENGTH, RIDGE_FIRST, WARP_OCTAVE, WARP_DISPLACE, simplex_grad, SimplexAt;
 from planet::rivers import water_at, water_share;
 from planet::anchor import Anchor, read_anchor, write_anchor, anchor_of, anchor_at, doubled, simplex_from, plane_offset;
@@ -149,7 +150,7 @@ fn unorm(x: f32, bits: i32) -> i32 {
 @kernel @grid(3)
 fn k_detail(g: grid<3>, table: read_store<vec4<i32>, 1>, anchors: read_store<vec4<i32>, 1>, texels: read_store<vec4<f32>, 1>,
             out: write_store<i32, 1>, radius: f32, border: f32, inv_size: f32, d: f32, truth: f32, seed: i32,
-            net: read_store<f32, 1>, soil_grid: read_store<f32, 1>) {
+            net: read_store<f32, 1>, soil_grid: read_store<f32, 1>, rock: write_store<i32, 1>) {
     let rec = tiles::record(table, g.z());
     let a = read_anchor(anchors, g.z());
     let z = g.z();
@@ -194,8 +195,19 @@ fn k_detail(g: grid<3>, table: read_store<vec4<i32>, 1>, anchors: read_store<vec
                          soil_slope(soil_grid, base, m, ix + 2, iy + 2, step), fx);
         soil = vec2<f32>(mix(top, bottom, fy), 0.0);
     }
+    let cl = climate_at(up, length(du) * 0.5 / radius, seed);
+    // The texels nearest the tile's corners give it its rock's corners
+    // (ANCHOR_WORDS' word 5), half a texel in.
+    // (texel_st: texel t is at s = ((t + 0.5) / d - 0.5 - border) / TILE.)
+    let c0 = ((border + 0.5) * d - 0.5) as i32;
+    let c1 = ((border + 1.0 / inv_size + 0.5) * d - 0.5) as i32;
+    if ((tx == c0 || tx == c1) && (ty == c0 || ty == c1)) {
+        let r = sqrt(cl.rock);
+        let k = (tx == c1 ? 1 : 0) + (ty == c1 ? 2 : 0);
+        rock[slot * ANCHOR_WORDS + 20 + k] = unorm(r.x, 8) | (unorm(r.y, 8) << 8) | (unorm(r.z, 8) << 16);
+    }
     var col = expected_surface(h, grad, length(du) * 0.5, sp.x, soil, variation(a, e, radius, octaves, seed),
-                               strata(a, e, radius, h, sd, seed));
+                               strata(a, e, radius, h, sd, seed), cl);
     // The rivers and lakes: the share of the texel under their water, a
     // river as deep as its channel runs there (shallow at its banks, its bed
     // showing through), a lake as deep as its water stands over its
@@ -203,7 +215,7 @@ fn k_detail(g: grid<3>, table: read_store<vec4<i32>, 1>, anchors: read_store<vec
     let wa = water_at(a.dir, e, radius, length(du) * 0.5, net, seed);
     let water = water_share(h, wa, sd);
     col = vec4<f32>(mix(col.xyz, fresh_water(max(max(wa.near.w, wa.channel), 0.3)), water), max(col.w, water));
-    let cover = expected_cover(h, grad, length(du) * 0.5, sp.x, soil) * (1.0 - water);
+    let cover = expected_cover(h, grad, length(du) * 0.5, sp.x, soil, cl) * (1.0 - water);
     var n = normalize(cross(du, dv));
     if (dot(n, up) < 0.0) { n = -n; }
     // Octahedral: the normal onto the octahedron |x| + |y| + |z| = 1, its
@@ -216,7 +228,11 @@ fn k_detail(g: grid<3>, table: read_store<vec4<i32>, 1>, anchors: read_store<vec
         oy = (1.0 - abs(o.x)) * sign(o.y);
     }
     let at = ((slot * w + ty) * w + tx) * 2;
-    out[at] = unorm(col.x, 8) | (unorm(col.y, 8) << 8) | (unorm(col.z, 8) << 16) | (unorm(col.w, 8) << 24);
+    // The colour square-rooted, as 8 linear bits band a dark forest's
+    // greens in steps a tenth of its value (ground_mesh.bk detail_texel
+    // squares it back); the water's share linear.
+    let enc = sqrt(max(col.xyz, vec3<f32>(0.0)));
+    out[at] = unorm(enc.x, 8) | (unorm(enc.y, 8) << 8) | (unorm(enc.z, 8) << 16) | (unorm(col.w, 8) << 24);
     // The normal in 12 bits a coordinate, the forest's cover in the top 8.
     out[at + 1] = unorm(ox * 0.5 + 0.5, 12) | (unorm(oy * 0.5 + 0.5, 12) << 12) | (unorm(cover, 8) << 24);
 }
@@ -229,12 +245,17 @@ fn k_detail(g: grid<3>, table: read_store<vec4<i32>, 1>, anchors: read_store<vec
 // layer): the noise's lattice cell and the offset in it, once a tile, from
 // which the shader runs the rest (relief.bk). The ridge octaves' lattices
 // are each twice the last, so one anchor gives every finer octave's.
-// ANCHOR_WORDS int32 a slot, as five vec4s:
+// ANCHOR_WORDS int32 a slot, as six vec4s:
 //   0 the ridge octaves' lattice cell at octave o_a (xyz), o_a (w)
 //   1 the offset in it (xyz, float bits), the octaves the texels carry (w)
 //   2-4 the warp's x, y and z noise's gradients per unit of p, times
 //       WARP_DISPLACE: the warp's stretch, which the shader's gradients take
-const ANCHOR_WORDS: i32 = 20;
+//   5 the region's rock colour (climate.bk) at the tile's corners (s, t) =
+//     (0, 0), (1, 0), (0, 1), (1, 1), square-rooted in unorm 8 x 4: the
+//     shader's cliffs interpolate it, the provinces being hundreds of
+//     kilometres to a near tile's few (k_detail writes it, from the texels
+//     nearest the corners)
+const ANCHOR_WORDS: i32 = 24;
 fn f32_bits(x: f32) -> i32 {
     return bitcast<i32>(x);
 }

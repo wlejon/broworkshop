@@ -11,6 +11,7 @@
 import std::noise::*;
 from planet::ground import terrain, tree_cover, variation, perlin_at, soil_gradient;
 from planet::rivers import water_at, water_share;
+from planet::climate import climate_at;
 from planet::anchor import read_anchor, plane_offset, perlin_from, STAND, GLADE;
 
 // Site (x, y0 + y) of the field, lattice site (li + x, lj + y0 + y) on face
@@ -40,7 +41,7 @@ fn k_tree_field(g: grid<2>, out: write_store<f32, 1>, anchor: read_store<vec4<i3
     // ground's colour lays it.
     let grad = soil_gradient(a, e, radius, seed, net);
     // None in the rivers and lakes, nor right on their banks.
-    let cover = tree_cover(h, grad) * (1.0 - water_share(h, water_at(a.dir, e, radius, 6.0, net, seed), 0.0));
+    let cover = tree_cover(h, grad, climate_at(normalize(a.dir + e), 0.0, seed)) * (1.0 - water_share(h, water_at(a.dir, e, radius, 6.0, net, seed), 0.0));
     // Forests grow in stands and glades: the cover scaled by zero-mean
     // noise across STAND and GLADE metres, so the forest's average stays
     // the cover the ground's colour takes. A tree stands where the site's
