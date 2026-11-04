@@ -151,6 +151,7 @@ fn unorm(x: f32, bits: i32) -> i32 {
 const RIPARIAN_MOIST: f32 = 0.45;
 const RIPARIAN: f32 = 0.8;
 const RIVER_SILT = vec3<f32>(0.065, 0.052, 0.034);
+const BAR_SAND = vec3<f32>(0.52, 0.47, 0.38);
 
 @kernel @grid(3)
 fn k_detail(g: grid<3>, table: read_store<vec4<i32>, 1>, anchors: read_store<vec4<i32>, 1>, texels: read_store<vec4<f32>, 1>,
@@ -232,10 +233,16 @@ fn k_detail(g: grid<3>, table: read_store<vec4<i32>, 1>, anchors: read_store<vec
         col = vec4<f32>(mix(col.xyz, banded, share), col.w);
         cover = mix(cover, max(cover, riparian.forest * (0.4 - 0.4 * wa.tone)), share);
     }
+    // Sand bars, pale and bare.
+    if (wa.bar > 0.0) {
+        col = vec4<f32>(mix(col.xyz, mix(cl.sand, BAR_SAND, 0.6), wa.bar), col.w);
+        cover = cover * (1.0 - wa.bar);
+    }
     let water = water_share(h, wa, sd);
     // A great river carries silt: lighter and browner than a lake, as the
-    // Amazon's and the Mississippi's water reads from orbit.
-    let fresh = mix(fresh_water(max(max(wa.near.w, wa.channel), 0.3)), RIVER_SILT, wa.plain * step(wa.near.w, 1.0) * 0.8);
+    // Amazon's and the Mississippi's water reads from orbit; so do the lakes
+    // on its floodplain.
+    let fresh = mix(fresh_water(max(max(wa.near.w, wa.channel), 0.3)), RIVER_SILT, wa.plain * 0.8);
     col = vec4<f32>(mix(col.xyz, fresh, water), max(col.w, water));
     cover = cover * (1.0 - water);
     var n = normalize(cross(du, dv));

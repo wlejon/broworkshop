@@ -214,6 +214,10 @@ pub struct Water {
     // its old courses there, to -1 in a grown-over swale.
     plain: f32,
     tone: f32,
+    // The share of the cell on a sand bar: an island's rim, or a bank's;
+    // and on an island, which stands out of a lake as out of a channel.
+    bar: f32,
+    dry: f32,
 }
 const CHANNEL_DEPTH: f32 = 0.04;   // of the width, at the middle
 // The reach from point k (record offset) to its downstream point, at offset
@@ -244,13 +248,18 @@ struct Reach {
     surface: f32,
     plain: f32,
     tone: f32,
+    bar: f32,
+    dry: f32,
 }
 // A floodplain's rise from its channel outward, m a metre.
 const PLAIN_RISE: f32 = 0.003;
-// How much a channel's width wanders along its reach, and the catchments
-// from which a channel holds islands and a floodplain.
+// How much a channel's width wanders along its reach (and each bank about
+// that), and the catchments from which a channel holds islands, sand bars
+// and a floodplain.
 const WIDTH_VARY: f32 = 0.3;
+const BANK_VARY: f32 = 0.12;
 const ISLAND_MIN: f32 = 150.0;
+const BAR_MIN: f32 = 60.0;
 const PLAIN_MIN: f32 = 20.0;
 // 0 to 1, hashed from (p, i).
 fn hash01(seed: i32, p: i32, i: i32) -> f32 {
@@ -298,8 +307,13 @@ fn reach(net: read_store<f32, 1>, k: i32, af: vec3<f32>, hi: vec3<f32>, lo: vec3
     let width = river_width(catchment);
     // The channel widens and narrows along its reach, back to its width at
     // the points, where the next reach takes it on.
-    let taper = smoothstep(0.0, 1.0, min(s, len - s) / max(3.0 * width, 1.0));
-    let half = 0.5 * width * (1.0 + WIDTH_VARY * wobble(seed + 11, p, s, 3.0 * width) * taper);
+    // Each bank wanders on its own too, at a shorter wavelength, so the
+    // channel's edges are not one curve twice.
+    let taper = smoothstep(0.0, 1.0, min(s, len - s) / max(min(3.0 * width, 0.25 * len), 1.0));
+    let mid = 0.5 * width * (1.0 + WIDTH_VARY * wobble(seed + 11, p, s, 3.0 * width) * taper);
+    let hl = mid * (1.0 + BANK_VARY * wobble(seed + 41, p, s, 0.8 * width) * taper);
+    let hr = mid * (1.0 + BANK_VARY * wobble(seed + 43, p, s, 0.8 * width) * taper);
+    let half = 0.5 * (hl + hr);
     // From here to the reach's line, and across it to the channel: the
     // meanders about the reach's bend to its points' tangents.
     let q = af + along * s;
@@ -324,28 +338,54 @@ fn reach(net: read_store<f32, 1>, k: i32, af: vec3<f32>, hi: vec3<f32>, lo: vec3
     let plain = max(plain_half(catchment), half);
     let ds = sqrt(d * d + spread);
     let floor_rise = PLAIN_RISE * clamp(ds - half, 0.0, plain - half);
-    var share = clamp(0.5 * (erf_approx((half - d) / sg) - erf_approx((-half - d) / sg)), 0.0, 1.0);
+    // This side's bank, blended across the middle.
+    let hs = mix(hl, hr, smoothstep(-0.5 * half, 0.5 * half, x));
+    var share = clamp(0.5 * (erf_approx((hs - d) / sg) - erf_approx((-hs - d) / sg)), 0.0, 1.0);
     var depth = CHANNEL_DEPTH * 2.0 * half * max(1.0 - across * across, 0.0);
     var out: Reach;
     out.plain = 0.0;
     out.tone = 0.0;
-    // Bars and islands stand in a broad river's channel: lenses a few
-    // widths long, one in about half of the stretches of five widths, off
-    // its middle; land the colour of the floodplain.
+    out.bar = 0.0;
+    out.dry = 0.0;
+    // Islands stand in a broad river's channel: lenses, a large one in
+    // about half of the stretches of five widths and a small one in a
+    // third of those of two, off its middle, rimmed with sand bars; land the
+    // colour of the floodplain.
     if (d < half + 2.0 * sg && catchment >= ISLAND_MIN) {
-        let stretch = 10.0 * half;
-        let u = s / stretch;
-        let ci = floor(u) as i32;
-        let h1 = hash01(seed + 13, p, ci);
-        if (h1 < 0.55) {
-            let h2 = hash01(seed + 17, p, ci);
-            let lens = 0.22 + 0.3 * h1;
-            let ex = (u - (ci as f32) - 0.5) / 0.38;
-            let ey = (x / half - (h2 - 0.5) * 0.9) / lens;
-            let island = smoothstep(-sg, sg, (1.0 - sqrt(ex * ex + ey * ey)) * lens * half);
-            share *= 1.0 - island;
-            depth *= 1.0 - island;
+        for (var layer: i32 = 0; layer < 2; layer += 1) {
+            let big = layer == 0;
+            let stretch = min((big ? 10.0 : 4.5) * half, (big ? 0.5 : 0.25) * len);
+            let u = s / stretch;
+            let ci = floor(u) as i32;
+            let h1 = hash01(seed + 13 + 7 * layer, p, ci);
+            // Only stretches wholly inside the reach: an island across its
+            // end would be cut off there.
+            if (h1 < (big ? 0.55 : 0.35) && ((ci + 1) as f32) * stretch <= len) {
+                let h2 = hash01(seed + 17 + 7 * layer, p, ci);
+                let lens = big ? 0.22 + 0.3 * h1 : 0.1 + 0.25 * h1;
+                let ex = (u - (ci as f32) - 0.5) / 0.38;
+                let ey = (x / half - (h2 - 0.5) * 0.9) / lens;
+                // Ragged, not a lens: its outline wanders by a third of its
+                // breadth.
+                let breadth = lens * half;
+                let ragged = 0.3 * breadth * wobble(seed + 53 + layer, p, s + 97.0 * x / max(half, 1.0), 0.15 * stretch);
+                let inside = (1.0 - sqrt(ex * ex + ey * ey)) * breadth + ragged;
+                let island = smoothstep(-sg, sg, inside);
+                share *= 1.0 - island;
+                depth *= 1.0 - island;
+                out.dry = max(out.dry, island);
+                // Bars: broad at its head, where the river drops its sand,
+                // a thin rim down its sides.
+                let rim = (0.12 + 0.35 * smoothstep(0.2, -0.9, ex)) * breadth + sg;
+                out.bar = max(out.bar, island * (1.0 - smoothstep(0.0, rim, inside)));
+            }
         }
+    }
+    // Point bars: sand along the banks, on stretches of them.
+    if (catchment >= BAR_MIN && d < hs + 0.3 * hs + 2.0 * sg) {
+        let out_of = d - hs;
+        let on = smoothstep(0.0, 0.5, wobble(seed + 47, p, s, 2.0 * width)) * taper;
+        out.bar = max(out.bar, on * smoothstep(-sg, sg, out_of) * (1.0 - smoothstep(0.0, 0.3 * hs + sg, out_of)));
     }
     // The floodplain, for a river large enough to have one: its edge
     // softened over a fifth of its width and wandering, and over it the
@@ -411,6 +451,8 @@ pub fn water_at(hi: vec3<f32>, lo: vec3<f32>, radius: f32, cell: f32, net: read_
     var depth: f32 = 0.0;
     var plain: f32 = 0.0;
     var tone: f32 = 0.0;
+    var bar: f32 = 0.0;
+    var dry: f32 = 0.0;
     let spread = cell * cell / 6.0;
     for (var dj: i32 = -1; dj <= 1; dj += 1) {
         for (var di: i32 = -1; di <= 1; di += 1) {
@@ -433,6 +475,8 @@ pub fn water_at(hi: vec3<f32>, lo: vec3<f32>, radius: f32, cell: f32, net: read_
                     plain = rc.plain;
                     tone = rc.tone;
                 }
+                bar = max(bar, rc.bar);
+                dry = max(dry, rc.dry);
             }
         }
     }
@@ -459,6 +503,8 @@ pub fn water_at(hi: vec3<f32>, lo: vec3<f32>, radius: f32, cell: f32, net: read_
                         plain = rc.plain;
                         tone = rc.tone;
                     }
+                    bar = max(bar, rc.bar);
+                    dry = max(dry, rc.dry);
                 }
             }
         }
@@ -470,6 +516,8 @@ pub fn water_at(hi: vec3<f32>, lo: vec3<f32>, radius: f32, cell: f32, net: read_
     w.lake = top;
     w.plain = plain;
     w.tone = tone;
+    w.bar = bar;
+    w.dry = dry;
     return w;
 }
 
@@ -523,7 +571,7 @@ pub fn water_share(h: f32, w: Water, sd: f32) -> f32 {
         let soft = 0.8 * sd + 0.25;
         lake = clamp(1.0 + min(w.lake - h, 0.0) / soft, 0.0, 1.0)
              * clamp(1.0 - (w.near.z - w.lake) / (soft + 2.0), 0.0, 1.0)
-             * clamp(w.near.w - LAKE_DEPTH, 0.0, 1.0);
+             * clamp(w.near.w - LAKE_DEPTH, 0.0, 1.0) * (1.0 - w.dry);
     }
     return max(w.near.y, lake);
 }
