@@ -218,6 +218,9 @@ pub struct Water {
     // and on an island, which stands out of a lake as out of a channel.
     bar: f32,
     dry: f32,
+    // The share of the cell on a river's banks, in the strip its gallery
+    // woods grow along (GALLERY).
+    gallery: f32,
 }
 const CHANNEL_DEPTH: f32 = 0.04;   // of the width, at the middle
 // The reach from point k (record offset) to its downstream point, at offset
@@ -250,7 +253,13 @@ struct Reach {
     tone: f32,
     bar: f32,
     dry: f32,
+    gallery: f32,
 }
+// The gallery woods' strip out from each bank: a creek's a few crowns
+// wide, a great river's some hundreds of metres; it wanders along the
+// reach, narrowing to nothing on some stretches.
+const GALLERY_MIN: f32 = 18.0;
+const GALLERY_MAX: f32 = 450.0;
 // A floodplain's rise from its channel outward, m a metre.
 const PLAIN_RISE: f32 = 0.003;
 // How much a channel's width wanders along its reach (and each bank about
@@ -311,8 +320,23 @@ fn reach(net: read_store<f32, 1>, k: i32, af: vec3<f32>, hi: vec3<f32>, lo: vec3
     // channel's edges are not one curve twice.
     let taper = smoothstep(0.0, 1.0, min(s, len - s) / max(min(3.0 * width, 0.25 * len), 1.0));
     let mid = 0.5 * width * (1.0 + WIDTH_VARY * wobble(seed + 11, p, s, 3.0 * width) * taper);
-    let hl = mid * (1.0 + BANK_VARY * wobble(seed + 41, p, s, 0.8 * width) * taper);
-    let hr = mid * (1.0 + BANK_VARY * wobble(seed + 43, p, s, 0.8 * width) * taper);
+    // A bank wanders at every scale, bays and spits down to a few metres,
+    // in octaves of a third the wavelength and half the reach; at one
+    // octave a great river's banks were smooth arcs kilometres long.
+    var vl: f32 = 0.0;
+    var vr: f32 = 0.0;
+    var bw = 0.8 * width;
+    var ba = BANK_VARY;
+    for (var o: i32 = 0; o < 4 && (o == 0 || bw > 2.0 * cell); o += 1) {
+        // The finer octaves fade in as the cells resolve them.
+        let fade = o == 0 ? 1.0 : clamp(bw / (2.0 * cell) - 1.0, 0.0, 1.0);
+        vl += ba * fade * wobble(seed + 41 + 100 * o, p, s, bw);
+        vr += ba * fade * wobble(seed + 43 + 100 * o, p, s, bw);
+        bw *= 0.33;
+        ba *= 0.5;
+    }
+    let hl = mid * (1.0 + vl * taper);
+    let hr = mid * (1.0 + vr * taper);
     let half = 0.5 * (hl + hr);
     // From here to the reach's line, and across it to the channel: the
     // meanders about the reach's bend to its points' tangents.
@@ -347,6 +371,12 @@ fn reach(net: read_store<f32, 1>, k: i32, af: vec3<f32>, hi: vec3<f32>, lo: vec3
     out.tone = 0.0;
     out.bar = 0.0;
     out.dry = 0.0;
+    // The banks' gallery: the share of the strip out to `gw` past either
+    // bank, less the channel's.
+    let gw = clamp(GALLERY_MIN + 0.25 * hs, GALLERY_MIN, GALLERY_MAX)
+           * smoothstep(-0.6, 0.2, wobble(seed + 61, p, s, 6.0 * hs + 200.0));
+    let strip = clamp(0.5 * (erf_approx((hs + gw - d) / sg) - erf_approx((-hs - gw - d) / sg)), 0.0, 1.0);
+    out.gallery = max(strip - share, 0.0);
     // Islands stand in a broad river's channel: lenses, a large one in
     // about half of the stretches of five widths and a small one in a
     // third of those of two, off its middle, rimmed with sand bars; land the
@@ -376,7 +406,9 @@ fn reach(net: read_store<f32, 1>, k: i32, af: vec3<f32>, hi: vec3<f32>, lo: vec3
                 out.dry = max(out.dry, island);
                 // Bars: broad at its head, where the river drops its sand,
                 // a thin rim down its sides.
-                let rim = (0.12 + 0.35 * smoothstep(0.2, -0.9, ex)) * breadth + sg;
+                // Its width wanders round the island, to nothing in places.
+                let patchy = clamp(0.6 + 0.9 * wobble(seed + 67 + layer, p, s + 61.0 * x / max(half, 1.0), 0.08 * stretch), 0.0, 1.4);
+                let rim = (0.12 * patchy + 0.35 * smoothstep(0.2, -0.9, ex)) * breadth + sg;
                 out.bar = max(out.bar, island * (1.0 - smoothstep(0.0, rim, inside)));
             }
         }
@@ -453,6 +485,7 @@ pub fn water_at(hi: vec3<f32>, lo: vec3<f32>, radius: f32, cell: f32, net: read_
     var tone: f32 = 0.0;
     var bar: f32 = 0.0;
     var dry: f32 = 0.0;
+    var gallery: f32 = 0.0;
     let spread = cell * cell / 6.0;
     for (var dj: i32 = -1; dj <= 1; dj += 1) {
         for (var di: i32 = -1; di <= 1; di += 1) {
@@ -477,6 +510,7 @@ pub fn water_at(hi: vec3<f32>, lo: vec3<f32>, radius: f32, cell: f32, net: read_
                 }
                 bar = max(bar, rc.bar);
                 dry = max(dry, rc.dry);
+                gallery = max(gallery, rc.gallery);
             }
         }
     }
@@ -505,6 +539,7 @@ pub fn water_at(hi: vec3<f32>, lo: vec3<f32>, radius: f32, cell: f32, net: read_
                     }
                     bar = max(bar, rc.bar);
                     dry = max(dry, rc.dry);
+                    gallery = max(gallery, rc.gallery);
                 }
             }
         }
@@ -518,6 +553,7 @@ pub fn water_at(hi: vec3<f32>, lo: vec3<f32>, radius: f32, cell: f32, net: read_
     w.tone = tone;
     w.bar = bar;
     w.dry = dry;
+    w.gallery = gallery;
     return w;
 }
 

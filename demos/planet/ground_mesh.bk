@@ -80,7 +80,6 @@ const RELIEF: f32 = 0.08;        // slope per octave, per unit of the noise's gr
 const ROCK_LUM: f32 = 1.8;
 const ROCK_RELIEF: f32 = 3.0;
 const FRESH_GLOSS: f32 = 0.35;   // fresh water's roughness, of its ripples'
-
 // What the clouds leave of the light at the ground point g (about the
 // planet's centre) over a footprint of w metres, from clouds.js's ground
 // light cache (clouds.bk k_cloud_ground): the sun straight through (x),
@@ -547,6 +546,28 @@ pub fn fragment(v: mesh::Vertex, s_in: mesh::Surface) -> mesh::Surface {
             water += vec4_at(by, j) * row;
         }
     }
+    // A shore the texels resolve runs as smoothly as their spline: from low
+    // over a river its banks were drawn arcs. Finer than the texels the
+    // edge is the pixel's: the spline's ramp sharpened to a couple of
+    // pixels and shifted by noise from the texel's scale down to the
+    // pixel's, so the bank wanders in bays and spits at every scale. The
+    // noise is even about the spline's middle, so the water's share holds
+    // on average and, farther off, resolves back to the texels'.
+    let texel_m = footprint / max(max(length(dpdx(v_tex)), length(dpdy(v_tex))), 1e-6);
+    if (water > 0.0 && water < 1.0 && texel_m > 2.0 * footprint) {
+        var ragged: f32 = 0.0;
+        var amp: f32 = 0.42;
+        var wl = min(exp2(floor(log2(texel_m))), 256.0);
+        for (var k: i32 = 0; k < 6 && wl > 2.0 * footprint; k += 1) {
+            let far = wl >= 1.0;
+            let pg = perlin_grad((far ? v_swell : v_q) / wl, ((far ? SWELL_PERIOD : DETAIL_PERIOD) / wl) as i32, 71 + k);
+            ragged += pg.x * amp * clamp(wl / footprint * 0.5 - 1.0, 0.0, 1.0);
+            amp *= 0.6;
+            wl *= 0.5;
+        }
+        let sharp = clamp(texel_m / footprint * 0.4, 1.0, 24.0);
+        water = clamp((water - 0.5 + ragged) * sharp + 0.5, 0.0, 1.0);
+    }
 
     // The octaves a pixel resolves: full weight from 4 pixels a
     // wavelength, none at 2.
@@ -574,7 +595,7 @@ pub fn fragment(v: mesh::Vertex, s_in: mesh::Surface) -> mesh::Surface {
     let rock = (1.0 - smoothstep(0.15, 0.45, (hi_c - lo_c) / max(hi_c, 1e-3))) * (1.0 - smoothstep(0.35, 0.6, hi_c));
     let lum_gain = mix(1.0, ROCK_LUM, rock);
     let relief_gain = mix(1.0, ROCK_RELIEF, rock);
-    let texel = footprint / max(max(length(dpdx(v_tex)), length(dpdy(v_tex))), 1e-6);
+    let texel = texel_m;
     // Past the drawn trees, the crowns' share of the ground (below): their
     // texture is the octaves of a crown and its neighbours (CROWN_FIRST to
     // CROWN_LAST metres), lit and shaded crowns and dark gaps, bumps the sun

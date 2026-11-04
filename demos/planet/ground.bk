@@ -629,6 +629,19 @@ pub fn tree_cover(h: f32, grad: f32, cl: Climate) -> f32 {
     return c;
 }
 
+// Gallery woods: along a river's banks (rivers.bk Water.gallery) the ground
+// is as wet as a much rainier climate's, and trees grow there in a strip
+// however open the country, the lines of trees that draw every creek
+// across a prairie or a savanna. `cover` is the land's own; the mosaic
+// (wooded) is laid over the two, so a gallery runs in clumps and gaps
+// rather than as one even ribbon.
+const GALLERY_MOIST: f32 = 0.6;
+pub fn banked(cover: f32, h: f32, grad: f32, cl: Climate, wa: Water) -> f32 {
+    if (wa.gallery <= 0.0) { return cover; }
+    let wet = Climate { temp: cl.temp, moist: min(cl.moist + GALLERY_MOIST, 1.0), sand: cl.sand, rock: cl.rock };
+    return mix(cover, max(cover, tree_cover(h, grad, wet)), wa.gallery);
+}
+
 // Forests grow as a mosaic at every scale: whole forests and open country
 // kilometres across, stands and clearings in them, glades of a few trees.
 // The cover is scaled by 1 + W, W zero-mean gradient noise in octaves
