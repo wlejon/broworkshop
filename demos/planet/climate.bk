@@ -119,9 +119,9 @@ pub fn cover_at(c: Climate, h: f32) -> Cover {
     let m = clamp(c.moist + 0.12 * smoothstep(400.0, 2200.0, h), 0.0, 1.0);
     // Hot: desert, savanna, rainforest. Temperate: steppe, grassland,
     // forest. Cold: tundra, boreal forest.
-    // The forests' are their floors: the ground's shader darkens them by
-    // the crowns over them (ground_mesh.bk TREE_TINT), to about 0.6 of these
-    // seen from above.
+    // The forests' are their floors: past the drawn trees the ground's
+    // shader lays the crowns' colour over them (ground_mesh.bk CANOPY, by
+    // TREE_CROWNS of the cover seen from above).
     let savanna = vec3<f32>(0.33, 0.27, 0.12);
     let rainforest = vec3<f32>(0.055, 0.15, 0.04);
     let steppe = vec3<f32>(0.30, 0.27, 0.15);

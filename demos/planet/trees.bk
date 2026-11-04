@@ -9,10 +9,10 @@
 // its centre (anchor.bk, found on the CPU): cell (x, y)'s corner is the plane
 // offset lost + e (du0 + x delta) + f (dv0 + y delta) from it.
 import std::noise::*;
-from planet::ground import terrain, tree_cover, variation, perlin_at, soil_gradient;
+from planet::ground import terrain, tree_cover, variation, soil_gradient, woodland, wooded;
 from planet::rivers import water_at, water_share;
 from planet::climate import climate_at;
-from planet::anchor import read_anchor, plane_offset, perlin_from, STAND, GLADE;
+from planet::anchor import read_anchor, plane_offset;
 
 // Site (x, y0 + y) of the field, lattice site (li + x, lj + y0 + y) on face
 // `face`, seven floats at `out` (row * width + x) * 7: its position about
@@ -42,13 +42,11 @@ fn k_tree_field(g: grid<2>, out: write_store<f32, 1>, anchor: read_store<vec4<i3
     let grad = soil_gradient(a, e, radius, seed, net);
     // None in the rivers and lakes, nor right on their banks.
     let cover = tree_cover(h, grad, climate_at(normalize(a.dir + e), 0.0, seed)) * (1.0 - water_share(h, water_at(a.dir, e, radius, 6.0, net, seed), 0.0));
-    // Forests grow in stands and glades: the cover scaled by zero-mean
-    // noise across STAND and GLADE metres, so the forest's average stays
-    // the cover the ground's colour takes. A tree stands where the site's
-    // pick is under it; at a thinning edge the ones left are smaller.
-    let stands = perlin_at(perlin_from(a.stand, e * (radius / STAND)), seed + 4111) * 2.2
-               + perlin_at(perlin_from(a.glade, e * (radius / GLADE)), seed + 4127) * 1.1;
-    let local = clamp(cover * (1.0 + stands), 0.0, 1.0);
+    // Forests grow as a mosaic, forests to glades (ground.bk woodland), the
+    // same the ground's colour takes over its texels. A tree stands where
+    // the site's pick is under it; at a thinning edge the ones left are
+    // smaller.
+    let local = wooded(cover, woodland(a, e, radius, 99.0, seed));
     var size: f32 = 0.0;
     if (pick < local) { size = 0.6 + 0.4 * local; }
     let vary = variation(a, e, radius, octaves, seed);

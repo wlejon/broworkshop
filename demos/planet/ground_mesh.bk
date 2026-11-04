@@ -68,8 +68,12 @@ struct Params {
 const ANCHOR_VEC4S: i32 = 6;
 
 const GROUND_PI: f32 = 3.14159265;
-const TREE_CROWNS: f32 = 0.55;
-const TREE_TINT: vec3<f32> = vec3<f32>(0.22, 0.24, 0.33);
+const TREE_CROWNS: f32 = 0.7;
+const CANOPY: vec3<f32> = vec3<f32>(0.026, 0.052, 0.019);
+const CROWN_FIRST: f32 = 4.0;     // the crowns' texture's octaves (m), and per octave
+const CROWN_LAST: f32 = 16.0;
+const CROWN_LUM: f32 = 0.8;       // its log-luminance and its slope per unit of the noise's gradient
+const CROWN_RELIEF: f32 = 0.5;
 const VARY_LUM: f32 = 0.11;      // ground.bk VARY_LUM
 const PERLIN_VAR: f32 = 0.0728;  // ground.bk PERLIN_VAR
 const RELIEF: f32 = 0.08;        // slope per octave, per unit of the noise's gradient
@@ -571,17 +575,33 @@ pub fn fragment(v: mesh::Vertex, s_in: mesh::Surface) -> mesh::Surface {
     let lum_gain = mix(1.0, ROCK_LUM, rock);
     let relief_gain = mix(1.0, ROCK_RELIEF, rock);
     let texel = footprint / max(max(length(dpdx(v_tex)), length(dpdy(v_tex))), 1e-6);
+    // Past the drawn trees, the crowns' share of the ground (below): their
+    // texture is the octaves of a crown and its neighbours (CROWN_FIRST to
+    // CROWN_LAST metres), lit and shaded crowns and dark gaps, bumps the sun
+    // lights, as long as a pixel resolves them. The texels hold none of it,
+    // so it is weighed by the pixel alone; mean-preserving like the rest, so
+    // farther off it averages to the canopy's colour. Without it the forest
+    // past the drawn trees was a smooth sheet.
+    let drawn = params.trees_far <= 0.0 ? 0.0 : smoothstep(params.trees_far, params.trees_far * (5.0 / 6.0), length(v.world_pos));
+    let canopy = TREE_CROWNS * forest * (1.0 - drawn * drawn) * (1.0 - water);
+    // (By the pixel's area, the root of its two footprints: seen low, a
+    // pixel is long down the view and narrow across it, and the crowns
+    // still show across it.)
+    let foot_area = sqrt(length(dpdx(v_q)) * length(dpdy(v_q)));
     var coarse = min(exp2(ceil(log2(2.0 * texel))), 32.0);
+    if (canopy > 0.0) { coarse = max(coarse, CROWN_LAST); }
     for (var k: i32 = 0; k < 8 && coarse > wavelength; k += 1) {
         let w = clamp(coarse / footprint * 0.5 - 1.0, 0.0, 1.0) - clamp(coarse / texel * 0.5 - 1.0, 0.0, 1.0);
-        if (w > 0.0) {
+        let wc = (coarse >= CROWN_FIRST && coarse <= CROWN_LAST) ? canopy * clamp(coarse / foot_area * 0.5 - 1.0, 0.0, 1.0) : 0.0;
+        if (w > 0.0 || wc > 0.0) {
             let far = coarse >= 1.0;
             let x = (far ? v_swell : v_q) / coarse;
             let pg = perlin_grad(x, ((far ? SWELL_PERIOD : DETAIL_PERIOD) / coarse) as i32, 41 + k);
-            let a = VARY_LUM * lum_gain * w;
-            lum += pg.x * a;
-            slope += pg.yzw * (RELIEF * relief_gain * w * steep);
-            lum_var += a * a * PERLIN_VAR;
+            let a = VARY_LUM * lum_gain * max(w, 0.0);
+            let ac = CROWN_LUM * wc;
+            lum += pg.x * (a + ac);
+            slope += pg.yzw * (RELIEF * relief_gain * max(w, 0.0) * steep + CROWN_RELIEF * wc);
+            lum_var += (a * a + ac * ac) * PERLIN_VAR;
         }
         coarse *= 0.5;
     }
@@ -600,14 +620,18 @@ pub fn fragment(v: mesh::Vertex, s_in: mesh::Surface) -> mesh::Surface {
         cells *= 2;
     }
     let land = 1.0 - water;
-    s.base_color = col.xyz * mix(1.0, exp(lum - 0.5 * lum_var), land);
+    let vary = mix(1.0, exp(lum - 0.5 * lum_var), land);
+    s.base_color = col.xyz * vary;
     let eye = -normalize(v.world_pos);
-    let drawn = params.trees_far <= 0.0 ? 0.0 : smoothstep(params.trees_far, params.trees_far * (5.0 / 6.0), length(v.world_pos));
     let crowns = 1.0 - pow(1.0 - TREE_CROWNS * forest, 1.0 / max(dot(eye, normalize(v_up)), 0.05));
     // Where blades stand, the ground between them, in their shade.
     let grass = GrassPlace { a: params.grass_a, e: params.grass_e, f: params.grass_f, uv: params.grass_uv };
     s.base_color *= grass_floor(grass, (params.cam_hi + params.cam_lo) + v.world_pos, length(v.world_pos));
-    s.base_color *= mix(vec3<f32>(1.0), TREE_TINT, crowns * (1.0 - drawn * drawn));
+    // Where the trees are not drawn, their crowns' share of the ground is
+    // the crowns' own colour (trees_mesh.bk's needles, as their shading
+    // averages them). A tint over the floor (bluish, for the shade) read
+    // from altitude as lakes under the air's blue.
+    s.base_color = mix(s.base_color, CANOPY * vary, crowns * (1.0 - drawn * drawn));
     let g_floor = TREE_CROWNS * forest * drawn * drawn;
     // The relief's gradient along the surface tilts the normal against it.
     n = normalize(n - (slope - dot(slope, n) * n) * land);
@@ -635,6 +659,7 @@ pub fn fragment(v: mesh::Vertex, s_in: mesh::Surface) -> mesh::Surface {
     s.sky_normal = normalize(s.normal + v_bent);
 
     if (SCENE_DEBUG(water)) { s = mesh::debug(s, vec3<f32>(water)); }
+    if (SCENE_DEBUG(forest)) { s = mesh::debug(s, vec3<f32>(forest, forest, water)); }
     if (SCENE_DEBUG(level)) {
         let hue = ((v_level % 6) as f32) / 6.0;
         s = mesh::debug(s, clamp(abs(mod(vec3<f32>(hue * 6.0) + vec3<f32>(0.0, 4.0, 2.0), 6.0) - vec3<f32>(3.0)) - vec3<f32>(1.0), vec3<f32>(0.0), vec3<f32>(1.0)) * 0.5);

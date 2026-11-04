@@ -159,7 +159,7 @@ pub fn vertex(v_in: mesh::Vertex) -> mesh::Vertex {
     // The neighbours' crowns between this point and the sun: the gap
     // probability of a canopy of their cover (the share of the 8 sites
     // about it holding a tree, times the share a crown hides from above,
-    // app.js TREE_CROWNS) over the depth of canopy above the point, along
+    // 0.55) over the depth of canopy above the point, along
     // the sun's slant (Nilson 1971, as the ground's crowns from afar).
     var around: f32 = 0.0;
     for (var j: i32 = -1; j <= 1; j += 1) {

@@ -2,7 +2,7 @@
 // lie at a point near the work, found on the CPU in f64 (planet.bk
 // k_anchors), so a kernel places its points as f32 offsets from it.
 
-export const ANCHOR_WORDS = 88;   // anchor.bk ANCHOR_VEC4S * 4
+export const ANCHOR_WORDS = 64;   // anchor.bk ANCHOR_VEC4S * 4
 
 // `count` anchors in a KernelBuffer (`buffer`, read by anchor.bk
 // read_anchor): set(i, base, dir) places anchor i at `base` (base

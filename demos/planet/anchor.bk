@@ -14,13 +14,10 @@ from planet::relief import BASE_WAVELENGTH, SimplexAt, skew;
 // The lattices' scales: the ranges' mask reads the noise at RANGE times the
 // continents' (ground.bk masks), the albedo's variation from octave
 // VARY_FIRST of the base wavelength (variation), the strata's folds at
-// STRATA_FOLD metres (strata), the forest's stands and glades at STAND and
-// GLADE metres (trees.bk).
+// STRATA_FOLD metres (strata).
 pub const RANGE: f32 = 1.7;
 pub const VARY_FIRST: i32 = 5;
 pub const STRATA_FOLD: f32 = 3500.0;
-pub const STAND: f32 = 70.0;
-pub const GLADE: f32 = 20.0;
 
 // A lattice's point: its cell, and the fraction in it in 64 bits an axis
 // (hi the top 32).
@@ -38,12 +35,10 @@ pub struct Anchor {
     r: Lattice,          // at RANGE p, skewed
     v: Lattice,          // the Perlin lattice at p 2^VARY_FIRST
     f: Lattice,          // at dir * radius / STRATA_FOLD
-    stand: Lattice,      // at dir * radius / STAND
-    glade: Lattice,      // at dir * radius / GLADE
 }
 // An anchor in a buffer (read_store<vec4<i32>, 1>): ANCHOR_VEC4S vec4s, the
 // four vectors (xyz, float bits) then each lattice's cell, hi and lo.
-pub const ANCHOR_VEC4S: i32 = 22;
+pub const ANCHOR_VEC4S: i32 = 16;
 
 fn lattice_at<B>(buf: B, i: i32) -> Lattice {
     let c = buf[i];
@@ -66,8 +61,6 @@ pub fn read_anchor<B>(buf: B, k: i32) -> Anchor {
         r: lattice_at(buf, i + 7),
         v: lattice_at(buf, i + 10),
         f: lattice_at(buf, i + 13),
-        stand: lattice_at(buf, i + 16),
-        glade: lattice_at(buf, i + 19),
     };
 }
 
@@ -174,8 +167,6 @@ pub fn anchor_near(dir: vec3<f32>, radius: f32) -> Anchor {
         r: lattice_near(p * RANGE, true),
         v: lattice_near(p * exp2(VARY_FIRST as f32), false),
         f: lattice_near(dir * (radius / STRATA_FOLD), false),
-        stand: lattice_near(dir * (radius / STAND), false),
-        glade: lattice_near(dir * (radius / GLADE), false),
     };
 }
 
@@ -218,8 +209,6 @@ pub fn anchor_of(base: vec3<f64>, dir: vec3<f32>, radius: f64) -> Anchor {
         r: lattice_of(p * (RANGE as f64), true),
         v: lattice_of(p * exp2(VARY_FIRST as f64), false),
         f: lattice_of(d * (radius / (STRATA_FOLD as f64)), false),
-        stand: lattice_of(d * (radius / (STAND as f64)), false),
-        glade: lattice_of(d * (radius / (GLADE as f64)), false),
     };
 }
 // An anchor at the unit direction `dir` itself, and dir's offset from it.
@@ -260,6 +249,4 @@ pub fn write_anchor(out: write_store<i32, 1>, k: i32, a: Anchor) {
     write_lattice(out, i + 28, a.r);
     write_lattice(out, i + 40, a.v);
     write_lattice(out, i + 52, a.f);
-    write_lattice(out, i + 64, a.stand);
-    write_lattice(out, i + 76, a.glade);
 }

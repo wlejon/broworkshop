@@ -8,7 +8,7 @@
 // in f32.
 from planet::ground import terrain, terrain_shaped, cell_height, spread, expected_surface, expected_cover, gradient,
                            variation, strata, octaves_for, range_margin, fresh_water, relief_offset, frame_dir,
-                           soil_height, SOIL_OCTAVES, cell_width;
+                           soil_height, SOIL_OCTAVES, cell_width, woodland, wooded;
 from planet::climate import climate_at, cover_at, snow_at, Climate;
 from planet::relief import BASE_WAVELENGTH, RIDGE_FIRST, WARP_OCTAVE, WARP_DISPLACE, simplex_grad, SimplexAt;
 from planet::rivers import water_at, water_share;
@@ -223,7 +223,7 @@ fn k_detail(g: grid<3>, table: read_store<vec4<i32>, 1>, anchors: read_store<vec
     // climate's with the river's water (the green ribbon a desert river
     // draws from orbit, a darker forest along a temperate one), and its
     // forest the gallery along the banks.
-    var cover = expected_cover(h, grad, length(du) * 0.5, sp.x, soil, cl);
+    var cover = wooded(expected_cover(h, grad, length(du) * 0.5, sp.x, soil, cl), woodland(a, e, radius, octaves, seed));
     if (wa.plain > 0.0) {
         let wet = Climate { temp: cl.temp, moist: min(cl.moist + RIPARIAN_MOIST, 1.0), sand: cl.sand, rock: cl.rock };
         let riparian = cover_at(wet, h);

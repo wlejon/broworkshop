@@ -629,6 +629,55 @@ pub fn tree_cover(h: f32, grad: f32, cl: Climate) -> f32 {
     return c;
 }
 
+// Forests grow as a mosaic at every scale: whole forests and open country
+// kilometres across, stands and clearings in them, glades of a few trees.
+// The cover is scaled by 1 + W, W zero-mean gradient noise in octaves
+// WOOD_FIRST (4.7 km) to WOOD_LAST (18 m) of the base wavelength on the
+// variation's lattice (anchor.bk), and a tree stands where its site's pick
+// is under that (trees.bk). With the forest only in stands of tens of
+// metres, the land a few kilometres up was one even tone, its meadows and
+// woods averaged away (under a dawn's haze the colour of water).
+// woodland: W's octaves a cell resolves (x, the last by its fraction) and
+// the variance of the rest (y); a site resolves them all.
+const WOOD_FIRST: i32 = 9;
+const WOOD_LAST: i32 = 17;
+fn wood_amp(o: i32) -> f32 {
+    if (o >= 15) { return 1.7; }
+    return 1.25;
+}
+pub fn woodland(a: Anchor, e: vec3<f32>, radius: f32, octaves: f32, seed: i32) -> vec2<f32> {
+    var lat = doubled(a.v, WOOD_FIRST - VARY_FIRST);
+    var d = p_offset(e, radius) * exp2(WOOD_FIRST as f32);
+    var s: f32 = 0.0;
+    var v: f32 = 0.0;
+    for (var o: i32 = WOOD_FIRST; o <= WOOD_LAST; o += 1) {
+        let amp = wood_amp(o);
+        let w = clamp(octaves - (o as f32), 0.0, 1.0);
+        if (w > 0.0) {
+            s += perlin_at(perlin_from(lat, d), seed + 4111 + o) * amp * w;
+        }
+        v += amp * amp * PERLIN_VAR * (1.0 - w * w);
+        lat = twice(lat);
+        d *= 2.0;
+    }
+    return vec2<f32>(s, v);
+}
+// The share of a cell under trees: the mean of clamp(cover (1 + W)) over
+// it, W the resolved part plus a normal of the rest's variance (the clamp
+// of a normal in closed form).
+pub fn wooded(cover: f32, wood: vec2<f32>) -> f32 {
+    let mu = cover * (1.0 + wood.x);
+    let sg = cover * sqrt(wood.y);
+    if (sg < 1e-4) { return clamp(mu, 0.0, 1.0); }
+    let za = -mu / sg;
+    let zb = (1.0 - mu) / sg;
+    let pa = normal_cdf(za);
+    let pb = normal_cdf(zb);
+    let fa = 0.3989423 * exp(-0.5 * za * za);
+    let fb = 0.3989423 * exp(-0.5 * zb * zb);
+    return clamp(mu * (pb - pa) + sg * (fa - fb) + (1.0 - pb), 0.0, 1.0);
+}
+
 // The z with normal_cdf(z) = u: normal_cdf's tanh inverted, then its cubic
 // solved by Newton from the linear guess (it is nearly linear, so three
 // steps reach f32).
