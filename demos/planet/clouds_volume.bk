@@ -595,11 +595,13 @@ fn skip_to(t: f32, dt: f32, clear: f32, jit: f32, mu: f32, dt_max: f32) -> f32 {
 // SLAB_W0 to SLAB_W1: the footprints over which the detail goes unresolved,
 // where the slab takes over; SLAB_CROSS: footprints of the crossing along
 // the layer, over which one column stands for the whole of it (to twice
-// that, the march's again).
+// that, the march's again). At one footprint the march drew everything
+// off the nadir from orbit, its unresolved cumuli grey rings on a mottle;
+// the slab's one column holds across six as well to the eye.
 const SLAB_STEPS: i32 = 16;
 const SLAB_W0: f32 = 300.0;
 const SLAB_W1: f32 = 600.0;
-const SLAB_CROSS: f32 = 1.0;
+const SLAB_CROSS: f32 = 6.0;
 struct Slab {
     l: vec3<f32>,
     transmittance: f32,

@@ -44,7 +44,9 @@ pub fn column(q: vec3<f32>, w: f32, radius: f32) -> vec2<f32> {
     // two octaves' random clusters. The ring is zero-mean (RING_MEAN) and
     // resolved as an octave CELL_RESOLVE long is, its variance where not.
     let qf = q;
-    let cells = cell_strength(q, radius);
+    // (Convective: as strong as the region's convection, below.)
+    let conv = convection(q, radius);
+    let cells = cell_strength(q, radius) * conv;
     if (cells > 0.0) {
         let r = clamp(CELL_RESOLVE * inv_w * 0.5 - 1.0, 0.0, 1.0);
         if (r > 0.0) {
@@ -53,10 +55,11 @@ pub fn column(q: vec3<f32>, w: f32, radius: f32) -> vec2<f32> {
         v += (1.0 - r * r) * cells * cells * CELL_AMP * CELL_AMP * RING_VAR;
     }
     // The cumuli: from 13 km to 25 m, each octave 0.62 of the last; past
-    // the finest, the variance of yet finer ones.
+    // the finest, the variance of yet finer ones. As strong as the region's
+    // convection.
     wavelength = 12800.0;
     p = q * (radius / 12800.0);
-    amp = 0.32;
+    amp = 0.32 * conv;
     for (var k: i32 = 0; k < 10; k += 1) {
         let r = clamp(wavelength * inv_w * 0.5 - 1.0, 0.0, 1.0);
         let a = amp * (1.0 - CELL_TAKE * cells * step(k as f32, 1.5));
@@ -75,8 +78,9 @@ pub fn column(q: vec3<f32>, w: f32, radius: f32) -> vec2<f32> {
     // zonal), bent by a slow warp, as strong as a region's weather has them
     // (none in most): resolved as an octave is, the rows' variance where
     // unresolved. Without them the field was the same speckle everywhere,
-    // from orbit a uniform grain.
-    let rows = street_strength(q, radius, qf);
+    // from orbit a uniform grain. The rolls are convection's, as strong as
+    // the region's: over a stable region the bare rows were a grating.
+    let rows = street_strength(q, radius, qf) * conv * conv;
     if (rows > 0.0) {
         let r = clamp(STREET_SPACING * inv_w * 0.5 - 1.0, 0.0, 1.0);
         if (r > 0.0) {
@@ -85,6 +89,19 @@ pub fn column(q: vec3<f32>, w: f32, radius: f32) -> vec2<f32> {
         v += (1.0 - r * r) * rows * rows * STREET_AMP * STREET_AMP * 0.5;
     }
     return vec2<f32>(f, v);
+}
+
+// How strongly a region's air convects, 0.12 to 1, over regions of about
+// CONV_REGION: where it is unstable the cumuli build into full fields; where
+// a stable layer caps them they stay small and sparse, and what shows is the
+// weather's own decks and clear skies. Everywhere at full strength the
+// cumuli were one speckle over the planet, from orbit a uniform grain;
+// Earth's fields come in patches, with smooth decks and clear air between.
+// Full in about a fifth of the regions, at its least in two fifths. Only
+// lowers the cumuli's amplitude, so clouds.js's gradient bound still holds.
+const CONV_REGION: f32 = 700000.0;
+fn convection(q: vec3<f32>, radius: f32) -> f32 {
+    return clamp(perlin_f32(q * (radius / CONV_REGION), 241) * 3.0 + 0.35, 0.12, 1.0);
 }
 
 // The cells' size (m), the ring's amplitude, its width (cell units), the
