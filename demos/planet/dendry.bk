@@ -56,7 +56,7 @@ module planet::dendry;
 
 import std::noise::*;
 from planet::rivers import RIV_N, RIV_REC, alpha_dir, face_of, face_a, face_e, face_f, cell_of, cell_next, point_index,
-    river_width, meander_from, erf_approx;
+    river_width, meander_from, meander_across, erf_approx;
 from planet::relief import simplex_grad_f32, GRAD_TO_VALUE;
 from planet::climate import moist_broad;
 
@@ -271,16 +271,18 @@ pub fn reach_seg(net: read_store<f32, 1>, c: vec3<i32>, f: Local) -> Seg {
 const MEANDER_COARSE: f32 = 4.0;
 // For a point `across` metres across the chord, the meanders as far from
 // the curve as it is (rivers.bk meander_from); on the curve (ON_CURVE), all
-// of them.
-fn curve_offset(c: vec4<f32>, s: f32, len: f32, k: i32, seed: i32, across: f32) -> f32 {
+// of them. y the meanders' slope along the chord.
+fn curve_offset(c: vec4<f32>, s: f32, len: f32, k: i32, seed: i32, across: f32) -> vec2<f32> {
     let t = s / len;
     let t2 = t * t;
     let bend = len * ((t2 * t - 2.0 * t2 + t) * c.x + (t2 * t - t2) * c.y);
-    // The streams' meanders stop at MEANDER_COARSE widths, four times the
-    // rivers' (a gully's finest wiggles are the relief's).
-    let width = k == 0 ? c.z : MEANDER_COARSE * c.z;
-    let far = across > 1.0e29 ? 0.0 : abs(across - bend);
-    return bend + meander_from(bitcast<i32>(c.w), s, len, width, seed + 131 * k, far);
+    // The streams that hold water (levels 1 and 2, tally_water) meander as
+    // the rivers do, down to their own width's scale; the dry gullies' stop
+    // at MEANDER_COARSE widths, four times the rivers' (a gully's finest
+    // wiggles are the relief's).
+    let width = k <= 2 ? c.z : MEANDER_COARSE * c.z;
+    let m = meander_from(bitcast<i32>(c.w), s, len, width, seed + 131 * k, across > 1.0e29 ? across : across - bend);
+    return vec2<f32>(bend + m.x, m.y);
 }
 const ON_CURVE: f32 = 1.0e30;
 
@@ -312,7 +314,8 @@ pub fn seg_dist(a: vec4<f32>, c: vec4<f32>, x: vec2<f32>, k: i32, limit: f32, se
     if (abs(ahead) > limit || abs(across) > limit + bound) {
         return vec2<f32>(max(abs(ahead), abs(across) - bound), s / len);
     }
-    let off = across - curve_offset(c, s, len, k, seed, across);
+    let co = curve_offset(c, s, len, k, seed, across);
+    let off = meander_across(across - co.x, co.y);
     return vec2<f32>(sqrt(ahead * ahead + off * off), s / len);
 }
 
@@ -392,7 +395,7 @@ pub fn pot_of(n: Near, x: vec2<f32>, k: i32, lk: f32, seed: i32) -> Pot {
     let len = max(length(a.zw - a.xy), 1e-3);
     let along = (a.zw - a.xy) / len;
     let side = vec2<f32>(along.y, -along.x);
-    let jn = a.xy + along * n.s + side * curve_offset(n.seg.c, n.s, len, k - 1, seed, ON_CURVE);
+    let jn = a.xy + along * n.s + side * curve_offset(n.seg.c, n.s, len, k - 1, seed, ON_CURVE).x;
     return Pot { a: vec4<f32>(x, n.v, 0.0), b: vec4<f32>(jn, n.d / lk, atan2(along.y, along.x)) };
 }
 // How steeply o's potential falls to neighbour t's (0: it does not).

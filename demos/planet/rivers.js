@@ -5,12 +5,13 @@
 // catchments, one step a dispatch, until the longest chain has settled; then
 // each point's floor (the full ground's lowest along its reach), the water
 // filled over the floors up every chain and breached the same way, the
-// water falling along every chain, and each point's tangent, the way its
-// water runs through it. The ground's kernels read the network's
+// water falling along every chain, each point's tangent, the way its
+// water runs through it, and each reach's lake level, its water lowered to
+// the drained ground about its shore. The ground's kernels read the network's
 // buffer; the CPU's (the camera's height) a copy of it.
 
 const N = 512;               // rivers.bk RIV_N
-const REC = 11;              // rivers.bk RIV_REC
+const REC = 12;              // rivers.bk RIV_REC
 const POINTS = 6 * N * N;
 // Steps of the fills, the catchments and the breach: past the longest chain
 // on a continent.
@@ -41,6 +42,8 @@ export function createRivers(module, radius, seed) {
     for (let i = 0; i < STEPS; i++) { breach.dispatch(grid, net, a, b); [a, b] = [b, a]; }
     module.kernel('k_river_store').dispatch(grid, net, catchment, a, floor);
     module.kernel('k_river_tangent').dispatch(grid, net);
+    module.kernel('k_river_lake').dispatch(grid, net, b, radius, seed);
+    module.kernel('k_river_lake_store').dispatch(grid, net, b);
     const cpu = net.read(new Float32Array(POINTS * REC));
     return { net, cpu };
 }

@@ -26,11 +26,9 @@ from planet::anchor import Anchor, Lattice, PerlinAt, RANGE, VARY_FIRST, STRATA_
 const RIDGE_VAR: f32 = 0.0727;
 const RIDGE_GRAD_VAR: f32 = 4.586;
 
-// The ground's noise: OpenSimplex2S, which is continuous everywhere. The
-// classic simplex (std simplex3d, FastNoise2's) reaches a little past its
-// simplex and steps where the lattice's simplices meet: on planes like y = z,
-// which every octave shares, so the steps of all of them line up into one
-// (a 4 cm ledge along the cube's +Y/+Z edge, seen as a line to the horizon).
+// The ground's noise: OpenSimplex2S, continuous everywhere. The classic
+// simplex (std simplex3d) steps on planes like y = z that every octave
+// shares: a 4 cm ledge along the cube's +Y/+Z edge, a line to the horizon.
 //
 // It is std supersimplex3d (relief.bk simplex_grad) at a lattice point and
 // an offset from it (anchor.bk simplex_from): octave k of lattice l at the
@@ -50,9 +48,8 @@ fn noise_on(l: Lattice, k: i32, off: vec3<f32>, seed: i32) -> f32 {
 // along the surface is twice the gradient variance along one axis over the
 // variance, which gives NOISE_BOX and RIDGE_BOX per unit of span^2. Measured
 // over 100k cells (16 x 16 samples each), the noise holds to it out to a
-// cell a wavelength wide; the ridge's crests are kinks, whose gradient is not
-// curvature a box removes, so its factor falls by exp(-0.9 span) as cells
-// widen. Both within a few hundredths of the measured slopes.
+// cell a wavelength wide; the ridge's crests are kinks, so its factor falls
+// by exp(-0.9 span) as cells widen. Both within a few hundredths.
 const RIDGE_BOX: f32 = 2.0 * RIDGE_GRAD_VAR / RIDGE_VAR / 24.0;
 fn span_of(o: i32, octaves: f32) -> f32 {
     return span_at(o, octaves);
@@ -107,9 +104,7 @@ pub fn octaves_for(extent: f32, inv_size: f32) -> f32 {
 // the ridges into ranges, the finer fall off by 0.45, a little faster than
 // equal slope (0.5), so the slope settles near 33 degrees instead of growing
 // with every octave down. They go on to a 2.3 m wavelength: spurs, gullies
-// and knolls down to a few metres, where a mountainside stopped at 73 m
-// was smooth as a dune from close by. (relief.bk holds them: RIDGE_FIRST,
-// RIDGE_LAST, ridge_amp.)
+// and knolls down to a few metres (relief.bk RIDGE_FIRST, RIDGE_LAST, ridge_amp).
 // Where ranges are, their ground is lifted this far (metres): the belt the
 // relief stands on.
 const UPLIFT: f32 = 2500.0;
@@ -333,21 +328,20 @@ pub fn cell_width(octaves: f32) -> f32 {
 // sides carry its relief), the relief finer than the drainage's gullies on
 // it unscaled, cut down by the rivers' channels and floodplains
 // (rivers.bk), and a lake's level where it stands over that. The rivers'
-// cut joins the ground by a smooth minimum over CUT_BLEND metres, its
-// sides carrying the fine relief on, faded out over the last VALLEY_FLOOR
-// metres down to its bed.
+// cut joins the ground by a smooth minimum over up to CUT_BLEND metres,
+// its sides carrying the fine relief on, faded out over the last
+// VALLEY_FLOOR metres to its bed. y, z and w: how much the ground moves with
+// the relief's octaves below FINE_FIRST, from it on, and the part of those
+// finer than the gullies (relief), per metre of relief at full uplift: the
+// uplift where the ground stands, scaled as the drainage scales it (the
+// finest not), less where a river cuts it (the fine parts as its sides
+// carry them on), none under a lake. The ground's shader scales the
+// octaves finer than its texels by them (ground_mesh.bk).
 const VALLEY_FLOOR: f32 = 150.0;
 const CUT_BLEND: f32 = 40.0;
+const CUT_SOFT: f32 = 3.0;
 const BANK_BLEND: f32 = 4.0;
 const SHORE_WANDER: f32 = 45.0;
-//
-// y, z and w: how much the ground here moves with the relief's octaves
-// below FINE_FIRST, from it on, and the part of those finer than the
-// gullies (relief), per metre of relief at full uplift: the uplift where
-// the ground stands, scaled as the drainage scales it (the finest not),
-// less where a river cuts it (the fine parts as its sides carry them on),
-// none under a lake. The ground's shader scales the octaves finer than its
-// texels by them (ground_mesh.bk).
 pub fn terrain_shaped(a: Anchor, e: vec3<f32>, radius: f32, octaves: f32, seed: i32, net: read_store<f32, 1>) -> vec4<f32> {
     return shaped_by(terrain_parts(a, e, radius, octaves, seed), water_at(a.dir, e, radius, cell_width(octaves), net, seed),
                      drain_at(a.dir, e, radius, cell_width(octaves), net, seed), radius);
@@ -368,8 +362,12 @@ fn shaped_rel(t: vec4<f32>, w: Water, d: Drain, rel: f32, radius: f32) -> vec4<f
     let side = smoothstep(0.0, VALLEY_FLOOR, w.near.x - w.bed);
     let valley = w.near.x + (t.y + t.w) * side;
     let x = h - valley;
-    let m = max(CUT_BLEND - abs(x), 0.0) / CUT_BLEND;
-    let cut = min(h, valley - m * m * CUT_BLEND * 0.25);
+    // A blend of twice the ground's height over the bed, from CUT_SOFT (a low
+    // bank, no crease): a smooth minimum dips a quarter of its width under
+    // both, and at CUT_BLEND it sank drained floodplains into ten metre trenches.
+    let blend = clamp(2.0 * (h - w.bed), CUT_SOFT, CUT_BLEND);
+    let m = max(blend - abs(x), 0.0) / blend;
+    let cut = min(h, valley - m * m * blend * 0.25);
     let u = t.z;
     var g = vec4<f32>(cut, u * k, u * k, u);
     if (cut < h) {
@@ -381,13 +379,11 @@ fn shaped_rel(t: vec4<f32>, w: Water, d: Drain, rel: f32, radius: f32) -> vec4<f
     if (w.lake < -1.0e8) { return g; }
     // A lake near (rivers.bk lake_rim): its rim, carrying the ground's fine
     // relief (less over its crest, so the crest holds over the level), joins
-    // the ground by a smooth maximum over BANK_BLEND metres, so the rim's
-    // foot runs into the land without a crease. The relief also moves the
-    // beach in and out, SHORE_WANDER metres a metre of it, none at the
-    // crest, so the waterline runs in bays and points of tens of metres
-    // over its longest wavelengths and less over its shorter, rather than
-    // along the profile's contour. Under the level on the lake's side of the
-    // crest, the lake's surface.
+    // the ground by a smooth maximum over BANK_BLEND metres, with no crease
+    // at its foot. The relief moves the beach in and out, SHORE_WANDER
+    // metres a metre of it, none at the crest, so the waterline runs in bays
+    // and points, not along the profile's contour. Under the level on the
+    // lake's side of the crest, the lake's surface.
     let level = w.near.z;
     let fine = t.y + t.w;
     let rim = lake_rim(w.shore + SHORE_WANDER * fine * clamp(1.0 - w.shore / RIM_CREST, 0.0, 1.0));

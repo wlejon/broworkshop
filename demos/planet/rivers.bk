@@ -20,7 +20,7 @@ module planet::rivers;
 import std::noise::*;
 
 pub const RIV_N: i32 = 512;
-pub const RIV_REC: i32 = 11;   // height (m), downstream point (-1 none), catchment (points), water level (m), direction (3), floor (m; riverbuild.bk k_river_floor), tangent (3; k_river_tangent, 0 for a lone point)
+pub const RIV_REC: i32 = 12;   // height (m), downstream point (-1 none), catchment (points), water level (m), direction (3), floor (m; riverbuild.bk k_river_floor), tangent (3; k_river_tangent, 0 for a lone point), lake level of the reach to the downstream point (m; k_river_lake)
 // The octaves the lattice resolves, which its points' heights are the
 // ground at: about 20 km between points, a wavelength of 2.5 of them
 // (ground.bk octaves_for).
@@ -135,7 +135,7 @@ fn valley_steepness(catchment: f32) -> f32 {
     return mix(3.0, 1.0, smoothstep(5.0, 800.0, catchment));
 }
 // A river's water stands over its bed as a lake from this deep (m).
-const LAKE_DEPTH: f32 = 1.0;
+pub const LAKE_DEPTH: f32 = 1.0;
 
 // A river's meanders: its channel's offset across its reach (m), `s` metres
 // along a reach `len` long from point `p`, for a channel `width` wide. Gradient
@@ -144,40 +144,72 @@ const LAKE_DEPTH: f32 = 1.0;
 // Wolman 1960), each MEANDER_AMP of its wavelength, each tapered to nothing
 // within half its wavelength of the reach's ends so reaches meet at their
 // points and the short meanders run up to them; the valley follows the
-// channel. Slopes stay under one, so the distance across the reach to the
-// offset stays the distance to the channel.
+// channel. Up to MEANDER_OCTAVES: a creek of a few metres on a reach of
+// kilometres still meanders at its own width's scale, not only in the
+// reach's broad bends. The meanders proper, the octaves within
+// MEANDER_BAND widths, swing up to 1 + MEANDER_SWING times as far as the
+// broad bends: a sinuosity of 1.1 to 1.2 at every size, where the octaves
+// alike left every stream all but straight (1.04 to 1.1). The curve's
+// slopes then pass one, so the distance across the reach to it is taken
+// over its slope (meander_across) to stay the distance to the channel.
 const MEANDER_WAVES: f32 = 11.0;
 const MEANDER_AMP: f32 = 0.18;
+const MEANDER_OCTAVES: i32 = 10;
+const MEANDER_SWING: f32 = 1.5;
+const MEANDER_BAND: f32 = 48.0;
 fn meander_gradient(seed: i32, p: i32, i: i32, octave: i32) -> f32 {
     let h = hash_primes3d(seed + 7919, p * PRIME_X, i * PRIME_Y, octave * PRIME_Z);
     return (((h >> 8) & 65535) as f32) / 32767.5 - 1.0;
 }
 pub fn meander(p: i32, s: f32, len: f32, width: f32, seed: i32) -> f32 {
-    return meander_from(p, s, len, width, seed, 0.0);
+    return meander_from(p, s, len, width, seed, 1.0e30).x;
 }
-// The meanders as ground `far` metres from the channel follows them (the
-// drainage's valleys, dendry.bk): an octave counts in full where its
-// wavelength is at least `far`, none under half of it, so a valley's sides
-// carry its channel's broad bends and not its fine ones.
-pub fn meander_from(p: i32, s: f32, len: f32, width: f32, seed: i32, far: f32) -> f32 {
-    let shortest = max(MEANDER_WAVES * width, 0.5 * far);
+// The meanders as the ground `across` metres across from the curve they
+// bend (the reach's bend, the drainage's valleys, dendry.bk) follows them,
+// all of them on the channel (across 1e30 or more: on it by definition).
+// Octave by octave from the broadest, `far` is the distance to the curve
+// the broader octaves make: an octave counts in full where its wavelength
+// is at least that, none under half of it, so a valley's sides carry its
+// channel's broad bends and not its fine ones, and the channel itself, as
+// near as its finer octaves are to it, all of them. (`far` from the bend
+// alone dropped the fine octaves wherever the broad ones swung the channel
+// off its reach's line: a smooth channel, straight for kilometres.) x the
+// offset, y its slope along the reach (the tapers' own left out).
+pub fn meander_from(p: i32, s: f32, len: f32, width: f32, seed: i32, across: f32) -> vec2<f32> {
+    let all = across > 1.0e29;
+    let narrowest = MEANDER_WAVES * width;
     var wavelength = 0.5 * len;
-    var m: f32 = 0.0;
-    for (var o: i32 = 0; o < 6; o += 1) {
-        if (wavelength < shortest) { break; }
+    var m = vec2<f32>(0.0);
+    for (var o: i32 = 0; o < MEANDER_OCTAVES; o += 1) {
+        let far = all ? 0.0 : max(abs(across - m.x), 1e-3);
+        // Half the reach bends whatever the river's width: a trunk too wide
+        // to meander within its reach still wanders across it, not along
+        // its chord, a bank straight for kilometres.
+        if (wavelength < (o == 0 ? 0.5 * far : max(narrowest, 0.5 * far))) { break; }
         let x = s / wavelength;
         let c = floor(x);
         let f = x - c;
         let i = c as i32;
-        let v = mix(meander_gradient(seed, p, i, o) * f, meander_gradient(seed, p, i + 1, o) * (f - 1.0),
-                    f * f * (3.0 - 2.0 * f));
+        let g0 = meander_gradient(seed, p, i, o);
+        let g1 = meander_gradient(seed, p, i + 1, o);
+        let h = f * f * (3.0 - 2.0 * f);
+        let v = mix(g0 * f, g1 * (f - 1.0), h);
+        let dv = mix(g0, g1, h) + (g1 * (f - 1.0) - g0 * f) * 6.0 * f * (1.0 - f);
         // Each octave tapers within half its wavelength of the ends.
         let e = clamp(min(s, len - s) * 2.0 / wavelength, 0.0, 1.0);
-        let follow = far > 0.0 ? smoothstep(0.5 * far, far, wavelength) : 1.0;
-        m += v * 2.0 * MEANDER_AMP * wavelength * e * e * (3.0 - 2.0 * e) * follow;
+        let follow = all ? 1.0 : smoothstep(0.5 * far, far, wavelength);
+        let r = wavelength / width;
+        let swing = r < MEANDER_WAVES ? 1.0 : 1.0 + MEANDER_SWING * clamp((MEANDER_BAND - r) / (MEANDER_BAND - 16.0), 0.0, 1.0);
+        let a = 2.0 * MEANDER_AMP * swing * e * e * (3.0 - 2.0 * e) * follow;
+        m += vec2<f32>(v * wavelength, dv) * a;
         wavelength *= 0.5;
     }
     return m;
+}
+// The distance across to a curve `off` metres across from here, its slope
+// `slope`: the offset over the slope, the distance square to the curve.
+pub fn meander_across(off: f32, slope: f32) -> f32 {
+    return off / sqrt(1.0 + slope * slope);
 }
 
 // The valley the water cuts, at `x` metres from its edge: its rise over the
@@ -242,10 +274,10 @@ const CHANNEL_DEPTH: f32 = 0.04;   // of the width, at the middle
 // af from here: v.x the height its valley cuts the ground to, v.y the share
 // of the cell in its channel, v.z how deep its channel runs here, v.w its
 // floor's height; surface the level its water stands at where it holds a
-// lake: its downstream point's, as a lake stands flat at its outlet's (a
-// surface run between its points' sloped from a tributary's level down to
-// the lake it joins, a sheet of water over the lake's floor ending in a cut
-// across the shore). The floor runs between its points'. A point's
+// lake: the reach's lake level (riverbuild.bk k_river_lake), its downstream
+// point's water, as a lake stands flat at its outlet's, lowered to the
+// drained ground about its shore so the lake lies in the land the drainage
+// left rather than over it. The floor runs between its points'. A point's
 // (riverbuild.bk): the water filled over the floors and breached, the
 // floor the full ground's lowest along the reach, or the water where an
 // outlet's gorge cuts through a rim under it. So the river lies in the
@@ -288,6 +320,7 @@ const BANK_VARY: f32 = 0.12;
 const ISLAND_MIN: f32 = 150.0;
 const BAR_MIN: f32 = 60.0;
 const PLAIN_MIN: f32 = 20.0;
+const BLUFF_WANDER: f32 = 1.0;
 // 0 to 1, hashed from (p, i).
 fn hash01(seed: i32, p: i32, i: i32) -> f32 {
     let h = hash_primes3d(seed, p * PRIME_X, i * PRIME_Y, 0);
@@ -324,7 +357,6 @@ fn bend(net: read_store<f32, 1>, k: i32, down: i32, along: vec3<f32>, side: vec3
 // texel of a tile, and so is each point's offset in it.
 fn reach(net: read_store<f32, 1>, k: i32, hi: vec3<f32>, here: vec3<f32>, r: f32, up: vec3<f32>,
          cell: f32, spread: f32, seed: i32) -> Reach {
-    let level = net[k + 3];
     let catchment = net[k + 2];
     let down = net[k + 1] as i32;
     let af = point_offset(net, k, hi, r);
@@ -366,11 +398,11 @@ fn reach(net: read_store<f32, 1>, k: i32, hi: vec3<f32>, here: vec3<f32>, r: f32
     // From here to the reach's line, and across it to the channel: the
     // meanders about the reach's bend to its points' tangents.
     let bent = bend(net, k, down * RIV_REC, along, side, t, len);
-    let x = x_line - bent - meander(p, s, len, width, seed);
+    let mf = meander_from(p, s, len, width, seed, x_line - bent);
+    let x = meander_across(x_line - bent - mf.x, mf.y);
     let ahead = s - s_line;
     let d = length(vec2<f32>(ahead, x));
-    let downLevel = net[down * RIV_REC + 3];
-    let bed = mix(min(net[k + 7], level), min(net[down * RIV_REC + 7], downLevel), t);
+    let bed = reach_bed(net, k, t);
     // The cell's share inside |d| < half: the strip under a Gaussian of
     // SHARE_SIGMA cells about here. A box a cell wide, or a tent, is not
     // band-limited: a stream narrower than a cell, running aslant across
@@ -386,9 +418,15 @@ fn reach(net: read_store<f32, 1>, k: i32, hi: vec3<f32>, here: vec3<f32>, r: f32
     // clear of the banks' wandering (at most about 1.9 BANK_VARY of `mid`)
     // rather than following it: following it, the whole valley side swung in
     // and out every few metres, a regular comb of rills down every bank.
+    // The sides rise from `bluff`, which wanders out from there to as far
+    // again in bays a couple of floodplains long, as the floodplain's colour
+    // does: at `plain` all along, a low bank ran beside the channel for
+    // kilometres, straight as a cut.
     let plain = max(plain_half(catchment), mid * (1.0 + 2.0 * BANK_VARY));
+    let wander = wobble(seed + 23, p, s, 2.0 * plain) * taper;
+    let bluff = min(plain * (1.0 + BLUFF_WANDER * (0.5 + 0.5 * wander)), max(plain, PLAIN_MAX));
     let ds = sqrt(d * d + spread);
-    let floor_rise = PLAIN_RISE * clamp(ds - half, 0.0, plain - half);
+    let floor_rise = PLAIN_RISE * clamp(ds - half, 0.0, bluff - half);
     // This side's bank, blended across the middle.
     let hs = mix(hl, hr, smoothstep(-0.5 * half, 0.5 * half, x));
     var share = clamp(0.5 * (erf_approx((hs - d) / sg) - erf_approx((-hs - d) / sg)), 0.0, 1.0);
@@ -452,7 +490,7 @@ fn reach(net: read_store<f32, 1>, k: i32, hi: vec3<f32>, here: vec3<f32>, r: f32
     // some stretches of one, and the others' swales.
     let soft = 0.2 * plain + sg;
     if (catchment >= PLAIN_MIN && d < plain + soft) {
-        let edge = plain * (1.0 + 0.25 * wobble(seed + 23, p, s, 2.0 * plain) * taper);
+        let edge = plain * (1.0 + 0.25 * wander);
         out.plain = (1.0 - smoothstep(edge - soft, edge + soft, d)) * smoothstep(PLAIN_MIN, 300.0, catchment);
         let old_width = min(0.7 * width, 0.5 * len / MEANDER_WAVES);
         let xo = x_line - bent - meander(p + 7919, s, len, old_width, seed + 101);
@@ -473,24 +511,48 @@ fn reach(net: read_store<f32, 1>, k: i32, hi: vec3<f32>, here: vec3<f32>, r: f32
         out.tone = -swale * taper * out.plain;
     }
     let steep = valley_steepness(catchment);
-    out.v = vec4<f32>(bed + floor_rise + valley_rise(ds - plain) * steep, share, depth, bed);
-    out.surface = downLevel;
-    // The lake's nominal shore: where the profile (the floodplain's rise,
-    // then valley_rise's) stands its threshold over the bed, found from the
-    // profile itself, so the distance past it runs on smoothly across the
-    // floodplain's edge, where the profile's slope steps.
+    out.v = vec4<f32>(bed + floor_rise + valley_rise(ds - bluff) * steep, share, depth, bed);
+    let surface = net[k + 11];
+    out.surface = surface;
     out.shore = 1.0e9;
-    let over = downLevel - bed - LAKE_DEPTH;
-    if (over > 0.0) {
-        let rise = downLevel + min(SHORE, 2.0 * over) - bed;
-        let flat = PLAIN_RISE * max(plain - half, 0.0);
-        var at = half + rise / PLAIN_RISE;
-        if (rise > flat) {
-            at = plain + (sqrt(0.04 + 6.4e-4 * (rise - flat) / steep) - 0.2) / 3.2e-4;
-        }
-        out.shore = max(ds - at, -SHORE_IN);
-    }
+    if (surface - bed > LAKE_DEPTH) { out.shore = max(ds - shore_across(surface, bed, half, bluff, steep), -SHORE_IN); }
     return out;
+}
+
+// A lake's nominal shore across its reach (m from the channel's middle),
+// at level `surface` over the bed `bed`: where the valley's profile (the
+// floodplain's rise, then valley_rise's) stands min(SHORE, twice the depth
+// past LAKE_DEPTH) over the level, found from the profile itself, so the
+// distance past it runs on smoothly across the floodplain's edge, where
+// the profile's slope steps.
+fn shore_across(surface: f32, bed: f32, half: f32, plain: f32, steep: f32) -> f32 {
+    let rise = surface + min(SHORE, 2.0 * (surface - bed - LAKE_DEPTH)) - bed;
+    let flat = PLAIN_RISE * max(plain - half, 0.0);
+    if (rise <= flat) { return half + rise / PLAIN_RISE; }
+    return plain + (sqrt(0.04 + 6.4e-4 * (rise - flat) / steep) - 0.2) / 3.2e-4;
+}
+// The same for the reach from point record k, at t along it with its
+// channel's own width (the banks' wandering left out) and its sides' foot
+// as far out as it wanders (reach's bluff), and the reach's
+// bed there (riverbuild.bk k_river_lake). The bed is the rivers' (min of
+// floor and water), as the drainage's base level takes it.
+pub fn reach_bed(net: read_store<f32, 1>, k: i32, t: f32) -> f32 {
+    let dk = (net[k + 1] as i32) * RIV_REC;
+    return mix(min(net[k + 7], net[k + 3]), min(net[dk + 7], net[dk + 3]), t);
+}
+// The channel's middle across the reach from point record k at t along it
+// (reach's bend and meanders), its chord `len` m long along `along`, `side`
+// across it as reach takes it.
+pub fn reach_channel(net: read_store<f32, 1>, k: i32, t: f32, len: f32, along: vec3<f32>, side: vec3<f32>, seed: i32) -> f32 {
+    let down = (net[k + 1] as i32) * RIV_REC;
+    return bend(net, k, down, along, side, t, len) + meander(k / RIV_REC, t * len, len, river_width(net[k + 2]), seed);
+}
+pub fn reach_shore(net: read_store<f32, 1>, k: i32, surface: f32, bed: f32) -> f32 {
+    let catchment = net[k + 2];
+    let half = 0.5 * river_width(catchment);
+    let plain = max(plain_half(catchment), half * (1.0 + 2.0 * BANK_VARY));
+    let bluff = min(plain * (1.0 + BLUFF_WANDER), max(plain, PLAIN_MAX));
+    return shore_across(surface, bed, half, bluff, valley_steepness(catchment));
 }
 
 // Whether point index `p` is one of the 3x3 points about cell c.
@@ -617,9 +679,10 @@ pub fn water_at(hi: vec3<f32>, lo: vec3<f32>, radius: f32, cell: f32, net: read_
 // where they meet.
 //
 // Where the valley's sides rise over the level, they carry the ground's
-// relief and set the shore. Where the ground about stands lower than the
-// lake (its level is the valley's, riverbuild.bk, and the drainage lowers
-// the land beside it) the lake keeps itself in a low rim (lake_rim): the
+// relief and set the shore. The level is no higher than the drained ground
+// at the rim's crest (riverbuild.bk k_river_lake), so the ground about
+// mostly stands over it; where it still dips under (between the points the
+// level was found at, or in a hollow) the lake keeps itself in a low rim (lake_rim): the
 // ground rises from the water at BEACH to RIM over the level RIM_CREST past
 // the nominal shore, rounded over RIM_ROUND, and falls beyond at
 // BANK_GRADE to meet the land. ground.bk shaped_rel lays it: the ground's
