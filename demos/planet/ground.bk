@@ -338,6 +338,7 @@ pub fn cell_width(octaves: f32) -> f32 {
 // metres down to its bed.
 const VALLEY_FLOOR: f32 = 150.0;
 const CUT_BLEND: f32 = 40.0;
+const BANK_RELIEF: f32 = 4.0;
 //
 // y, z and w: how much the ground here moves with the relief's octaves
 // below FINE_FIRST, from it on, and the part of those finer than the
@@ -369,8 +370,16 @@ fn shaped_rel(t: vec4<f32>, w: Water, d: Drain, rel: f32, radius: f32) -> vec4<f
     let m = max(CUT_BLEND - abs(x), 0.0) / CUT_BLEND;
     let cut = min(h, valley - m * m * CUT_BLEND * 0.25);
     let lake = lake_surface(cut, w);
-    if (lake > cut) { return vec4<f32>(lake, 0.0, 0.0, 0.0); }
     let u = t.z;
+    if (lake > cut) {
+        // A lake's bank (rivers.bk lake_top), from its shore down to the
+        // ground about, carries the ground's fine relief as a valley's
+        // sides do, in full a few metres under the level and none at the
+        // water or at its foot, so it falls in spurs and hollows rather than
+        // as one plane.
+        let bank = clamp((w.near.z - w.lake) / BANK_RELIEF, 0.0, 1.0) * clamp((lake - cut) / BANK_RELIEF, 0.0, 1.0);
+        return vec4<f32>(max(lake + (t.y + t.w) * bank, cut), u * bank, u * bank, u * bank);
+    }
     if (cut >= h) { return vec4<f32>(cut, u * k, u * k, u); }
     // On the cut: d cut / d h and d cut / d valley.
     let sx = x >= 0.0 ? 1.0 : -1.0;

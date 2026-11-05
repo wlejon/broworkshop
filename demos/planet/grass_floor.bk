@@ -6,9 +6,9 @@
 // out as the blades do toward FAR, past which the ground is the blades'
 // average itself.
 module planet::grass_floor;
-from planet::grass_layout import P, FAR, GRASS_FLOOR;
+from planet::grass_layout import P, FAR, GRASS_FLOOR, FIELD;
 
-// The grass's field as a reader binds it: P x P points of 7 floats
+// The grass's field as a reader binds it: P x P points of FIELD floats
 // (grass.bk k_grass_field), and where it lies.
 @binding(4, 17) pub var grass_field: read_buffer<f32>;
 pub struct GrassPlace {
@@ -27,8 +27,8 @@ pub fn grass_floor(pl: GrassPlace, p: vec3<f32>, d: f32) -> f32 {
     if (f.x < 0.0 || f.y < 0.0 || f.x >= last || f.y >= last) { return 1.0; }
     let i = vec2<i32>(f.x as i32, f.y as i32);
     let t = f - vec2<f32>(i.x as f32, i.y as f32);
-    let k = (i.y * P + i.x) * 7 + 3;
-    let cover = mix(mix(grass_field[k], grass_field[k + 7], t.x),
-                    mix(grass_field[k + P * 7], grass_field[k + P * 7 + 7], t.x), t.y);
+    let k = (i.y * P + i.x) * FIELD + 3;
+    let cover = mix(mix(grass_field[k], grass_field[k + FIELD], t.x),
+                    mix(grass_field[k + P * FIELD], grass_field[k + P * FIELD + FIELD], t.x), t.y);
     return mix(1.0, GRASS_FLOOR, fade * cover);
 }

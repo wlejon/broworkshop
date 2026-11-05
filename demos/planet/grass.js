@@ -93,12 +93,14 @@ const SUN_P = N / SUN_STRIDE + 1;
 // The ground under the blades, between them and in their shade: GRASS_FLOOR
 // of what the blades average to (grass_floor.bk, which a reader imports).
 const GRASS_FLOOR = 0.55;
+// Floats a field point (grass.bk k_grass_field).
+const FIELD = 8;
 
 // The shaders: the blades' hook (grass_mesh.bk) and the floor's module,
 // both reading this layout.
 const LAYOUT = constants('planet::grass_layout', {
     N: ['i32', N], P: ['i32', P], THIN: ['f32', THIN], FAR: ['f32', FAR], DENSE: ['f32', DENSE],
-    SUN_STRIDE: ['i32', SUN_STRIDE], SUN_P: ['i32', SUN_P], GRASS_FLOOR: ['f32', GRASS_FLOOR],
+    SUN_STRIDE: ['i32', SUN_STRIDE], SUN_P: ['i32', SUN_P], GRASS_FLOOR: ['f32', GRASS_FLOOR], FIELD: ['i32', FIELD],
 });
 // What a reader of the grass's field imports (grass_floor.bk grass_floor).
 export const grassModules = { 'planet::grass_layout': LAYOUT, 'planet::grass_floor': readApp('grass_floor.bk') };
@@ -115,7 +117,7 @@ export function createGrass(scene, radius, module, sunModule, octaves, seed, net
     // The field's anchor (anchors.js), at its centre.
     const anchor = createAnchors(kAnchors, 1, radius);
     const sunGrid = createSunGrid(sunModule, SUN_P, net, 4, kAnchors, radius);
-    const field = bro.kernel.createBuffer(P * P * 7 * 4), heights = bro.kernel.createBuffer((P + 2) * (P + 2) * 4);
+    const field = bro.kernel.createBuffer(P * P * FIELD * 4), heights = bro.kernel.createBuffer((P + 2) * (P + 2) * 4);
     const bands = [
         { blades: DENSE, band: [0, NEAR], ring: cellRing(0, NEAR) },
         { blades: SPARSE, band: [NEAR, FAR], ring: cellRing(NEAR, FAR) },

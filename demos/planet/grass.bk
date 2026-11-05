@@ -5,9 +5,10 @@
 // The blades stand on the field, between its points. The field is anchored
 // at its centre (anchor.bk, found on the CPU): field point (x, y) is the plane
 // offset lost + e (du0 + x delta) + f (dv0 + y delta) from it.
-from planet::ground import terrain, surface, grass_cover, variation, site_ground, with_streams;
+from planet::ground import terrain, surface, grass_cover, variation, site_ground, with_streams, tree_cover, woodland, wooded,
+    banked;
 from planet::rivers import water_share;
-from planet::climate import climate_at, landform_climate, landform_share;
+from planet::climate import climate_at, landform_climate, landform_share, landform_wood;
 from planet::anchor import Anchor, read_anchor, plane_offset;
 
 // Field point (x, y)'s offset from the anchor's direction (-1 and the width
@@ -30,10 +31,10 @@ fn k_grass_heights(g: grid<2>, heights: write_store<f32, 1>, anchor: read_store<
     heights[g.y() * g.width() + g.x()] = terrain(a, e, radius, octaves, seed, net);
 }
 
-// Field point (x, y), seven floats at `out` (y * width + x) * 7: its
-// position about `origin` (xyz), its grass cover and its albedo (rgb), from
-// k_grass_heights'. `point` is the anchor's surface point (its direction
-// times the radius) less the origin.
+// Field point (x, y), eight floats at `out` (y * width + x) * 8: its
+// position about `origin` (xyz), its grass cover, its albedo (rgb) and how
+// lush it grows, from k_grass_heights'. `point` is the anchor's surface
+// point (its direction times the radius) less the origin.
 @kernel @grid(2)
 fn k_grass_field(g: grid<2>, out: write_store<f32, 1>, heights: read_store<f32, 1>, anchor: read_store<vec4<i32>, 1>,
                  ex: f32, ey: f32, ez: f32, fx: f32, fy: f32, fz: f32,
@@ -57,16 +58,26 @@ fn k_grass_field(g: grid<2>, out: write_store<f32, 1>, heights: read_store<f32, 
     let lf = landform_share(site.drain.dry);
     let cl = landform_climate(region, lf * site.drain.wet, lf * site.drain.ridge);
     let albedo = surface(h, 0.0, cl).xyz * variation(a, e, radius, octaves, seed);
+    // Under the trees (their share as trees.bk stands them) the floor is
+    // their litter and little grass grows (ground_mesh.bk LITTER).
+    let wa = with_streams(site.water, site.drain.share, site.drain.gallery, region);
+    let woods = wooded(banked(tree_cover(h, grad, cl), h, grad, cl, wa),
+                       landform_wood(woodland(a, e, radius, 99.0, seed), lf * site.drain.wet, lf * site.drain.ridge));
 
-    let i = (y * g.width() + x) * 7;
+    let i = (y * g.width() + x) * 8;
     let rel = vec3<f32>(px, py, pz) + e * radius + (a.dir + e) * max(h, 0.0);
     out[i] = rel.x;
     out[i + 1] = rel.y;
     out[i + 2] = rel.z;
     // None in the rivers and lakes.
-    out[i + 3] = grass_cover(h, grad, cl)
-               * (1.0 - water_share(h, with_streams(site.water, site.drain.share, site.drain.gallery, region), 0.0));
+    out[i + 3] = grass_cover(h, grad, cl) * (1.0 - WOODS_SHADE * woods) * (1.0 - water_share(h, wa, 0.0));
     out[i + 4] = albedo.x;
     out[i + 5] = albedo.y;
     out[i + 6] = albedo.z;
+    // How lush the sward grows, 0 to 1: taller and greener down the
+    // hollows and valleys, short and part straw along the crests, as the
+    // landform moves the moisture (grass_mesh.bk).
+    out[i + 7] = clamp(0.55 + LUSH_LANDFORM * (cl.moist - region.moist), 0.0, 1.0);
 }
+const WOODS_SHADE: f32 = 0.85;
+const LUSH_LANDFORM: f32 = 2.5;

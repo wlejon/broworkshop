@@ -79,6 +79,13 @@ const PERLIN_VAR: f32 = 0.0728;  // ground.bk PERLIN_VAR
 const RELIEF: f32 = 0.08;        // slope per octave, per unit of the noise's gradient
 const ROCK_LUM: f32 = 1.8;
 const ROCK_RELIEF: f32 = 3.0;
+const FLOOR_LAST: f32 = 8.0;    // the floor's own relief's longest wavelength (m)
+const FLOOR_RELIEF: f32 = 0.2;   // its slope per octave, per unit of the noise's gradient
+// The forest's floor: needle and leaf litter, mossy in its hollows, over
+// LITTER of the ground under the trees.
+const LITTER: f32 = 0.8;
+const NEEDLES: vec3<f32> = vec3<f32>(0.070, 0.047, 0.026);
+const MOSS: vec3<f32> = vec3<f32>(0.030, 0.055, 0.016);
 const FRESH_GLOSS: f32 = 0.35;   // fresh water's roughness, of its ripples'
 // What the clouds leave of the light at the ground point g (about the
 // planet's centre) over a footprint of w metres, from clouds.js's ground
@@ -429,15 +436,94 @@ fn region_rock(slot: i32, tex: vec2<f32>) -> vec3<f32> {
                 mix(unpack_unorm4x8(w.z).xyz, unpack_unorm4x8(w.w).xyz, st.x), st.y);
     return r * r;
 }
-fn cliff_rock(p: vec3<f32>, footprint: f32, stone: vec3<f32>) -> vec3<f32> {
+// The beds are not ruled lines: they buckle by a few metres over tens
+// (CLIFF_BUCKLE, at CLIFF_FOLD metres), and how strongly they show comes and
+// goes across the face, so a wall reads as layered stone, weathered in
+// places to one tone, rather than as even stripes. One noise for both (its
+// value and one component of its gradient, a field of its own), from
+// `swell`, the vertices' periodic position: p's f32 is half a metre at the
+// planet's radius.
+const CLIFF_FOLD: f32 = 64.0;
+const CLIFF_BUCKLE: f32 = 8.0;
+fn cliff_rock(p: vec3<f32>, swell: vec3<f32>, footprint: f32, stone: vec3<f32>) -> vec3<f32> {
     let h = length(p) - FACE_EXTENT * 0.63661977;   // FACE_EXTENT is a quarter of the circumference
-    let level = h + perlin_grad(p * (1.0 / 3500.0), 4096, SEED + 307).x * 1600.0;
-    let bed = 0.10 * cliff_band(level, 9.0, footprint, SEED + 311)
-            + 0.16 * cliff_band(level, 41.0, footprint, SEED + 313)
-            + 0.18 * cliff_band(level, 130.0, footprint, SEED + 317);
+    let fold = perlin_grad(swell / CLIFF_FOLD, (SWELL_PERIOD / CLIFF_FOLD) as i32, SEED + 331);
+    let level = h + perlin_grad(p * (1.0 / 3500.0), 4096, SEED + 307).x * 1600.0 + fold.x * CLIFF_BUCKLE;
+    let shows = clamp(0.75 + 0.6 * (fold.y + fold.z), 0.15, 1.3);
+    let bed = (0.10 * cliff_band(level, 9.0, footprint, SEED + 311)
+             + 0.16 * cliff_band(level, 41.0, footprint, SEED + 313)
+             + 0.18 * cliff_band(level, 130.0, footprint, SEED + 317)) * shows;
     // The region's stone (climate.bk, region_rock), as ground.bk
     // bedded_surface lays it.
     return stone * exp(bed) + vec3<f32>(0.03, 0.012, -0.012) * bed;
+}
+
+// Gradient noise in 2D (lattice units, periodic over `cells`, a power of
+// two) and its gradient: x value, yz gradient. Half the 3D noise's corners,
+// for relief that lies along the ground.
+fn lattice_gradient2(c: vec2<i32>, cells: i32, seed: i32) -> vec2<f32> {
+    let m = c & vec2<i32>(cells - 1);
+    var h = ((m.x as u32) * 0x8da6b343u ^ (m.y as u32) * 0xd8163841u ^ (seed as u32)) * 0x27d4eb2du;
+    h = h ^ (h >> 15u);
+    let a = ((h >> 29u) as f32) * 0.78539816;
+    return vec2<f32>(cos(a), sin(a));
+}
+fn perlin2_grad(x: vec2<f32>, cells: i32, seed: i32) -> vec3<f32> {
+    let fl = floor(x);
+    let i = vec2<i32>(fl.x as i32, fl.y as i32);
+    let f = x - fl;
+    let u = f * f * f * (f * (f * 6.0 - 15.0) + 10.0);
+    let du = 30.0 * f * f * (f * (f - 2.0) + 1.0);
+    let ga = lattice_gradient2(i, cells, seed);
+    let gb = lattice_gradient2(i + vec2<i32>(1, 0), cells, seed);
+    let gc = lattice_gradient2(i + vec2<i32>(0, 1), cells, seed);
+    let gd = lattice_gradient2(i + vec2<i32>(1, 1), cells, seed);
+    let va = dot(ga, f);
+    let vb = dot(gb, f - vec2<f32>(1.0, 0.0));
+    let vc = dot(gc, f - vec2<f32>(0.0, 1.0));
+    let vd = dot(gd, f - vec2<f32>(1.0, 1.0));
+    let k4 = va - vb - vc + vd;
+    let value = va + u.x * (vb - va) + u.y * (vc - va) + u.x * u.y * k4;
+    let grad = ga + u.x * (gb - ga) + u.y * (gc - ga) + u.x * u.y * (ga - gb - gc + gd)
+             + du * (vec2<f32>(vb - va, vc - va) + u.yx * k4);
+    return vec3<f32>(value, grad);
+}
+// The floor's relief (fragment) in the plane of the two axes the ground's
+// up is furthest from, its coordinates the vertices' periodic positions as
+// they are (swell past a metre, q under): x its height in noise units, yzw
+// its gradient (per unit of the noise's lattice). In the octaves at 8, 2
+// and 0.5 m, each fading as a pixel spans it. Where two axes are about
+// equally far from up (a band along the cube's diagonal planes) the two
+// planes' blend, so the pattern changes there without a seam.
+fn floor_plane(p: vec3<f32>, axis: i32) -> vec2<f32> {
+    return axis == 0 ? p.yz : (axis == 1 ? p.zx : p.xy);
+}
+fn floor_axes(axis: i32, g: vec2<f32>) -> vec3<f32> {
+    return axis == 0 ? vec3<f32>(0.0, g.x, g.y) : (axis == 1 ? vec3<f32>(g.y, 0.0, g.x) : vec3<f32>(g.x, g.y, 0.0));
+}
+fn floor_octaves(swell: vec3<f32>, q: vec3<f32>, axis: i32, footprint: f32) -> vec4<f32> {
+    var out = vec4<f32>(0.0);
+    var wl = FLOOR_LAST;
+    for (var k: i32 = 0; k < 3; k += 1) {
+        let w = clamp(wl / footprint * 0.5 - 1.0, 0.0, 1.0);
+        if (w <= 0.0) { break; }
+        let far = wl >= 1.0;
+        let pg = perlin2_grad(floor_plane(far ? swell : q, axis) / wl, ((far ? SWELL_PERIOD : DETAIL_PERIOD) / wl) as i32, 61 + k);
+        out += vec4<f32>(pg.x, floor_axes(axis, pg.yz)) * w;
+        wl *= 0.25;
+    }
+    return out;
+}
+fn floor_noise(swell: vec3<f32>, q: vec3<f32>, up: vec3<f32>, footprint: f32) -> vec4<f32> {
+    let a = abs(up);
+    let first = a.x >= a.y && a.x >= a.z ? 0 : (a.y >= a.z ? 1 : 2);
+    let top = max(a.x, max(a.y, a.z));
+    let next = first == 0 ? max(a.y, a.z) : (first == 1 ? max(a.x, a.z) : max(a.x, a.y));
+    let second = first == 0 ? (a.y >= a.z ? 1 : 2) : (first == 1 ? (a.x >= a.z ? 0 : 2) : (a.x >= a.y ? 0 : 1));
+    let blend = 0.5 * (1.0 - smoothstep(0.0, 0.03, top - next));
+    var r = floor_octaves(swell, q, first, footprint);
+    if (blend > 0.0) { r = mix(r, floor_octaves(swell, q, second, footprint), blend); }
+    return r;
 }
 
 struct SeaResult {
@@ -580,7 +666,7 @@ pub fn fragment(v: mesh::Vertex, s_in: mesh::Surface) -> mesh::Surface {
     // face) would run down it as stripes.
     let shed = (1.0 - smoothstep(0.2, 0.45, dot(n, normalize(v_up)))) * (1.0 - water);
     if (shed > 0.0) {
-        let cliff = cliff_rock((params.cam_hi + params.cam_lo) + v.world_pos, footprint, region_rock(v_slot, v_tex));
+        let cliff = cliff_rock((params.cam_hi + params.cam_lo) + v.world_pos, v_swell, footprint, region_rock(v_slot, v_tex));
         col = vec4<f32>(mix(col.xyz, cliff, shed), col.w);
     }
     var lum: f32 = 0.0;
@@ -620,7 +706,8 @@ pub fn fragment(v: mesh::Vertex, s_in: mesh::Surface) -> mesh::Surface {
         if (w > 0.0 || wc > 0.0) {
             let far = coarse >= 1.0;
             let x = (far ? v_swell : v_q) / coarse;
-            let pg = perlin_grad(x, ((far ? SWELL_PERIOD : DETAIL_PERIOD) / coarse) as i32, 41 + k);
+            // Each wavelength its own noise, wherever the loop starts.
+            let pg = perlin_grad(x, ((far ? SWELL_PERIOD : DETAIL_PERIOD) / coarse) as i32, 46 + (round(log2(coarse)) as i32));
             let a = VARY_LUM * lum_gain * max(w, 0.0);
             let ac = CROWN_LUM * wc;
             lum += pg.x * (a + ac);
@@ -628,6 +715,22 @@ pub fn fragment(v: mesh::Vertex, s_in: mesh::Surface) -> mesh::Surface {
             lum_var += (a * a + ac * ac) * PERLIN_VAR;
         }
         coarse *= 0.5;
+    }
+    // The forest floor's own small relief, root mounds, windthrow pits and
+    // hollows, from FLOOR_LAST metres down on the gentle ground the faces'
+    // relief leaves alone: the drained ground is smooth below its gullies,
+    // and the texels resolving it close by left the floor dead flat however
+    // near. (The open ground's is under the grass's blades.) It is the
+    // shader's alone, at every distance (the texels hold none of it), each
+    // octave fading as a pixel spans it; faded in from a tenth of the
+    // forest, so thin woods cost nothing. rise: how high it stands here,
+    // its noise, about -1 to 1.
+    let floor_relief = FLOOR_RELIEF * forest * smoothstep(0.1, 0.2, forest) * (1.0 - steep) * (1.0 - water);
+    var rise: f32 = 0.0;
+    if (floor_relief > 0.0 && footprint < 0.5 * FLOOR_LAST) {
+        let fr = floor_noise(v_swell, v_q, normalize(v_up), footprint);
+        rise = fr.x;
+        slope += fr.yzw * floor_relief;
     }
     var cells = (DETAIL_PERIOD / wavelength) as i32;
     for (var k: i32 = 0; k < 6; k += 1) {
@@ -645,6 +748,15 @@ pub fn fragment(v: mesh::Vertex, s_in: mesh::Surface) -> mesh::Surface {
     }
     let land = 1.0 - water;
     let vary = mix(1.0, exp(lum - 0.5 * lum_var), land);
+    // Under the trees the floor is their litter, not the open ground's
+    // sward: brown needles on the floor's rises, moss in its hollows, none
+    // over rock or snow. (Where the pixel spans the relief, rise is 0 and
+    // the floor their mix.)
+    let litter = LITTER * forest * land * (1.0 - rock) * (1.0 - shed) * (1.0 - smoothstep(0.25, 0.5, hi_c));
+    if (litter > 0.0) {
+        let mossy = smoothstep(0.25, -0.25, rise);
+        col = vec4<f32>(mix(col.xyz, mix(NEEDLES, MOSS, mossy), litter), col.w);
+    }
     s.base_color = col.xyz * vary;
     let eye = -normalize(v.world_pos);
     let crowns = 1.0 - pow(1.0 - TREE_CROWNS * forest, 1.0 / max(dot(eye, normalize(v_up)), 0.05));

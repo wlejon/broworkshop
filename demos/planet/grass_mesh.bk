@@ -2,7 +2,7 @@
 // blades built from a hash of their index.
 module hook;
 import mesh;
-from planet::grass_layout import N, P, THIN, FAR, DENSE, SUN_STRIDE, SUN_P;
+from planet::grass_layout import N, P, THIN, FAR, DENSE, SUN_STRIDE, SUN_P, FIELD;
 
 struct Params {
     cam_hi: vec3<f32>,
@@ -24,6 +24,14 @@ struct Params {
 @binding(4, 15) var sun: read_buffer<u32>;
 @binding(4, 16) var cells: read_buffer<i32>;
 
+// How far the sward's patches move its lushness about the landform's, and
+// the share of straw blades in a lean sward and a lush one, and the straw's
+// colour per unit of the blades' luminance.
+const LUSH_PATCHES: f32 = 0.45;
+const STRAW_LEAN: f32 = 0.35;
+const STRAW_LUSH: f32 = 0.04;
+const STRAW: vec3<f32> = vec3<f32>(1.22, 1.0, 0.6);
+
 fn pcg(v: u32) -> u32 {
     let s = v * 747796405u + 2891336453u;
     let w = ((s >> ((s >> 28u) + 4u)) ^ s) * 277803737u;
@@ -36,14 +44,31 @@ struct FieldPoint {
     p: vec3<f32>,
     cover: f32,
     albedo: vec3<f32>,
+    lush: f32,
 }
 fn field_point(x: i32, y: i32) -> FieldPoint {
-    let k = (y * P + x) * 7;
+    let k = (y * P + x) * FIELD;
     return FieldPoint {
         p: vec3<f32>(field[k], field[k + 1], field[k + 2]),
         cover: field[k + 3],
         albedo: vec3<f32>(field[k + 4], field[k + 5], field[k + 6]),
+        lush: field[k + 7],
     };
+}
+// Value noise over the field's cells, 2^shift cells a lattice step, 0 to 1:
+// smoothstepped between hashed corners, fixed to the world's cells.
+fn cell_noise(world: vec2<i32>, at: vec2<f32>, shift: i32, salt: u32) -> f32 {
+    let c = vec2<i32>(world.x >> shift, world.y >> shift);
+    let m = (1 << shift) - 1;
+    let f = (vec2<f32>((world.x & m) as f32, (world.y & m) as f32) + at) / ((m + 1) as f32);
+    let s = f * f * (vec2<f32>(3.0) - 2.0 * f);
+    let x0 = c.x as u32;
+    let y0 = c.y as u32;
+    let n00 = rnd_val(pcg(x0 * 73856093u ^ y0 * 19349663u ^ salt));
+    let n10 = rnd_val(pcg((x0 + 1u) * 73856093u ^ y0 * 19349663u ^ salt));
+    let n01 = rnd_val(pcg(x0 * 73856093u ^ (y0 + 1u) * 19349663u ^ salt));
+    let n11 = rnd_val(pcg((x0 + 1u) * 73856093u ^ (y0 + 1u) * 19349663u ^ salt));
+    return mix(mix(n00, n10, s.x), mix(n01, n11, s.x), s.y);
 }
 // The sun grid between its points, at field point f (sun.js: the
 // terrain's sun, then the clouds' direct, scattered and sky).
@@ -75,7 +100,7 @@ pub fn vertex(v_in: mesh::Vertex) -> mesh::Vertex {
     // A blade whose cell (under 1.5 m across) is out of this node's band
     // or the view, or that stands beyond what the distance keeps, is one
     // point: its triangles have no area, and it costs one field read.
-    let k0 = (cell.y * P + cell.x) * 7;
+    let k0 = (cell.y * P + cell.x) * FIELD;
     let rel0 = (params.o_hi - params.cam_hi) + (params.o_lo - params.cam_lo) + vec3<f32>(field[k0], field[k0 + 1], field[k0 + 2]);
     let d0 = length(rel0);
     if (d0 < params.band.x - 1.5 || d0 > params.band.y + 1.5 || dot(rel0, params.cam_fwd) + 1.5 < params.cos_view * d0
@@ -93,6 +118,11 @@ pub fn vertex(v_in: mesh::Vertex) -> mesh::Vertex {
     let base = mix(mix(fp00.p, fp10.p, at.x), mix(fp01.p, fp11.p, at.x), at.y);
     let cover = mix(mix(fp00.cover, fp10.cover, at.x), mix(fp01.cover, fp11.cover, at.x), at.y);
     let albedo = mix(mix(fp00.albedo, fp10.albedo, at.x), mix(fp01.albedo, fp11.albedo, at.x), at.y);
+    // How lush the sward grows here: the landform's (the field's), and
+    // patches of a few metres about it, where it grew taller or thinner.
+    let lush = clamp(mix(mix(fp00.lush, fp10.lush, at.x), mix(fp01.lush, fp11.lush, at.x), at.y)
+                     + LUSH_PATCHES * (cell_noise(world, at, 2, 0x2f6b1a3du) + cell_noise(world, at, 4, 0x6c8e9cf5u) - 1.0),
+                     0.0, 1.0);
     let v_light = sun_at(vec2<f32>(cell.x as f32, cell.y as f32) + at + (params.lattice - params.sun_lattice));
     let rel = (params.o_hi - params.cam_hi) + (params.o_lo - params.cam_lo) + base;
     let up = normalize(params.o_hi + (params.o_lo + base));
@@ -127,7 +157,7 @@ pub fn vertex(v_in: mesh::Vertex) -> mesh::Vertex {
 
     // The blade: its height, facing, bend and width from its hash.
     seed = pcg(seed);
-    let height = mix(0.22, 0.55, rnd_val(seed)) * grow;
+    let height = mix(0.22, 0.55, rnd_val(seed)) * mix(0.4, 1.5, lush) * grow;
     seed = pcg(seed);
     let phi = 6.2831853 * rnd_val(seed);
     let tx = normalize(cross(up, abs(up.y) < 0.9 ? vec3<f32>(0.0, 1.0, 0.0) : vec3<f32>(1.0, 0.0, 0.0)));
@@ -157,7 +187,17 @@ pub fn vertex(v_in: mesh::Vertex) -> mesh::Vertex {
     if (dot(slab, up) < 0.0) { slab = -slab; }
     v.normal = normalize(n + across * side * 0.5 + slab * 1.2);
     seed = pcg(seed);
-    let v_col = albedo * exp(0.3 * (rnd_val(seed) - 0.5));
+    // A lush sward is greener and bluer, a lean one yellower, and among
+    // any some blades are dead straw: a few in a lush sward, a third of a
+    // lean one's. The straw is as light as the blades about it, so the
+    // field's albedo, which the ground past the blades takes, still holds
+    // on average; their greens move about it.
+    let tint = mix(vec3<f32>(1.1, 0.97, 0.8), vec3<f32>(0.92, 1.03, 1.08), lush);
+    var v_col = albedo * tint * exp(0.3 * (rnd_val(seed) - 0.5));
+    seed = pcg(seed);
+    if (rnd_val(seed) < mix(STRAW_LEAN, STRAW_LUSH, lush)) {
+        v_col = dot(v_col, vec3<f32>(0.3, 0.6, 0.1)) * STRAW;
+    }
     v.v0 = vec4<f32>(v_col, t);
     v.v1 = v_light;
     return v;

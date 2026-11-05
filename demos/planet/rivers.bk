@@ -198,12 +198,16 @@ fn valley_rise(x: f32) -> f32 {
 // root mean square over a cell) and holds its water as the share of it the
 // channel covers.
 //
-// The points' offsets from here are in f32: each point's direction as its
-// record stores it (f32, so the same wherever it is read), less here as an
-// anchor's direction `hi` (anchor.bk) and the offset `lo` from it, exact to
-// millimetres.
-fn point_offset(net: read_store<f32, 1>, k: i32, hi: vec3<f32>, lo: vec3<f32>, r: f32) -> vec3<f32> {
-    return ((vec3<f32>(net[k + 4], net[k + 5], net[k + 6]) - hi) - lo) * r;
+// The points' offsets are in f32: each point's direction as its record
+// stores it (f32, so the same wherever it is read), less an anchor's
+// direction `hi` (anchor.bk), in metres: the same for every texel of a
+// tile. The texel's own offset `lo` from the anchor is taken off only in
+// the reach's frame (reach), as the small difference of two dot products,
+// since a point kilometres off less it, rounded to f32, moved by
+// millimetres from texel to texel, which the valley's walls and a lake's
+// shore magnified into a hatch of centimetres.
+fn point_offset(net: read_store<f32, 1>, k: i32, hi: vec3<f32>, r: f32) -> vec3<f32> {
+    return (vec3<f32>(net[k + 4], net[k + 5], net[k + 6]) - hi) * r;
 }
 // channel: how deep the channels it lies in run under their water there
 // (m; 0 out of every channel): a river's bed sinks to a 25th of its
@@ -256,6 +260,8 @@ pub fn erf_approx(x: f32) -> f32 {
 }
 struct Reach {
     v: vec4<f32>,
+    // How steeply v.x rises outward here (m a metre).
+    rise: f32,
     surface: f32,
     plain: f32,
     tone: f32,
@@ -309,16 +315,23 @@ fn bend(net: read_store<f32, 1>, k: i32, down: i32, along: vec3<f32>, side: vec3
     let t2 = t * t;
     return len * ((t2 * t - 2.0 * t2 + t) * tangent_slope(net, k, along, side) + (t2 * t - t2) * tangent_slope(net, down, along, side));
 }
-fn reach(net: read_store<f32, 1>, k: i32, af: vec3<f32>, hi: vec3<f32>, lo: vec3<f32>, r: f32, up: vec3<f32>,
+// `here` is the texel's offset from the anchor (m) and `up` the anchor's
+// direction: the reach's frame (along, side) is then the same for every
+// texel of a tile, and so is each point's offset in it.
+fn reach(net: read_store<f32, 1>, k: i32, hi: vec3<f32>, here: vec3<f32>, r: f32, up: vec3<f32>,
          cell: f32, spread: f32, seed: i32) -> Reach {
     let level = net[k + 3];
     let catchment = net[k + 2];
     let down = net[k + 1] as i32;
-    let bf = point_offset(net, down * RIV_REC, hi, lo, r);
+    let af = point_offset(net, k, hi, r);
+    let bf = point_offset(net, down * RIV_REC, hi, r);
     let len = max(length(bf - af), 1.0);
     let along = (bf - af) / len;
     let side = normalize(cross(along, up));
-    let s = clamp(-dot(af, along), 0.0, len);
+    // How far along the reach here lies, unclamped, and how far across its line.
+    let s_line = dot(here, along) - dot(af, along);
+    let x_line = dot(here, side) - dot(af, side);
+    let s = clamp(s_line, 0.0, len);
     let t = s / len;
     let p = k / RIV_REC;
     let width = river_width(catchment);
@@ -348,10 +361,9 @@ fn reach(net: read_store<f32, 1>, k: i32, af: vec3<f32>, hi: vec3<f32>, lo: vec3
     let half = 0.5 * (hl + hr);
     // From here to the reach's line, and across it to the channel: the
     // meanders about the reach's bend to its points' tangents.
-    let q = af + along * s;
     let bent = bend(net, k, down * RIV_REC, along, side, t, len);
-    let x = -dot(q, side) - bent - meander(p, s, len, width, seed);
-    let ahead = dot(q, along);
+    let x = x_line - bent - meander(p, s, len, width, seed);
+    let ahead = s - s_line;
     let d = length(vec2<f32>(ahead, x));
     let downLevel = net[down * RIV_REC + 3];
     let bed = mix(min(net[k + 7], level), min(net[down * RIV_REC + 7], downLevel), t);
@@ -366,8 +378,11 @@ fn reach(net: read_store<f32, 1>, k: i32, af: vec3<f32>, hi: vec3<f32>, lo: vec3
     let sg = SHARE_SIGMA * max(cell, 1e-3) * 1.4142136;
     let across = d / half;
     // The floodplain: from the channel's bank out to `plain`, rising a few
-    // metres a kilometre; the valley's sides from its edge.
-    let plain = max(plain_half(catchment), half);
+    // metres a kilometre; the valley's sides from its edge. The edge keeps
+    // clear of the banks' wandering (at most about 1.9 BANK_VARY of `mid`)
+    // rather than following it: following it, the whole valley side swung in
+    // and out every few metres, a regular comb of rills down every bank.
+    let plain = max(plain_half(catchment), mid * (1.0 + 2.0 * BANK_VARY));
     let ds = sqrt(d * d + spread);
     let floor_rise = PLAIN_RISE * clamp(ds - half, 0.0, plain - half);
     // This side's bank, blended across the middle.
@@ -436,7 +451,7 @@ fn reach(net: read_store<f32, 1>, k: i32, af: vec3<f32>, hi: vec3<f32>, lo: vec3
         let edge = plain * (1.0 + 0.25 * wobble(seed + 23, p, s, 2.0 * plain) * taper);
         out.plain = (1.0 - smoothstep(edge - soft, edge + soft, d)) * smoothstep(PLAIN_MIN, 300.0, catchment);
         let old_width = min(0.7 * width, 0.5 * len / MEANDER_WAVES);
-        let xo = -dot(q, side) - bent - meander(p + 7919, s, len, old_width, seed + 101);
+        let xo = x_line - bent - meander(p + 7919, s, len, old_width, seed + 101);
         let ho = 0.5 * old_width;
         let stretch = smoothstep(0.1, 0.35, wobble(seed + 19, p, s, 8.0 * old_width)) * taper * out.plain;
         let oxbow = stretch * clamp(0.5 * (erf_approx((ho - xo) / sg) - erf_approx((-ho - xo) / sg)), 0.0, 1.0);
@@ -446,14 +461,16 @@ fn reach(net: read_store<f32, 1>, k: i32, af: vec3<f32>, hi: vec3<f32>, lo: vec3
         // along other meanders, fading in and out along the plain.
         var swale: f32 = 0.0;
         for (var o: i32 = 0; o < 2; o += 1) {
-            let xs = -dot(q, side) - bent - meander(p + 104729 * (o + 2), s, len, old_width * (1.3 + 0.5 * (o as f32)), seed + 211 + o);
+            let xs = x_line - bent - meander(p + 104729 * (o + 2), s, len, old_width * (1.3 + 0.5 * (o as f32)), seed + 211 + o);
             let along_s = smoothstep(-0.2, 0.3, wobble(seed + 29 + o, p, s, 6.0 * old_width));
             let wide = ho * 1.6 + sg;
             swale = max(swale, along_s * exp(-(xs * xs) / (wide * wide)));
         }
         out.tone = -swale * taper * out.plain;
     }
-    out.v = vec4<f32>(bed + floor_rise + valley_rise(ds - plain) * valley_steepness(catchment), share, depth, bed);
+    let steep = valley_steepness(catchment);
+    out.v = vec4<f32>(bed + floor_rise + valley_rise(ds - plain) * steep, share, depth, bed);
+    out.rise = ds < plain ? PLAIN_RISE : steep * (0.2 + 3.2e-4 * (ds - plain));
     out.surface = downLevel;
     return out;
 }
@@ -479,9 +496,10 @@ fn in_block(c: vec3<i32>, p: i32) -> bool {
 // any ground; one left out nearer would end its valley along a cell's edge,
 // a straight crease across the land.
 pub fn water_at(hi: vec3<f32>, lo: vec3<f32>, radius: f32, cell: f32, net: read_store<f32, 1>, seed: i32) -> Water {
-    let up = normalize(hi + lo);
-    let c = cell_of(up);
+    let c = cell_of(normalize(hi + lo));
     let r = radius;
+    let up = normalize(hi);
+    let here = lo * r;
     var cut: f32 = 1.0e9;
     var share: f32 = 0.0;
     var channel: f32 = 0.0;
@@ -499,7 +517,7 @@ pub fn water_at(hi: vec3<f32>, lo: vec3<f32>, radius: f32, cell: f32, net: read_
         for (var di: i32 = -1; di <= 1; di += 1) {
             let k = point_index(cell_next(c, di, dj)) * RIV_REC;
             if (net[k + 3] > 0.0 && net[k + 2] >= MIN_CATCHMENT && net[k + 1] >= 0.0) {
-                let rc = reach(net, k, point_offset(net, k, hi, lo, r), hi, lo, r, up, cell, spread, seed);
+                let rc = reach(net, k, hi, here, r, up, cell, spread, seed);
                 if (rc.v.x < cut) {
                     cut = rc.v.x;
                     bed = rc.v.w;
@@ -528,7 +546,7 @@ pub fn water_at(hi: vec3<f32>, lo: vec3<f32>, radius: f32, cell: f32, net: read_
                 let k = point_index(cell_next(c, di, dj)) * RIV_REC;
                 let down = net[k + 1];
                 if (down >= 0.0 && net[k + 3] > 0.0 && net[k + 2] >= MIN_CATCHMENT && in_block(c, down as i32)) {
-                    let rc = reach(net, k, point_offset(net, k, hi, lo, r), hi, lo, r, up, cell, spread, seed);
+                    let rc = reach(net, k, hi, here, r, up, cell, spread, seed);
                     if (rc.v.x < cut) {
                         cut = rc.v.x;
                         bed = rc.v.w;
@@ -572,17 +590,20 @@ pub fn water_at(hi: vec3<f32>, lo: vec3<f32>, radius: f32, cell: f32, net: read_
 // narrows to its end rather than ending across the valley in a straight
 // line): the valley's sides
 // carry the ground's relief, so the shore runs in bays and points rather
-// than along the profile's smooth contour, a canal's. Beyond, it falls
-// BANK times as steeply as the profile rises, so the lake ends in a short
-// bank over lower ground rather than a wall. -1e9 without a lake. A lake
-// stands only in its river's valley, so never as a ring of water about a
-// hollow's slopes.
+// than along the profile's smooth contour, a canal's. Beyond, where the
+// ground about stands lower than the lake (its level is the valley's,
+// riverbuild.bk, and the drainage lowers the land beside it), it falls
+// away at BANK_GRADE as a bank whose foot meets the lower ground: falling
+// as some times the profile's own rise, a lake in a steep valley stood
+// on a wall tens of metres high, a perched canal. -1e9 without a lake. A
+// lake stands only in its river's valley, so never as a ring of water
+// about a hollow's slopes.
 const SHORE: f32 = 60.0;
-const BANK: f32 = 3.0;
+const BANK_GRADE: f32 = 0.3;
 fn lake_top(rc: Reach) -> f32 {
     let over = rc.surface - rc.v.w - LAKE_DEPTH;
     if (over <= 0.0) { return -1.0e9; }
-    return rc.surface - BANK * max(rc.v.x - rc.surface - min(SHORE, 2.0 * over), 0.0);
+    return rc.surface - BANK_GRADE * max(rc.v.x - rc.surface - min(SHORE, 2.0 * over), 0.0) / max(rc.rise, PLAIN_RISE);
 }
 
 // The surface over ground at height h by the lakes of `w` (water_at): the
