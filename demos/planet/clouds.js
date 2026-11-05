@@ -57,14 +57,17 @@ export const GROUND_LIGHT = { tile: GROUND_TILE, border: GROUND_BORDER, levels: 
 // The column's octaves (clouds.bk column): wavelength and amplitude as
 // their gradient bound takes them. The weather's from the third and the
 // cumuli's first two are stretched across the parallels (WEATHER_STRETCH,
-// their wavelength that much shorter there), and the weather's ridged two
-// are steeper by their gain (FRONT_GAIN).
-const WEATHER_STRETCH = 1.8, FRONT_GAIN = 1.73;
+// their wavelength that much shorter there). The weather's fronts' crests are steeper by their Gaussian's (FRONT_GAIN sqrt(2 / e)
+// / FRONT_WIDTH a unit of noise), the cumuli's skewed octaves (the second
+// to the fifth) by PUFF_GAIN (1 + 2 PUFF_SKEW 0.96).
+const WEATHER_STRETCH = 1.8, FRONT_STEEP = 0.740 * Math.sqrt(2 / Math.E) / 0.15, PUFF_STEEP = 0.892 * (1 + 2 * 1.5 * 0.96);
 const OCTAVES = [];
 for (let k = 0, w = 2.0e6, a = 0.48; k < 7; k++, w /= 2, a *= 0.6) {
-    OCTAVES.push([k < 2 ? w : w / WEATHER_STRETCH, k === 2 || k === 3 ? a * FRONT_GAIN : a]);
+    OCTAVES.push([k < 2 ? w : w / WEATHER_STRETCH, k === 2 || k === 3 ? a * FRONT_STEEP : a]);
 }
-for (let k = 0, w = 12800, a = 0.32; k < 10; k++, w /= 2, a *= 0.62) OCTAVES.push([k < 2 ? w / WEATHER_STRETCH : w, a]);
+for (let k = 0, w = 12800, a = 0.32; k < 10; k++, w /= 2, a *= 0.62) {
+    OCTAVES.push([k < 2 ? w / WEATHER_STRETCH : w, k >= 1 && k <= 4 ? a * PUFF_STEEP : a]);
+}
 
 // The detail's noise (cloudNoise): gradient noise (Perlin 2002's gradients)
 // over a lattice tiling every NOISE_PERIOD units, sampled NOISE_CELL texels

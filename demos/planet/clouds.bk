@@ -12,13 +12,27 @@ import tiles;
 
 const F0: f32 = -0.12;          // the mean amount: clear more than cloudy
 pub const NOISE_VAR: f32 = 0.0728;  // perlin_f32's variance (ground.bk PERLIN_VAR)
-// The weather's stretch across the parallels; its ridged octaves' mean
-// |noise| and the gain that gives them the plain octaves' variance
-// (FRONT_GAIN^2 (NOISE_VAR - FRONT_MEAN^2) = NOISE_VAR; clouds.js's
-// gradient bound has them).
+// The weather's stretch across the parallels; its fronts' crests, a
+// Gaussian of the noise FRONT_WIDTH wide about its zeros, their mean, and
+// the gain that gives them the plain octaves' variance (FRONT_GAIN^2 times
+// the crest's variance 0.13289 = NOISE_VAR; mean and variance measured over
+// 200k points; clouds.js's gradient bound has them). The crests of |noise|
+// (as wide as its whole lower half) laid a front's deck over half the
+// land, and from the ground most skies were grey.
 const WEATHER_STRETCH: f32 = 1.8;
-const FRONT_MEAN: f32 = 0.2205;   // measured over 200k points
-const FRONT_GAIN: f32 = 1.73;
+const FRONT_WIDTH: f32 = 0.15;
+const FRONT_MEAN: f32 = 0.34602;
+const FRONT_GAIN: f32 = 0.740;
+// The cumuli's octaves from 6.4 km to 800 m (each a cumulus or a cluster
+// of them) skewed toward their crests, n + PUFF_SKEW (n^2 - NOISE_VAR),
+// times PUFF_GAIN for the plain octaves' variance (PUFF_GAIN^2 (NOISE_VAR
+// + PUFF_SKEW^2 (E n^4 - NOISE_VAR^2)) = NOISE_VAR, E n^4 = 0.01357,
+// E n^3 = 0): cloud is the noise's peaks, separate puffs on broad
+// clear troughs, where the plain noise's level sets made a crowd one sheet
+// perforated by holes. |n| < 0.96, so the slope grows at most
+// 1 + 2 PUFF_SKEW 0.96 (clouds.js's bound).
+const PUFF_SKEW: f32 = 1.5;
+const PUFF_GAIN: f32 = 0.892;
 
 // The column at the unit direction q, resolved at a footprint of w metres:
 // an octave counts in full from 4 footprints a wavelength, not at all at 2,
@@ -44,7 +58,7 @@ pub fn column(q: vec3<f32>, w: f32, radius: f32) -> vec2<f32> {
         if (r > 0.0) {
             let sheared = k >= 2;
             let n = perlin_f32(select(sheared, vec3<f32>(p.x, p.y * WEATHER_STRETCH, p.z), p), select(sheared, 371 + k, 101 + k));
-            f += r * amp * select(k == 2 || k == 3, FRONT_GAIN * (FRONT_MEAN - abs(n)), n);
+            f += r * amp * select(k == 2 || k == 3, FRONT_GAIN * (exp(-(n / FRONT_WIDTH) * (n / FRONT_WIDTH)) - FRONT_MEAN), n);
         }
         v += (1.0 - r * r) * amp * amp * NOISE_VAR;
         wavelength *= 0.5;
@@ -91,7 +105,8 @@ pub fn column(q: vec3<f32>, w: f32, radius: f32) -> vec2<f32> {
         let r = clamp(wavelength * inv_w * 0.5 - 1.0, 0.0, 1.0);
         let a = amp * (1.0 - CELL_TAKE * cells * step(k as f32, 1.5));
         if (r > 0.0) {
-            f += r * a * perlin_f32(select(k < 2, vec3<f32>(p.x, p.y * WEATHER_STRETCH, p.z), p), 7 + k);
+            let n = perlin_f32(select(k < 2, vec3<f32>(p.x, p.y * WEATHER_STRETCH, p.z), p), 7 + k);
+            f += r * a * select(k >= 1 && k <= 4, PUFF_GAIN * (n + PUFF_SKEW * (n * n - NOISE_VAR)), n);
         }
         v += (1.0 - r * r) * a * a * NOISE_VAR;
         wavelength *= 0.5;
