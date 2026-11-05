@@ -13,7 +13,7 @@ const fs = require('fs');
 const readApp = (path) => fs.readFileSync(bro.resolvePath('/app/' + path), 'utf-8');
 const mod = bro.kernel.compile(readApp('tests/measure.bk'),
                                { file: 'measure.bk', modules: { 'planet::ground': readApp('ground.bk'), 'planet::relief': readApp('relief.bk'), 'planet::rivers': readApp('rivers.bk'),
-                                                                'planet::anchor': readApp('anchor.bk'), 'planet::climate': readApp('climate.bk'), tiles: bro.tiles.module } });
+                                                                'planet::anchor': readApp('anchor.bk'), 'planet::climate': readApp('climate.bk'), 'planet::dendry': readApp('dendry.bk'), tiles: bro.tiles.module } });
 // The drainage network the app built (rivers.js), which the ground carves.
 const NET = planet.rivers.cpu;
 const kTruth = mod.kernel('k_horizon_truth');

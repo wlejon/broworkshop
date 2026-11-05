@@ -5,8 +5,8 @@
 // The blades stand on the field, between its points. The field is anchored
 // at its centre (anchor.bk, found on the CPU): field point (x, y) is the plane
 // offset lost + e (du0 + x delta) + f (dv0 + y delta) from it.
-from planet::ground import terrain, surface, grass_cover, variation, soil_gradient;
-from planet::rivers import water_at, water_share;
+from planet::ground import terrain, surface, grass_cover, variation, site_ground, with_streams, landform_climate;
+from planet::rivers import water_share;
 from planet::climate import climate_at;
 from planet::anchor import Anchor, read_anchor, plane_offset;
 
@@ -48,10 +48,13 @@ fn k_grass_field(g: grid<2>, out: write_store<f32, 1>, heights: read_store<f32, 
     let h = heights[at];
     // Grass grows where the soil holds: by its slope over tens of metres
     // (ground.bk soil_gradient), as the ground's colour lays its rock.
-    let grad = soil_gradient(a, e, radius, seed, net);
+    let site = site_ground(a, e, radius, octaves, seed, net);
+    let grad = site.grad;
     // The blades' colour is the sward's at this height, not the ground's,
-    // which on a slope is part bare rock that no blade is.
-    let cl = climate_at(normalize(a.dir + e), 0.0, seed);
+    // which on a slope is part bare rock that no blade is; in the climate
+    // its landform makes (ground.bk landform_climate).
+    let region = climate_at(normalize(a.dir + e), 0.0, seed);
+    let cl = landform_climate(region, site.drain.wet, site.drain.ridge);
     let albedo = surface(h, 0.0, cl).xyz * variation(a, e, radius, octaves, seed);
 
     let i = (y * g.width() + x) * 7;
@@ -60,7 +63,8 @@ fn k_grass_field(g: grid<2>, out: write_store<f32, 1>, heights: read_store<f32, 
     out[i + 1] = rel.y;
     out[i + 2] = rel.z;
     // None in the rivers and lakes.
-    out[i + 3] = grass_cover(h, grad, cl) *(1.0 - water_share(h, water_at(a.dir, e, radius, 1.0, net, seed), 0.0));
+    out[i + 3] = grass_cover(h, grad, cl)
+               * (1.0 - water_share(h, with_streams(site.water, site.drain.share, site.drain.gallery, region), 0.0));
     out[i + 4] = albedo.x;
     out[i + 5] = albedo.y;
     out[i + 6] = albedo.z;

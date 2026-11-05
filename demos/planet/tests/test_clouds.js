@@ -13,7 +13,7 @@ const readApp = (path) => fs.readFileSync(bro.resolvePath('/app/' + path), 'utf-
 const mod = bro.kernel.compile(readApp('tests/measure_clouds.bk'), {
     file: 'measure_clouds.bk',
     modules: { 'planet::ground': readApp('ground.bk'), 'planet::relief': readApp('relief.bk'), 'planet::rivers': readApp('rivers.bk'),
-               'planet::clouds': readApp('clouds.bk'), 'planet::anchor': readApp('anchor.bk'), 'planet::climate': readApp('climate.bk'), tiles: bro.tiles.module },
+               'planet::clouds': readApp('clouds.bk'), 'planet::anchor': readApp('anchor.bk'), 'planet::climate': readApp('climate.bk'), 'planet::dendry': readApp('dendry.bk'), tiles: bro.tiles.module },
 });
 const kColumn = mod.kernel('k_column'), kLight = mod.kernel('k_ground_light');
 const RADIUS = 6371000, SEED = 7;

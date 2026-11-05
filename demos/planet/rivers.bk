@@ -153,7 +153,14 @@ fn meander_gradient(seed: i32, p: i32, i: i32, octave: i32) -> f32 {
     return (((h >> 8) & 65535) as f32) / 32767.5 - 1.0;
 }
 pub fn meander(p: i32, s: f32, len: f32, width: f32, seed: i32) -> f32 {
-    let shortest = MEANDER_WAVES * width;
+    return meander_from(p, s, len, width, seed, 0.0);
+}
+// The meanders as ground `far` metres from the channel follows them (the
+// drainage's valleys, dendry.bk): an octave counts in full where its
+// wavelength is at least `far`, none under half of it, so a valley's sides
+// carry its channel's broad bends and not its fine ones.
+pub fn meander_from(p: i32, s: f32, len: f32, width: f32, seed: i32, far: f32) -> f32 {
+    let shortest = max(MEANDER_WAVES * width, 0.5 * far);
     var wavelength = 0.5 * len;
     var m: f32 = 0.0;
     for (var o: i32 = 0; o < 6; o += 1) {
@@ -166,7 +173,8 @@ pub fn meander(p: i32, s: f32, len: f32, width: f32, seed: i32) -> f32 {
                     f * f * (3.0 - 2.0 * f));
         // Each octave tapers within half its wavelength of the ends.
         let e = clamp(min(s, len - s) * 2.0 / wavelength, 0.0, 1.0);
-        m += v * 2.0 * MEANDER_AMP * wavelength * e * e * (3.0 - 2.0 * e);
+        let follow = far > 0.0 ? smoothstep(0.5 * far, far, wavelength) : 1.0;
+        m += v * 2.0 * MEANDER_AMP * wavelength * e * e * (3.0 - 2.0 * e) * follow;
         wavelength *= 0.5;
     }
     return m;
@@ -239,7 +247,7 @@ const CHANNEL_DEPTH: f32 = 0.04;   // of the width, at the middle
 // into the slopes either side.
 const SHARE_SIGMA: f32 = 0.75;
 // erf, to 2e-4 (Winitzki 2008).
-fn erf_approx(x: f32) -> f32 {
+pub fn erf_approx(x: f32) -> f32 {
     let x2 = x * x;
     let ax2 = 0.147 * x2;
     let e = sqrt(1.0 - exp(-x2 * (1.2732395 + ax2) / (1.0 + ax2)));

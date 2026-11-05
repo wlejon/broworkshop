@@ -8,6 +8,7 @@ module planet::ground;
 import std::noise::*;
 import tiles;
 from planet::rivers import water_at, lake_surface, Water;
+from planet::dendry import Drain, drain_at, drain_probed, drained;
 from planet::climate import Climate, climate_at, cover_at, temp_at, snow_at;
 // The ridged relief's octaves and statistics, which the ground's shader
 // shares (relief.bk): BASE_WAVELENGTH the first octave's wavelength, metres;
@@ -314,27 +315,42 @@ pub fn cell_width(octaves: f32) -> f32 {
     return BASE_WAVELENGTH / (2.5 * exp2(octaves));
 }
 
-// The ground at offset e, metres above the sphere, or the water over it: the
-// ground cut down by the rivers' valleys (rivers.bk), and a lake's level
-// where it stands over that. A valley cuts the broad shape, and its sides
-// carry the fine relief on, faded out over the last VALLEY_FLOOR metres down
-// to its bed: a valley side planed to its profile would be a smooth ramp,
-// straight along its reach, and meet the ground in a crease. A smooth
-// minimum over CUT_BLEND metres joins the cut to the ground.
+// The ground at offset e, metres above the sphere, or the water over it:
+// the terrain drained (dendry.bk: its height over the base level its water
+// drains to, scaled by the relative height of the valleys within valleys
+// there, so the valleys' sides carry its relief), cut down by the rivers'
+// channels and floodplains (rivers.bk), and a lake's level where it stands
+// over that. The rivers' cut joins the ground by a smooth minimum over
+// CUT_BLEND metres, its sides carrying the fine relief on, faded out over
+// the last VALLEY_FLOOR metres down to its bed.
 const VALLEY_FLOOR: f32 = 150.0;
 const CUT_BLEND: f32 = 40.0;
 //
 // y and z: how much the ground here moves with the relief's octaves below
 // FINE_FIRST and from it on, per metre of relief at full uplift (relief):
-// the uplift where the ground stands, less where a valley cuts it (the
-// fine part as its sides carry it on), none under a lake. The ground's
-// shader scales the octaves finer than its texels by them (ground_mesh.bk).
+// the uplift where the ground stands, scaled as the drainage scales it,
+// less where a river cuts it (the fine part as its sides carry it on),
+// none under a lake. The ground's shader scales the octaves finer than its
+// texels by them (ground_mesh.bk).
 pub fn terrain_shaped(a: Anchor, e: vec3<f32>, radius: f32, octaves: f32, seed: i32, net: read_store<f32, 1>) -> vec3<f32> {
-    return shaped_by(terrain_parts(a, e, radius, octaves, seed), water_at(a.dir, e, radius, cell_width(octaves), net, seed));
+    return terrain_drained(a, e, radius, octaves, seed, net, drain_at(a.dir, e, radius, cell_width(octaves), net, seed));
 }
-// The ground's parts (terrain_parts) cut by the water w found for them.
-fn shaped_by(t: vec3<f32>, w: Water) -> vec3<f32> {
-    let h = t.x + t.y;
+// The same with its drainage found already (a tile's, dendry_grid.bk).
+pub fn terrain_drained(a: Anchor, e: vec3<f32>, radius: f32, octaves: f32, seed: i32, net: read_store<f32, 1>,
+                       d: Drain) -> vec3<f32> {
+    return shaped_by(terrain_parts(a, e, radius, octaves, seed),
+                     water_at(a.dir, e, radius, cell_width(octaves), net, seed), d);
+}
+// The ground's parts (terrain_parts) drained by d and cut by the water w
+// found for them.
+fn shaped_by(t: vec3<f32>, w: Water, d: Drain) -> vec3<f32> {
+    return shaped_rel(t, w, d.base, d.rel);
+}
+fn shaped_rel(t: vec3<f32>, w: Water, base: f32, rel: f32) -> vec3<f32> {
+    let h0 = t.x + t.y;
+    let h = drained(h0, base, rel);
+    // d h / d h0.
+    let k = h0 > base ? rel : 1.0;
     let side = smoothstep(0.0, VALLEY_FLOOR, w.near.x - w.bed);
     let valley = w.near.x + t.y * side;
     let x = h - valley;
@@ -343,11 +359,11 @@ fn shaped_by(t: vec3<f32>, w: Water) -> vec3<f32> {
     let lake = lake_surface(cut, w);
     if (lake > cut) { return vec3<f32>(lake, 0.0, 0.0); }
     let u = t.z;
-    if (cut >= h) { return vec3<f32>(cut, t.z, t.z); }
+    if (cut >= h) { return vec3<f32>(cut, u * k, u * k); }
     // On the cut: d cut / d h and d cut / d valley.
     let sx = x >= 0.0 ? 1.0 : -1.0;
     let dh = 0.5 * m * sx;
-    return vec3<f32>(cut, u * dh, u * (dh + (1.0 - dh) * side));
+    return vec3<f32>(cut, u * k * dh, u * (k * dh + (1.0 - dh) * side));
 }
 pub fn terrain(a: Anchor, e: vec3<f32>, radius: f32, octaves: f32, seed: i32, net: read_store<f32, 1>) -> f32 {
     return terrain_shaped(a, e, radius, octaves, seed, net).x;
@@ -361,24 +377,50 @@ pub fn terrain(a: Anchor, e: vec3<f32>, radius: f32, octaves: f32, seed: i32, ne
 // a cell finer than that takes it at its point (soil_gradient), a coarser
 // one the share of it under the cell (spread to SOIL_OCTAVES).
 pub const SOIL_OCTAVES: f32 = 17.0;
-// The ground through SOIL_OCTAVES at offset e, its water's cut included.
+// The ground through SOIL_OCTAVES at offset e, its drainage and its water's
+// cut included.
 pub fn soil_height(a: Anchor, e: vec3<f32>, radius: f32, seed: i32, net: read_store<f32, 1>) -> f32 {
+    return soil_height_drained(a, e, radius, seed, net, drain_at(a.dir, e, radius, cell_width(SOIL_OCTAVES), net, seed));
+}
+// The same with its drainage found already (a tile's, dendry_grid.bk).
+pub fn soil_height_drained(a: Anchor, e: vec3<f32>, radius: f32, seed: i32, net: read_store<f32, 1>, d: Drain) -> f32 {
     let w = water_at(a.dir, e, radius, cell_width(SOIL_OCTAVES), net, seed);
-    return shaped_by(terrain_parts(a, e, radius, SOIL_OCTAVES, seed), w).x;
+    return shaped_by(terrain_parts(a, e, radius, SOIL_OCTAVES, seed), w, d).x;
 }
 pub fn soil_gradient(a: Anchor, e: vec3<f32>, radius: f32, seed: i32, net: read_store<f32, 1>) -> f32 {
+    return site_ground(a, e, radius, SOIL_OCTAVES, seed, net).grad;
+}
+
+// The ground at a site (a tree's, a grass point's): its height at
+// `octaves`, the soil's gradient there (soil_gradient), its water and its
+// drainage, the drainage found once for all of them (its relative height
+// probed at the gradient's four points).
+pub struct Site {
+    h: f32,
+    grad: f32,
+    water: Water,
+    drain: Drain,
+}
+pub fn site_ground(a: Anchor, e: vec3<f32>, radius: f32, octaves: f32, seed: i32, net: read_store<f32, 1>) -> Site {
     let n = a.dir + e;
     let axis = abs(n.y) < 0.9 ? vec3<f32>(0.0, 1.0, 0.0) : vec3<f32>(1.0, 0.0, 0.0);
     let t1 = normalize(cross(n, axis));
     let t2 = cross(n, t1);
     let step: f32 = 2.0;   // metres either side
-    let w = water_at(a.dir, e, radius, cell_width(SOIL_OCTAVES), net, seed);
+    let cell = cell_width(max(octaves, SOIL_OCTAVES));
+    let w = water_at(a.dir, e, radius, cell, net, seed);
+    let d = drain_probed(a.dir, e, radius, cell, net, seed, t1 * step, t2 * step, 5);
     let k = step / radius;
-    let hu = shaped_by(terrain_parts(a, moved(a.dir, e, t1 * k), radius, SOIL_OCTAVES, seed), w).x
-           - shaped_by(terrain_parts(a, moved(a.dir, e, -t1 * k), radius, SOIL_OCTAVES, seed), w).x;
-    let hv = shaped_by(terrain_parts(a, moved(a.dir, e, t2 * k), radius, SOIL_OCTAVES, seed), w).x
-           - shaped_by(terrain_parts(a, moved(a.dir, e, -t2 * k), radius, SOIL_OCTAVES, seed), w).x;
-    return sqrt(hu * hu + hv * hv) / (2.0 * step);
+    let hu = shaped_rel(terrain_parts(a, moved(a.dir, e, t1 * k), radius, SOIL_OCTAVES, seed), w, d.base, d.probe.x).x
+           - shaped_rel(terrain_parts(a, moved(a.dir, e, -t1 * k), radius, SOIL_OCTAVES, seed), w, d.base, d.probe.y).x;
+    let hv = shaped_rel(terrain_parts(a, moved(a.dir, e, t2 * k), radius, SOIL_OCTAVES, seed), w, d.base, d.probe.z).x
+           - shaped_rel(terrain_parts(a, moved(a.dir, e, -t2 * k), radius, SOIL_OCTAVES, seed), w, d.base, d.probe.w).x;
+    var s: Site;
+    s.h = shaped_by(terrain_parts(a, e, radius, octaves, seed), w, d).x;
+    s.grad = sqrt(hu * hu + hv * hv) / (2.0 * step);
+    s.water = w;
+    s.drain = d;
+    return s;
 }
 
 // Below this many octaves a cell is wide enough that the next octaves vary
@@ -398,20 +440,43 @@ pub fn frame_dir(rec: tiles::Record, s: f32, t: f32) -> vec3<f32> {
 // (s, t).
 pub fn cell_height(a: Anchor, rec: tiles::Record, s: f32, t: f32, cell: f32,
                    radius: f32, octaves: f32, seed: i32, net: read_store<f32, 1>) -> f32 {
+    return cell_ground(a, rec, s, t, cell, radius, octaves, seed, net).h;
+}
+// The same, with the drainage found for it (the cell's: a supersampled
+// cell's samples take it from its centre, where it holds the mean over the
+// valleys the cell does not resolve).
+pub struct CellGround {
+    h: f32,
+    drain: Drain,
+}
+pub fn cell_ground(a: Anchor, rec: tiles::Record, s: f32, t: f32, cell: f32,
+                   radius: f32, octaves: f32, seed: i32, net: read_store<f32, 1>) -> CellGround {
+    let e = frame_dir(rec, s, t);
+    return cell_ground_drained(a, rec, s, t, cell, radius, octaves, seed, net,
+                               drain_at(a.dir, e, radius, cell_width(octaves), net, seed));
+}
+// The same with the cell's drainage found already (a tile's, dendry_grid.bk).
+pub fn cell_ground_drained(a: Anchor, rec: tiles::Record, s: f32, t: f32, cell: f32, radius: f32, octaves: f32,
+                           seed: i32, net: read_store<f32, 1>, d: Drain) -> CellGround {
+    let e = frame_dir(rec, s, t);
+    let w = water_at(a.dir, e, radius, cell_width(octaves), net, seed);
+    var out: CellGround;
+    out.drain = d;
     if (octaves >= SUPERSAMPLE_BELOW) {
-        return terrain(a, frame_dir(rec, s, t), radius, octaves, seed, net);
+        out.h = shaped_by(terrain_parts(a, e, radius, octaves, seed), w, d).x;
+        return out;
     }
-    let w = water_at(a.dir, frame_dir(rec, s, t), radius, cell_width(octaves), net, seed);
-    let m = masks(a, p_offset(frame_dir(rec, s, t), radius), radius, octaves, seed);
+    let m = masks(a, p_offset(e, radius), radius, octaves, seed);
     var sum: f32 = 0.0;
     for (var j: i32 = 0; j < SUB; j += 1) {
         for (var i: i32 = 0; i < SUB; i += 1) {
             let ds = (((i as f32) + 0.5) / (SUB as f32) - 0.5) * cell;
             let dt = (((j as f32) + 0.5) / (SUB as f32) - 0.5) * cell;
-            sum += shaped_by(terrain_parts_over(a, frame_dir(rec, s + ds, t + dt), m, radius, octaves + 2.0, seed), w).x;
+            sum += shaped_by(terrain_parts_over(a, frame_dir(rec, s + ds, t + dt), m, radius, octaves + 2.0, seed), w, d).x;
         }
     }
-    return sum / ((SUB * SUB) as f32);
+    out.h = sum / ((SUB * SUB) as f32);
+    return out;
 }
 
 // ── Colour ──────────────────────────────────────────────────────────────────
@@ -640,6 +705,36 @@ pub fn banked(cover: f32, h: f32, grad: f32, cl: Climate, wa: Water) -> f32 {
     if (wa.gallery <= 0.0) { return cover; }
     let wet = Climate { temp: cl.temp, moist: min(cl.moist + GALLERY_MOIST, 1.0), sand: cl.sand, rock: cl.rock };
     return mix(cover, max(cover, tree_cover(h, grad, wet)), wa.gallery);
+}
+
+// The drainage's streams (dendry.bk) into the rivers' water w: their
+// channels' share of a cell and their banks' gallery strip, where the
+// climate is wet enough for them to run (dry washes elsewhere).
+pub fn with_streams(w: Water, share: f32, gallery: f32, cl: Climate) -> Water {
+    let runs = smoothstep(0.12, 0.35, cl.moist);
+    var o = w;
+    o.near.y = max(w.near.y, share * runs);
+    o.gallery = max(w.gallery, gallery * runs);
+    o.channel = max(w.channel, 0.3 * share * runs);
+    return o;
+}
+
+// The landform's climate: valley floors gather water and their soil holds
+// it, interfluves and their crests shed it, so the land is wetter and
+// greener down its valleys and drier and barer along its ridges, at every
+// scale the drainage has (dendry.bk Drain wet and ridge, both about their
+// means, so the climate's own moisture holds on average).
+const LANDFORM_WET: f32 = 0.35;
+const LANDFORM_DRY: f32 = 0.3;
+pub fn landform_climate(cl: Climate, wet: f32, ridge: f32) -> Climate {
+    let m = clamp(cl.moist + LANDFORM_WET * wet - LANDFORM_DRY * ridge, 0.0, 1.0);
+    return Climate { temp: cl.temp, moist: m, sand: cl.sand, rock: cl.rock };
+}
+// And the forest's mosaic leans to the valleys: woods down them, open
+// ground along the crests (woodland's W, about its mean).
+const LANDFORM_WOOD: f32 = 0.9;
+pub fn landform_wood(wood: vec2<f32>, wet: f32, ridge: f32) -> vec2<f32> {
+    return vec2<f32>(wood.x + LANDFORM_WOOD * (wet - 0.6 * ridge), wood.y);
 }
 
 // Forests grow as a mosaic at every scale: whole forests and open country

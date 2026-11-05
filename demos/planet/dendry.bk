@@ -1,0 +1,695 @@
+// The land's drainage below the rivers (rivers.bk): valleys within valleys,
+// four levels of them under the river network, so the ground is organised
+// by the water it sheds at every scale from the lattice's 20 km down to a
+// gully's tens of metres (after Gaillard et al. 2019, "Dendry").
+//
+// Each level is a lattice of points on the cube faces' equal-angle grid,
+// each subdividing the last's cells by four: points about 4.9 km, 1.2 km,
+// 300 m and 76 m apart (level 0 is the rivers' own lattice, 20 km), each at
+// a spot hashed inside its cell. A point's potential is the relative height
+// its stream would stand at if it ran straight to the level above's network:
+// the height of the nearest place on that network plus RISE of the relief a
+// cell of its own level away, so streams climb the faster the finer they
+// are. The network it is measured to is the level above's segments from the
+// 3 x 3 points about its own cell's parent. It drains to the neighbour its
+// potential falls to most steeply, or, where none lies lower, to that place
+// on the network above: the points form trees that run down to their
+// parents and join them, leaning downstream. A stream's segments are curves,
+// bent and meandering as the rivers' are (rivers.bk meander), tapered to
+// their points.
+//
+// Heights here are relative: 0 the base level the water drains to (the
+// rivers' beds about here, `base`), 1 the terrain's own height over it, so
+// the relief a valley cuts scales with the height there is to cut. A
+// stream stands at its relative height u and its valley rises from it to
+// the terrain over VALLEY of its spacing either side, carrying the
+// terrain's own relief scaled (ground.bk shaped_by): ranges are dissected
+// deep, plains gently, and no valley digs below its river. The ground's
+// relative height is the soft minimum of every stream's valley, so ridges
+// stand between valleys at every scale.
+//
+// Refine, never replace: a level fades in as cells resolve it (fade), and
+// where they do not a cell holds its mean over the valleys it cannot see
+// (mean_rel), so a coarse cell is the aggregate of the finer truth.
+//
+// Two evaluations of the same network. A tile's (dendry_grid.bk) finds
+// every point's potential and link once over the tile and reads the 5 x 5
+// segments about each of its cells. Any other point's (drain_probed, for
+// trees, grass, the sun's steps and the CPU) finds them about the point
+// itself, bounded: the level's points in a 7 x 7 block of its cells about
+// here (their potentials, from the level above's 5 x 5 segments about
+// here's parent, which hold every one's 3 x 3), the links of the 5 x 5
+// within. Both are the same network to f32's rounding. Positions are
+// metres on a tangent plane, from each point's f32 direction less the
+// plane's origin as an anchor's direction `hi` and the offset `lo` from it
+// (as rivers.bk point_offset), so a point lies at the same place wherever
+// it is read.
+module planet::dendry;
+
+import std::noise::*;
+from planet::rivers import RIV_N, RIV_REC, alpha_dir, face_of, face_a, face_e, face_f, cell_of, cell_next, point_index,
+    river_width, meander_from, erf_approx;
+
+pub const DRAIN_LEVELS: i32 = 4;
+const PI4: f32 = 0.78539816;
+// rivers.bk draws reaches from MIN_CATCHMENT points (river_width 5.04 m
+// on); the reaches narrower are this module's streams.
+const RIVER_WIDTH_MIN: f32 = 5.04;
+// A valley rises to the terrain over VALLEY of its level's spacing either
+// side of its stream.
+pub const VALLEY: f32 = 0.45;
+// The soft minimum's sharpness: two valleys meeting dip a few percent
+// under either (the root of the sum of the inverse powers), so ridges
+// between them round rather than crease.
+const SOFT: f32 = 10.0;
+// The base level is the rivers' beds about here, each weighted by the
+// inverse fourth power of its distance, out to BASE_REACH of the lattice's
+// spacing: so on a reach it is that reach's bed exactly.
+const BASE_REACH: f32 = 1.1;
+
+// How far a level's streams climb, in relative height, a cell of their own
+// level from the network above: sources of every level together reach the
+// ridges.
+pub fn rise(k: i32) -> f32 {
+    if (k == 1) { return 0.22; }
+    if (k == 2) { return 0.16; }
+    if (k == 3) { return 0.12; }
+    return 0.10;
+}
+// A level's channel at the most it gathers (m): levels 1 and 2 carry
+// water, the finer are dry gullies (their width sets only how finely they
+// meander).
+fn stream_width(k: i32) -> f32 {
+    if (k == 1) { return 4.0; }
+    if (k == 2) { return 1.8; }
+    if (k == 3) { return 0.9; }
+    return 0.5;
+}
+// How much a level's valley floors and its interfluves count toward the
+// land's wetness and dryness (landform).
+fn wet_weight(k: i32) -> f32 {
+    if (k == 0) { return 1.0; }
+    if (k == 1) { return 0.75; }
+    if (k == 2) { return 0.5; }
+    if (k == 3) { return 0.3; }
+    return 0.18;
+}
+fn ridge_weight(k: i32) -> f32 {
+    if (k == 0) { return 0.5; }
+    if (k == 1) { return 0.6; }
+    if (k == 2) { return 0.5; }
+    if (k == 3) { return 0.35; }
+    return 0.2;
+}
+
+// A level's spacing between points (m).
+pub fn spacing(k: i32, radius: f32) -> f32 {
+    return 1.5707963 * radius / ((RIV_N << (2 * k)) as f32);
+}
+
+// How much of a level a cell `cell` metres wide holds: none from a cell
+// half its spacing wide, all from an eighth, in between over the octaves.
+pub fn fade(l: f32, cell: f32) -> f32 {
+    return smoothstep(0.0, 1.0, (log2(l / max(cell, 1e-3)) - 1.0) * 0.5);
+}
+
+// ── The levels' lattices ───────────────────────────────────────────────────
+
+// The cell (i, j) of face `face`'s lattice, n cells along its edge, that
+// `d` lies in, the lattice carried on past the face's edges (a direction
+// within 45 degrees of the face's).
+pub fn cell_virtual(d: vec3<f32>, face: i32, n: i32) -> vec2<i32> {
+    let z = dot(d, face_a(face));
+    let x = atan(dot(d, face_e(face)) / z) / PI4;
+    let y = atan(dot(d, face_f(face)) / z) / PI4;
+    let nf = n as f32;
+    return vec2<i32>(floor((x + 1.0) * 0.5 * nf) as i32, floor((y + 1.0) * 0.5 * nf) as i32);
+}
+// The cell (face, i, j) of a lattice n cells a face's edge that `d` lies in
+// (rivers.bk cell_of, at n).
+pub fn cell_in(d: vec3<f32>, n: i32) -> vec3<i32> {
+    let face = face_of(d);
+    let c = cell_virtual(d, face, n);
+    return vec3<i32>(face, clamp(c.x, 0, n - 1), clamp(c.y, 0, n - 1));
+}
+// The cell (di, dj) from c, across the face's edge if need be (rivers.bk
+// cell_next, at n).
+pub fn cell_step(c: vec3<i32>, di: i32, dj: i32, n: i32) -> vec3<i32> {
+    let i = c.y + di;
+    let j = c.z + dj;
+    if (i >= 0 && i < n && j >= 0 && j < n) { return vec3<i32>(c.x, i, j); }
+    let step = 2.0 / (n as f32);
+    return cell_in(alpha_dir(c.x, -1.0 + ((i as f32) + 0.5) * step, -1.0 + ((j as f32) + 0.5) * step), n);
+}
+// The index of the parent of a cell index i, the level above's (floor of
+// i / 4, past the face's edges too).
+pub fn parent_of(i: i32) -> i32 {
+    return i >= 0 ? i / 4 : -((3 - i) / 4);
+}
+// A cell's point: at a spot hashed inside the middle 70% of it.
+pub fn site_dir(c: vec3<i32>, n: i32, seed: i32) -> vec3<f32> {
+    let hx = hash_primes3d(seed + 5003, c.y * PRIME_X, c.z * PRIME_Y, c.x * PRIME_Z);
+    let hy = hash_primes3d(seed + 6007, c.y * PRIME_X, c.z * PRIME_Y, c.x * PRIME_Z);
+    let jx = 0.15 + 0.7 * (((hx >> 8) & 65535) as f32) / 65536.0;
+    let jy = 0.15 + 0.7 * (((hy >> 8) & 65535) as f32) / 65536.0;
+    let step = 2.0 / (n as f32);
+    return alpha_dir(c.x, -1.0 + ((c.y as f32) + jx) * step, -1.0 + ((c.z as f32) + jy) * step);
+}
+// A point's own number, which its stream's meanders are hashed from.
+pub fn site_id(c: vec3<i32>, k: i32) -> i32 {
+    return hash_primes3d(9173 + k, c.y * PRIME_X, c.z * PRIME_Y, c.x * PRIME_Z);
+}
+
+// A tangent plane: metres along t1 and t2 from its origin hi + lo.
+pub struct Local {
+    hi: vec3<f32>,
+    lo: vec3<f32>,
+    t1: vec3<f32>,
+    t2: vec3<f32>,
+    r: f32,
+}
+pub fn local_frame(hi: vec3<f32>, lo: vec3<f32>, r: f32) -> Local {
+    let up = normalize(hi + lo);
+    let axis = abs(up.y) < 0.9 ? vec3<f32>(0.0, 1.0, 0.0) : vec3<f32>(1.0, 0.0, 0.0);
+    let t1 = normalize(cross(up, axis));
+    // up = t1 x t2: a segment's side (along.y, -along.x) is rivers.bk's
+    // cross(along, up).
+    let t2 = cross(up, t1);
+    return Local { hi: hi, lo: lo, t1: t1, t2: t2, r: r };
+}
+pub fn to_local(f: Local, p: vec3<f32>) -> vec2<f32> {
+    let o = ((p - f.hi) - f.lo) * f.r;
+    return vec2<f32>(dot(o, f.t1), dot(o, f.t2));
+}
+pub fn vec_local(f: Local, v: vec3<f32>) -> vec2<f32> {
+    return vec2<f32>(dot(v, f.t1), dot(v, f.t2));
+}
+
+// ── Segments ───────────────────────────────────────────────────────────────
+//
+// A stream's segment from a point P to where it drains T, three vec4s:
+//   a: P (xy), T (zw), metres on the tangent plane
+//   b: its relative height at P and at T; level 0's the base level at P
+//      and at T
+//   c: its bend's slopes at P and at T (across over along, as rivers.bk
+//      bend takes them), its channel's width (0: no segment), its number
+//      (bits) for its meanders
+pub struct Seg {
+    a: vec4<f32>,
+    b: vec4<f32>,
+    c: vec4<f32>,
+}
+pub fn no_seg() -> Seg {
+    return Seg { a: vec4<f32>(0.0), b: vec4<f32>(0.0), c: vec4<f32>(0.0) };
+}
+
+// Level 0: the reach from the rivers' point in cell c to its downstream
+// point, its bed the rivers' (min of floor and water), its bend their
+// tangents', so its curve is the very line rivers.bk lays its channel
+// along. Every reach on land, a source's too: the valleys of the reaches
+// too small for rivers.bk to draw are this module's.
+pub fn reach_seg(net: read_store<f32, 1>, c: vec3<i32>, f: Local) -> Seg {
+    var s = no_seg();
+    let p = point_index(c);
+    let k = p * RIV_REC;
+    let down = net[k + 1];
+    if (net[k + 3] <= 0.0 || down < 0.0) { return s; }
+    let dk = (down as i32) * RIV_REC;
+    let pa = to_local(f, vec3<f32>(net[k + 4], net[k + 5], net[k + 6]));
+    let pb = to_local(f, vec3<f32>(net[dk + 4], net[dk + 5], net[dk + 6]));
+    let len = max(length(pb - pa), 1.0);
+    let along = (pb - pa) / len;
+    let side = vec2<f32>(along.y, -along.x);
+    let ta = vec_local(f, vec3<f32>(net[k + 8], net[k + 9], net[k + 10]));
+    let tb = vec_local(f, vec3<f32>(net[dk + 8], net[dk + 9], net[dk + 10]));
+    let sa = clamp(dot(ta, side) / max(dot(ta, along), 0.3), -0.6, 0.6);
+    let sb = clamp(dot(tb, side) / max(dot(tb, along), 0.3), -0.6, 0.6);
+    s.a = vec4<f32>(pa, pb);
+    s.b = vec4<f32>(0.0, 0.0, min(net[k + 7], net[k + 3]), min(net[dk + 7], net[dk + 3]));
+    s.c = vec4<f32>(sa, sb, river_width(net[k + 2]), bitcast<f32>(p));
+    return s;
+}
+
+// The segment's curve's offset across its chord at s metres along it, a
+// chord `len` long: a cubic Hermite to its slopes at either end, and the
+// meanders (level 0 at the rivers' own seed: their channel's line).
+const MEANDER_COARSE: f32 = 4.0;
+// For a point `across` metres across the chord, the meanders as far from
+// the curve as it is (rivers.bk meander_from); on the curve (ON_CURVE), all
+// of them.
+fn curve_offset(c: vec4<f32>, s: f32, len: f32, k: i32, seed: i32, across: f32) -> f32 {
+    let t = s / len;
+    let t2 = t * t;
+    let bend = len * ((t2 * t - 2.0 * t2 + t) * c.x + (t2 * t - t2) * c.y);
+    // The streams' meanders stop at MEANDER_COARSE widths, four times the
+    // rivers' (a gully's finest wiggles are the relief's).
+    let width = k == 0 ? c.z : MEANDER_COARSE * c.z;
+    let far = across > 1.0e29 ? 0.0 : abs(across - bend);    return bend + meander_from(bitcast<i32>(c.w), s, len, width, seed + 131 * k, far);
+}
+const ON_CURVE: f32 = 1.0e30;
+
+// X's distance to a segment's chord (x), the place along it (y, m) and
+// its length (z).
+pub fn chord(a: vec4<f32>, x: vec2<f32>) -> vec3<f32> {
+    let p = a.xy;
+    let len = max(length(a.zw - p), 1e-3);
+    let along = (a.zw - p) / len;
+    let s = clamp(dot(x - p, along), 0.0, len);
+    return vec3<f32>(length(x - p - along * s), s, len);
+}
+
+// X's distance to a segment's curve (x) and the fraction along it (y). The
+// curve stays within 0.4 of its chord's length of the chord, so past
+// `limit` of that the distance is not needed: a bound under it is returned
+// instead, without the meanders.
+pub fn seg_dist(a: vec4<f32>, c: vec4<f32>, x: vec2<f32>, k: i32, limit: f32, seed: i32) -> vec2<f32> {
+    let p = a.xy;
+    let len = max(length(a.zw - p), 1e-3);
+    let along = (a.zw - p) / len;
+    let side = vec2<f32>(along.y, -along.x);
+    let rel = x - p;
+    let sr = dot(rel, along);
+    let s = clamp(sr, 0.0, len);
+    let across = dot(rel, side);
+    let ahead = sr - s;
+    let bound = 0.4 * len;
+    if (abs(ahead) > limit || abs(across) > limit + bound) {
+        return vec2<f32>(max(abs(ahead), abs(across) - bound), s / len);
+    }
+    let off = across - curve_offset(c, s, len, k, seed, across);
+    return vec2<f32>(sqrt(ahead * ahead + off * off), s / len);
+}
+
+// A valley's cross-section: its relative rise at t of its half-width,
+// steepest at its stream and level at its rim.
+fn prof(t: f32) -> f32 {
+    let x = clamp(t, 0.0, 1.0);
+    return x * (2.0 - x);
+}
+
+// What a level's valleys leave of relative height rho over a cell that
+// does not resolve them, its streams at relative height ubar: rho's mean
+// under the valleys' minimum, the distance to the nearest stream taken as
+// uniform out to SPAN of a valley's half-width.
+const SPAN: f32 = 1.1;
+pub fn mean_rel(rho: f32, ubar: f32) -> f32 {
+    if (rho <= ubar) { return rho; }
+    let span = max(1.0 - ubar, 1e-4);
+    let rp = clamp((rho - ubar) / span, 0.0, 1.0);
+    // prof(ts) = rp.
+    let ts = 1.0 - sqrt(1.0 - rp);
+    var e: f32 = SPAN - SPAN * SPAN / 3.0;
+    if (ts < SPAN) { e = (ts * ts - ts * ts * ts / 3.0 + rp * (SPAN - ts)) / SPAN; }
+    return ubar + span * min(e, rp);
+}
+// The mean, over the same uniform distance, of a valley floor's wetness
+// (exp(-(d / (WET_W w))^2)) and of being near a level's stream for its
+// interfluves (exp(-(d / (NEAR_W w))^2)).
+const WET_W: f32 = 0.35;
+const NEAR_W: f32 = 0.8;
+const WET_MEAN: f32 = 0.282;    // WET_W sqrt(pi) / 2 / SPAN
+const NEAR_MEAN: f32 = 0.565;   // erf(SPAN / NEAR_W) NEAR_W sqrt(pi) / 2 / SPAN
+
+// ── Potentials and links ───────────────────────────────────────────────────
+
+// The nearest place, by potential, on the level above's network from a
+// point: its potential v (1e9: none), the place along the segment (s, m),
+// the distance (d, m), and the segment.
+pub struct Near {
+    v: f32,
+    s: f32,
+    d: f32,
+    seg: Seg,
+}
+pub fn near_none() -> Near {
+    return Near { v: 1.0e9, s: 0.0, d: 0.0, seg: no_seg() };
+}
+// n, or segment s if it offers x, of level `lk` apart and rising `sig`, a
+// lower potential.
+pub fn near_try(n: Near, s: Seg, x: vec2<f32>, sig: f32, lk: f32) -> Near {
+    if (s.c.z <= 0.0) { return n; }
+    let ch = chord(s.a, x);
+    let v = mix(s.b.x, s.b.y, ch.y / ch.z) + sig * ch.x / lk;
+    if (v >= n.v) { return n; }
+    return Near { v: v, s: ch.y, d: ch.x, seg: s };
+}
+// The level's streams about a point stand under its own potential by about
+// half a cell's rise, and over the network they join (1e9: none found).
+pub fn streams_about(n: Near, sig: f32) -> f32 {
+    if (n.v > 1.0e8) { return 1.0e9; }
+    let a = n.seg.a;
+    return max(n.v - 0.5 * sig, mix(n.seg.b.x, n.seg.b.y, n.s / max(length(a.zw - a.xy), 1e-3)));
+}
+
+// A point's potential, two vec4s: a its position (xy) and potential (z,
+// 1e9: none); b where it would join the network above (xy), its distance
+// to it in its level's spacings, and the direction the network runs there.
+pub struct Pot {
+    a: vec4<f32>,
+    b: vec4<f32>,
+}
+// The potential of the point at x of level k from its nearest place n on
+// the level above's network.
+pub fn pot_of(n: Near, x: vec2<f32>, k: i32, lk: f32, seed: i32) -> Pot {
+    if (n.v > 1.0e8) { return Pot { a: vec4<f32>(x, 1.0e9, 0.0), b: vec4<f32>(x, 0.0, 0.0) }; }
+    let a = n.seg.a;
+    let len = max(length(a.zw - a.xy), 1e-3);
+    let along = (a.zw - a.xy) / len;
+    let side = vec2<f32>(along.y, -along.x);
+    let jn = a.xy + along * n.s + side * curve_offset(n.seg.c, n.s, len, k - 1, seed, ON_CURVE);
+    return Pot { a: vec4<f32>(x, n.v, 0.0), b: vec4<f32>(jn, n.d / lk, atan2(along.y, along.x)) };
+}
+// How steeply o's potential falls to neighbour t's (0: it does not).
+pub fn fall(o: Pot, t: Pot) -> f32 {
+    let drop = o.a.z - t.a.z;
+    if (drop <= 0.0) { return 0.0; }
+    return drop / max(length(t.a.xy - o.a.xy), 1.0);
+}
+// A stream's end slope (12 bits over -0.6 to 0.6) and its width (11 bits
+// over 0 to 8 m) as the grids hold them, in a float exactly
+// (dendry_grid.bk), and taken so by both evaluations.
+fn slope_q(x: f32) -> i32 { return (clamp((x + 0.6) / 1.2, 0.0, 1.0) * 4095.0 + 0.5) as i32; }
+fn slope_of(q: i32) -> f32 { return -0.6 + (q as f32) / 4095.0 * 1.2; }
+fn width_q(x: f32) -> i32 { return (clamp(x / 8.0, 0.0, 1.0) * 2047.0 + 0.5) as i32; }
+fn width_of(q: i32) -> f32 { return (q as f32) / 2047.0 * 8.0; }
+// A segment of level 1 on (its start's slope 0, no base level) as two
+// vec4s: a, and its heights, slope and width, number.
+pub fn seg_packed(s: Seg) -> vec4<f32> {
+    return vec4<f32>(s.b.x, s.b.y, (slope_q(s.c.y) + 4096 * width_q(s.c.z)) as f32, s.c.w);
+}
+pub fn seg_unpacked(a: vec4<f32>, b: vec4<f32>) -> Seg {
+    let p = b.z as i32;
+    return Seg { a: a, b: vec4<f32>(b.x, b.y, 0.0, 0.0), c: vec4<f32>(0.0, slope_of(p & 4095), width_of(p >> 12), b.w) };
+}
+// Whether x is past a segment's valley `limit` metres wide (as seg_dist
+// bounds it, its chord alone).
+pub fn seg_far(a: vec4<f32>, x: vec2<f32>, limit: f32) -> bool {
+    let p = a.xy;
+    let len = max(length(a.zw - p), 1e-3);
+    let along = (a.zw - p) / len;
+    let rel = x - p;
+    let sr = dot(rel, along);
+    let ahead = sr - clamp(sr, 0.0, len);
+    let across = dot(rel, vec2<f32>(along.y, -along.x));
+    return abs(ahead) > limit || abs(across) > limit + 0.4 * len;
+}
+
+// Point o's segment (level k, rising sig), to neighbour t where `to_t`,
+// else to the network above, leaning the way it runs; id its number. None
+// where o has no potential.
+pub fn link_of(o: Pot, t: Pot, to_t: bool, k: i32, sig: f32, id: i32) -> Seg {
+    var s = no_seg();
+    if (o.a.z > 1.0e8) { return s; }
+    // What it gathers: most where it nears the network above.
+    let width = width_of(width_q(stream_width(k) * (0.3 + 0.7 * (1.0 - clamp(o.b.z / 2.5, 0.0, 1.0)))));
+    if (to_t) {
+        s.a = vec4<f32>(o.a.xy, t.a.xy);
+        s.b = vec4<f32>(o.a.z, t.a.z, 0.0, 0.0);
+        s.c = vec4<f32>(0.0, slope_of(slope_q(0.0)), width, bitcast<f32>(id));
+        return s;
+    }
+    let len = max(length(o.b.xy - o.a.xy), 1e-3);
+    let along = (o.b.xy - o.a.xy) / len;
+    let side = vec2<f32>(along.y, -along.x);
+    var tg = along + vec2<f32>(cos(o.b.w), sin(o.b.w));
+    if (dot(tg, tg) < 1e-4) { tg = along; }
+    let slope = slope_of(slope_q(dot(tg, side) / max(dot(tg, along), 0.3)));
+    s.a = vec4<f32>(o.a.xy, o.b.xy);
+    s.b = vec4<f32>(o.a.z, o.a.z - sig * o.b.z, 0.0, 0.0);
+    s.c = vec4<f32>(0.0, slope, width, bitcast<f32>(id));
+    return s;
+}
+
+// ── A level's valleys at a point ───────────────────────────────────────────
+
+// Segment s's valley's term in the soft minimum at a point dt (seg_dist)
+// from it, its level's valleys `wk` either side.
+pub fn valley_term(s: Seg, dt: vec2<f32>, wk: f32) -> f32 {
+    if (dt.x >= wk) { return 0.0; }
+    let u = mix(s.b.x, s.b.y, dt.y);
+    let r = u + (1.0 - u) * prof(dt.x / wk);
+    if (r >= 1.0) { return 0.0; }
+    return pow(max(r, 1e-3), -SOFT) - 1.0;
+}
+// The relative height rel after a level's valleys: their terms' sum acc,
+// as much as the cell resolves them (fk), the mean over them (streams at
+// ubar) for the rest.
+pub fn rel_after(rel: f32, acc: f32, ubar: f32, fk: f32) -> f32 {
+    let actual = pow(pow(max(rel, 1e-3), -SOFT) + acc, -1.0 / SOFT);
+    return mix(mean_rel(rel, ubar), actual, fk);
+}
+// The base level's weight for a reach dn of the lattice's spacings away.
+pub fn base_weight(dn: f32) -> f32 {
+    return smoothstep(BASE_REACH, 0.6 * BASE_REACH, dn) / ((dn * dn + 0.0025) * (dn * dn + 0.0025));
+}
+
+// What a point takes from the levels besides its relative height: the
+// streams' channels and their banks over a cell (sg: the cell's spread in
+// metres), the valley floors and interfluves about it.
+pub struct Tally {
+    share: f32,
+    gallery: f32,
+    dry: f32,
+    wet_even: f32,
+    far: f32,
+    far_even: f32,
+}
+pub fn tally_none() -> Tally {
+    return Tally { share: 0.0, gallery: 0.0, dry: 1.0, wet_even: 1.0, far: 1.0, far_even: 1.0 };
+}
+// Segment s's channel, dist metres away, into the tally: level 0's reaches
+// too small for rivers.bk, levels 1 and 2 as much as the cell resolves them.
+pub fn tally_water(t: Tally, s: Seg, dist: f32, k: i32, fk: f32, sg: f32) -> Tally {
+    var o = t;
+    if (k > 2 || (k == 0 && s.c.z >= RIVER_WIDTH_MIN)) { return o; }
+    let hw = 0.5 * s.c.z;
+    let gw = k == 0 ? hw + 10.0 + 4.0 * s.c.z : hw + 8.0 + 3.0 * s.c.z;
+    // Past the banks by three of the cell's spreads there is nothing of it.
+    if (dist > gw + 3.0 * sg) { return o; }
+    let ws = clamp(0.5 * (erf_approx((hw - dist) / sg) - erf_approx((-hw - dist) / sg)), 0.0, 1.0);
+    let strip = clamp(0.5 * (erf_approx((gw - dist) / sg) - erf_approx((-gw - dist) / sg)), 0.0, 1.0);
+    let f = k == 0 ? 1.0 : fk;
+    o.share = max(o.share, ws * f);
+    o.gallery = max(o.gallery, (strip - ws) * f);
+    return o;
+}
+// Level k's floors and interfluves into the tally, its nearest stream dmin
+// away, as much as the cell resolves them (fk), their means for the rest.
+pub fn tally_level(t: Tally, k: i32, dmin: f32, wk: f32, fk: f32) -> Tally {
+    var o = t;
+    o.dry *= 1.0 - wet_weight(k) * mix(WET_MEAN, exp(-(dmin * dmin) / (WET_W * WET_W * wk * wk)), fk);
+    o.wet_even *= 1.0 - wet_weight(k) * WET_MEAN;
+    o.far *= 1.0 - ridge_weight(k) * mix(NEAR_MEAN, exp(-(dmin * dmin) / (NEAR_W * NEAR_W * wk * wk)), fk);
+    o.far_even *= 1.0 - ridge_weight(k) * NEAR_MEAN;
+    return o;
+}
+
+// The streams of an unresolved level climb on above the last level's: a
+// point's potential is about RISE of a spacing over its parent's.
+pub fn ubar_next(ubar: f32, k: i32) -> f32 {
+    return ubar + 0.8 * rise(k);
+}
+
+// ── The drainage at a point ────────────────────────────────────────────────
+
+// The drainage about here: the base level (m), the relative height (0 to
+// 1, ground.bk shaped_by), and what the land's colour and water take from
+// it: wet, how much of a cell lies on valley floors (each level's floors
+// counting by wet_weight, together as independent shares), ridge, how much
+// lies on interfluves away from every level's streams; both less their
+// means over the planet (landform), so they move the climate about its
+// own. share, how much of the cell the streams' channels cover (level 0's
+// reaches too small for rivers.bk, levels 1 and 2), gallery how much their
+// banks' strip. probe: the relative height at the four points drain_probed
+// was given (+s1, -s1, +s2, -s2).
+pub struct Drain {
+    base: f32,
+    rel: f32,
+    wet: f32,
+    ridge: f32,
+    share: f32,
+    gallery: f32,
+    probe: vec4<f32>,
+}
+pub fn drain_of(base: f32, rel: f32, t: Tally, probe: vec4<f32>) -> Drain {
+    var d: Drain;
+    d.base = base;
+    d.rel = rel;
+    d.wet = (1.0 - t.dry) - (1.0 - t.wet_even);
+    d.ridge = t.far - t.far_even;
+    d.share = t.share;
+    d.gallery = t.gallery;
+    d.probe = probe;
+    return d;
+}
+// A drainage of base level and relative height alone, as a kernel found it
+// for another (what the ground's height takes, ground.bk shaped_by).
+pub fn drain_held(br: vec2<f32>) -> Drain {
+    return drain_of(br.x, br.y, tally_none(), vec4<f32>(1.0));
+}
+// A cell `cell` wide's spread in metres, for the channels' share of it.
+pub fn cell_spread(cell: f32) -> f32 {
+    return 0.75 * max(cell, 1e-3) * 1.4142136;
+}
+
+pub fn drain_at(hi: vec3<f32>, lo: vec3<f32>, radius: f32, cell: f32, net: read_store<f32, 1>, seed: i32) -> Drain {
+    return drain_probed(hi, lo, radius, cell, net, seed, vec3<f32>(0.0), vec3<f32>(0.0), 1);
+}
+
+// The same, and the relative height at `np` - 1 more points (up to 4),
+// here + s1, - s1, + s2, - s2 (metres), from the same streams.
+pub fn drain_probed(hi: vec3<f32>, lo: vec3<f32>, radius: f32, cell: f32, net: read_store<f32, 1>, seed: i32,
+                    s1: vec3<f32>, s2: vec3<f32>, np: i32) -> Drain {
+    let f = local_frame(hi, lo, radius);
+    let up = normalize(hi + lo);
+    var q: array<vec2<f32>, 5>;
+    q[0] = vec2<f32>(0.0);
+    q[1] = vec_local(f, s1);
+    q[2] = -q[1];
+    q[3] = vec_local(f, s2);
+    q[4] = -q[3];
+    var rel: array<f32, 5>;
+    var acc: array<f32, 5>;
+    for (var p: i32 = 0; p < 5; p += 1) {
+        rel[p] = 1.0;
+        acc[p] = 0.0;
+    }
+    // The level's segments, and the next's as they are found.
+    var sa: array<vec4<f32>, 25>;
+    var sb: array<vec4<f32>, 25>;
+    var sc: array<vec4<f32>, 25>;
+    // The level's points' potentials.
+    var pa: array<vec4<f32>, 49>;
+    var pb: array<vec4<f32>, 49>;
+    let sg = cell_spread(cell);
+    var t = tally_none();
+
+    // Level 0: the reaches from the 5 x 5 rivers' points about here, every
+    // reach whose valley can reach here.
+    let l0 = spacing(0, radius);
+    let w0 = VALLEY * l0;
+    let f0 = fade(l0, cell);
+    let c0 = cell_of(up);
+    var zsum: f32 = 0.0;
+    var wsum: f32 = 0.0;
+    var dmin: f32 = 1.0e9;
+    for (var m: i32 = 0; m < 25; m += 1) {
+        let s = reach_seg(net, cell_next(c0, m % 5 - 2, m / 5 - 2), f);
+        sa[m] = s.a;
+        sb[m] = s.b;
+        sc[m] = s.c;
+        if (s.c.z > 0.0) {
+            let ch = chord(s.a, q[0]);
+            let wt = base_weight(ch.x / l0);
+            zsum += wt * mix(s.b.z, s.b.w, ch.y / ch.z);
+            wsum += wt;
+            if (f0 > 0.0) {
+                for (var p: i32 = 0; p < np; p += 1) {
+                    let dt = seg_dist(s.a, s.c, q[p], 0, w0, seed);
+                    acc[p] += valley_term(s, dt, w0);
+                    if (p == 0) {
+                        dmin = min(dmin, dt.x);
+                        t = tally_water(t, s, dt.x, 0, 1.0, sg);
+                    }
+                }
+            }
+        }
+    }
+    let base = wsum > 0.0 ? zsum / wsum : 0.0;
+    for (var p: i32 = 0; p < np; p += 1) { rel[p] = rel_after(1.0, acc[p], 0.0, f0); }
+    t = tally_level(t, 0, dmin, w0, f0);
+
+    // Levels 1 on, each from the last's segments while the cells resolve
+    // them; past that each the mean over its valleys.
+    var resolved = f0 > 0.0;
+    var ubar: f32 = 0.0;
+    for (var k: i32 = 1; k <= DRAIN_LEVELS; k += 1) {
+        let lk = spacing(k, radius);
+        let wk = VALLEY * lk;
+        let sig = rise(k);
+        let fk = fade(lk, cell);
+        if (!resolved || fk <= 0.0) {
+            ubar = ubar_next(ubar, k);
+            for (var p: i32 = 0; p < np; p += 1) { rel[p] = mean_rel(rel[p], ubar); }
+            t = tally_level(t, k, 1.0e9, wk, 0.0);
+            resolved = false;
+            continue;
+        }
+        let n = RIV_N << (2 * k);
+        let ck = cell_in(up, n);
+        let sk = seed + 1000 * k;
+        // The potentials of the 7 x 7 points about here and of here itself
+        // (index 49), each from the segments above about its parent.
+        var uq: f32 = 1.0e9;
+        for (var m: i32 = 0; m < 50; m += 1) {
+            var di: i32 = 0;
+            var dj: i32 = 0;
+            var x = q[0];
+            if (m < 49) {
+                di = m % 7 - 3;
+                dj = m / 7 - 3;
+                x = to_local(f, site_dir(cell_step(ck, di, dj, n), n, sk));
+            }
+            let pi = parent_of(ck.y + di) - parent_of(ck.y) + 2;
+            let pj = parent_of(ck.z + dj) - parent_of(ck.z) + 2;
+            var near = near_none();
+            for (var e: i32 = 0; e < 9; e += 1) {
+                let at = (pj + e / 3 - 1) * 5 + pi + e % 3 - 1;
+                near = near_try(near, Seg { a: sa[at], b: sb[at], c: sc[at] }, x, sig, lk);
+            }
+            if (m == 49) {
+                uq = streams_about(near, sig);
+            } else {
+                let pt = pot_of(near, x, k, lk, seed);
+                pa[m] = pt.a;
+                pb[m] = pt.b;
+            }
+        }
+        ubar = uq < 1.0e8 ? uq : ubar_next(ubar, k);
+        // The links of the 5 x 5 within, to the neighbour the potential
+        // falls to most steeply or to the network above, and their valleys
+        // here.
+        for (var p: i32 = 0; p < np; p += 1) { acc[p] = 0.0; }
+        dmin = 1.0e9;
+        for (var m: i32 = 0; m < 25; m += 1) {
+            let o = (m / 5 + 1) * 7 + m % 5 + 1;
+            let po = Pot { a: pa[o], b: pb[o] };
+            var tgt: i32 = o;
+            var steep: f32 = 0.0;
+            for (var nb: i32 = 0; nb < 9; nb += 1) {
+                let at = o + (nb / 3 - 1) * 7 + nb % 3 - 1;
+                let sl = fall(po, Pot { a: pa[at], b: pb[at] });
+                if (sl > steep) {
+                    steep = sl;
+                    tgt = at;
+                }
+            }
+            let s = link_of(po, Pot { a: pa[tgt], b: pb[tgt] }, tgt != o, k, sig,
+                            site_id(cell_step(ck, m % 5 - 2, m / 5 - 2, n), k));
+            sa[m] = s.a;
+            sb[m] = s.b;
+            sc[m] = s.c;
+            if (s.c.z > 0.0) {
+                for (var p: i32 = 0; p < np; p += 1) {
+                    let dt = seg_dist(s.a, s.c, q[p], k, wk, seed);
+                    acc[p] += valley_term(s, dt, wk);
+                    if (p == 0) {
+                        dmin = min(dmin, dt.x);
+                        t = tally_water(t, s, dt.x, k, fk, sg);
+                    }
+                }
+            }
+        }
+        for (var p: i32 = 0; p < np; p += 1) { rel[p] = rel_after(rel[p], acc[p], ubar, fk); }
+        t = tally_level(t, k, dmin, wk, fk);
+    }
+    return drain_of(base, rel[0], t, vec4<f32>(rel[1], rel[2], rel[3], rel[4]));
+}
+
+// The relative height `rel` of drainage d applied to ground h metres up:
+// the base level plus rel of the height over it; ground under the base
+// level (a hollow) as it is.
+pub fn drained(h: f32, base: f32, rel: f32) -> f32 {
+    if (h <= base) { return h; }
+    return base + (h - base) * rel;
+}
