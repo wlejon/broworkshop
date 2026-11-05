@@ -76,8 +76,13 @@ pub fn phase(cos_sun: f32) -> f32 {
 // clouds seen from above at dusk a flat mauve-brown where they glow gold on
 // every bump toward the sun, dark between.
 const MANY_FACING: f32 = 0.5;
+// The first scatterings' share. A thick deck under a high sun, seen from
+// above, sends back about 0.8 of a white card's light (conservative
+// scattering, g 0.85); at 0.55 its tops sent back 0.58, and from orbit every
+// cumulus was a dull grey not much brighter than the forest under it.
+const MANY_FIRST: f32 = 1.1;
 pub fn sun_many(tau_sun: vec4<f32>, mu_s: f32) -> vec4<f32> {
-    return (0.85 / 3.14159) * (0.55 * mix(mu_s, 1.0, MANY_FACING) * exp(-0.6 * tau_sun)
+    return (0.85 / 3.14159) * (MANY_FIRST * mix(mu_s, 1.0, MANY_FACING) * exp(-0.6 * tau_sun)
                                + 0.45 * mu_s / (1.0 + 0.1125 * tau_sun));
 }
 pub fn sky_many(tau_sun: vec4<f32>, mu_s: f32) -> vec4<f32> {
@@ -95,9 +100,13 @@ fn tops(f: f32, v: f32) -> vec4<f32> {
 // column's top is in the sun, reached through a smooth maximum over
 // CLOUD_TOP_SOFT of the height (at a hard one, every such patch had a hard
 // edge across the bases).
+// Less the knee's own half-width, so a point at a top has nothing above it:
+// with it, every top was lit through 60 m of cloud (an optical depth of
+// 1.8 at its very surface), half its light, and from orbit, where the light
+// comes from the tops' first tens of metres, the cumuli were a dull grey.
 fn soft_tops(s: f32, f: f32, v: f32) -> vec4<f32> {
     let over = tops(f, v) - s;
-    return s + 0.5 * (over + sqrt(over * over + CLOUD_TOP_SOFT * CLOUD_TOP_SOFT));
+    return s + 0.5 * (over + sqrt(over * over + CLOUD_TOP_SOFT * CLOUD_TOP_SOFT) - CLOUD_TOP_SOFT);
 }
 
 // The depth of cloud toward the sun from height share s of a column (F, v):

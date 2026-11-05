@@ -125,7 +125,10 @@ const NOISE = noiseSlices();
 export const CLOUD_DETAIL_VAR = NOISE_VAR * (0.07 * 0.07 + 0.04 * 0.04) + BILLOW_VAR * (0.03 * 0.03 + 0.02 * 0.02);
 
 // A bound on the gradient (per m along the layer) of the column resolved at
-// footprint w: what a level's amount can change by within a distance.
+// footprint w: what a level's amount can change by within a distance. Here
+// an octave counts in full from 4 w a wavelength; the column (clouds.bk)
+// counts it from 4 w / COLUMN_SHARP.
+const COLUMN_SHARP = 2;
 function gradientBound(w) {
     let g = 0;
     for (const [wavelength, amp] of OCTAVES) {
@@ -152,8 +155,13 @@ function gradientBound(w) {
     // scales every cumulus octave's strength.
     const crowd = 3 * NOISE_SLOPE * (1.8 + 1.2) / CLUSTERS.size;
     g += crowd * (CLUSTERS.lift + (1 - CLUSTERS.gap) * 0.32 / (1 - 0.62));
+    // The weather held back where the air convects: its slope at most the
+    // weather's (counted above), and the convection's change (3 a unit of
+    // its noise) times what it holds back of the weather's excess (under 1.4).
+    g += CUMULUS_HOLD * 1.4 * 3 * NOISE_SLOPE / CONV_REGION;
     return g;
 }
+const CUMULUS_HOLD = 0.75, CONV_REGION = 700000;
 const CLUSTERS = { size: 90000, gap: 0.3, lift: 0.12 };
 const CELLS = { size: 25000, amp: 0.22, width: 0.22, resolve: 8000, take: 0.35, region: 1500000, warp: 0.5, flip: 6 };
 const STREETS = { spacing: 4000, amp: 0.09, region: 800000, warp: 80000, warpRows: 3 };
@@ -259,7 +267,7 @@ export function createClouds(scene, radius, module, readers, seed, hook, maxGrou
     const bounds = new Float32Array(4 * (TILE_LEVELS + 1));
     for (let l = 0; l <= TILE_LEVELS; l++) {
         const w = 2 * radius * (2 / 2 ** l / TILE);
-        bounds.set([w, gradientBound(w * 0.35)], 4 * l);
+        bounds.set([w, gradientBound(w * 0.35 / COLUMN_SHARP)], 4 * l);
     }
     const boundsBuffer = bro.kernel.createBuffer(bounds);
 

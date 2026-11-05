@@ -35,14 +35,18 @@ const PUFF_SKEW: f32 = 1.5;
 const PUFF_GAIN: f32 = 0.892;
 
 // The column at the unit direction q, resolved at a footprint of w metres:
-// an octave counts in full from 4 footprints a wavelength, not at all at 2,
-// and adds the variance of what it leaves out. Each octave's point is the
-// first's doubled (the wavelengths halve, so radius over each is exactly
-// twice the last's).
+// an octave counts in full from 2 footprints a wavelength, not at all at 1
+// (COLUMN_SHARP), and adds the variance of what it leaves out. The view
+// reads a footprint of two pixels (cloud_field.bk CACHE_SPAN), from cells a
+// pixel apart, so an octave counts in full from 4 cells: at 4 footprints,
+// from 8 pixels, a cumulus field from orbit was its blurred mean, a grey
+// sheet of partial cover. Each octave's point is the first's doubled (the
+// wavelengths halve, so radius over each is exactly twice the last's).
+const COLUMN_SHARP: f32 = 2.0;
 pub fn column(q: vec3<f32>, w: f32, radius: f32) -> vec2<f32> {
     var f: f32 = F0;
     var v: f32 = 0.0;
-    let inv_w = 1.0 / w;
+    let inv_w = COLUMN_SHARP / w;
     // The weather: cloud systems from 2000 km down to fronts and cells of
     // 30 km, clear skies between them; each octave 0.6 of the last. Below
     // the systems themselves the winds shear the weather along the parallels
@@ -74,6 +78,15 @@ pub fn column(q: vec3<f32>, w: f32, radius: f32) -> vec2<f32> {
     let qf = q;
     // (Convective: as strong as the region's convection, below.)
     let conv = convection(q, radius);
+    // Where the air convects, the weather's moisture goes up in the cumuli
+    // rather than spreading as a sheet: the weather's amount over CU_CAP
+    // rises only 1 - CU_HOLD as fast (a smooth knee CU_KNEE wide), so a
+    // crowd is cumuli standing on clear troughs, and only a strong system's
+    // deck closes over them (stratocumulus, textured by the cumuli's crests).
+    // At the plain weather's amount, every crowd over a moist region was one
+    // grey sheet perforated by holes. Its slope is at most the weather's.
+    let over = f - CU_CAP;
+    f -= conv * CU_HOLD * 0.5 * (over + sqrt(over * over + CU_KNEE * CU_KNEE));
     let cells = cell_strength(q, radius) * conv;
     if (cells > 0.0) {
         let r = clamp(CELL_RESOLVE * inv_w * 0.5 - 1.0, 0.0, 1.0);
@@ -142,6 +155,12 @@ pub fn column(q: vec3<f32>, w: f32, radius: f32) -> vec2<f32> {
 // Full in about a fifth of the regions, at its least in two fifths. Only
 // lowers the cumuli's amplitude, so clouds.js's gradient bound still holds.
 const CONV_REGION: f32 = 700000.0;
+// The weather's amount a convecting region holds as cumuli (column): over
+// CU_CAP, CU_HOLD of the rise is held back, through a knee CU_KNEE wide.
+// clouds.js's gradient bound has them.
+const CU_CAP: f32 = 0.06;
+const CU_HOLD: f32 = 0.5;
+const CU_KNEE: f32 = 0.05;
 fn convection(q: vec3<f32>, radius: f32) -> f32 {
     return clamp(perlin_f32(q * (radius / CONV_REGION), 241) * 3.0 + 0.35, 0.12, 1.0);
 }
@@ -289,7 +308,11 @@ fn cloud_sub(occ: f32, rank: f32, len: f32) -> f32 {
 // the grass and the trees from their sun grids (sun.bk).
 pub fn cloud_light(dir: vec3<f32>, h: f32, to_sun: vec3<f32>, w: f32, radius: f32, seed: i32,
                    detail_var: f32) -> vec3<f32> {
-    let fw = max(w, CLOUD_COLUMN_MIN);
+    // The column at COLUMN_SHARP the footprint: an octave in full from 4
+    // footprints, as the light's cells (a few pixels each) hold it; at the
+    // view's sharpness its seven columns a cell slowed the tiles' production
+    // by a tenth.
+    let fw = max(w, CLOUD_COLUMN_MIN) * COLUMN_SHARP;
     let base = CLOUD_BASE + max(terrain_base_near(dir, radius, LIFT_OCTAVES, seed), 0.0);
     let s0 = clamp((h - base) / CLOUD_DEPTH, 0.0, 1.0);
     let ds = (1.0 - s0) / (CLOUD_SHADOW_STEPS as f32);

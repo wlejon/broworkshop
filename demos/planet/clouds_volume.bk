@@ -161,8 +161,12 @@ fn skip_to(t: f32, dt: f32, clear: f32, jit: f32, mu: f32, dt_max: f32) -> f32 {
 // off the nadir from orbit, its unresolved cumuli grey rings on a mottle;
 // the slab's one column holds across six as well to the eye.
 const SLAB_STEPS: i32 = 16;
-const SLAB_W0: f32 = 300.0;
-const SLAB_W1: f32 = 600.0;
+// From 240 m the detail is wholly unresolved and the march reads the slab's
+// column, adding only its steps' error: at 300 to 600 m, from 350 km, every
+// cumulus was a flat lilac grey drawn in contour rings, where the slab's are
+// white.
+const SLAB_W0: f32 = 160.0;
+const SLAB_W1: f32 = 240.0;
 const SLAB_CROSS: f32 = 6.0;
 struct Slab {
     l: vec3<f32>,
@@ -245,6 +249,7 @@ fn slab(ray: volume::Ray, eye: vec3<f32>, dir: vec3<f32>, hc: f32, mu: f32, t0: 
         tc = mix(tc, vec4<f32>(1.0), gone);
         let grown = max(cover, fill);
         tc = mix(vec4<f32>(1.0), (cover * tc + grown - cover) / max(grown, vec4<f32>(1.0e-4)), step(vec4<f32>(1.0e-30), grown));
+        inside *= cover / max(grown, vec4<f32>(1.0e-4));
         cover = grown;
         if (max4(fill) <= 0.0) {
             inside = vec4<f32>(0.0);
@@ -253,9 +258,13 @@ fn slab(ray: volume::Ray, eye: vec3<f32>, dir: vec3<f32>, hc: f32, mu: f32, t0: 
         let sigma = CLOUD_SIGMA * fill / max(cover, vec4<f32>(1.0e-4));
         let sd = sun_depth(x.s, f, v, mu_s);
         let rate = step(vec4<f32>(1.0e-30), sd.above) * (CLOUD_SIGMA * descent / mu_s);
-        // A sub-column entered within this step is lit from its top: half
-        // the step back on average, as the march's.
-        let back = (1.0 - inside) * min(sd.above / max(descent, 1.0e-6), vec4<f32>(0.5 * dt));
+        // A sub-column entered within this step is lit from its top, where
+        // the ray crossed it since the last sample (clear): up to a whole
+        // step back. The march's half a step on average (it may have come in
+        // through a side) cut the brightest skin off every top that fell in
+        // a step's earlier half, and as the tops' heights crossed the slab's
+        // steps, each top was drawn in pale contour rings.
+        let back = (1.0 - inside) * min(sd.above / max(descent, 1.0e-6), vec4<f32>(dt));
         let kept = max(sd.tau - rate * back, vec4<f32>(0.0)) / max(sd.tau, vec4<f32>(1.0e-6));
         let tau0 = min(sd.tau, vec4<f32>(field_tau(cp, ct, x.s))) * kept;
         let tau_sun = billow_tau(x.p, x.s, f, v, w, to_sun, mu_s, fill, tau0, fc);
@@ -490,6 +499,9 @@ pub fn volume(ray: volume::Ray) -> volume::Light {
         // end unread, the edge is the cloudy end); where the edge read in
         // turn is clear or empty, at the step that landed (in cloud).
         // No finer than the footprint the field is read at.
+        // The gap since the last point known clear, before the entry below
+        // moves it here: where the cloud was entered (back, below).
+        let gap = t - t_prev;
         if (edge != 0) {
             fine_until = edge_b;
             t_prev = t;
@@ -520,9 +532,11 @@ pub fn volume(ray: volume::Ray) -> volume::Light {
         tr *= mix(vec4<f32>(1.0), 1.0 - cover + cover * tc, gone);
         cover *= 1.0 - gone;
         tc = mix(tc, vec4<f32>(1.0), gone);
-        // More cover: the columns it adds are clear so far.
+        // More cover: the columns it adds are clear so far, and are entered
+        // here (inside, below, becomes the share of the cover entered before).
         let grown = max(cover, fill);
         tc = mix(vec4<f32>(1.0), (cover * tc + grown - cover) / max(grown, vec4<f32>(1.0e-4)), step(vec4<f32>(1.0e-30), grown));
+        inside *= cover / max(grown, vec4<f32>(1.0e-4));
         cover = grown;
         var sigma: vec4<f32> = CLOUD_SIGMA * fill / max(cover, vec4<f32>(1.0e-4));
         let mu_s = max(dot(to_sun, x.up), 0.04);
@@ -539,9 +553,17 @@ pub fn volume(ray: volume::Ray) -> volume::Light {
         // nothing: a sample lands anywhere up to a step below a top.
         // Through its top when the ray came down far enough within the gap
         // since the last point known clear, else through its side somewhere
-        // in that gap, half of it on average: the two meet as the ray levels
-        // (a cut-off at a slope drew a line across every cloud there).
-        let back = (1.0 - inside) * min(sd.above / max(descent, 1.0e-6), vec4<f32>(0.5 * (t - t_prev)));
+        // in that gap, half of it on average as the top is further above:
+        // the two meet as the ray levels (a cut-off at a slope drew a line
+        // across every cloud there). The gap is the one before the entry
+        // moved the last clear point here: taken after, it was nothing, and
+        // a cloud entered without the edge search (a step under a
+        // footprint, every top from orbit) was lit from wherever its first
+        // sample fell below the top, its skin unlit: a dull grey in contour
+        // rings as the tops crossed the steps. At most the whole gap (a top
+        // crossed in its earlier half lost its brightest skin).
+        let over_top = sd.above / max(descent, 1.0e-6);
+        let back = (1.0 - inside) * min(over_top, gap * (0.5 + 0.5 * gap / max(over_top, vec4<f32>(gap + 1.0e-6))));
         // Where the sun field finds a shorter way out (a side toward a low
         // sun, the sun's ray leaving the cloud long before any top), it. The
         // way back to where the step entered keeps of either depth what it
