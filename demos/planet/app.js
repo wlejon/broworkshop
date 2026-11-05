@@ -74,6 +74,7 @@ const MODULES = { 'planet::ground': readApp('ground.bk'), 'planet::relief': read
                   'planet::clouds': readApp('clouds.bk'), 'planet::anchor': readApp('anchor.bk'),
                   'planet::climate': readApp('climate.bk'), 'planet::dendry': readApp('dendry.bk'),
                   'planet::dendry_grid': readApp('dendry_grid.bk'), 'planet::dendry_field': readApp('dendry_field.bk'),
+                  'planet::cloud_field': readApp('cloud_field.bk'), 'planet::cloud_lighting': readApp('cloud_lighting.bk'),
                   tiles: bro.tiles.module };
 const mod = bro.kernel.compile(readApp('planet.bk'), { file: 'planet.bk', modules: MODULES });
 const rivers = createRivers(bro.kernel.compile(readApp('riverbuild.bk'), { file: 'riverbuild.bk', modules: MODULES }), RADIUS, SEED);
