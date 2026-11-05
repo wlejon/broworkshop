@@ -606,15 +606,26 @@ pub fn fragment(v: mesh::Vertex, s_in: mesh::Surface) -> mesh::Surface {
         let dq = vec3<f32>(v.v1.w, v.v2.w, v.v3.w);
         var lattice = exp2(a0.w as f32);
         var gq = vec3<f32>(0.0);
+        // The mean factors octave by octave: the span doubles, so the factor
+        // exp(-NOISE_BOX s^2) goes to its fourth power.
+        var mf_pix = mean_factor(a0.w, oct_pix);
+        var mf_tex = mean_factor(a0.w, oct_tex);
         for (var o: i32 = a0.w; o < o_end; o += 1) {
             let fo = o as f32;
             let fade_p = clamp(o_nyquist - fo, 0.0, 1.0);
             let fade_t = clamp(oct_tex + RIDGE_PAST - fo, 0.0, 1.0);
-            let x = 6.2831853 * min(span_at(o, oct_tex), 1.0);
-            let kept = max(sin(x) / x, 0.0);
             let nq = simplex_grad(simplex_past(at, dq * lattice), SEED + 100 + o);
-            let dr = ridge_cell_slope(nq.x, mean_factor(o, oct_pix)) * fade_p
-                   - ridge_cell_slope(nq.x, mean_factor(o, oct_tex)) * fade_t * kept;
+            var dr = ridge_cell_slope(nq.x, mf_pix) * fade_p;
+            // What the texels hold of it (none past half its wavelength: no
+            // slope taken).
+            let x = 6.2831853 * min(span_at(o, oct_tex), 1.0);
+            if (fade_t > 0.0 && x < 3.1415926) {
+                dr -= ridge_cell_slope(nq.x, mf_tex) * fade_t * (sin(x) / x);
+            }
+            mf_pix *= mf_pix;
+            mf_pix *= mf_pix;
+            mf_tex *= mf_tex;
+            mf_tex *= mf_tex;
             let scale = o < FINE_FIRST ? v.uv.x : mix(v.uv.y, v.v5.w, kept_share(o));
             gq += nq.yzw * (ridge_amp(o) * scale * dr * lattice);
             at = simplex_twice(at);

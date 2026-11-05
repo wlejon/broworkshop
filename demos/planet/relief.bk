@@ -165,8 +165,9 @@ pub fn simplex_twice(at: SimplexAt) -> SimplexAt {
 // |r|^2) / 2 (r the point's offset from it) to the fourth, times its
 // gradient's dot with r.
 fn corner(seed: i32, xp: i32, yp: i32, zp: i32, r: vec3<f32>) -> vec4<f32> {
+    // Past the point's reach f is 0 and so is its share: no branch, so the
+    // lanes of a warp take the corners alike.
     let f = max(0.5 * (0.75 - dot(r, r)), 0.0);
-    if (f <= 0.0) { return vec4<f32>(0.0); }
     // The gradient grad_dot_common3d dots with: bit 0 the sign of one axis
     // (y where hash & 13 is over 7, else x), bit 1 of another (y under 2,
     // x at 12, else z).
