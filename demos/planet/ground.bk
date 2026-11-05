@@ -17,7 +17,7 @@ from planet::climate import Climate, climate_at, cover_at, temp_at, snow_at;
 // per unit of input.
 from planet::relief import BASE_WAVELENGTH, RIDGE_MEAN, NOISE_VAR, NOISE_GRAD_VAR, NOISE_BOX, RIDGE_FIRST, RIDGE_LAST,
     RIDGE_PAST, FINE_FIRST, WARP_OCTAVE, WARP_DISPLACE, ridge_amp, normal_cdf, ridge_cell_mean, span_at, mean_factor, SimplexAt,
-    simplex_grad, simplex_f32, simplex_grad_f32, GRAD_TO_VALUE;
+    simplex_grad, simplex_f32, simplex_grad_f32, GRAD_TO_VALUE, kept_share;
 from planet::anchor import Anchor, Lattice, PerlinAt, RANGE, VARY_FIRST, STRATA_FOLD, twice, doubled, simplex_from,
     perlin_from, moved, anchor_near;
 
@@ -252,24 +252,33 @@ pub fn relief_offset(a: Anchor, off: vec3<f32>, seed: i32) -> vec3<f32> {
 // mean over one of the tile's cells (relief.bk ridge_cell_mean) less the
 // ridge's mean. x the octaves below FINE_FIRST, y those from it on: the
 // ground's fine relief (a 1.2 km wavelength on), spurs, gullies and knolls,
-// which a valley's sides carry on (terrain) instead of being planed away.
-fn relief(a: Anchor, off: vec3<f32>, octaves: f32, seed: i32) -> vec2<f32> {
+// which a valley's sides carry on (terrain) instead of being planed away;
+// z the part of the fine relief finer than the drainage's gullies
+// (relief.bk kept_share), which rides on the drained ground unscaled.
+fn relief(a: Anchor, off: vec3<f32>, octaves: f32, seed: i32) -> vec3<f32> {
     let n = min(ceil(octaves + RIDGE_PAST) as i32, RIDGE_LAST);
-    if (n <= RIDGE_FIRST) { return vec2<f32>(0.0, 0.0); }
+    if (n <= RIDGE_FIRST) { return vec3<f32>(0.0); }
     var lat = doubled(a.p, RIDGE_FIRST);
     var d = relief_offset(a, off, seed) * exp2(RIDGE_FIRST as f32);
     var broad: f32 = 0.0;
     var fine: f32 = 0.0;
+    var kept: f32 = 0.0;
     let past = octaves + RIDGE_PAST;
     for (var o: i32 = RIDGE_FIRST; o < n; o += 1) {
         let fade = clamp(past - (o as f32), 0.0, 1.0);
         let mean = ridge_cell_mean(simplex_grad(simplex_from(lat, d), seed + 100 + o).x, noise_mean_factor(o, octaves));
         let v = (mean - RIDGE_MEAN) * ridge_amp(o) * fade;
-        if (o < FINE_FIRST) { broad += v; } else { fine += v; }
+        if (o < FINE_FIRST) {
+            broad += v;
+        } else {
+            let ks = kept_share(o);
+            fine += v * (1.0 - ks);
+            kept += v * ks;
+        }
         lat = twice(lat);
         d *= 2.0;
     }
-    return vec2<f32>(broad, fine);
+    return vec3<f32>(broad, fine, kept);
 }
 
 // The anchor's offset e in p units.
@@ -282,15 +291,16 @@ fn p_offset(e: vec3<f32>, radius: f32) -> vec3<f32> {
 // (FINE_FIRST). Continents from the broad octaves, ranges where a broad mask
 // allows them on land (lifted, and carrying the ridged relief), and the fine
 // octaves over both, rougher in the ranges. z the uplift, which scales the
-// relief.
-pub fn terrain_parts(a: Anchor, e: vec3<f32>, radius: f32, octaves: f32, seed: i32) -> vec3<f32> {
+// relief; w the fine relief finer than the drainage's gullies (relief), which
+// the drainage leaves as it is.
+pub fn terrain_parts(a: Anchor, e: vec3<f32>, radius: f32, octaves: f32, seed: i32) -> vec4<f32> {
     return terrain_parts_over(a, e, masks(a, p_offset(e, radius), radius, octaves, seed), radius, octaves, seed);
 }
 // The same over masks `m` already read: a supersampled cell reads them once
 // at its centre, at its own octaves, where they are the mean over the cell
 // (their finest octave is tens of kilometres; the coast's clamps take their
 // mean over the rest, masks y).
-fn terrain_parts_over(a: Anchor, e: vec3<f32>, m: vec4<f32>, radius: f32, octaves: f32, seed: i32) -> vec3<f32> {
+fn terrain_parts_over(a: Anchor, e: vec3<f32>, m: vec4<f32>, radius: f32, octaves: f32, seed: i32) -> vec4<f32> {
     let off = p_offset(e, radius);
     let land = clamp_mean(m.x * 3.0 + 0.15, m.y * 3.0, -1.0, 1.0);
     let uplift = m.z * m.w;
@@ -298,11 +308,12 @@ fn terrain_parts_over(a: Anchor, e: vec3<f32>, m: vec4<f32>, radius: f32, octave
     let amp = DETAIL_PLAINS + DETAIL_RANGES * uplift;
     let broad = fbm_to(a.p, off, octaves, 4, FINE_FIRST, seed + 200);
     let fine = fbm_to(a.p, off, octaves, FINE_FIRST, 64, seed + 200) * exp2((4 - FINE_FIRST) as f32);
-    return vec3<f32>(land * 1100.0 + uplift * (UPLIFT + r.x) + broad * amp, uplift * r.y + fine * amp, uplift);
+    return vec4<f32>(land * 1100.0 + uplift * (UPLIFT + r.x) + broad * amp, uplift * r.y + fine * amp, uplift,
+                     uplift * r.z);
 }
 pub fn terrain_base(a: Anchor, e: vec3<f32>, radius: f32, octaves: f32, seed: i32) -> f32 {
     let t = terrain_parts(a, e, radius, octaves, seed);
-    return t.x + t.y;
+    return t.x + t.y + t.w;
 }
 // The same at a direction known only to f32 (anchor.bk anchor_near): for the
 // clouds' and the rivers' coarse work, good to about a metre.
@@ -318,52 +329,53 @@ pub fn cell_width(octaves: f32) -> f32 {
 // The ground at offset e, metres above the sphere, or the water over it:
 // the terrain drained (dendry.bk: its height over the base level its water
 // drains to, scaled by the relative height of the valleys within valleys
-// there, so the valleys' sides carry its relief), cut down by the rivers'
-// channels and floodplains (rivers.bk), and a lake's level where it stands
-// over that. The rivers' cut joins the ground by a smooth minimum over
-// CUT_BLEND metres, its sides carrying the fine relief on, faded out over
-// the last VALLEY_FLOOR metres down to its bed.
+// there, each level's cut saturating at its own depth, so the valleys'
+// sides carry its relief), the relief finer than the drainage's gullies on
+// it unscaled, cut down by the rivers' channels and floodplains
+// (rivers.bk), and a lake's level where it stands over that. The rivers'
+// cut joins the ground by a smooth minimum over CUT_BLEND metres, its
+// sides carrying the fine relief on, faded out over the last VALLEY_FLOOR
+// metres down to its bed.
 const VALLEY_FLOOR: f32 = 150.0;
 const CUT_BLEND: f32 = 40.0;
 //
-// y and z: how much the ground here moves with the relief's octaves below
-// FINE_FIRST and from it on, per metre of relief at full uplift (relief):
-// the uplift where the ground stands, scaled as the drainage scales it,
-// less where a river cuts it (the fine part as its sides carry it on),
+// y, z and w: how much the ground here moves with the relief's octaves
+// below FINE_FIRST, from it on, and the part of those finer than the
+// gullies (relief), per metre of relief at full uplift: the uplift where
+// the ground stands, scaled as the drainage scales it (the finest not),
+// less where a river cuts it (the fine parts as its sides carry them on),
 // none under a lake. The ground's shader scales the octaves finer than its
 // texels by them (ground_mesh.bk).
-pub fn terrain_shaped(a: Anchor, e: vec3<f32>, radius: f32, octaves: f32, seed: i32, net: read_store<f32, 1>) -> vec3<f32> {
-    return terrain_drained(a, e, radius, octaves, seed, net, drain_at(a.dir, e, radius, cell_width(octaves), net, seed));
-}
-// The same with its drainage found already (a tile's, dendry_grid.bk).
-pub fn terrain_drained(a: Anchor, e: vec3<f32>, radius: f32, octaves: f32, seed: i32, net: read_store<f32, 1>,
-                       d: Drain) -> vec3<f32> {
-    return shaped_by(terrain_parts(a, e, radius, octaves, seed),
-                     water_at(a.dir, e, radius, cell_width(octaves), net, seed), d);
+pub fn terrain_shaped(a: Anchor, e: vec3<f32>, radius: f32, octaves: f32, seed: i32, net: read_store<f32, 1>) -> vec4<f32> {
+    return shaped_by(terrain_parts(a, e, radius, octaves, seed), water_at(a.dir, e, radius, cell_width(octaves), net, seed),
+                     drain_at(a.dir, e, radius, cell_width(octaves), net, seed), radius);
 }
 // The ground's parts (terrain_parts) drained by d and cut by the water w
-// found for them.
-fn shaped_by(t: vec3<f32>, w: Water, d: Drain) -> vec3<f32> {
-    return shaped_rel(t, w, d.base, d.rel);
+// found for them. (A tile's kernels read their drainage, dendry_grid.bk,
+// only once they have the parts: held through the noise, it costs them
+// threads.)
+pub fn shaped_by(t: vec4<f32>, w: Water, d: Drain, radius: f32) -> vec4<f32> {
+    return shaped_rel(t, w, d, d.rel, radius);
 }
-fn shaped_rel(t: vec3<f32>, w: Water, base: f32, rel: f32) -> vec3<f32> {
-    let h0 = t.x + t.y;
-    let h = drained(h0, base, rel);
-    // d h / d h0.
-    let k = h0 > base ? rel : 1.0;
+// The same at relative height `rel` (a probe's, site_ground).
+fn shaped_rel(t: vec4<f32>, w: Water, d: Drain, rel: f32, radius: f32) -> vec4<f32> {
+    // The drained height and d h / d (t.x + t.y).
+    let dr = drained(t.x + t.y, d.base, rel, d, radius);
+    let k = dr.y;
+    let h = dr.x + t.w;
     let side = smoothstep(0.0, VALLEY_FLOOR, w.near.x - w.bed);
-    let valley = w.near.x + t.y * side;
+    let valley = w.near.x + (t.y + t.w) * side;
     let x = h - valley;
     let m = max(CUT_BLEND - abs(x), 0.0) / CUT_BLEND;
     let cut = min(h, valley - m * m * CUT_BLEND * 0.25);
     let lake = lake_surface(cut, w);
-    if (lake > cut) { return vec3<f32>(lake, 0.0, 0.0); }
+    if (lake > cut) { return vec4<f32>(lake, 0.0, 0.0, 0.0); }
     let u = t.z;
-    if (cut >= h) { return vec3<f32>(cut, u * k, u * k); }
+    if (cut >= h) { return vec4<f32>(cut, u * k, u * k, u); }
     // On the cut: d cut / d h and d cut / d valley.
     let sx = x >= 0.0 ? 1.0 : -1.0;
     let dh = 0.5 * m * sx;
-    return vec3<f32>(cut, u * k * dh, u * (k * dh + (1.0 - dh) * side));
+    return vec4<f32>(cut, u * k * dh, u * (k * dh + (1.0 - dh) * side), u * (dh + (1.0 - dh) * side));
 }
 pub fn terrain(a: Anchor, e: vec3<f32>, radius: f32, octaves: f32, seed: i32, net: read_store<f32, 1>) -> f32 {
     return terrain_shaped(a, e, radius, octaves, seed, net).x;
@@ -380,12 +392,9 @@ pub const SOIL_OCTAVES: f32 = 17.0;
 // The ground through SOIL_OCTAVES at offset e, its drainage and its water's
 // cut included.
 pub fn soil_height(a: Anchor, e: vec3<f32>, radius: f32, seed: i32, net: read_store<f32, 1>) -> f32 {
-    return soil_height_drained(a, e, radius, seed, net, drain_at(a.dir, e, radius, cell_width(SOIL_OCTAVES), net, seed));
-}
-// The same with its drainage found already (a tile's, dendry_grid.bk).
-pub fn soil_height_drained(a: Anchor, e: vec3<f32>, radius: f32, seed: i32, net: read_store<f32, 1>, d: Drain) -> f32 {
-    let w = water_at(a.dir, e, radius, cell_width(SOIL_OCTAVES), net, seed);
-    return shaped_by(terrain_parts(a, e, radius, SOIL_OCTAVES, seed), w, d).x;
+    let cell = cell_width(SOIL_OCTAVES);
+    return shaped_by(terrain_parts(a, e, radius, SOIL_OCTAVES, seed), water_at(a.dir, e, radius, cell, net, seed),
+                     drain_at(a.dir, e, radius, cell, net, seed), radius).x;
 }
 pub fn soil_gradient(a: Anchor, e: vec3<f32>, radius: f32, seed: i32, net: read_store<f32, 1>) -> f32 {
     return site_ground(a, e, radius, SOIL_OCTAVES, seed, net).grad;
@@ -411,12 +420,12 @@ pub fn site_ground(a: Anchor, e: vec3<f32>, radius: f32, octaves: f32, seed: i32
     let w = water_at(a.dir, e, radius, cell, net, seed);
     let d = drain_probed(a.dir, e, radius, cell, net, seed, t1 * step, t2 * step, 5);
     let k = step / radius;
-    let hu = shaped_rel(terrain_parts(a, moved(a.dir, e, t1 * k), radius, SOIL_OCTAVES, seed), w, d.base, d.probe.x).x
-           - shaped_rel(terrain_parts(a, moved(a.dir, e, -t1 * k), radius, SOIL_OCTAVES, seed), w, d.base, d.probe.y).x;
-    let hv = shaped_rel(terrain_parts(a, moved(a.dir, e, t2 * k), radius, SOIL_OCTAVES, seed), w, d.base, d.probe.z).x
-           - shaped_rel(terrain_parts(a, moved(a.dir, e, -t2 * k), radius, SOIL_OCTAVES, seed), w, d.base, d.probe.w).x;
+    let hu = shaped_rel(terrain_parts(a, moved(a.dir, e, t1 * k), radius, SOIL_OCTAVES, seed), w, d, d.probe.x, radius).x
+           - shaped_rel(terrain_parts(a, moved(a.dir, e, -t1 * k), radius, SOIL_OCTAVES, seed), w, d, d.probe.y, radius).x;
+    let hv = shaped_rel(terrain_parts(a, moved(a.dir, e, t2 * k), radius, SOIL_OCTAVES, seed), w, d, d.probe.z, radius).x
+           - shaped_rel(terrain_parts(a, moved(a.dir, e, -t2 * k), radius, SOIL_OCTAVES, seed), w, d, d.probe.w, radius).x;
     var s: Site;
-    s.h = shaped_by(terrain_parts(a, e, radius, octaves, seed), w, d).x;
+    s.h = shaped_by(terrain_parts(a, e, radius, octaves, seed), w, d, radius).x;
     s.grad = sqrt(hu * hu + hv * hv) / (2.0 * step);
     s.water = w;
     s.drain = d;
@@ -463,7 +472,7 @@ pub fn cell_ground_drained(a: Anchor, rec: tiles::Record, s: f32, t: f32, cell: 
     var out: CellGround;
     out.drain = d;
     if (octaves >= SUPERSAMPLE_BELOW) {
-        out.h = shaped_by(terrain_parts(a, e, radius, octaves, seed), w, d).x;
+        out.h = shaped_by(terrain_parts(a, e, radius, octaves, seed), w, d, radius).x;
         return out;
     }
     let m = masks(a, p_offset(e, radius), radius, octaves, seed);
@@ -472,7 +481,8 @@ pub fn cell_ground_drained(a: Anchor, rec: tiles::Record, s: f32, t: f32, cell: 
         for (var i: i32 = 0; i < SUB; i += 1) {
             let ds = (((i as f32) + 0.5) / (SUB as f32) - 0.5) * cell;
             let dt = (((j as f32) + 0.5) / (SUB as f32) - 0.5) * cell;
-            sum += shaped_by(terrain_parts_over(a, frame_dir(rec, s + ds, t + dt), m, radius, octaves + 2.0, seed), w, d).x;
+            sum += shaped_by(terrain_parts_over(a, frame_dir(rec, s + ds, t + dt), m, radius, octaves + 2.0, seed), w, d,
+                             radius).x;
         }
     }
     out.h = sum / ((SUB * SUB) as f32);
@@ -717,24 +727,6 @@ pub fn with_streams(w: Water, share: f32, gallery: f32, cl: Climate) -> Water {
     o.gallery = max(w.gallery, gallery * runs);
     o.channel = max(w.channel, 0.3 * share * runs);
     return o;
-}
-
-// The landform's climate: valley floors gather water and their soil holds
-// it, interfluves and their crests shed it, so the land is wetter and
-// greener down its valleys and drier and barer along its ridges, at every
-// scale the drainage has (dendry.bk Drain wet and ridge, both about their
-// means, so the climate's own moisture holds on average).
-const LANDFORM_WET: f32 = 0.35;
-const LANDFORM_DRY: f32 = 0.3;
-pub fn landform_climate(cl: Climate, wet: f32, ridge: f32) -> Climate {
-    let m = clamp(cl.moist + LANDFORM_WET * wet - LANDFORM_DRY * ridge, 0.0, 1.0);
-    return Climate { temp: cl.temp, moist: m, sand: cl.sand, rock: cl.rock };
-}
-// And the forest's mosaic leans to the valleys: woods down them, open
-// ground along the crests (woodland's W, about its mean).
-const LANDFORM_WOOD: f32 = 0.9;
-pub fn landform_wood(wood: vec2<f32>, wet: f32, ridge: f32) -> vec2<f32> {
-    return vec2<f32>(wood.x + LANDFORM_WOOD * (wet - 0.6 * ridge), wood.y);
 }
 
 // Forests grow as a mosaic at every scale: whole forests and open country

@@ -22,11 +22,19 @@
 // rivers' beds about here, `base`), 1 the terrain's own height over it, so
 // the relief a valley cuts scales with the height there is to cut. A
 // stream stands at its relative height u and its valley rises from it to
-// the terrain over VALLEY of its spacing either side, carrying the
-// terrain's own relief scaled (ground.bk shaped_by): ranges are dissected
-// deep, plains gently, and no valley digs below its river. The ground's
-// relative height is the soft minimum of every stream's valley, so ridges
-// stand between valleys at every scale.
+// the terrain over VALLEY of its spacing either side (less for a stream
+// that gathers little), carrying the terrain's own relief scaled
+// (ground.bk shaped_by): ranges are dissected deep, plains gently, and no
+// valley digs below its river. The ground's relative height is the soft
+// minimum of every stream's valley, so ridges stand between valleys at
+// every scale. Each level's share of it (drops) is kept apart, so its
+// depth in metres saturates at its own scale (drained): a gully cuts as
+// deep as gullies do however high the range it cuts.
+//
+// The drainage is not one texture everywhere: each level cuts as strongly
+// as the region dissects (strengths: finely in dry land, sparsely in wet),
+// and where a regional grain runs the streams lean along it (grain_at), in
+// parallel lines and trellises.
 //
 // Refine, never replace: a level fades in as cells resolve it (fade), and
 // where they do not a cell holds its mean over the valleys it cannot see
@@ -49,6 +57,8 @@ module planet::dendry;
 import std::noise::*;
 from planet::rivers import RIV_N, RIV_REC, alpha_dir, face_of, face_a, face_e, face_f, cell_of, cell_next, point_index,
     river_width, meander_from, erf_approx;
+from planet::relief import simplex_grad_f32, GRAD_TO_VALUE;
+from planet::climate import moist_broad;
 
 pub const DRAIN_LEVELS: i32 = 4;
 const PI4: f32 = 0.78539816;
@@ -79,7 +89,7 @@ pub fn rise(k: i32) -> f32 {
 // A level's channel at the most it gathers (m): levels 1 and 2 carry
 // water, the finer are dry gullies (their width sets only how finely they
 // meander).
-fn stream_width(k: i32) -> f32 {
+pub fn stream_width(k: i32) -> f32 {
     if (k == 1) { return 4.0; }
     if (k == 2) { return 1.8; }
     if (k == 3) { return 0.9; }
@@ -105,6 +115,17 @@ fn ridge_weight(k: i32) -> f32 {
 // A level's spacing between points (m).
 pub fn spacing(k: i32, radius: f32) -> f32 {
     return 1.5707963 * radius / ((RIV_N << (2 * k)) as f32);
+}
+
+// How deep a level's valleys cut for the height there is to cut (drained):
+// a share of it while it is under the level's depth scale, DEPTH of its
+// valleys' half-width, and saturating toward that past it. A gully a few
+// tens of metres wide cuts metres into a range thousands of metres over its
+// base level, not hundreds: its walls stay soil slopes, where they were
+// cliffs whose rock streaked every range's gullies.
+const DEPTH: f32 = 1.2;
+pub fn depth_scale(k: i32, radius: f32) -> f32 {
+    return DEPTH * VALLEY * spacing(k, radius);
 }
 
 // How much of a level a cell `cell` metres wide holds: none from a cell
@@ -159,6 +180,15 @@ pub fn site_dir(c: vec3<i32>, n: i32, seed: i32) -> vec3<f32> {
 pub fn site_id(c: vec3<i32>, k: i32) -> i32 {
     return hash_primes3d(9173 + k, c.y * PRIME_X, c.z * PRIME_Y, c.x * PRIME_Z);
 }
+// 0 to 1 from a stream's number, a draw `salt` for each of its traits.
+fn id_unit(id: i32, salt: i32) -> f32 {
+    return (((hash_primes3d(salt, id, id * PRIME_Y, 0) >> 8) & 65535) as f32) / 65536.0;
+}
+// A stream's curve leaves its point at a slope of its own (across over
+// along), so no two run alike from their sources.
+pub fn start_slope(id: i32) -> f32 {
+    return (id_unit(id, 811) - 0.5) * 0.9;
+}
 
 // A tangent plane: metres along t1 and t2 from its origin hi + lo.
 pub struct Local {
@@ -183,6 +213,11 @@ pub fn to_local(f: Local, p: vec3<f32>) -> vec2<f32> {
 }
 pub fn vec_local(f: Local, v: vec3<f32>) -> vec2<f32> {
     return vec2<f32>(dot(v, f.t1), dot(v, f.t2));
+}
+// The direction of the plane's point x (to f32's rounding: for the fields
+// hundreds of kilometres across).
+pub fn from_local(f: Local, x: vec2<f32>) -> vec3<f32> {
+    return normalize(f.hi + (f.lo + (f.t1 * x.x + f.t2 * x.y) / f.r));
 }
 
 // ── Segments ───────────────────────────────────────────────────────────────
@@ -244,7 +279,8 @@ fn curve_offset(c: vec4<f32>, s: f32, len: f32, k: i32, seed: i32, across: f32) 
     // The streams' meanders stop at MEANDER_COARSE widths, four times the
     // rivers' (a gully's finest wiggles are the relief's).
     let width = k == 0 ? c.z : MEANDER_COARSE * c.z;
-    let far = across > 1.0e29 ? 0.0 : abs(across - bend);    return bend + meander_from(bitcast<i32>(c.w), s, len, width, seed + 131 * k, far);
+    let far = across > 1.0e29 ? 0.0 : abs(across - bend);
+    return bend + meander_from(bitcast<i32>(c.w), s, len, width, seed + 131 * k, far);
 }
 const ON_CURVE: f32 = 1.0e30;
 
@@ -372,14 +408,16 @@ fn slope_q(x: f32) -> i32 { return (clamp((x + 0.6) / 1.2, 0.0, 1.0) * 4095.0 + 
 fn slope_of(q: i32) -> f32 { return -0.6 + (q as f32) / 4095.0 * 1.2; }
 fn width_q(x: f32) -> i32 { return (clamp(x / 8.0, 0.0, 1.0) * 2047.0 + 0.5) as i32; }
 fn width_of(q: i32) -> f32 { return (q as f32) / 2047.0 * 8.0; }
-// A segment of level 1 on (its start's slope 0, no base level) as two
-// vec4s: a, and its heights, slope and width, number.
+// A segment of level 1 on (no base level; its start's slope is its
+// number's, start_slope) as two vec4s: a, and its heights, slope and
+// width, number.
 pub fn seg_packed(s: Seg) -> vec4<f32> {
     return vec4<f32>(s.b.x, s.b.y, (slope_q(s.c.y) + 4096 * width_q(s.c.z)) as f32, s.c.w);
 }
 pub fn seg_unpacked(a: vec4<f32>, b: vec4<f32>) -> Seg {
     let p = b.z as i32;
-    return Seg { a: a, b: vec4<f32>(b.x, b.y, 0.0, 0.0), c: vec4<f32>(0.0, slope_of(p & 4095), width_of(p >> 12), b.w) };
+    return Seg { a: a, b: vec4<f32>(b.x, b.y, 0.0, 0.0),
+                 c: vec4<f32>(start_slope(bitcast<i32>(b.w)), slope_of(p & 4095), width_of(p >> 12), b.w) };
 }
 // Whether x is past a segment's valley `limit` metres wide (as seg_dist
 // bounds it, its chord alone).
@@ -395,39 +433,49 @@ pub fn seg_far(a: vec4<f32>, x: vec2<f32>, limit: f32) -> bool {
 }
 
 // Point o's segment (level k, rising sig), to neighbour t where `to_t`,
-// else to the network above, leaning the way it runs; id its number. None
-// where o has no potential.
+// else to the network above, leaning the way it runs, each as much as its
+// own draw says (id: its number), so streams meet their parents at every
+// angle from straight across to nearly along. None where o has no
+// potential.
 pub fn link_of(o: Pot, t: Pot, to_t: bool, k: i32, sig: f32, id: i32) -> Seg {
     var s = no_seg();
     if (o.a.z > 1.0e8) { return s; }
     // What it gathers: most where it nears the network above.
     let width = width_of(width_q(stream_width(k) * (0.3 + 0.7 * (1.0 - clamp(o.b.z / 2.5, 0.0, 1.0)))));
+    let start = start_slope(id);
     if (to_t) {
         s.a = vec4<f32>(o.a.xy, t.a.xy);
         s.b = vec4<f32>(o.a.z, t.a.z, 0.0, 0.0);
-        s.c = vec4<f32>(0.0, slope_of(slope_q(0.0)), width, bitcast<f32>(id));
+        s.c = vec4<f32>(start, slope_of(slope_q((id_unit(id, 823) - 0.5) * 0.8)), width, bitcast<f32>(id));
         return s;
     }
     let len = max(length(o.b.xy - o.a.xy), 1e-3);
     let along = (o.b.xy - o.a.xy) / len;
     let side = vec2<f32>(along.y, -along.x);
-    var tg = along + vec2<f32>(cos(o.b.w), sin(o.b.w));
+    var tg = along + (0.15 + 1.7 * id_unit(id, 829)) * vec2<f32>(cos(o.b.w), sin(o.b.w));
     if (dot(tg, tg) < 1e-4) { tg = along; }
     let slope = slope_of(slope_q(dot(tg, side) / max(dot(tg, along), 0.3)));
     s.a = vec4<f32>(o.a.xy, o.b.xy);
     s.b = vec4<f32>(o.a.z, o.a.z - sig * o.b.z, 0.0, 0.0);
-    s.c = vec4<f32>(0.0, slope, width, bitcast<f32>(id));
+    s.c = vec4<f32>(start, slope, width, bitcast<f32>(id));
     return s;
 }
 
 // ── A level's valleys at a point ───────────────────────────────────────────
 
 // Segment s's valley's term in the soft minimum at a point dt (seg_dist)
-// from it, its level's valleys `wk` either side.
-pub fn valley_term(s: Seg, dt: vec2<f32>, wk: f32) -> f32 {
-    if (dt.x >= wk) { return 0.0; }
+// from it, its level's valleys `wk` either side at the most: a valley
+// widens with what its stream gathers (its channel's width, link_of), a
+// source's gully narrow and the reach that joins the network above broad.
+pub fn valley_half(s: Seg, k: i32, wk: f32) -> f32 {
+    if (k == 0) { return wk; }
+    return wk * (0.55 + 0.45 * clamp(s.c.z / stream_width(k), 0.0, 1.0));
+}
+pub fn valley_term(s: Seg, dt: vec2<f32>, k: i32, wk: f32) -> f32 {
+    let wv = valley_half(s, k, wk);
+    if (dt.x >= wv) { return 0.0; }
     let u = mix(s.b.x, s.b.y, dt.y);
-    let r = u + (1.0 - u) * prof(dt.x / wk);
+    let r = u + (1.0 - u) * prof(dt.x / wv);
     if (r >= 1.0) { return 0.0; }
     return pow(max(r, 1e-3), -SOFT) - 1.0;
 }
@@ -474,20 +522,97 @@ pub fn tally_water(t: Tally, s: Seg, dist: f32, k: i32, fk: f32, sg: f32) -> Tal
     return o;
 }
 // Level k's floors and interfluves into the tally, its nearest stream dmin
-// away, as much as the cell resolves them (fk), their means for the rest.
-pub fn tally_level(t: Tally, k: i32, dmin: f32, wk: f32, fk: f32) -> Tally {
+// away (seg_near), as much as the cell resolves them (fk), their means for
+// the rest, weighed by the level's strength in the region (a).
+pub fn tally_level(t: Tally, k: i32, dmin: f32, wk: f32, fk: f32, a: f32) -> Tally {
     var o = t;
-    o.dry *= 1.0 - wet_weight(k) * mix(WET_MEAN, exp(-(dmin * dmin) / (WET_W * WET_W * wk * wk)), fk);
-    o.wet_even *= 1.0 - wet_weight(k) * WET_MEAN;
-    o.far *= 1.0 - ridge_weight(k) * mix(NEAR_MEAN, exp(-(dmin * dmin) / (NEAR_W * NEAR_W * wk * wk)), fk);
-    o.far_even *= 1.0 - ridge_weight(k) * NEAR_MEAN;
+    let wet = a * wet_weight(k);
+    let ridge = a * ridge_weight(k);
+    let em = k == 0 ? NEAR_SHARE_RIVERS : NEAR_SHARE;
+    o.dry *= 1.0 - wet * mix(WET_MEAN * em, exp(-(dmin * dmin) / (WET_W * WET_W * wk * wk)), fk);
+    o.wet_even *= 1.0 - wet * WET_MEAN * em;
+    o.far *= 1.0 - ridge * mix(NEAR_MEAN * em, exp(-(dmin * dmin) / (NEAR_W * NEAR_W * wk * wk)), fk);
+    o.far_even *= 1.0 - ridge * NEAR_MEAN * em;
     return o;
+}
+// A segment's distance d as the floors and interfluves weigh it: a stream
+// counts as near as what it gathers (its width, 0.3 to 1 of the level's
+// most, link_of) and as its own draw makes it (its number: some streams
+// hold water and green floors, others are dry washes), so the floors run
+// from a fifth of the width to the whole and the land reads by some of its
+// streams, not as an even lace of every one. (Over a level's streams that
+// keeps about NEAR_SHARE of the floors a full width each would.)
+// The rivers' reaches (level 0) by their catchment alone: a 3 m stream's
+// floor is a fifth of a 100 m river's.
+const NEAR_SHARE: f32 = 0.45;
+const NEAR_SHARE_RIVERS: f32 = 0.4;
+pub fn seg_near(s: Seg, d: f32, k: i32, wk: f32) -> f32 {
+    if (k == 0) {
+        let g0 = clamp(log2(max(s.c.z, 1.0) / 3.0) / 5.0, 0.0, 1.0);
+        return d / (0.2 + 0.8 * g0);
+    }
+    let g = clamp((s.c.z / stream_width(k) - 0.15) / 0.85, 0.0, 1.0) * mix(0.15, 1.0, id_unit(bitcast<i32>(s.c.w), 841));
+    return d / (0.2 + 0.8 * g * g);
 }
 
 // The streams of an unresolved level climb on above the last level's: a
 // point's potential is about RISE of a spacing over its parent's.
 pub fn ubar_next(ubar: f32, k: i32) -> f32 {
     return ubar + 0.8 * rise(k);
+}
+
+// ── The drainage's character over a region ─────────────────────────────────
+
+// How dry the land's drainage is here, 0 to 1: the climate's broad
+// moisture, varied by regions of a few hundred kilometres. (Found at each
+// drainage point, so cheap: two noise calls.)
+pub fn dryness(dir: vec3<f32>, seed: i32) -> f32 {
+    let m = moist_broad(dir, seed);
+    return clamp(0.1 + 0.75 * (1.0 - smoothstep(0.15, 0.75, m.x)) + 0.45 * m.y, 0.0, 1.0);
+}
+// How strongly levels 1 to 4 cut (x to w, of their depth) in land of
+// dryness `dry` standing hh metres over its base level. Dry land dissects
+// finely, every gully cut (badlands); wet land, under its soil and cover,
+// keeps broad smooth interfluves between sparse long streams, more of them
+// as it has the relief to cut them: wet hill country is well dissected, if
+// less finely than dry, a level most fully once the land stands a couple of
+// its depths over its base. The coarse levels always cut: the land's main
+// valleys run everywhere. With hh 0, the climate's alone, which the floors'
+// and interfluves' colour takes (tally_level).
+pub fn strengths(dry: f32, hh: f32, radius: f32) -> vec4<f32> {
+    let clim = vec4<f32>(mix(0.85, 1.0, dry), mix(0.6, 1.0, dry), mix(0.35, 1.0, dry), mix(0.12, 1.0, dry * dry));
+    let c = vec4<f32>(depth_scale(1, radius), depth_scale(2, radius), depth_scale(3, radius), depth_scale(4, radius));
+    return mix(clim, vec4<f32>(1.0), 0.75 * smoothstep(0.1 * c, c, vec4<f32>(hh)));
+}
+pub fn comp4(v: vec4<f32>, i: i32) -> f32 {
+    return i == 0 ? v.x : (i == 1 ? v.y : (i == 2 ? v.z : v.w));
+}
+
+// A region's grain: where folded strata, joints or a tilted surface run
+// through the land, a stream drains, of the neighbours its potential falls
+// to, the most along the grain, so the network runs in parallel lines or
+// in a trellis; over most land there is none and it branches freely. xy
+// the grain's axis on the plane f, z its strength, w how far it is
+// rectangular (joints at right angles: either axis). Its fields span
+// hundreds of kilometres, so a link reads it about where it is read
+// (drain_probed, a vertex's window) as at its own point.
+pub fn grain_at(dir: vec3<f32>, f: Local, seed: i32) -> vec4<f32> {
+    let g = simplex_grad_f32(dir * 7.0, seed + 961);
+    let h = simplex_grad_f32(dir * 13.0, seed + 962);
+    var ax = vec_local(f, g.yzw);
+    let l = length(ax);
+    ax = l > 1e-6 ? ax / l : vec2<f32>(1.0, 0.0);
+    return vec4<f32>(ax, 2.2 * smoothstep(0.05, 0.45, h.x), smoothstep(0.0, 0.4, h.y * GRAD_TO_VALUE));
+}
+// How a stream at o weighs the fall to neighbour t in grain r.
+pub fn lean(r: vec4<f32>, o: Pot, t: Pot) -> f32 {
+    if (r.z <= 0.0) { return 1.0; }
+    let v = t.a.xy - o.a.xy;
+    let n = v / max(length(v), 1e-3);
+    let c = abs(dot(n, r.xy));
+    let s = abs(n.x * r.y - n.y * r.x);
+    let al = mix(c, max(c, s), r.w);
+    return exp(r.z * (2.0 * al * al - 1.0));
 }
 
 // ── The drainage at a point ────────────────────────────────────────────────
@@ -501,7 +626,11 @@ pub fn ubar_next(ubar: f32, k: i32) -> f32 {
 // own. share, how much of the cell the streams' channels cover (level 0's
 // reaches too small for rivers.bk, levels 1 and 2), gallery how much their
 // banks' strip. probe: the relative height at the four points drain_probed
-// was given (+s1, -s1, +s2, -s2).
+// was given (+s1, -s1, +s2, -s2). drops: how much of the relative height
+// levels 1 to 4 took at full strength (x to w; rel is 1 less level 0's and
+// these); dry, the land's dryness (dryness). drained takes each level's
+// drop as strongly as the region cuts it (strengths), its depth saturating
+// at its own scale.
 pub struct Drain {
     base: f32,
     rel: f32,
@@ -510,8 +639,10 @@ pub struct Drain {
     share: f32,
     gallery: f32,
     probe: vec4<f32>,
+    drops: vec4<f32>,
+    dry: f32,
 }
-pub fn drain_of(base: f32, rel: f32, t: Tally, probe: vec4<f32>) -> Drain {
+pub fn drain_of(base: f32, rel: f32, t: Tally, probe: vec4<f32>, drops: vec4<f32>, dry: f32) -> Drain {
     var d: Drain;
     d.base = base;
     d.rel = rel;
@@ -520,12 +651,15 @@ pub fn drain_of(base: f32, rel: f32, t: Tally, probe: vec4<f32>) -> Drain {
     d.share = t.share;
     d.gallery = t.gallery;
     d.probe = probe;
+    d.drops = drops;
+    d.dry = dry;
     return d;
 }
-// A drainage of base level and relative height alone, as a kernel found it
-// for another (what the ground's height takes, ground.bk shaped_by).
-pub fn drain_held(br: vec2<f32>) -> Drain {
-    return drain_of(br.x, br.y, tally_none(), vec4<f32>(1.0));
+// A drainage of base level, relative height and dryness (xyz of brd) and
+// the levels' drops alone, as a kernel found it for another (what the
+// ground's height takes, ground.bk shaped_by).
+pub fn drain_held(brd: vec4<f32>, drops: vec4<f32>) -> Drain {
+    return drain_of(brd.x, brd.y, tally_none(), vec4<f32>(1.0), drops, brd.z);
 }
 // A cell `cell` wide's spread in metres, for the channels' share of it.
 pub fn cell_spread(cell: f32) -> f32 {
@@ -563,6 +697,10 @@ pub fn drain_probed(hi: vec3<f32>, lo: vec3<f32>, radius: f32, cell: f32, net: r
     var pb: array<vec4<f32>, 49>;
     let sg = cell_spread(cell);
     var t = tally_none();
+    let dry = dryness(up, seed);
+    let st = strengths(dry, 0.0, radius);
+    let grain = grain_at(up, f, seed);
+    var drop: array<f32, 4>;
 
     // Level 0: the reaches from the 5 x 5 rivers' points about here, every
     // reach whose valley can reach here.
@@ -586,9 +724,9 @@ pub fn drain_probed(hi: vec3<f32>, lo: vec3<f32>, radius: f32, cell: f32, net: r
             if (f0 > 0.0) {
                 for (var p: i32 = 0; p < np; p += 1) {
                     let dt = seg_dist(s.a, s.c, q[p], 0, w0, seed);
-                    acc[p] += valley_term(s, dt, w0);
+                    acc[p] += valley_term(s, dt, 0, w0);
                     if (p == 0) {
-                        dmin = min(dmin, dt.x);
+                        if (dt.x < dmin) { dmin = min(dmin, seg_near(s, dt.x, 0, w0)); }
                         t = tally_water(t, s, dt.x, 0, 1.0, sg);
                     }
                 }
@@ -597,7 +735,7 @@ pub fn drain_probed(hi: vec3<f32>, lo: vec3<f32>, radius: f32, cell: f32, net: r
     }
     let base = wsum > 0.0 ? zsum / wsum : 0.0;
     for (var p: i32 = 0; p < np; p += 1) { rel[p] = rel_after(1.0, acc[p], 0.0, f0); }
-    t = tally_level(t, 0, dmin, w0, f0);
+    t = tally_level(t, 0, dmin, w0, f0, 1.0);
 
     // Levels 1 on, each from the last's segments while the cells resolve
     // them; past that each the mean over its valleys.
@@ -608,10 +746,13 @@ pub fn drain_probed(hi: vec3<f32>, lo: vec3<f32>, radius: f32, cell: f32, net: r
         let wk = VALLEY * lk;
         let sig = rise(k);
         let fk = fade(lk, cell);
+        let ak = comp4(st, k - 1);
+        let before = rel[0];
         if (!resolved || fk <= 0.0) {
             ubar = ubar_next(ubar, k);
             for (var p: i32 = 0; p < np; p += 1) { rel[p] = mean_rel(rel[p], ubar); }
-            t = tally_level(t, k, 1.0e9, wk, 0.0);
+            t = tally_level(t, k, 1.0e9, wk, 0.0, ak);
+            drop[k - 1] = before - rel[0];
             resolved = false;
             continue;
         }
@@ -658,7 +799,8 @@ pub fn drain_probed(hi: vec3<f32>, lo: vec3<f32>, radius: f32, cell: f32, net: r
             var steep: f32 = 0.0;
             for (var nb: i32 = 0; nb < 9; nb += 1) {
                 let at = o + (nb / 3 - 1) * 7 + nb % 3 - 1;
-                let sl = fall(po, Pot { a: pa[at], b: pb[at] });
+                let pt = Pot { a: pa[at], b: pb[at] };
+                let sl = fall(po, pt) * lean(grain, po, pt);
                 if (sl > steep) {
                     steep = sl;
                     tgt = at;
@@ -672,24 +814,46 @@ pub fn drain_probed(hi: vec3<f32>, lo: vec3<f32>, radius: f32, cell: f32, net: r
             if (s.c.z > 0.0) {
                 for (var p: i32 = 0; p < np; p += 1) {
                     let dt = seg_dist(s.a, s.c, q[p], k, wk, seed);
-                    acc[p] += valley_term(s, dt, wk);
+                    acc[p] += valley_term(s, dt, k, wk);
                     if (p == 0) {
-                        dmin = min(dmin, dt.x);
+                        if (dt.x < dmin) { dmin = min(dmin, seg_near(s, dt.x, k, wk)); }
                         t = tally_water(t, s, dt.x, k, fk, sg);
                     }
                 }
             }
         }
         for (var p: i32 = 0; p < np; p += 1) { rel[p] = rel_after(rel[p], acc[p], ubar, fk); }
-        t = tally_level(t, k, dmin, wk, fk);
+        t = tally_level(t, k, dmin, wk, fk, ak);
+        drop[k - 1] = before - rel[0];
     }
-    return drain_of(base, rel[0], t, vec4<f32>(rel[1], rel[2], rel[3], rel[4]));
+    return drain_of(base, rel[0], t, vec4<f32>(rel[1], rel[2], rel[3], rel[4]),
+                    vec4<f32>(drop[0], drop[1], drop[2], drop[3]), dry);
 }
 
-// The relative height `rel` of drainage d applied to ground h metres up:
-// the base level plus rel of the height over it; ground under the base
-// level (a hollow) as it is.
-pub fn drained(h: f32, base: f32, rel: f32) -> f32 {
-    if (h <= base) { return h; }
-    return base + (h - base) * rel;
+// Ground h0 metres up drained: the base level plus its relative height of
+// the height hh over it, each level's drop taken as strongly as the land
+// here cuts it (strengths) and of the depth it can cut there (depth_scale
+// c: hh while hh is well under c, saturating to c past it), so the coarse
+// levels cut in proportion to the relief and the fine ones, gullies, no
+// deeper than their width allows. x the height, y its
+// slope to h0 (the share of the relief's octaves it carries). Ground under
+// the base level (a hollow) as it is. `rel` may be a probe's (drain_probed)
+// with the point's drops: the probe's own difference from the point is the
+// finest level's, and cut as that level's.
+pub fn drained(h0: f32, base: f32, rel_at: f32, d: Drain, radius: f32) -> vec2<f32> {
+    let hh = h0 - base;
+    if (hh <= 0.0) { return vec2<f32>(h0, 1.0); }    let st = strengths(d.dry, hh, radius);
+    // The relative height after level 0 alone, and each level's cut from
+    // it. The levels' depths are each a quarter of the last's (their
+    // spacings'), so their saturations are one exponential's powers.
+    let rel0 = d.rel + d.drops.x + d.drops.y + d.drops.z + d.drops.w;
+    let c = vec4<f32>(depth_scale(1, radius), depth_scale(2, radius), depth_scale(3, radius), depth_scale(4, radius));
+    let e1 = exp(-hh / c.x);
+    let e2 = (e1 * e1) * (e1 * e1);
+    let e3 = (e2 * e2) * (e2 * e2);
+    let e = vec4<f32>(e1, e2, e3, (e3 * e3) * (e3 * e3));
+    let dj = d.drops * st;
+    let h = hh * rel0 + (rel_at - d.rel) * st.w * c.w * (1.0 - e.w) - dot(c * (vec4<f32>(1.0) - e), dj);
+    let k = rel0 + (rel_at - d.rel) * st.w * e.w - dot(e, dj);
+    return vec2<f32>(base + h, k);
 }

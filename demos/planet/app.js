@@ -114,10 +114,12 @@ const span = bro.kernel.createBuffer(PRODUCE_PER_UPDATE * 2 * 4);
 span.write(new Int32Array(PRODUCE_PER_UPDATE * 2));
 // The batch's texels, each its point and mean height, k_detail_height to k_detail.
 const texelHeights = bro.kernel.createBuffer(PRODUCE_PER_UPDATE * TEXELS * TEXELS * 16);
-// And what each texel's colour takes from its drainage (planet.bk
-// k_point_drains), found at every other texel (tex_drains).
+// And what each texel's colour takes from its drainage and its climate
+// (planet.bk k_point_drains, two vec4s), found at every other texel
+// (tex_drains).
 const TEX_DRAINS = Math.floor(TEXELS / 2) + 1;
 const texelDrains = bro.kernel.createBuffer(PRODUCE_PER_UPDATE * TEX_DRAINS * TEX_DRAINS * 16);
+const texelClimates = bro.kernel.createBuffer(PRODUCE_PER_UPDATE * TEX_DRAINS * TEX_DRAINS * 32);
 // The batch's soil heights, k_soil to k_detail (planet.bk SOIL_STRIDE).
 const SOIL_STRIDE = 67;
 const soilGrid = bro.kernel.createBuffer(PRODUCE_PER_UPDATE * SOIL_STRIDE * SOIL_STRIDE * 4);
@@ -130,12 +132,15 @@ const drainPots = bro.kernel.createBuffer(PRODUCE_PER_UPDATE * DRAIN_POT_GRID * 
 // And the rivers' reaches about each tile, level 0, three vec4s a reach.
 const drainReaches = bro.kernel.createBuffer(PRODUCE_PER_UPDATE * DRAIN_GRID * DRAIN_GRID * 48);
 // The drainage at the batch's points from the grids (base level, relative
-// height): k_point_drains' for the texels, the horizon heights and the soil
-// (planet.bk drain_points), and the vertices.
+// height, dryness): k_point_drains' for the texels, the horizon heights and
+// the soil (planet.bk drain_points), and the vertices; and beside each, the
+// levels' drops (dendry.bk Drain drops).
 const HZ_DRAINS = Math.floor((HZ_GRID + 1) / 2);
 const DRAIN_POINTS = TEX_DRAINS * TEX_DRAINS + HZ_DRAINS * HZ_DRAINS + SOIL_STRIDE * SOIL_STRIDE;
-const pointDrains = bro.kernel.createBuffer(PRODUCE_PER_UPDATE * DRAIN_POINTS * 8);
-const vertexDrains = bro.kernel.createBuffer(PRODUCE_PER_UPDATE * CELLS * CELLS * 8);
+const pointDrains = bro.kernel.createBuffer(PRODUCE_PER_UPDATE * DRAIN_POINTS * 16);
+const vertexDrains = bro.kernel.createBuffer(PRODUCE_PER_UPDATE * CELLS * CELLS * 16);
+const pointDrops = bro.kernel.createBuffer(PRODUCE_PER_UPDATE * DRAIN_POINTS * 16);
+const vertexDrops = bro.kernel.createBuffer(PRODUCE_PER_UPDATE * CELLS * CELLS * 16);
 // The vertices' windows on the levels finer than a tile's grid holds
 // (dendry_grid.bk WIN, POTS): every level's links, two vec4s each, and one
 // level's potentials at a time.
@@ -229,31 +234,33 @@ function makeCache(pixelsPerTexel, select = {}) {
                 kDrainPoints.dispatch([DRAIN_POT_GRID, DRAIN_POT_GRID, batch.count], batch.table, at, drainPots, drainSegs, drainReaches,
                                       RADIUS, 1 / TILE, DETAIL, level, PRODUCE_PER_UPDATE, SEED);
                 kDrainLinks.dispatch([DRAIN_GRID, DRAIN_GRID, batch.count], batch.table, at, drainSegs, drainPots,
-                                     RADIUS, 1 / TILE, DETAIL, level, PRODUCE_PER_UPDATE);
+                                     RADIUS, 1 / TILE, DETAIL, level, PRODUCE_PER_UPDATE, SEED);
             }
             for (let level = windowFrom; level <= DRAIN_LEVELS; level++) {
                 kWindowPoints.dispatch([CELLS * CELLS, WINDOW_POTS, batch.count], batch.table, at, windowPots, drainWindows, drainSegs,
                                        drainReaches, rivers.net, CELLS, RADIUS, BORDER, 1 / TILE, DETAIL, level, PRODUCE_PER_UPDATE, SEED);
                 kWindowLinks.dispatch([CELLS * CELLS, WINDOW_LINKS, batch.count], batch.table, at, drainWindows, windowPots, CELLS,
-                                      RADIUS, BORDER, 1 / TILE, DETAIL, level);
+                                      RADIUS, BORDER, 1 / TILE, DETAIL, level, SEED);
             }
             kDrainParts.dispatch([DRAIN_POINTS + CELLS * CELLS, DRAIN_LEVELS + 1, batch.count], batch.table, at, drainSegs, drainReaches,
                                  drainParts, TEXELS, HZ_GRID, CELLS, RADIUS, BORDER, 1 / TILE, DETAIL, TRUTH, PRODUCE_PER_UPDATE, SEED,
                                  rivers.net, drainWindows);
-            kPointDrains.dispatch([DRAIN_POINTS + CELLS * CELLS, batch.count], batch.table, drainParts, pointDrains, texelDrains,
-                                  vertexDrains, TEXELS, HZ_GRID, CELLS, RADIUS, BORDER, 1 / TILE, DETAIL, TRUTH);
+            kPointDrains.dispatch([DRAIN_POINTS + CELLS * CELLS, batch.count], batch.table, at, drainParts, pointDrains, texelDrains,
+                                  vertexDrains, pointDrops, vertexDrops, texelClimates, TEXELS, HZ_GRID, CELLS, RADIUS, BORDER, 1 / TILE, DETAIL,
+                                  TRUTH, SEED);
             kTile.dispatch(grid, batch.table, at, pos, this.layer('relief'), span, RADIUS, BORDER, 1 / TILE, TRUTH, SEED, rivers.net,
-                           vertexDrains);
+                           vertexDrains, vertexDrops);
             kAnchor.dispatch([batch.count], batch.table, at, anchors, RADIUS, 1 / TILE, DETAIL, SEED);
             kHorizonHeights.dispatch([HZ_GRID, HZ_GRID, batch.count], batch.table, at, horizonHeights, RADIUS, 1 / TILE, SEED, rivers.net,
-                                     pointDrains, TEXELS);
+                                     pointDrains, TEXELS, pointDrops);
             kHorizon.dispatch([HZ, HZ, batch.count], batch.table, horizonHeights, this.layer('horizon'), HZ_GRID, RADIUS, BORDER, 1 / TILE);
             const texels = [TEXELS, TEXELS, batch.count];
             kDetailHeight.dispatch(texels, batch.table, at, texelHeights, RADIUS, BORDER, 1 / TILE, DETAIL, SEED, rivers.net,
-                                   pointDrains, HZ_GRID);
+                                   pointDrains, HZ_GRID, pointDrops);
             kSoil.dispatch([SOIL_STRIDE, SOIL_STRIDE, batch.count], batch.table, at, soilGrid, TEXELS, RADIUS, BORDER, 1 / TILE, DETAIL, SEED, rivers.net,
-                           pointDrains, HZ_GRID);
-            kDetail.dispatch(texels, batch.table, at, texelHeights, this.layer('detail'), RADIUS, BORDER, 1 / TILE, DETAIL, TRUTH, SEED, rivers.net, soilGrid, anchors, texelDrains);
+                           pointDrains, HZ_GRID, pointDrops);
+            kDetail.dispatch(texels, batch.table, at, texelHeights, this.layer('detail'), RADIUS, BORDER, 1 / TILE, DETAIL, TRUTH, SEED,
+                             rivers.net, soilGrid, anchors, texelDrains, texelClimates);
             kRange.dispatch([batch.count], batch.table, span, this.ranges, 1 / TILE, MAX_HEIGHT);
             if (this.detail) {
                 const half = TILE * DETAIL / 2;

@@ -5,9 +5,9 @@
 // The blades stand on the field, between its points. The field is anchored
 // at its centre (anchor.bk, found on the CPU): field point (x, y) is the plane
 // offset lost + e (du0 + x delta) + f (dv0 + y delta) from it.
-from planet::ground import terrain, surface, grass_cover, variation, site_ground, with_streams, landform_climate;
+from planet::ground import terrain, surface, grass_cover, variation, site_ground, with_streams;
 from planet::rivers import water_share;
-from planet::climate import climate_at;
+from planet::climate import climate_at, landform_climate, landform_share;
 from planet::anchor import Anchor, read_anchor, plane_offset;
 
 // Field point (x, y)'s offset from the anchor's direction (-1 and the width
@@ -52,9 +52,10 @@ fn k_grass_field(g: grid<2>, out: write_store<f32, 1>, heights: read_store<f32, 
     let grad = site.grad;
     // The blades' colour is the sward's at this height, not the ground's,
     // which on a slope is part bare rock that no blade is; in the climate
-    // its landform makes (ground.bk landform_climate).
+    // its landform makes (climate.bk landform_climate).
     let region = climate_at(normalize(a.dir + e), 0.0, seed);
-    let cl = landform_climate(region, site.drain.wet, site.drain.ridge);
+    let lf = landform_share(site.drain.dry);
+    let cl = landform_climate(region, lf * site.drain.wet, lf * site.drain.ridge);
     let albedo = surface(h, 0.0, cl).xyz * variation(a, e, radius, octaves, seed);
 
     let i = (y * g.width() + x) * 7;

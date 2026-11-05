@@ -46,6 +46,18 @@ fn fine(scale: f32, cell: f32) -> f32 {
 // The climate at unit direction `dir_in`, over a cell `cell` radians wide
 // (0 for a point).
 pub fn climate_at(dir_in: vec3<f32>, cell: f32, seed: i32) -> Climate {
+    let f = climate_fields(dir_in, cell, seed);
+    return climate_of(f.a, f.b);
+}
+// The climate's fields, which vary over tens of kilometres and more, so a
+// tile's texels take them bilinearly from every other one's (planet.bk
+// k_detail): a the temperature, the moisture and the desert's hue fields,
+// b (xy) the rock's.
+pub struct ClimateFields {
+    a: vec4<f32>,
+    b: vec4<f32>,
+}
+pub fn climate_fields(dir_in: vec3<f32>, cell: f32, seed: i32) -> ClimateFields {
     // The regions' edges are ragged, not round: the fields are read through
     // a warp of ~150 km noise (its gradient, one call), and finer moisture
     // octaves fray the borders into fingers and outliers tens of kilometres
@@ -61,8 +73,6 @@ pub fn climate_at(dir_in: vec3<f32>, cell: f32, seed: i32) -> Climate {
     let c = n4(dir, 17.0, seed + 503);
     let d = n4(dir, 95.0, seed + 504);
     let temp = 30.0 - 46.0 * s * s + 5.0 * a.x + 2.0 * c.x;
-    // cos(6 lat): wet at 0 and 60 degrees, dry at 30 and 90.
-    let band = cos(6.0 * (lat + 0.06 * b.x));
     // A finer octave (~25 km, two of its fields) mottles the transitions,
     // so a region's edge is a mosaic of the two, not nested contours of one
     // smooth field; a texel too wide for it holds its mean, none.
@@ -71,12 +81,16 @@ pub fn climate_at(dir_in: vec3<f32>, cell: f32, seed: i32) -> Climate {
         let e = n4(dir_in, 260.0, seed + 505);
         mottle = 0.07 * (e.x + e.y) * fine(260.0, cell);
     }
-    let moist = clamp(0.5 + 0.24 * band + 0.38 * b.x + 0.16 * c.x + 0.1 * a.x + 0.08 * d.x * fine(95.0, cell) + mottle,
-                      0.0, 1.0);
-
+    let moist = moist_of(lat, a.x, b.x, c.x, 0.08 * d.x * fine(95.0, cell) + mottle);
+    return ClimateFields { a: vec4<f32>(temp, moist, b.y, c.y), b: vec4<f32>(c.z, c.w, 0.0, 0.0) };
+}
+// The climate of its fields (climate_fields).
+pub fn climate_of(fa: vec4<f32>, fb: vec4<f32>) -> Climate {
+    let temp = fa.x;
+    let moist = fa.y;
     // Desert ground: pale sand, ochre and red, in regions of ~800 km.
-    let d1 = b.y;
-    let d2 = c.y;
+    let d1 = fa.z;
+    let d2 = fa.w;
     let pale = vec3<f32>(0.60, 0.50, 0.36);
     let ochre = vec3<f32>(0.55, 0.36, 0.18);
     let red = vec3<f32>(0.46, 0.20, 0.09);
@@ -85,8 +99,8 @@ pub fn climate_at(dir_in: vec3<f32>, cell: f32, seed: i32) -> Climate {
 
     // Rock: granite by default, sandstone where it is dry, limestone and
     // basalt in their own provinces (~300 km).
-    let r1 = c.z;
-    let r2 = c.w;
+    let r1 = fb.x;
+    let r2 = fb.y;
     let granite = vec3<f32>(0.24, 0.22, 0.21);
     let sandstone = vec3<f32>(0.42, 0.22, 0.12);
     let limestone = vec3<f32>(0.42, 0.39, 0.33);
@@ -97,6 +111,47 @@ pub fn climate_at(dir_in: vec3<f32>, cell: f32, seed: i32) -> Climate {
     let dry = 1.0 - smoothstep(0.15, 0.45, moist);
     rock = mix(rock, sandstone, dry * smoothstep(-0.1, 0.3, -r1) * smoothstep(12.0, 20.0, temp));
     return Climate { temp: temp, moist: moist, sand: sand, rock: rock };
+}
+
+// The moisture at latitude `lat` from the weather's broad octaves a, b, c
+// (~4000, ~1200, ~370 km) and its finer ones: the bands, cos(6 lat), wet
+// at 0 and 60 degrees and dry at 30 and 90, wandered by the weather.
+fn moist_of(lat: f32, a: f32, b: f32, c: f32, finer: f32) -> f32 {
+    let band = cos(6.0 * (lat + 0.06 * b));
+    return clamp(0.5 + 0.24 * band + 0.38 * b + 0.16 * c + 0.1 * a + finer, 0.0, 1.0);
+}
+// The moisture's broad part alone, what the drainage's character follows
+// (dendry.bk dryness), in two calls: its bands and its ~1200 and ~370 km
+// octaves, unwarped (x), and a field of the second's call (y, about +-1).
+pub fn moist_broad(dir: vec3<f32>, seed: i32) -> vec2<f32> {
+    let b = n4(dir, 5.3, seed + 502);
+    let c = n4(dir, 17.0, seed + 503);
+    return vec2<f32>(moist_of(asin(clamp(dir.y, -1.0, 1.0)), 0.0, b.x, c.x, 0.0), c.w);
+}
+
+// The landform's climate: valley floors gather water and their soil holds
+// it, interfluves and their crests shed it, so the land is wetter and
+// greener down its valleys and drier and barer along its ridges, at every
+// scale the drainage has (dendry.bk Drain wet and ridge, both about their
+// means, so the climate's own moisture holds on average), each taken as
+// much as the land is dry (landform_share of dendry.bk dryness; wet and
+// ridge come here scaled by it): in a desert the water its valleys gather
+// is all there is, and they run green through bare ground; wet land is
+// green on its interfluves too.
+const LANDFORM_WET: f32 = 0.3;
+const LANDFORM_DRY: f32 = 0.24;
+pub fn landform_share(dry: f32) -> f32 {
+    return mix(0.4, 1.0, dry);
+}
+pub fn landform_climate(cl: Climate, wet: f32, ridge: f32) -> Climate {
+    let m = clamp(cl.moist + LANDFORM_WET * wet - LANDFORM_DRY * ridge, 0.0, 1.0);
+    return Climate { temp: cl.temp, moist: m, sand: cl.sand, rock: cl.rock };
+}
+// And the forest's mosaic leans to the valleys: woods down them, open
+// ground along the crests (ground.bk woodland's W, about its mean).
+const LANDFORM_WOOD: f32 = 0.9;
+pub fn landform_wood(wood: vec2<f32>, wet: f32, ridge: f32) -> vec2<f32> {
+    return vec2<f32>(wood.x + LANDFORM_WOOD * (wet - 0.6 * ridge), wood.y);
 }
 
 // The temperature `h` metres up.

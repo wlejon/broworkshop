@@ -19,6 +19,13 @@ pub const RIDGE_PAST: f32 = 1.5;
 // From FINE_FIRST on the relief is the fine relief, which a valley's sides
 // fade out toward its bed (ground.bk terrain).
 pub const FINE_FIRST: i32 = 11;
+// How much of a fine octave rides on the drained ground unscaled (ground.bk
+// shaped_by): none of the octaves as long as the drainage's valleys, which
+// the drainage shapes, all of those under its finest gullies' width (from
+// 37 m), the knolls, rills and roughness the ground holds wherever it is.
+pub fn kept_share(o: i32) -> f32 {
+    return clamp(((o - 14) as f32) * 0.5, 0.0, 1.0);
+}
 // The ground's first octave's wavelength, metres, and the warp the relief
 // reads its octaves through (ground.bk relief): one octave of noise per axis
 // at WARP_OCTAVE, WARP_DISPLACE of the base wavelength per unit of noise.

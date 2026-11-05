@@ -9,10 +9,9 @@
 // its centre (anchor.bk, found on the CPU): cell (x, y)'s corner is the plane
 // offset lost + e (du0 + x delta) + f (dv0 + y delta) from it.
 import std::noise::*;
-from planet::ground import tree_cover, variation, site_ground, woodland, wooded, banked, with_streams, landform_climate,
-    landform_wood;
+from planet::ground import tree_cover, variation, site_ground, woodland, wooded, banked, with_streams;
 from planet::rivers import water_share;
-from planet::climate import climate_at;
+from planet::climate import climate_at, landform_climate, landform_wood, landform_share;
 from planet::anchor import read_anchor, plane_offset;
 
 // Site (x, y0 + y) of the field, lattice site (li + x, lj + y0 + y) on face
@@ -44,17 +43,18 @@ fn k_tree_field(g: grid<2>, out: write_store<f32, 1>, anchor: read_store<vec4<i3
     let h = site.h;
     let grad = site.grad;
     // Forests grow as a mosaic, forests to glades (ground.bk woodland),
-    // leaning to the valleys, in the climate the landform makes (ground.bk
+    // leaning to the valleys, in the climate the landform makes (climate.bk
     // landform_climate), the same the ground's colour takes over its
     // texels, and in gallery woods along the rivers' and streams' banks
     // (ground.bk banked); none in the water. A tree stands where the site's
     // pick is under it; at a thinning edge the ones left are smaller.
     let region = climate_at(normalize(a.dir + e), 0.0, seed);
     let dr = site.drain;
-    let cl = landform_climate(region, dr.wet, dr.ridge);
+    let lf = landform_share(dr.dry);
+    let cl = landform_climate(region, lf * dr.wet, lf * dr.ridge);
     let wa = with_streams(site.water, dr.share, dr.gallery, region);
     let local = wooded(banked(tree_cover(h, grad, cl), h, grad, cl, wa),
-                       landform_wood(woodland(a, e, radius, 99.0, seed), dr.wet, dr.ridge))
+                       landform_wood(woodland(a, e, radius, 99.0, seed), lf * dr.wet, lf * dr.ridge))
               * (1.0 - water_share(h, wa, 0.0));
     var size: f32 = 0.0;
     if (pick < local) { size = 0.6 + 0.4 * local; }

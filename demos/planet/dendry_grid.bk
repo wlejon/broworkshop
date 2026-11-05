@@ -25,9 +25,10 @@ module planet::dendry_grid;
 import tiles;
 from planet::rivers import RIV_N, cell_of, cell_next;
 from planet::dendry import DRAIN_LEVELS, VALLEY, Seg, no_seg, Near, near_none, near_try, streams_about, Pot, pot_of,
-    fall, link_of, seg_packed, seg_unpacked, seg_far, Local, local_frame, to_local, vec_local, reach_seg, seg_dist, chord, valley_term, rel_after, mean_rel,
-    base_weight, Tally, tally_none, tally_water, tally_level, ubar_next, Drain, drain_of, cell_spread, spacing, fade,
-    rise, cell_in, cell_virtual, cell_step, site_dir, site_id, parent_of;
+    fall, link_of, seg_packed, seg_unpacked, seg_far, Local, local_frame, to_local, vec_local, from_local, reach_seg,
+    seg_dist, chord, valley_term, seg_near, rel_after, mean_rel, base_weight, Tally, tally_none,
+    tally_water, tally_level, ubar_next, Drain, drain_of, cell_spread, spacing, fade, rise, cell_in, cell_virtual,
+    cell_step, site_dir, site_id, parent_of, grain_at, lean, comp4, strengths;
 from planet::ground import frame_dir, cell_width, octaves_for, SOIL_OCTAVES;
 from planet::anchor import Anchor;
 
@@ -161,9 +162,9 @@ pub fn grid_point(pots: write_store<vec4<f32>, 1>, segs: read_store<vec4<f32>, 1
 }
 
 // Level k's segment (gx, gy) of tile z's grid: its point's link, from the
-// potentials about it.
+// potentials about it, in the grain at its point.
 pub fn grid_link(segs: write_store<vec4<f32>, 1>, pots: read_store<vec4<f32>, 1>, a: Anchor, rec: tiles::Record,
-                 k: i32, z: i32, tiles: i32, gx: i32, gy: i32, radius: f32, inv_size: f32, d: f32) {
+                 k: i32, z: i32, tiles: i32, gx: i32, gy: i32, radius: f32, inv_size: f32, d: f32, seed: i32) {
     let r = grid_reach(a, rec, k, radius, inv_size, d);
     let i = gx - GRID_R;
     let j = gy - GRID_R;
@@ -172,11 +173,14 @@ pub fn grid_link(segs: write_store<vec4<f32>, 1>, pots: read_store<vec4<f32>, 1>
     let ck = cell_in(normalize(a.dir + rec.dir_lo), n);
     let o = pot_at(z, i, j);
     let po = Pot { a: pots[o], b: pots[o + 1] };
+    let f = local_frame(a.dir, rec.dir_lo, radius);
+    let grain = grain_at(from_local(f, po.a.xy), f, seed);
     var tgt: i32 = o;
     var steep: f32 = 0.0;
     for (var nb: i32 = 0; nb < 9; nb += 1) {
         let at = pot_at(z, i + nb % 3 - 1, j + nb / 3 - 1);
-        let sl = fall(po, Pot { a: pots[at], b: pots[at + 1] });
+        let pt = Pot { a: pots[at], b: pots[at + 1] };
+        let sl = fall(po, pt) * lean(grain, po, pt);
         if (sl > steep) {
             steep = sl;
             tgt = at;
@@ -200,6 +204,11 @@ struct Walk {
     t: Tally,
     next: i32,
     onward: bool,
+    drops: vec4<f32>,
+}
+// v with component i set to x.
+fn set4(v: vec4<f32>, i: i32, x: f32) -> vec4<f32> {
+    return vec4<f32>(i == 0 ? x : v.x, i == 1 ? x : v.y, i == 2 ? x : v.z, i == 3 ? x : v.w);
 }
 
 // Whether tile rec's grid holds level k (its texels resolve it).
@@ -264,8 +273,8 @@ pub fn level_part(segs: read_store<vec4<f32>, 1>, reaches: read_store<vec4<f32>,
                 wsum += wt;
                 if (fk > 0.0) {
                     let dt = seg_dist(s.a, s.c, q, 0, wk, seed);
-                    acc += valley_term(s, dt, wk);
-                    dmin = min(dmin, dt.x);
+                    acc += valley_term(s, dt, 0, wk);
+                    if (dt.x < dmin) { dmin = min(dmin, seg_near(s, dt.x, 0, wk)); }
                     t = tally_water(t, s, dt.x, 0, 1.0, sg);
                 }
             }
@@ -300,8 +309,9 @@ pub fn level_part(segs: read_store<vec4<f32>, 1>, reaches: read_store<vec4<f32>,
         let s = seg_unpacked(a4, segs[at + 1]);
         if (s.c.z > 0.0) {
             let dt = seg_dist(s.a, s.c, q, k, wk, seed);
-            acc += valley_term(s, dt, wk);
-            dmin = min(dmin, dt.x);
+            acc += valley_term(s, dt, k, wk);
+            // (seg_near is never nearer than the distance itself.)
+            if (dt.x < dmin) { dmin = min(dmin, seg_near(s, dt.x, k, wk)); }
             t = tally_water(t, s, dt.x, k, fk, sg);
         }
     }
@@ -320,18 +330,21 @@ fn with_water(t: Tally, word: f32) -> Tally {
     return o;
 }
 
-// The walk from the levels' parts.
+// The walk from the levels' parts, each level's floors and interfluves as
+// strong as the region's strengths `st` (dendry.bk strengths) say; its
+// depth whole (dendry.bk drained takes it as strong as the land cuts it).
 fn walk_parts(p0: vec4<f32>, p1: vec4<f32>, p2: vec4<f32>, p3: vec4<f32>, p4: vec4<f32>, cell: f32, tc: f32,
-                  radius: f32) -> Walk {
+              radius: f32, st: vec4<f32>) -> Walk {
     let l0 = spacing(0, radius);
     let f0 = fade(l0, cell);
     var w: Walk;
     w.base = p0.z;
     w.rel = rel_after(1.0, p0.x, 0.0, f0);
-    w.t = tally_level(with_water(tally_none(), p0.w), 0, p0.y, VALLEY * l0, f0);
+    w.t = tally_level(with_water(tally_none(), p0.w), 0, p0.y, VALLEY * l0, f0, 1.0);
     w.ubar = 0.0;
     w.next = 1;
     w.onward = f0 > 0.0;
+    w.drops = vec4<f32>(0.0);
     for (var k: i32 = 1; k <= DRAIN_LEVELS; k += 1) {
         if (w.next != k || !w.onward) { continue; }
         let taken = level_taken(k, cell, tc, radius);
@@ -346,30 +359,38 @@ fn walk_parts(p0: vec4<f32>, p1: vec4<f32>, p2: vec4<f32>, p3: vec4<f32>, p4: ve
         if (k == 3) { p = p3; }
         let lk = spacing(k, radius);
         let fk = fade(lk, cell);
+        let ak = comp4(st, k - 1);
+        let before = w.rel;
         w.ubar = p.z < 1.0e8 ? p.z : ubar_next(w.ubar, k);
         w.rel = rel_after(w.rel, p.x, w.ubar, fk);
-        w.t = tally_level(with_water(w.t, p.w), k, p.y, VALLEY * lk, fk);
+        w.t = tally_level(with_water(w.t, p.w), k, p.y, VALLEY * lk, fk, ak);
+        w.drops = set4(w.drops, k - 1, before - w.rel);
         w.next = k + 1;
     }
     return w;
 }
 // The drainage from the levels' parts, the levels found down to a cell `tc`
 // wide (the grid's texel_cell; a vertex's own, its windows going on past
-// the grid), the rest as the means over their valleys.
+// the grid), the rest as the means over their valleys, in land of dryness
+// `dry` (dendry.bk dryness).
 pub fn drain_parts(p0: vec4<f32>, p1: vec4<f32>, p2: vec4<f32>, p3: vec4<f32>, p4: vec4<f32>, cell: f32,
-                   tc: f32, radius: f32) -> Drain {
-    let w = walk_means(walk_parts(p0, p1, p2, p3, p4, cell, tc, radius), radius);
-    return drain_of(w.base, w.rel, w.t, vec4<f32>(1.0));
+                   tc: f32, radius: f32, dry: f32) -> Drain {
+    let st = strengths(dry, 0.0, radius);
+    let w = walk_means(walk_parts(p0, p1, p2, p3, p4, cell, tc, radius, st), radius, st);
+    return drain_of(w.base, w.rel, w.t, vec4<f32>(1.0), w.drops, dry);
 }
 
 // The levels from `next` on as the means over their valleys.
-fn walk_means(w: Walk, radius: f32) -> Walk {
+fn walk_means(w: Walk, radius: f32, st: vec4<f32>) -> Walk {
     var o = w;
     for (var k: i32 = 1; k <= DRAIN_LEVELS; k += 1) {
         if (k < o.next) { continue; }
+        let ak = comp4(st, k - 1);
+        let before = o.rel;
         o.ubar = ubar_next(o.ubar, k);
         o.rel = mean_rel(o.rel, o.ubar);
-        o.t = tally_level(o.t, k, 1.0e9, VALLEY * spacing(k, radius), 0.0);
+        o.t = tally_level(o.t, k, 1.0e9, VALLEY * spacing(k, radius), 0.0, ak);
+        o.drops = set4(o.drops, k - 1, before - o.rel);
     }
     o.next = DRAIN_LEVELS + 1;
     return o;
@@ -464,23 +485,28 @@ pub fn window_point(pots: write_store<vec4<f32>, 1>, win: read_store<vec4<f32>, 
 // Vertex v's level k link m of its window, its 5 x 5 cells' row by row, from
 // its potentials (m 25: the streams' height about it, copied).
 pub fn window_link(win: write_store<vec4<f32>, 1>, pots: read_store<vec4<f32>, 1>, a: Anchor, rec: tiles::Record,
-                   z: i32, e: vec3<f32>, v: i32, verts: i32, m: i32, k: i32, radius: f32, inv_size: f32, d: f32) {
+                   z: i32, e: vec3<f32>, v: i32, verts: i32, m: i32, k: i32, radius: f32, inv_size: f32, d: f32,
+                   seed: i32) {
     if (grid_holds(rec, k, radius, inv_size, d)) { return; }
     let out = win_at(z, v, verts, k, m);
     if (m == 25) {
         win[out] = pots[wpot_at(z, v, verts, 49)];
         return;
     }
+    let dq = normalize(a.dir + e);
     let n = RIV_N << (2 * k);
-    let ck = cell_in(normalize(a.dir + e), n);
+    let ck = cell_in(dq, n);
     let o = (m / 5 + 1) * 7 + m % 5 + 1;
     let ao = wpot_at(z, v, verts, o);
     let po = Pot { a: pots[ao], b: pots[ao + 1] };
+    // The grain about the vertex (dendry.bk grain_at).
+    let grain = grain_at(dq, local_frame(a.dir, rec.dir_lo, radius), seed);
     var tgt: i32 = ao;
     var steep: f32 = 0.0;
     for (var nb: i32 = 0; nb < 9; nb += 1) {
         let at = wpot_at(z, v, verts, o + (nb / 3 - 1) * 7 + nb % 3 - 1);
-        let sl = fall(po, Pot { a: pots[at], b: pots[at + 1] });
+        let pt = Pot { a: pots[at], b: pots[at + 1] };
+        let sl = fall(po, pt) * lean(grain, po, pt);
         if (sl > steep) {
             steep = sl;
             tgt = at;
@@ -511,8 +537,8 @@ pub fn window_part(win: read_store<vec4<f32>, 1>, a: Anchor, rec: tiles::Record,
         let s = seg_unpacked(a4, win[at + 1]);
         if (s.c.z > 0.0) {
             let dt = seg_dist(s.a, s.c, q, k, wk, seed);
-            acc += valley_term(s, dt, wk);
-            dmin = min(dmin, dt.x);
+            acc += valley_term(s, dt, k, wk);
+            if (dt.x < dmin) { dmin = min(dmin, seg_near(s, dt.x, k, wk)); }
             t = tally_water(t, s, dt.x, k, fk, sg);
         }
     }

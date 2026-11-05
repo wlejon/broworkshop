@@ -6,17 +6,17 @@
 // its noise lattices, found on the CPU in f64 by k_anchors). A cell's point
 // is the anchor's direction and its offset from it (ground.bk frame_dir),
 // in f32.
-from planet::ground import terrain, terrain_drained, cell_ground_drained, spread, expected_surface, expected_cover, gradient,
-                           variation, strata, octaves_for, range_margin, fresh_water, relief_offset, frame_dir,
-                           soil_height_drained, SOIL_OCTAVES, cell_width, woodland, wooded, banked, with_streams,
-                           landform_climate, landform_wood;
-from planet::climate import climate_at, cover_at, snow_at, Climate;
+from planet::ground import terrain, terrain_parts, shaped_by, cell_ground_drained, spread, expected_surface, expected_cover,
+                           gradient, variation, strata, octaves_for, range_margin, fresh_water, relief_offset, frame_dir,
+                           SOIL_OCTAVES, cell_width, woodland, wooded, banked, with_streams;
+from planet::climate import climate_fields, climate_of, cover_at, snow_at, Climate, landform_climate, landform_wood,
+                            landform_share;
 from planet::relief import BASE_WAVELENGTH, RIDGE_FIRST, WARP_OCTAVE, WARP_DISPLACE, simplex_grad, SimplexAt;
 from planet::rivers import water_at, water_share;
 from planet::anchor import Anchor, read_anchor, write_anchor, anchor_of, anchor_at, doubled, simplex_from, plane_offset;
 from planet::dendry_grid import grid_reach_point, grid_holds, grid_point, grid_link, level_part, drain_parts, texel_cell,
     horizon_cell, window_point, window_link, window_part;
-from planet::dendry import drain_held;
+from planet::dendry import drain_held, dryness;
 import tiles;
 
 // The batch's drainage grids (dendry_grid.bk), before anything reads them:
@@ -39,9 +39,9 @@ fn k_drain_points(g: grid<3>, table: read_store<vec4<i32>, 1>, anchors: read_sto
 @kernel @grid(3)
 fn k_drain_links(g: grid<3>, table: read_store<vec4<i32>, 1>, anchors: read_store<vec4<i32>, 1>,
                  segs: write_store<vec4<f32>, 1>, pots: read_store<vec4<f32>, 1>, radius: f32, inv_size: f32,
-                 d: f32, level: i32, tiles: i32) {
+                 d: f32, level: i32, tiles: i32, seed: i32) {
     grid_link(segs, pots, read_anchor(anchors, g.z()), tiles::record(table, g.z()), level, g.z(), tiles,
-              g.x(), g.y(), radius, inv_size, d);
+              g.x(), g.y(), radius, inv_size, d, seed);
 }
 // Then, a level at a time after the grid's, the levels finer than a tile's
 // grid holds about each of its vertices (dendry_grid.bk window_point): grid
@@ -61,25 +61,27 @@ fn k_window_points(g: grid<3>, table: read_store<vec4<i32>, 1>, anchors: read_st
 @kernel @grid(3)
 fn k_window_links(g: grid<3>, table: read_store<vec4<i32>, 1>, anchors: read_store<vec4<i32>, 1>,
                   win: write_store<vec4<f32>, 1>, pots: read_store<vec4<f32>, 1>, cells: i32, radius: f32, border: f32,
-                  inv_size: f32, d: f32, level: i32) {
+                  inv_size: f32, d: f32, level: i32, seed: i32) {
     let rec = tiles::record(table, g.z());
     let v = g.x();
     window_link(win, pots, read_anchor(anchors, g.z()), rec, g.z(), vertex_dir(rec, v % cells, v / cells, border, inv_size),
-                v, cells * cells, g.y(), level, radius, inv_size, d);
+                v, cells * cells, g.y(), level, radius, inv_size, d, seed);
 }
 
 // The drainage at the batch's points from the grids, found apart from the
 // kernels that take it (theirs are heavy already, and a lone tile's
 // production is as long as its slowest threads), each point's levels side
 // by side (k_drain_parts, dendry_grid.bk level_part) and then together
-// (k_point_drains): the base level and the relative height (xy of `out`),
-// drain_points() a tile, in order its texels' (every other texel, tex_drains;
-// k_detail_height, which takes
-// from `extras` what their colour does: wet, ridge, the streams' share and
-// their gallery), the horizon heights' points (k_horizon_heights), the
-// soil's (k_soil, SOIL_STRIDE^2, its ring beyond the texels: soil_ring). Past those, the vertices (k_tile, every
-// level, into `vertices`, cells^2 a tile), the levels the grid does not hold
-// from their windows (k_window_points).
+// (k_point_drains): the base level, the relative height and the dryness
+// (xyz of `out`) and the levels' drops (`drops`, dendry.bk Drain drops),
+// drain_points() a tile, in order its texels' (every other texel,
+// tex_drains; k_detail_height, and k_detail, which takes from `extras`
+// what their colour does: wet, ridge, the streams' share and their
+// gallery, and their climate from `climates`), the
+// horizon heights' points (k_horizon_heights), the soil's (k_soil,
+// SOIL_STRIDE^2, its ring beyond the texels: soil_ring). Past those, the
+// vertices (k_tile, every level, into `vertices`, cells^2 a tile), the
+// levels the grid does not hold from their windows (k_window_points).
 fn drain_points(texels: i32, hz: i32) -> i32 {
     let td = tex_drains(texels);
     let hd = hz_drains(hz);
@@ -94,14 +96,6 @@ fn tex_drains(texels: i32) -> i32 {
 }
 // Point (x, y) of a grid of points found at every other one of them, n a
 // side from `base`: the found one, or the mean of the two or four about it.
-fn halved(drains: read_store<vec2<f32>, 1>, base: i32, n: i32, x: i32, y: i32) -> vec2<f32> {
-    let x0 = x / 2;
-    let y0 = y / 2;
-    let x1 = min(x0 + (x & 1), n - 1);
-    let y1 = min(y0 + (y & 1), n - 1);
-    return 0.25 * (drains[base + y0 * n + x0] + drains[base + y0 * n + x1] + drains[base + y1 * n + x0] +
-                   drains[base + y1 * n + x1]);
-}
 fn halved4(drains: read_store<vec4<f32>, 1>, base: i32, n: i32, x: i32, y: i32) -> vec4<f32> {
     let x0 = x / 2;
     let y0 = y / 2;
@@ -155,8 +149,8 @@ fn soil_ring(x: i32, y: i32, n: i32) -> bool {
     return x == 0 || y == 0 || x == n + 1 || y == n + 1;
 }
 // The texels' drainage at texel coordinate (tx, ty), bilinearly between
-// its points (every other texel, tex_drains).
-fn tex_drain_at(drains: read_store<vec2<f32>, 1>, base: i32, td: i32, tx: f32, ty: f32) -> vec2<f32> {
+// its points (every other texel, tex_drains): either of its stores.
+fn tex_drain_at(drains: read_store<vec4<f32>, 1>, base: i32, td: i32, tx: f32, ty: f32) -> vec4<f32> {
     let gx = clamp(0.5 * tx, 0.0, (td - 1) as f32);
     let gy = clamp(0.5 * ty, 0.0, (td - 1) as f32);
     let x0 = min(floor(gx) as i32, td - 2);
@@ -189,10 +183,19 @@ fn k_drain_parts(g: grid<3>, table: read_store<vec4<i32>, 1>, anchors: read_stor
     }
     parts[out] = level_part(segs, reaches, net, a, rec, z, tiles, p.xyz, p.w, k, radius, inv_size, d, seed);
 }
+// Each point's drainage: base level, relative height and the land's
+// dryness (dendry.bk dryness, which the levels' strengths follow) into
+// `out` (or `vertices`), the levels' drops (dendry.bk Drain drops) into
+// `drops` (or `vertex_drops`) at the same index, what its texel's colour
+// takes into `extras`, and a texel's climate (climate.bk climate_fields,
+// for the texel's width) into `climates`, two vec4s, td^2 apart (k_detail
+// takes both bilinearly, as it does `extras`).
 @kernel @grid(2)
-fn k_point_drains(g: grid<2>, table: read_store<vec4<i32>, 1>, parts: read_store<vec4<f32>, 1>,
-                  out: write_store<vec2<f32>, 1>, extras: write_store<vec4<f32>, 1>, vertices: write_store<vec2<f32>, 1>,
-                  texels: i32, hz: i32, cells: i32, radius: f32, border: f32, inv_size: f32, d: f32, truth: f32) {
+fn k_point_drains(g: grid<2>, table: read_store<vec4<i32>, 1>, anchors: read_store<vec4<i32>, 1>,
+                  parts: read_store<vec4<f32>, 1>, out: write_store<vec4<f32>, 1>, extras: write_store<vec4<f32>, 1>,
+                  vertices: write_store<vec4<f32>, 1>, drops: write_store<vec4<f32>, 1>,
+                  vertex_drops: write_store<vec4<f32>, 1>, climates: write_store<vec4<f32>, 1>, texels: i32, hz: i32,
+                  cells: i32, radius: f32, border: f32, inv_size: f32, d: f32, truth: f32, seed: i32) {
     let z = g.y();
     let i = g.x();
     let rec = tiles::record(table, z);
@@ -203,15 +206,28 @@ fn k_point_drains(g: grid<2>, table: read_store<vec4<i32>, 1>, parts: read_store
     let np = drain_points(texels, hz);
     // A vertex's levels go on past the grid to its own cell.
     let tc = i >= np ? p.w : texel_cell(rec, inv_size, d);
+    let up = normalize(read_anchor(anchors, z).dir + p.xyz);
+    let dry = dryness(up, seed);
     let dr = drain_parts(parts[at], parts[at + w], parts[at + 2 * w], parts[at + 3 * w], parts[at + 4 * w], p.w, tc,
-                         radius);
+                         radius, dry);
+    let brd = vec4<f32>(dr.base, dr.rel, dry, 0.0);
     if (i >= np) {
-        vertices[z * cells * cells + i - np] = vec2<f32>(dr.base, dr.rel);
+        vertices[z * cells * cells + i - np] = brd;
+        vertex_drops[z * cells * cells + i - np] = dr.drops;
         return;
     }
-    out[z * np + i] = vec2<f32>(dr.base, dr.rel);
+    out[z * np + i] = brd;
+    drops[z * np + i] = dr.drops;
     let td = tex_drains(texels);
-    if (i < td * td) { extras[z * td * td + i] = vec4<f32>(dr.wet, dr.ridge, dr.share, dr.gallery); }
+    // The landform's wet and ridge as the land's dryness takes them
+    // (climate.bk landform_share).
+    let lf = landform_share(dry);
+    let nt = td * td;
+    if (i >= nt) { return; }
+    extras[z * nt + i] = vec4<f32>(lf * dr.wet, lf * dr.ridge, dr.share, dr.gallery);
+    let cf = climate_fields(up, cell_width(octaves_for(rec.extent, inv_size / d)) / radius, seed);
+    climates[2 * z * nt + i] = cf.a;
+    climates[(2 * z + 1) * nt + i] = cf.b;
 }
 // Vertex (x, y)'s offset from the tile's anchor's direction (as k_tile).
 fn vertex_dir(rec: tiles::Record, x: i32, y: i32, border: f32, inv_size: f32) -> vec3<f32> {
@@ -233,24 +249,30 @@ fn vertex_dir(rec: tiles::Record, x: i32, y: i32, border: f32, inv_size: f32) ->
 // relief's octaves finer than its texels (ground_mesh.bk): where the cell is
 // in the relief's noise (ground.bk relief_offset), from the anchor's, through
 // the warp (xyz); and how much the ground there moves with the octaves (w's
-// bits: ground.bk terrain_shaped, below FINE_FIRST in the low 16 bits, from
-// it on in the high, each -0.5 to 1 as a unorm).
+// bits: ground.bk terrain_shaped, below FINE_FIRST in the low 11 bits, from
+// it on in the next 11, the octaves the drainage keeps whole (relief.bk
+// kept_share) in the top 10, each -0.5 to 1 as a unorm).
 @kernel @grid(3)
 fn k_tile(g: grid<3>, table: read_store<vec4<i32>, 1>, anchors: read_store<vec4<i32>, 1>, out: write_store<vec4<f32>, 3>,
           relief: write_store<vec4<f32>, 3>, span: rw_store<i32, 1>, radius: f32, border: f32, inv_size: f32, truth: f32,
-          seed: i32, net: read_store<f32, 1>, drains: read_store<vec2<f32>, 1>) {
+          seed: i32, net: read_store<f32, 1>, drains: read_store<vec4<f32>, 1>, drops: read_store<vec4<f32>, 1>) {
     let rec = tiles::record(table, g.z());
     let a = read_anchor(anchors, g.z());
     let s = ((g.x() as f32) - border) * inv_size;
     let t = ((g.y() as f32) - border) * inv_size;
     let d = tiles::frame_offset(rec, s, t);
     let e = rec.dir_lo + tiles::sphere_offset(rec, d);
-    let drain = drain_held(drains[(g.z() * g.height() + g.y()) * g.width() + g.x()]);
-    let shaped = terrain_drained(a, e, radius, truth, seed, net, drain);
+    // (Its drainage read after the noise: kept live through it, it costs the
+    // noise's threads.)
+    let parts = terrain_parts(a, e, radius, truth, seed);
+    let wa = water_at(a.dir, e, radius, cell_width(truth), net, seed);
+    let vi = (g.z() * g.height() + g.y()) * g.width() + g.x();
+    let shaped = shaped_by(parts, wa, drain_held(drains[vi], drops[vi]), radius);
     let h = shaped.x;
     let p = tiles::sphere_vertex(rec, d, radius, max(h, 0.0));
     out[g.x(), g.y(), rec.slot] = vec4<f32>(p, h);
-    let scales = unorm((shaped.y + 0.5) / 1.5, 16) | (unorm((shaped.z + 0.5) / 1.5, 16) << 16);
+    let scales = unorm((shaped.y + 0.5) / 1.5, 11) | (unorm((shaped.z + 0.5) / 1.5, 11) << 11) |
+                 (unorm((shaped.w + 0.5) / 1.5, 10) << 22);
     let k = radius / BASE_WAVELENGTH;
     let dq = relief_offset(a, e * k, seed) - relief_offset(a, rec.dir_lo * k, seed);
     relief[g.x(), g.y(), rec.slot] = vec4<f32>(dq, bitcast<f32>(scales));
@@ -297,24 +319,33 @@ fn soil_points(octaves: f32, texels: i32) -> i32 {
 @kernel @grid(3)
 fn k_soil(g: grid<3>, table: read_store<vec4<i32>, 1>, anchors: read_store<vec4<i32>, 1>, out: write_store<f32, 1>,
           texels: i32, radius: f32, border: f32, inv_size: f32, d: f32, seed: i32, net: read_store<f32, 1>,
-          drains: read_store<vec2<f32>, 1>, hz: i32) {
+          drains: read_store<vec4<f32>, 1>, hz: i32, drops: read_store<vec4<f32>, 1>) {
     let rec = tiles::record(table, g.z());
     let octaves = octaves_for(rec.extent, inv_size / d);
     let n = soil_points(octaves, texels);
     if (octaves <= SOIL_OCTAVES || g.x() >= n + 2 || g.y() >= n + 2) { return; }
     let at = g.z() * SOIL_STRIDE * SOIL_STRIDE + g.y() * (n + 2) + g.x();
     let st = soil_st(g.x(), g.y(), n, texels, border, inv_size, d);
+    let a = read_anchor(anchors, g.z());
+    let e = frame_dir(rec, st.x, st.y);
+    // (Its drainage read after the noise, as k_tile's.)
+    let parts = terrain_parts(a, e, radius, SOIL_OCTAVES, seed);
+    let wa = water_at(a.dir, e, radius, cell_width(SOIL_OCTAVES), net, seed);
     let hd = hz_drains(hz);
     let td = tex_drains(texels);
     let base = g.z() * drain_points(texels, hz);
-    var dr = drains[base + td * td + hd * hd + g.y() * SOIL_STRIDE + g.x()];
+    let ri = base + td * td + hd * hd + g.y() * SOIL_STRIDE + g.x();
+    var dr = drains[ri];
+    var dp = drops[ri];
     if (!soil_ring(g.x(), g.y(), n)) {
         // (soil_st: point x is at texel (x - 1) span.)
         let span = ((texels - 1) as f32) / ((n - 1) as f32);
-        dr = tex_drain_at(drains, base, td, ((g.x() - 1) as f32) * span, ((g.y() - 1) as f32) * span);
+        let tx = ((g.x() - 1) as f32) * span;
+        let ty = ((g.y() - 1) as f32) * span;
+        dr = tex_drain_at(drains, base, td, tx, ty);
+        dp = tex_drain_at(drops, base, td, tx, ty);
     }
-    let drain = drain_held(dr);
-    out[at] = soil_height_drained(read_anchor(anchors, g.z()), frame_dir(rec, st.x, st.y), radius, seed, net, drain);
+    out[at] = shaped_by(parts, wa, drain_held(dr, dp), radius).x;
 }
 // Soil point (x, y)'s frame coordinates, n points a side.
 fn soil_st(x: i32, y: i32, n: i32, texels: i32, border: f32, inv_size: f32, d: f32) -> vec2<f32> {
@@ -340,7 +371,7 @@ fn soil_slope(soil: read_store<f32, 1>, base: i32, m: i32, i: i32, j: i32, step:
 @kernel @grid(3)
 fn k_detail_height(g: grid<3>, table: read_store<vec4<i32>, 1>, anchors: read_store<vec4<i32>, 1>,
                    texels: write_store<vec4<f32>, 1>, radius: f32, border: f32, inv_size: f32, d: f32, seed: i32,
-                   net: read_store<f32, 1>, drains: read_store<vec2<f32>, 1>, hz: i32) {
+                   net: read_store<f32, 1>, drains: read_store<vec4<f32>, 1>, hz: i32, drops: read_store<vec4<f32>, 1>) {
     let rec = tiles::record(table, g.z());
     let a = read_anchor(anchors, g.z());
     let w = g.width();
@@ -349,7 +380,8 @@ fn k_detail_height(g: grid<3>, table: read_store<vec4<i32>, 1>, anchors: read_st
     let cell = inv_size / d;
     let st = texel_st(tx, ty, border, inv_size, d);
     let octaves = octaves_for(rec.extent, cell);
-    let drain = drain_held(halved(drains, g.z() * drain_points(w, hz), tex_drains(w), tx, ty));
+    let base = g.z() * drain_points(w, hz);
+    let drain = drain_held(halved4(drains, base, tex_drains(w), tx, ty), halved4(drops, base, tex_drains(w), tx, ty));
     let h = cell_ground_drained(a, rec, st.x, st.y, cell, radius, octaves, seed, net, drain).h;
     let p = tiles::sphere_vertex(rec, tiles::frame_offset(rec, st.x, st.y), radius, max(h, 0.0));
     texels[(g.z() * w + ty) * w + tx] = vec4<f32>(p, h);
@@ -380,7 +412,7 @@ const BAR_SAND = vec3<f32>(0.44, 0.40, 0.32);
 fn k_detail(g: grid<3>, table: read_store<vec4<i32>, 1>, anchors: read_store<vec4<i32>, 1>, texels: read_store<vec4<f32>, 1>,
             out: write_store<i32, 1>, radius: f32, border: f32, inv_size: f32, d: f32, truth: f32, seed: i32,
             net: read_store<f32, 1>, soil_grid: read_store<f32, 1>, rock: write_store<i32, 1>,
-            drains: read_store<vec4<f32>, 1>) {
+            drains: read_store<vec4<f32>, 1>, climates: read_store<vec4<f32>, 1>) {
     let rec = tiles::record(table, g.z());
     let a = read_anchor(anchors, g.z());
     let z = g.z();
@@ -425,11 +457,13 @@ fn k_detail(g: grid<3>, table: read_store<vec4<i32>, 1>, anchors: read_store<vec
                          soil_slope(soil_grid, base, m, ix + 2, iy + 2, step), fx);
         soil = vec2<f32>(mix(top, bottom, fy), 0.0);
     }
-    // The climate, wetter down the valleys and drier along the ridges
-    // (k_detail_height's drainage); the region's rock is the climate's own.
+    // The climate (k_point_drains', every other texel), wetter down the
+    // valleys and drier along the ridges (its drainage); the region's rock
+    // is the climate's own.
     let td = tex_drains(w);
     let dr = halved4(drains, z * td * td, td, tx, ty);
-    let cl_region = climate_at(up, length(du) * 0.5 / radius, seed);
+    let cl_region = climate_of(halved4(climates, 2 * z * td * td, td, tx, ty),
+                               halved4(climates, (2 * z + 1) * td * td, td, tx, ty));
     let cl = landform_climate(cl_region, dr.x, dr.y);
     // The texels nearest the tile's corners give it its rock's corners
     // (ANCHOR_WORDS' word 5), half a texel in.
@@ -605,7 +639,7 @@ const HZ_DENSITY: i32 = 2;
 @kernel @grid(3)
 fn k_horizon_heights(g: grid<3>, table: read_store<vec4<i32>, 1>, anchors: read_store<vec4<i32>, 1>,
                      heights: write_store<f32, 1>, radius: f32, inv_size: f32, seed: i32, net: read_store<f32, 1>,
-                     drains: read_store<vec2<f32>, 1>, texels: i32) {
+                     drains: read_store<vec4<f32>, 1>, texels: i32, drops: read_store<vec4<f32>, 1>) {
     let rec = tiles::record(table, g.z());
     let a = read_anchor(anchors, g.z());
     let e = g.width();
@@ -617,8 +651,13 @@ fn k_horizon_heights(g: grid<3>, table: read_store<vec4<i32>, 1>, anchors: read_
     let at = frame_dir(rec, cx * inv_size, cy * inv_size);
     // The drainage a cell apart, bilinearly (hz_drains).
     let td = tex_drains(texels);
-    let drain = drain_held(halved(drains, g.z() * drain_points(texels, e) + td * td, hz_drains(e), g.x(), g.y()));
-    let h = terrain_drained(a, at, radius, octaves, seed, net, drain).x;
+    let hb = g.z() * drain_points(texels, e) + td * td;
+    let hd = hz_drains(e);
+    // (Read after the noise, as k_tile's.)
+    let parts = terrain_parts(a, at, radius, octaves, seed);
+    let wa = water_at(a.dir, at, radius, cell_width(octaves), net, seed);
+    let drain = drain_held(halved4(drains, hb, hd, g.x(), g.y()), halved4(drops, hb, hd, g.x(), g.y()));
+    let h = shaped_by(parts, wa, drain, radius).x;
     heights[(g.z() * e + g.y()) * e + g.x()] = max(h, 0.0);
 }
 
