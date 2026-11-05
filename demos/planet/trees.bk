@@ -33,10 +33,12 @@ fn k_tree_field(g: grid<2>, out: write_store<f32, 1>, anchor: read_store<vec4<i3
     let hx = hash_primes3d(seed + 977, (li + g.x()) * PRIME_X, (lj + row) * PRIME_Y, face * PRIME_Z);
     let hy = hash_primes3d(seed + 1979, (li + g.x()) * PRIME_X, (lj + row) * PRIME_Y, face * PRIME_Z);
     let hp = hash_primes3d(seed + 2971, (li + g.x()) * PRIME_X, (lj + row) * PRIME_Y, face * PRIME_Z);
-    // Inside the middle 70% of the cell, so neighbours do not touch.
-    let jx = 0.15 + 0.7 * (((hx >> 8) & 65535) as f32) / 65536.0;
-    let jy = 0.15 + 0.7 * (((hy >> 8) & 65535) as f32) / 65536.0;
+    // Anywhere but the cell's very edge, so spacings run from a crown's
+    // width down to touching, not an even grid.
+    let jx = 0.04 + 0.92 * (((hx >> 8) & 65535) as f32) / 65536.0;
+    let jy = 0.04 + 0.92 * (((hy >> 8) & 65535) as f32) / 65536.0;
     let pick = (((hp >> 8) & 65535) as f32) / 65536.0;
+    let open = stand_openness(li + g.x(), lj + row, face, jx, jy, seed);
     let du = du0 + ((g.x() as f32) + jx) * delta;
     let dv = dv0 + ((row as f32) + jy) * delta;
     let e = plane_offset(a, a.lost + vec3<f32>(ex, ey, ez) * du + vec3<f32>(fx, fy, fz) * dv);
@@ -54,7 +56,8 @@ fn k_tree_field(g: grid<2>, out: write_store<f32, 1>, anchor: read_store<vec4<i3
     // landform_climate), the same the ground's colour takes over its
     // texels, and in gallery woods along the rivers' and streams' banks
     // (ground.bk banked); none in the water. A tree stands where the site's
-    // pick is under it; at a thinning edge the ones left are smaller.
+    // pick is under the cover as the stand thins it (stand_openness); at a
+    // thinning edge the ones left are smaller, in an opening larger.
     let region = climate_at(normalize(a.dir + e), 0.0, seed);
     let dr = site.drain;
     let lf = landform_share(dr.dry);
@@ -64,7 +67,7 @@ fn k_tree_field(g: grid<2>, out: write_store<f32, 1>, anchor: read_store<vec4<i3
                        landform_wood(woodland(a, e, radius, 99.0, seed), lf * dr.wet, lf * dr.ridge))
               * (1.0 - water_share(h, wa, 0.0));
     var size: f32 = 0.0;
-    if (pick < local) { size = 0.6 + 0.4 * local; }
+    if (pick < local * mix(1.0, OPEN_DENSITY, open)) { size = (0.6 + 0.4 * local) * mix(CLUMP_SIZE, OPEN_SIZE, open); }
     let vary = variation(a, e, radius, octaves, seed);
 
     let i = (row * g.width() + g.x()) * 7;
@@ -76,4 +79,37 @@ fn k_tree_field(g: grid<2>, out: write_store<f32, 1>, anchor: read_store<vec4<i3
     out[i + 4] = vary.x;
     out[i + 5] = vary.y;
     out[i + 6] = vary.z;
+}
+
+// A forest grows in stands, not rows: clumps whose crowns close, small
+// openings, and in them a few lone trees grown large in the light. The
+// openness of site (x, y) on face `face`, 0 in a clump to 1 in an opening,
+// from value noise over the sites (16 sites, about 130 m, and 4 sites,
+// about 30 m, a step) at the site's spot (jx, jy in its cell). A clump
+// stands every site the cover keeps, its trees CLUMP_SIZE; an opening
+// OPEN_DENSITY of them, OPEN_SIZE. The two are chosen so the crowns'
+// mean area, the density times the size squared over the openness's
+// spread, is the cover's as an even stand of size-1 trees had it, which
+// the ground's canopy past the drawn trees takes (ground_mesh.bk
+// TREE_CROWNS).
+const OPEN_DENSITY: f32 = 0.15;
+const CLUMP_SIZE: f32 = 1.145;
+const OPEN_SIZE: f32 = 1.25;
+fn stand_value(x: i32, y: i32, face: i32, jx: f32, jy: f32, shift: i32, seed: i32) -> f32 {
+    let cx = x >> shift;
+    let cy = y >> shift;
+    let m = (1 << shift) - 1;
+    let f = (vec2<f32>((x & m) as f32 + jx, (y & m) as f32 + jy)) / ((m + 1) as f32);
+    let s = f * f * (vec2<f32>(3.0) - 2.0 * f);
+    let n00 = hash_primes3d(seed, cx * PRIME_X, cy * PRIME_Y, face * PRIME_Z);
+    let n10 = hash_primes3d(seed, (cx + 1) * PRIME_X, cy * PRIME_Y, face * PRIME_Z);
+    let n01 = hash_primes3d(seed, cx * PRIME_X, (cy + 1) * PRIME_Y, face * PRIME_Z);
+    let n11 = hash_primes3d(seed, (cx + 1) * PRIME_X, (cy + 1) * PRIME_Y, face * PRIME_Z);
+    let v = vec4<f32>(((n00 >> 8) & 65535) as f32, ((n10 >> 8) & 65535) as f32,
+                      ((n01 >> 8) & 65535) as f32, ((n11 >> 8) & 65535) as f32) / 65536.0;
+    return mix(mix(v.x, v.y, s.x), mix(v.z, v.w, s.x), s.y);
+}
+fn stand_openness(x: i32, y: i32, face: i32, jx: f32, jy: f32, seed: i32) -> f32 {
+    let n = 0.6 * stand_value(x, y, face, jx, jy, 4, seed + 3967) + 0.4 * stand_value(x, y, face, jx, jy, 2, seed + 4973);
+    return smoothstep(0.5, 0.68, n);
 }

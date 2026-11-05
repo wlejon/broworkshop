@@ -7,7 +7,7 @@ module planet::ground;
 
 import std::noise::*;
 import tiles;
-from planet::rivers import water_at, lake_surface, Water;
+from planet::rivers import water_at, Water, RIM, RIM_CREST, lake_rim;
 from planet::dendry import Drain, drain_at, drain_probed, drained;
 from planet::climate import Climate, climate_at, cover_at, temp_at, snow_at;
 // The ridged relief's octaves and statistics, which the ground's shader
@@ -338,7 +338,8 @@ pub fn cell_width(octaves: f32) -> f32 {
 // metres down to its bed.
 const VALLEY_FLOOR: f32 = 150.0;
 const CUT_BLEND: f32 = 40.0;
-const BANK_RELIEF: f32 = 4.0;
+const BANK_BLEND: f32 = 4.0;
+const SHORE_WANDER: f32 = 45.0;
 //
 // y, z and w: how much the ground here moves with the relief's octaves
 // below FINE_FIRST, from it on, and the part of those finer than the
@@ -369,22 +370,33 @@ fn shaped_rel(t: vec4<f32>, w: Water, d: Drain, rel: f32, radius: f32) -> vec4<f
     let x = h - valley;
     let m = max(CUT_BLEND - abs(x), 0.0) / CUT_BLEND;
     let cut = min(h, valley - m * m * CUT_BLEND * 0.25);
-    let lake = lake_surface(cut, w);
     let u = t.z;
-    if (lake > cut) {
-        // A lake's bank (rivers.bk lake_top), from its shore down to the
-        // ground about, carries the ground's fine relief as a valley's
-        // sides do, in full a few metres under the level and none at the
-        // water or at its foot, so it falls in spurs and hollows rather than
-        // as one plane.
-        let bank = clamp((w.near.z - w.lake) / BANK_RELIEF, 0.0, 1.0) * clamp((lake - cut) / BANK_RELIEF, 0.0, 1.0);
-        return vec4<f32>(max(lake + (t.y + t.w) * bank, cut), u * bank, u * bank, u * bank);
+    var g = vec4<f32>(cut, u * k, u * k, u);
+    if (cut < h) {
+        // On the cut: d cut / d h and d cut / d valley.
+        let sx = x >= 0.0 ? 1.0 : -1.0;
+        let dh = 0.5 * m * sx;
+        g = vec4<f32>(cut, u * k * dh, u * (k * dh + (1.0 - dh) * side), u * (dh + (1.0 - dh) * side));
     }
-    if (cut >= h) { return vec4<f32>(cut, u * k, u * k, u); }
-    // On the cut: d cut / d h and d cut / d valley.
-    let sx = x >= 0.0 ? 1.0 : -1.0;
-    let dh = 0.5 * m * sx;
-    return vec4<f32>(cut, u * k * dh, u * (k * dh + (1.0 - dh) * side), u * (dh + (1.0 - dh) * side));
+    if (w.lake < -1.0e8) { return g; }
+    // A lake near (rivers.bk lake_rim): its rim, carrying the ground's fine
+    // relief (less over its crest, so the crest holds over the level), joins
+    // the ground by a smooth maximum over BANK_BLEND metres, so the rim's
+    // foot runs into the land without a crease. The relief also moves the
+    // beach in and out, SHORE_WANDER metres a metre of it, none at the
+    // crest, so the waterline runs in bays and points of tens of metres
+    // over its longest wavelengths and less over its shorter, rather than
+    // along the profile's contour. Under the level on the lake's side of the
+    // crest, the lake's surface.
+    let level = w.near.z;
+    let fine = t.y + t.w;
+    let rim = lake_rim(w.shore + SHORE_WANDER * fine * clamp(1.0 - w.shore / RIM_CREST, 0.0, 1.0));
+    let gain = clamp(1.0 - 0.7 * rim / RIM, 0.3, 1.0);
+    let bank = level + rim + fine * gain;
+    let s = clamp(0.5 + 0.5 * (bank - cut) / BANK_BLEND, 0.0, 1.0);
+    let ground = mix(cut, bank, s) + BANK_BLEND * s * (1.0 - s);
+    if (w.shore < RIM_CREST && ground < level) { return vec4<f32>(level, 0.0, 0.0, 0.0); }
+    return vec4<f32>(ground, mix(g.yzw, vec3<f32>(u * gain), s));
 }
 pub fn terrain(a: Anchor, e: vec3<f32>, radius: f32, octaves: f32, seed: i32, net: read_store<f32, 1>) -> f32 {
     return terrain_shaped(a, e, radius, octaves, seed, net).x;

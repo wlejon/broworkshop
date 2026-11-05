@@ -37,7 +37,7 @@ const FAR = 1900;          // the silhouettes out to it, shrinking over its last
 const SUN_STRIDE = 4;      // sites between the sun grid's points
 const SUN_P = N / SUN_STRIDE + 1;
 const SHOWN_BELOW = 2500;  // metres of altitude above which no tree is drawn
-const MAX_TREE_H = 24;     // metres: the tallest tree (treeCrown at size 1)
+const MAX_TREE_H = 30;     // metres: the tallest tree (tree_crown at size 1.25, trees.bk OPEN_SIZE)
 const SHADOW_REACH = 64;   // metres: the farthest a crown's shadow is followed toward the sun
 const SHADOW_STEPS = 14;   // and the most steps along it
 
