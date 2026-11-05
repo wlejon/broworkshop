@@ -65,8 +65,10 @@ const WAVES = (() => {
     // Rivers and lakes are sheltered: no fetch for waves longer than a few
     // metres, and a breeze's ripples (Cox and Munk at 2 m/s, a mean square
     // slope of 0.0132) where the sea has its wind sea. They take the waves
-    // from `fresh` on, 4 m and shorter, scaled with the residual to that.
-    const fresh = list.findIndex((w) => 2 * Math.PI / w.k <= 4);
+    // from `fresh` on, 2 m and shorter, scaled with the residual to that
+    // (from 4 m, the sun's glint on a river seen from over it was a few big
+    // blotches; from 1 m, a lattice of the few waves left).
+    const fresh = list.findIndex((w) => 2 * Math.PI / w.k <= 2);
     const freshScale = Math.sqrt((0.003 + 0.00512 * 2) / (list[fresh].tail + residual));
     return { list, residual, swell: list.filter((w) => w.period === SWELL_PERIOD).length, fresh, freshScale };
 })();

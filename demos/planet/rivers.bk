@@ -750,14 +750,16 @@ pub fn sea_water(depth: f32) -> vec3<f32> {
 // brown a metre or two and is dark beyond (Kirk, Light and Photosynthesis
 // in Aquatic Ecosystems): darker than the land around it from above, as
 // lakes are, where the sea is blue. Silt (0 to 1) holds the light near the
-// surface: silty water sends back its silt's brown and hides its bed within
-// a metre, as a river's does from low over it (the clear lakes' near-black
-// on a river read as a slate ribbon).
+// surface: silty water sends back a deep olive-green and shows its bed a
+// metre or two down, as a river's does from over it, its banks shelving
+// from the bed's brown to the channel's dark (the clear lakes' near-black
+// on a river read as a slate ribbon; a brighter silt hid the bed and,
+// metered from over the river, read as wet sand).
 const LAKE_WATER = vec3<f32>(0.006, 0.011, 0.009);
 const LAKE_BED = vec3<f32>(0.13, 0.11, 0.07);
 const LAKE_ATTENUATION = vec3<f32>(0.55, 0.30, 0.65);   // per metre
-const RIVER_SILT =vec3<f32>(0.085, 0.088, 0.045);
-const SILT_ATTENUATION = vec3<f32>(0.7, 0.75, 0.95);
+const RIVER_SILT = vec3<f32>(0.040, 0.052, 0.026);
+const SILT_ATTENUATION = vec3<f32>(0.45, 0.40, 0.55);
 pub fn fresh_water(depth: f32, silt: f32) -> vec3<f32> {
     let through = exp(mix(LAKE_ATTENUATION, SILT_ATTENUATION, silt) * (-2.0 * depth));
     return mix(mix(LAKE_WATER, RIVER_SILT, silt), LAKE_BED, through);

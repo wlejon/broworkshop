@@ -88,19 +88,21 @@ const LITTER: f32 = 0.8;
 const NEEDLES: vec3<f32> = vec3<f32>(0.070, 0.047, 0.026);
 const MOSS: vec3<f32> = vec3<f32>(0.030, 0.055, 0.016);
 const FRESH_GLOSS: f32 = 0.35;   // fresh water's roughness, of its ripples'
-// A river's lanes along its current: STREAK_W metres across, STREAK_LEN
+// Fresh water's lanes along the wind: STREAK_W metres across, STREAK_LEN
 // between the samples averaged along it, how much they gather and calm the
 // ripples (STREAK_RIPPLE) and tilt the surface (slope per unit of the
 // noise's gradient).
-const STREAK_W: f32 = 6.0;
+// (A power of two, so the noise's period divides SWELL_PERIOD: at 6 m the
+// lanes jumped at every tile's edge, where the coordinates wrap.)
+const STREAK_W: f32 = 8.0;
 const STREAK_LEN: f32 = 6.0;
 const STREAK_RIPPLE: f32 = 1.6;
 const STREAK_SLOPE: f32 = 0.02;
+const WIND: vec3<f32> = vec3<f32>(0.48, 0.36, -0.8);   // the lanes' direction over the planet
 // Clouds low in a reflection: their sunlit sides, of the sun's light on the
 // ground; the reflection where the horizons hide the sky: the banks' shade.
 const CLOUD_SIDES: f32 = 0.55;
-const BANK_SHADE: f32 = 0.35;
-// What the clouds leave of the light at the ground point g (about the
+const BANK_SHADE: f32 = 0.35;// What the clouds leave of the light at the ground point g (about the
 // planet's centre) over a footprint of w metres, from clouds.js's ground
 // light cache (clouds.bk k_cloud_ground): the sun straight through (x),
 // scattered down (y), and the sky's (z). Between the two tile levels whose
@@ -805,20 +807,21 @@ pub fn fragment(v: mesh::Vertex, s_in: mesh::Surface) -> mesh::Surface {
     var sea = up;
     if (water > 0.001) {
         let calm = mix(1.0, WAVE_FRESH_SCALE, fresh);
-        let sr = sea_slope(footprint * mix(1.0, 4.0, fresh), up, v_swell, v_q, fresh > 0.5 ? WAVE_FRESH : 0);
-        // A river's surface in streaks along its current: rippled lanes
-        // and glassy slicks between, and the gentle swell across them,
-        // which break its mirror into what reads as moving water. The
-        // current runs across the bed's slope (the texels' normal under
-        // the water is its bed's); the lanes are the noise averaged along
-        // it, so they stay periodic (no seam where the coordinates wrap),
-        // and turn to patches where the bed is level.
+        let sr = sea_slope(footprint * mix(1.0, 2.0, fresh), up, v_swell, v_q, fresh > 0.5 ? WAVE_FRESH : 0);
+        // Fresh water's surface in wind rows: rippled lanes and glassy
+        // slicks between, and the gentle swell across them, which break its
+        // mirror into what reads as moving water. The lanes are the noise
+        // averaged along the wind (WIND on the tangent plane), so they stay
+        // periodic (no seam where the coordinates wrap) and run the same on
+        // every tile and level. (Along the current, taken across the bed's
+        // slope in the texels' normal, they turned at every tile edge where
+        // the levels' beds differed, and drew the tiles across the glint.)
         var lane: f32 = 0.0;
-        let sw = clamp(STREAK_W / footprint * 0.5 - 1.0, 0.0, 1.0) * fresh;
+        let wind = WIND - up * dot(WIND, up);
+        let wl = length(wind);
+        let sw = clamp(STREAK_W / footprint * 0.5 - 1.0, 0.0, 1.0) * fresh * smoothstep(0.05, 0.2, wl);
         if (sw > 0.0) {
-            let across = n - up * dot(n, up);
-            let al = length(across);
-            let along = (al > 1.0e-5 ? cross(up, across / al) : vec3<f32>(0.0)) * (STREAK_LEN * smoothstep(0.002, 0.02, al));
+            let along = wind * (STREAK_LEN / wl);
             var acc = vec4<f32>(0.0);
             acc = perlin_grad((v_swell - along) / STREAK_W, (SWELL_PERIOD / STREAK_W) as i32, 81)
                 + perlin_grad((v_swell + along) / STREAK_W, (SWELL_PERIOD / STREAK_W) as i32, 81);
