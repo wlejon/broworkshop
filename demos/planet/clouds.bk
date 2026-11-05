@@ -12,6 +12,13 @@ import tiles;
 
 const F0: f32 = -0.12;          // the mean amount: clear more than cloudy
 pub const NOISE_VAR: f32 = 0.0728;  // perlin_f32's variance (ground.bk PERLIN_VAR)
+// The weather's stretch across the parallels; its ridged octaves' mean
+// |noise| and the gain that gives them the plain octaves' variance
+// (FRONT_GAIN^2 (NOISE_VAR - FRONT_MEAN^2) = NOISE_VAR; clouds.js's
+// gradient bound has them).
+const WEATHER_STRETCH: f32 = 1.8;
+const FRONT_MEAN: f32 = 0.2205;   // measured over 200k points
+const FRONT_GAIN: f32 = 1.73;
 
 // The column at the unit direction q, resolved at a footprint of w metres:
 // an octave counts in full from 4 footprints a wavelength, not at all at 2,
@@ -23,14 +30,21 @@ pub fn column(q: vec3<f32>, w: f32, radius: f32) -> vec2<f32> {
     var v: f32 = 0.0;
     let inv_w = 1.0 / w;
     // The weather: cloud systems from 2000 km down to fronts and cells of
-    // 30 km, clear skies between them; each octave 0.6 of the last.
+    // 30 km, clear skies between them; each octave 0.6 of the last. Below
+    // the systems themselves the winds shear the weather along the parallels
+    // (WEATHER_STRETCH), so decks and fronts run east and west for hundreds
+    // of km, and its 500 and 250 km octaves are ridged: fronts, long bands of
+    // cloud along the ridges' crests, where plain noise drew only round
+    // blobs.
     var wavelength: f32 = 2000000.0;
     var p: vec3<f32> = q * (radius / 2000000.0);
     var amp: f32 = 0.48;
     for (var k: i32 = 0; k < 7; k += 1) {
         let r = clamp(wavelength * inv_w * 0.5 - 1.0, 0.0, 1.0);
         if (r > 0.0) {
-            f += r * amp * perlin_f32(p, 101 + k);
+            let sheared = k >= 2;
+            let n = perlin_f32(select(sheared, vec3<f32>(p.x, p.y * WEATHER_STRETCH, p.z), p), select(sheared, 371 + k, 101 + k));
+            f += r * amp * select(k == 2 || k == 3, FRONT_GAIN * (FRONT_MEAN - abs(n)), n);
         }
         v += (1.0 - r * r) * amp * amp * NOISE_VAR;
         wavelength *= 0.5;
@@ -56,7 +70,9 @@ pub fn column(q: vec3<f32>, w: f32, radius: f32) -> vec2<f32> {
     }
     // The cumuli: from 13 km to 25 m, each octave 0.62 of the last; past
     // the finest, the variance of yet finer ones. As strong as the region's
-    // convection.
+    // convection. Their clusters, the coarsest two, lie along the wind as
+    // the weather's systems do (WEATHER_STRETCH): round, they were the same
+    // spots everywhere, from orbit a leopard's coat.
     wavelength = 12800.0;
     p = q * (radius / 12800.0);
     amp = 0.32 * conv;
@@ -64,7 +80,7 @@ pub fn column(q: vec3<f32>, w: f32, radius: f32) -> vec2<f32> {
         let r = clamp(wavelength * inv_w * 0.5 - 1.0, 0.0, 1.0);
         let a = amp * (1.0 - CELL_TAKE * cells * step(k as f32, 1.5));
         if (r > 0.0) {
-            f += r * a * perlin_f32(p, 7 + k);
+            f += r * a * perlin_f32(select(k < 2, vec3<f32>(p.x, p.y * WEATHER_STRETCH, p.z), p), 7 + k);
         }
         v += (1.0 - r * r) * a * a * NOISE_VAR;
         wavelength *= 0.5;

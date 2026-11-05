@@ -7,12 +7,12 @@
 // is the anchor's direction and its offset from it (ground.bk frame_dir),
 // in f32.
 from planet::ground import terrain, terrain_parts, shaped_by, cell_ground_drained, spread, expected_surface, expected_cover,
-                           gradient, variation, strata, octaves_for, range_margin, fresh_water, relief_offset, frame_dir,
+                           gradient, variation, strata, octaves_for, range_margin, relief_offset, frame_dir,
                            SOIL_OCTAVES, cell_width, woodland, wooded, banked, with_streams;
 from planet::climate import climate_fields, climate_of, cover_at, snow_at, Climate, landform_climate, landform_wood,
                             landform_share;
 from planet::relief import BASE_WAVELENGTH, RIDGE_FIRST, WARP_OCTAVE, WARP_DISPLACE, simplex_grad, SimplexAt;
-from planet::rivers import water_at, water_share;
+from planet::rivers import water_at, water_share, fresh_water, water_depth;
 from planet::anchor import Anchor, read_anchor, write_anchor, anchor_of, anchor_at, doubled, simplex_from, plane_offset;
 from planet::dendry_grid import grid_reach_point, grid_holds, grid_point, grid_link, level_part, drain_parts, texel_cell,
     horizon_cell, window_point, window_link, window_part;
@@ -402,10 +402,11 @@ fn unorm(x: f32, bits: i32) -> i32 {
 // gradient from its neighbours', its spreads from the octaves it does not
 // resolve, and the expected surface over them, with the mean surface's
 // normal.
-// A floodplain's moisture over its climate's, and a great river's silty water.
+// A floodplain's moisture over its climate's, and a river's silt off its
+// floodplain (rivers.bk fresh_water).
 const RIPARIAN_MOIST: f32 = 0.45;
 const RIPARIAN: f32 = 0.8;
-const RIVER_SILT = vec3<f32>(0.085, 0.088, 0.045);
+const RIVER_TURBID: f32 = 0.6;
 const BAR_SAND = vec3<f32>(0.44, 0.40, 0.32);
 
 @kernel @grid(3)
@@ -505,10 +506,11 @@ fn k_detail(g: grid<3>, table: read_store<vec4<i32>, 1>, anchors: read_store<vec
     let water = water_share(h, wa, sd);
     // A great river carries silt: lighter and browner than a lake, as the
     // Amazon's and the Mississippi's water reads from orbit; so do the lakes
-    // on its floodplain. Its silt holds the light near the surface, so
-    // however deep its channel it is never the clear lakes' near-black: a
-    // great river from low over it read as a dark slate ribbon.
-    let fresh = mix(fresh_water(max(max(wa.near.w, wa.channel), 0.3)), RIVER_SILT, wa.plain);
+    // on its floodplain. Every river carries some (its share of the water
+    // here, against a lake's), so however deep its channel it is never the
+    // clear lakes' near-black.
+    let silt = max(wa.plain, RIVER_TURBID * clamp(wa.near.y / max(water, 1.0e-3), 0.0, 1.0));
+    let fresh = fresh_water(water_depth(wa), silt);
     col = vec4<f32>(mix(col.xyz, fresh, water), max(col.w, water));
     cover = cover * (1.0 - water);
     var n = normalize(cross(du, dv));

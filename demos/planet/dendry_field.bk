@@ -201,7 +201,7 @@ pub fn field_part(reaches: read_store<vec4<f32>, 1>, segs: read_store<vec4<f32>,
                 zsum += wt * mix(s.b.z, s.b.w, ch.y / ch.z);
                 wsum += wt;
                 if (fk > 0.0) {
-                    let dt = seg_dist(s.a, s.c, q, 0, wk, seed);
+                    let dt = seg_dist(s, q, 0, wk, seed);
                     acc += valley_term(s, dt, 0, wk);
                     if (dt.x < dmin) { dmin = min(dmin, seg_near(s, dt.x, 0, wk)); }
                     t = tally_water(t, s, dt.x, 0, 1.0, sg);
@@ -235,7 +235,7 @@ pub fn field_part(reaches: read_store<vec4<f32>, 1>, segs: read_store<vec4<f32>,
         if (seg_far(a4, q, 2.0 * wk)) { continue; }
         let s = seg_unpacked(a4, segs[at + 1]);
         if (s.c.z > 0.0) {
-            let dt = seg_dist(s.a, s.c, q, k, wk, seed);
+            let dt = seg_dist(s, q, k, wk, seed);
             acc += valley_term(s, dt, k, wk);
             if (dt.x < dmin) { dmin = min(dmin, seg_near(s, dt.x, k, wk)); }
             t = tally_water(t, s, dt.x, k, fk, sg);
@@ -292,7 +292,7 @@ pub fn field_drain(reaches: read_store<vec4<f32>, 1>, segs: read_store<vec4<f32>
             wsum += wt;
             if (f0 > 0.0) {
                 for (var p: i32 = 0; p < np; p += 1) {
-                    let dt = seg_dist(s.a, s.c, q[p], 0, w0, seed);
+                    let dt = seg_dist(s, q[p], 0, w0, seed);
                     acc[p] += valley_term(s, dt, 0, w0);
                     if (p == 0) {
                         if (dt.x < dmin) { dmin = min(dmin, seg_near(s, dt.x, 0, w0)); }
@@ -354,7 +354,7 @@ pub fn field_drain(reaches: read_store<vec4<f32>, 1>, segs: read_store<vec4<f32>
             let s = seg_unpacked(a4, segs[at + 1]);
             if (s.c.z > 0.0) {
                 for (var p: i32 = 0; p < np; p += 1) {
-                    let dt = seg_dist(s.a, s.c, q[p], k, wk, seed);
+                    let dt = seg_dist(s, q[p], k, wk, seed);
                     acc[p] += valley_term(s, dt, k, wk);
                     if (p == 0) {
                         if (dt.x < dmin) { dmin = min(dmin, seg_near(s, dt.x, k, wk)); }

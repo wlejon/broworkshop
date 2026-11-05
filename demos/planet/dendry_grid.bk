@@ -272,7 +272,7 @@ pub fn level_part(segs: read_store<vec4<f32>, 1>, reaches: read_store<vec4<f32>,
                 zsum += wt * mix(s.b.z, s.b.w, ch.y / ch.z);
                 wsum += wt;
                 if (fk > 0.0) {
-                    let dt = seg_dist(s.a, s.c, q, 0, wk, seed);
+                    let dt = seg_dist(s, q, 0, wk, seed);
                     acc += valley_term(s, dt, 0, wk);
                     if (dt.x < dmin) { dmin = min(dmin, seg_near(s, dt.x, 0, wk)); }
                     t = tally_water(t, s, dt.x, 0, 1.0, sg);
@@ -308,7 +308,7 @@ pub fn level_part(segs: read_store<vec4<f32>, 1>, reaches: read_store<vec4<f32>,
         if (seg_far(a4, q, 2.0 * wk)) { continue; }
         let s = seg_unpacked(a4, segs[at + 1]);
         if (s.c.z > 0.0) {
-            let dt = seg_dist(s.a, s.c, q, k, wk, seed);
+            let dt = seg_dist(s, q, k, wk, seed);
             acc += valley_term(s, dt, k, wk);
             // (seg_near is never nearer than the distance itself.)
             if (dt.x < dmin) { dmin = min(dmin, seg_near(s, dt.x, k, wk)); }
@@ -536,7 +536,7 @@ pub fn window_part(win: read_store<vec4<f32>, 1>, a: Anchor, rec: tiles::Record,
         if (seg_far(a4, q, 2.0 * wk)) { continue; }
         let s = seg_unpacked(a4, win[at + 1]);
         if (s.c.z > 0.0) {
-            let dt = seg_dist(s.a, s.c, q, k, wk, seed);
+            let dt = seg_dist(s, q, k, wk, seed);
             acc += valley_term(s, dt, k, wk);
             if (dt.x < dmin) { dmin = min(dmin, seg_near(s, dt.x, k, wk)); }
             t = tally_water(t, s, dt.x, k, fk, sg);

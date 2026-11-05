@@ -733,3 +733,42 @@ pub fn water_share(h: f32, w: Water, sd: f32) -> f32 {
     return max(w.near.y, lake);
 }
 
+// Water's colour: the sea bed seen through the water, down and back up
+// (clear ocean water's attenuation, red lost in a few metres and blue
+// carrying tens), over what the water itself sends back where the bed is
+// too deep to see.
+const DEEP_WATER = vec3<f32>(0.004, 0.017, 0.040);
+const SEA_BED = vec3<f32>(0.40, 0.36, 0.27);
+const WATER_ATTENUATION = vec3<f32>(0.40, 0.065, 0.032);   // per metre
+pub fn sea_water(depth: f32) -> vec3<f32> {
+    return mix(DEEP_WATER, SEA_BED, exp(WATER_ATTENUATION * (-2.0 * depth)));
+}
+
+// Fresh water's colour, `depth` metres deep: a lake's or a river's silt and
+// leaf litter seen the same way, through water whose dissolved organic
+// matter takes the blue and whose algae the red, so it carries green and
+// brown a metre or two and is dark beyond (Kirk, Light and Photosynthesis
+// in Aquatic Ecosystems): darker than the land around it from above, as
+// lakes are, where the sea is blue. Silt (0 to 1) holds the light near the
+// surface: silty water sends back its silt's brown and hides its bed within
+// a metre, as a river's does from low over it (the clear lakes' near-black
+// on a river read as a slate ribbon).
+const LAKE_WATER = vec3<f32>(0.006, 0.011, 0.009);
+const LAKE_BED = vec3<f32>(0.13, 0.11, 0.07);
+const LAKE_ATTENUATION = vec3<f32>(0.55, 0.30, 0.65);   // per metre
+const RIVER_SILT =vec3<f32>(0.085, 0.088, 0.045);
+const SILT_ATTENUATION = vec3<f32>(1.1, 1.2, 1.5);
+pub fn fresh_water(depth: f32, silt: f32) -> vec3<f32> {
+    let through = exp(mix(LAKE_ATTENUATION, SILT_ATTENUATION, silt) * (-2.0 * depth));
+    return mix(mix(LAKE_WATER, RIVER_SILT, silt), LAKE_BED, through);
+}
+
+// How deep the water stands here, for its colour: a river's channel, and a
+// lake's water over its bed, shelving to its shore at the beach's slope, so
+// a lake's edge shows its bed through the water as a pale rim.
+pub fn water_depth(w: Water) -> f32 {
+    var lake = w.near.w;
+    if (w.shore < 1.0e8) { lake = min(lake, max(-BEACH * w.shore, 0.0)); }
+    return max(max(lake, w.channel), 0.3);
+}
+

@@ -15,8 +15,9 @@
 // potential falls to most steeply, or, where none lies lower, to that place
 // on the network above: the points form trees that run down to their
 // parents and join them, leaning downstream. A stream's segments are curves,
-// bent and meandering as the rivers' are (rivers.bk meander), tapered to
-// their points.
+// bent, and wandering (stream_wander) in bends of every size that straighten
+// where the stream runs high and steep; level 0's meander as the rivers' do
+// (rivers.bk meander_from); tapered to their points.
 //
 // Heights here are relative: 0 the base level the water drains to (the
 // rivers' beds about here, `base`), 1 the terrain's own height over it, so
@@ -87,8 +88,7 @@ pub fn rise(k: i32) -> f32 {
     return 0.10;
 }
 // A level's channel at the most it gathers (m): levels 1 and 2 carry
-// water, the finer are dry gullies (their width sets only how finely they
-// meander).
+// water, the finer are dry gullies.
 pub fn stream_width(k: i32) -> f32 {
     if (k == 1) { return 4.0; }
     if (k == 2) { return 1.8; }
@@ -267,24 +267,92 @@ pub fn reach_seg(net: read_store<f32, 1>, c: vec3<i32>, f: Local) -> Seg {
 
 // The segment's curve's offset across its chord at s metres along it, a
 // chord `len` long: a cubic Hermite to its slopes at either end, and the
-// meanders (level 0 at the rivers' own seed: their channel's line).
-const MEANDER_COARSE: f32 = 4.0;
-// For a point `across` metres across the chord, the meanders as far from
-// the curve as it is (rivers.bk meander_from); on the curve (ON_CURVE), all
-// of them. y the meanders' slope along the chord.
-fn curve_offset(c: vec4<f32>, s: f32, len: f32, k: i32, seed: i32, across: f32) -> vec2<f32> {
+// meanders (level 0 at the rivers' own seed: their channel's line). For a
+// point `across` metres across the chord, the meanders as far from the
+// curve as it is (rivers.bk meander_from); on the curve (ON_CURVE), all of
+// them. y the meanders' slope along the chord. u: the stream's relative
+// height there. Level 0's reaches meander as the rivers' channels do (the
+// very line rivers.bk lays them along); the levels below wander
+// (stream_wander).
+fn curve_offset(c: vec4<f32>, s: f32, len: f32, k: i32, seed: i32, across: f32, u: f32) -> vec2<f32> {
     let t = s / len;
     let t2 = t * t;
     let bend = len * ((t2 * t - 2.0 * t2 + t) * c.x + (t2 * t - t2) * c.y);
-    // The streams that hold water (levels 1 and 2, tally_water) meander as
-    // the rivers do, down to their own width's scale; the dry gullies' stop
-    // at MEANDER_COARSE widths, four times the rivers' (a gully's finest
-    // wiggles are the relief's).
-    let width = k <= 2 ? c.z : MEANDER_COARSE * c.z;
-    let m = meander_from(bitcast<i32>(c.w), s, len, width, seed + 131 * k, across > 1.0e29 ? across : across - bend);
+    let off = across > 1.0e29 ? across : across - bend;
+    var m: vec2<f32>;
+    if (k == 0) {
+        m = meander_from(bitcast<i32>(c.w), s, len, c.z, seed, off);
+    } else {
+        m = stream_wander(bitcast<i32>(c.w), s, len, seed + 131 * k, off, u);
+    }
     return vec2<f32>(bend + m.x, m.y);
 }
 const ON_CURVE: f32 = 1.0e30;
+
+// A stream's or a gully's line about its bend: not a great river's
+// meanders (whose one wavelength, eleven channel widths, at the swing that
+// makes a river's sinuosity, drew every creek and gully as the same even
+// squiggle: they are washes and small channels, steered by the ground) but
+// a wander in octaves of gradient noise from half its segment down to
+// GULLY_FINEST metres, each octave's length a hashed 0.42 to 0.58
+// of the last's and its lattice at a hashed phase, so no bend repeats and no
+// crossing falls on a beat; each GULLY_GAIN of the last's amplitude, more
+// than the half a self-similar curve keeps, so the line is as rough at a
+// few metres as at its segment's scale. Its amplitude comes and goes along
+// it (straight runs and tortuous ones), and it straightens where the stream
+// runs high on its slopes (u, its relative height: a rill on a steep upper
+// slope runs down the fall line; on the gentle footslopes it wanders). The
+// tapers and `far` as rivers.bk meander_from takes them, so the valley's
+// sides follow its broad bends and the floor all of them.
+const GULLY_OCTAVES: i32 = 6;
+const GULLY_AMP: f32 = 0.2;
+const GULLY_GAIN: f32 = 0.6;
+const GULLY_FINEST: f32 = 8.0;
+fn gully_gradient(seed: i32, p: i32, i: i32, octave: i32) -> f32 {
+    let h = hash_primes3d(seed + 7927, p * PRIME_X, i * PRIME_Y, octave * PRIME_Z);
+    return (((h >> 8) & 65535) as f32) / 32767.5 - 1.0;
+}
+fn gully_noise(seed: i32, p: i32, x: f32, octave: i32) -> vec2<f32> {
+    let c = floor(x);
+    let f = x - c;
+    let i = c as i32;
+    let g0 = gully_gradient(seed, p, i, octave);
+    let g1 = gully_gradient(seed, p, i + 1, octave);
+    let h = f * f * (3.0 - 2.0 * f);
+    return vec2<f32>(mix(g0 * f, g1 * (f - 1.0), h),
+                     mix(g0, g1, h) + (g1 * (f - 1.0) - g0 * f) * 6.0 * f * (1.0 - f));
+}
+pub fn stream_wander(p: i32, s: f32, len: f32, seed: i32, across: f32, u: f32) -> vec2<f32> {
+    let all = across > 1.0e29;
+    // Farther than its segment's length, even the broadest octave's
+    // `follow` is nothing (and every finer one stops), so most segments a
+    // point sees cost no noise.
+    if (!all && len <= abs(across)) { return vec2<f32>(0.0); }
+    // One hash a segment; each octave's phase and length ratio step from it
+    // by the golden ratio's fraction (a low-discrepancy run, no repeats).
+    var r = id_unit(p, 917);
+    // Under a period and a half a segment: a sine at a hashed phase and
+    // depth comes and goes as noise would, with no beat to see.
+    let along = (0.2 + 0.3 * fract(r * 7.0)) * sin(6.2831853 * (s / (0.7 * len) + r));
+    let amp = GULLY_AMP * clamp(1.0 + 2.2 * along, 0.15, 1.9) * mix(1.25, 0.3, smoothstep(0.3, 0.85, u));
+    var wavelength = 0.5 * len;
+    var gain: f32 = 1.0;
+    var m = vec2<f32>(0.0);
+    for (var o: i32 = 0; o < GULLY_OCTAVES; o += 1) {
+        let far = all ? 0.0 : max(abs(across - m.x), 1e-3);
+        if (o > 0 && wavelength < max(GULLY_FINEST, 0.5 * far)) { break; }
+        r = fract(r + 0.618034);
+        let n = gully_noise(seed, p, s / wavelength + r * 7.0, o);
+        let e = clamp(min(s, len - s) * 2.0 / wavelength, 0.0, 1.0);
+        let follow = all ? 1.0 : smoothstep(0.5 * far, far, wavelength);
+        let a = amp * gain * e * e * (3.0 - 2.0 * e) * follow;
+        m += vec2<f32>(n.x * wavelength * a, n.y * a);
+        gain *= GULLY_GAIN / 0.5;
+        r = fract(r + 0.618034);
+        wavelength *= 0.42 + 0.16 * r;
+    }
+    return m;
+}
 
 // X's distance to a segment's chord (x), the place along it (y, m) and
 // its length (z).
@@ -300,7 +368,8 @@ pub fn chord(a: vec4<f32>, x: vec2<f32>) -> vec3<f32> {
 // curve stays within 0.4 of its chord's length of the chord, so past
 // `limit` of that the distance is not needed: a bound under it is returned
 // instead, without the meanders.
-pub fn seg_dist(a: vec4<f32>, c: vec4<f32>, x: vec2<f32>, k: i32, limit: f32, seed: i32) -> vec2<f32> {
+pub fn seg_dist(sg: Seg, x: vec2<f32>, k: i32, limit: f32, seed: i32) -> vec2<f32> {
+    let a = sg.a;
     let p = a.xy;
     let len = max(length(a.zw - p), 1e-3);
     let along = (a.zw - p) / len;
@@ -314,16 +383,19 @@ pub fn seg_dist(a: vec4<f32>, c: vec4<f32>, x: vec2<f32>, k: i32, limit: f32, se
     if (abs(ahead) > limit || abs(across) > limit + bound) {
         return vec2<f32>(max(abs(ahead), abs(across) - bound), s / len);
     }
-    let co = curve_offset(c, s, len, k, seed, across);
+    let co = curve_offset(sg.c, s, len, k, seed, across, mix(sg.b.x, sg.b.y, s / len));
     let off = meander_across(across - co.x, co.y);
     return vec2<f32>(sqrt(ahead * ahead + off * off), s / len);
 }
 
-// A valley's cross-section: its relative rise at t of its half-width,
-// steepest at its stream and level at its rim.
+// A valley's cross-section: its relative rise at t of its half-width, a
+// swale: level along its floor, steepest partway up its sides and level at
+// its rim. (Steepest at its stream, x (2 - x), every gully's floor was a
+// crease, drawn as an engraved dark groove rather than a soft swale.)
 fn prof(t: f32) -> f32 {
     let x = clamp(t, 0.0, 1.0);
-    return x * (2.0 - x);
+    let x2 = x * x;
+    return x2 * (2.0 - x2);
 }
 
 // What a level's valleys leave of relative height rho over a cell that
@@ -335,10 +407,10 @@ pub fn mean_rel(rho: f32, ubar: f32) -> f32 {
     if (rho <= ubar) { return rho; }
     let span = max(1.0 - ubar, 1e-4);
     let rp = clamp((rho - ubar) / span, 0.0, 1.0);
-    // prof(ts) = rp.
-    let ts = 1.0 - sqrt(1.0 - rp);
-    var e: f32 = SPAN - SPAN * SPAN / 3.0;
-    if (ts < SPAN) { e = (ts * ts - ts * ts * ts / 3.0 + rp * (SPAN - ts)) / SPAN; }
+    // prof(ts) = rp (ts <= 1 < SPAN), and prof's integral to it.
+    let ts = sqrt(max(1.0 - sqrt(1.0 - rp), 0.0));
+    let t3 = ts * ts * ts;
+    let e = (t3 * (2.0 / 3.0) - t3 * ts * ts * 0.2 + rp * (SPAN - ts)) / SPAN;
     return ubar + span * min(e, rp);
 }
 // The mean, over the same uniform distance, of a valley floor's wetness
@@ -395,7 +467,8 @@ pub fn pot_of(n: Near, x: vec2<f32>, k: i32, lk: f32, seed: i32) -> Pot {
     let len = max(length(a.zw - a.xy), 1e-3);
     let along = (a.zw - a.xy) / len;
     let side = vec2<f32>(along.y, -along.x);
-    let jn = a.xy + along * n.s + side * curve_offset(n.seg.c, n.s, len, k - 1, seed, ON_CURVE).x;
+    let jn = a.xy + along * n.s + side * curve_offset(n.seg.c, n.s, len, k - 1, seed, ON_CURVE,
+                                                      mix(n.seg.b.x, n.seg.b.y, n.s / len)).x;
     return Pot { a: vec4<f32>(x, n.v, 0.0), b: vec4<f32>(jn, n.d / lk, atan2(along.y, along.x)) };
 }
 // How steeply o's potential falls to neighbour t's (0: it does not).
@@ -726,7 +799,7 @@ pub fn drain_probed(hi: vec3<f32>, lo: vec3<f32>, radius: f32, cell: f32, net: r
             wsum += wt;
             if (f0 > 0.0) {
                 for (var p: i32 = 0; p < np; p += 1) {
-                    let dt = seg_dist(s.a, s.c, q[p], 0, w0, seed);
+                    let dt = seg_dist(s, q[p], 0, w0, seed);
                     acc[p] += valley_term(s, dt, 0, w0);
                     if (p == 0) {
                         if (dt.x < dmin) { dmin = min(dmin, seg_near(s, dt.x, 0, w0)); }
@@ -816,7 +889,7 @@ pub fn drain_probed(hi: vec3<f32>, lo: vec3<f32>, radius: f32, cell: f32, net: r
             sc[m] = s.c;
             if (s.c.z > 0.0) {
                 for (var p: i32 = 0; p < np; p += 1) {
-                    let dt = seg_dist(s.a, s.c, q[p], k, wk, seed);
+                    let dt = seg_dist(s, q[p], k, wk, seed);
                     acc[p] += valley_term(s, dt, k, wk);
                     if (p == 0) {
                         if (dt.x < dmin) { dmin = min(dmin, seg_near(s, dt.x, k, wk)); }

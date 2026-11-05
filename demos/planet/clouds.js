@@ -54,10 +54,17 @@ const GROUND_PIXELS = 4, GROUND_CAPACITY = 4096, GROUND_ATLAS = 2;
 // For the readers' modules.
 export const GROUND_LIGHT = { tile: GROUND_TILE, border: GROUND_BORDER, levels: GROUND_LEVELS, atlas: GROUND_ATLAS };
 
-// The column's octaves (clouds.bk column): wavelength and amplitude.
+// The column's octaves (clouds.bk column): wavelength and amplitude as
+// their gradient bound takes them. The weather's from the third and the
+// cumuli's first two are stretched across the parallels (WEATHER_STRETCH,
+// their wavelength that much shorter there), and the weather's ridged two
+// are steeper by their gain (FRONT_GAIN).
+const WEATHER_STRETCH = 1.8, FRONT_GAIN = 1.73;
 const OCTAVES = [];
-for (let k = 0, w = 2.0e6, a = 0.48; k < 7; k++, w /= 2, a *= 0.6) OCTAVES.push([w, a]);
-for (let k = 0, w = 12800, a = 0.32; k < 10; k++, w /= 2, a *= 0.62) OCTAVES.push([w, a]);
+for (let k = 0, w = 2.0e6, a = 0.48; k < 7; k++, w /= 2, a *= 0.6) {
+    OCTAVES.push([k < 2 ? w : w / WEATHER_STRETCH, k === 2 || k === 3 ? a * FRONT_GAIN : a]);
+}
+for (let k = 0, w = 12800, a = 0.32; k < 10; k++, w /= 2, a *= 0.62) OCTAVES.push([k < 2 ? w / WEATHER_STRETCH : w, a]);
 
 // The detail's noise (cloudNoise): gradient noise (Perlin 2002's gradients)
 // over a lattice tiling every NOISE_PERIOD units, sampled NOISE_CELL texels

@@ -137,12 +137,19 @@ pub struct Tiles {
     fine: tiles::Tile,
     coarse: tiles::Tile,
 }
+// The cache splits a tile while its cells span more than a pixel
+// (clouds.js TILE_PIXELS), so the level it holds everywhere is the one whose
+// cells are a footprint, two cells' footprint twice it (CACHE_SPAN): asked
+// for a footprint of its cells' two, the column wanted a level finer than
+// the cache holds but where it split one further, and those tiles' finer
+// column drew rectangles of resolved cumuli in the smooth field about them.
+const CACHE_SPAN: f32 = 2.0;
 fn level_at(p: tiles::Point, w: f32) -> f32 {
     // The footprint of a level-0 tile's cells here: at a face's centre, by
     // the plane's stretch (clouds.bk k_cloud_tile).
     let uv = vec2<f32>(p.u, p.v) * 2.0 - 1.0;
     let stretch = sqrt(1.0 + max(uv.x * uv.x, uv.y * uv.y)) / (1.0 + dot(uv, uv));
-    return tiles::level_for(max(w, CLOUD_COLUMN_MIN), bounds[0].x * stretch, TILE_LEVELS);
+    return tiles::level_for(max(CACHE_SPAN * w, CLOUD_COLUMN_MIN), bounds[0].x * stretch, TILE_LEVELS);
 }
 pub fn tiles_at(p: tiles::Point, w: f32) -> Tiles {
     let l = level_at(p, w);

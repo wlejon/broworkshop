@@ -25,6 +25,7 @@
 module hook;
 import scene;
 import mesh;
+import lighting;
 import custom;
 import tiles;
 from planet::ground_layout import CELLS, BORDER, TILE, DETAIL, TEXELS, HZ, FACE_EXTENT, DETAIL_PERIOD, SWELL_PERIOD,
@@ -781,11 +782,18 @@ pub fn fragment(v: mesh::Vertex, s_in: mesh::Surface) -> mesh::Surface {
         sea = normalize(up - sr.slope * calm);
         sea_variance = sr.variance * calm * calm;
     }
-    s.normal = normalize(mix(n, sea, water));
     // Fresh water is smoother than its ripples' slopes say: a river or a
     // lake mirrors its sky and its banks, which is what reads as water from
     // low over it (at the slopes' roughness it was a dull grey sheet).
-    s.roughness = mix(0.9, sqrt(sqrt(sea_variance)) * mix(1.0, FRESH_GLOSS, fresh), water);
+    let water_rough = sqrt(sqrt(sea_variance)) * mix(1.0, FRESH_GLOSS, fresh);
+    // A pixel mostly water shades as water. One partly water (a stream
+    // narrower than it, a shore crossing it) shades as its land, and its
+    // water's mirror is added in its share: a roughness between the two
+    // mirrors nothing, so a stream finer than the pixels lost its glint and
+    // vanished into the ground about it.
+    let mirror = smoothstep(0.5, 1.0, water);
+    s.normal = normalize(mix(n, sea, mirror));
+    s.roughness = mix(0.9, water_rough, mirror);
     s.metallic = 0.0;
 
     s.sun_visibility *= v_light.x;
@@ -793,6 +801,17 @@ pub fn fragment(v: mesh::Vertex, s_in: mesh::Surface) -> mesh::Surface {
     s.occluder_sun *= v_light.z;
     s.sun_diffuse = v_light.w;
     s.sky_normal = normalize(s.normal + v_bent);
+    let glint = water * (1.0 - mirror);
+    if (glint > 0.0) {
+        let ls = lighting::Surface {
+            position: v.world_pos, normal: sea, view: eye, cam_dist: length(v.world_pos),
+            base_color: vec3<f32>(0.0), metallic: 0.0, roughness: max(water_rough, 0.04),
+            receives_shadow: false, two_sided: false, subsurface: 0.0, translucency: 0.0,
+            sun_visibility: clamp(s.sun_visibility, 0.0, 1.0), sky_visibility: clamp(s.sky_visibility, 0.0, 1.0),
+            sky_normal: sea, occluder_sun: 0.0, sun_diffuse: 0.0,
+        };
+        s.emissive += glint * (lighting::direct_light(ls) + lighting::ambient(ls));
+    }
 
     if (SCENE_DEBUG(water)) { s = mesh::debug(s, vec3<f32>(water)); }
     if (SCENE_DEBUG(forest)) { s = mesh::debug(s, vec3<f32>(forest, forest, water)); }
