@@ -88,6 +88,18 @@ const LITTER: f32 = 0.8;
 const NEEDLES: vec3<f32> = vec3<f32>(0.070, 0.047, 0.026);
 const MOSS: vec3<f32> = vec3<f32>(0.030, 0.055, 0.016);
 const FRESH_GLOSS: f32 = 0.35;   // fresh water's roughness, of its ripples'
+// A river's lanes along its current: STREAK_W metres across, STREAK_LEN
+// between the samples averaged along it, how much they gather and calm the
+// ripples (STREAK_RIPPLE) and tilt the surface (slope per unit of the
+// noise's gradient).
+const STREAK_W: f32 = 6.0;
+const STREAK_LEN: f32 = 6.0;
+const STREAK_RIPPLE: f32 = 1.6;
+const STREAK_SLOPE: f32 = 0.02;
+// Clouds low in a reflection: their sunlit sides, of the sun's light on the
+// ground; the reflection where the horizons hide the sky: the banks' shade.
+const CLOUD_SIDES: f32 = 0.55;
+const BANK_SHADE: f32 = 0.35;
 // What the clouds leave of the light at the ground point g (about the
 // planet's centre) over a footprint of w metres, from clouds.js's ground
 // light cache (clouds.bk k_cloud_ground): the sun straight through (x),
@@ -157,6 +169,7 @@ fn fast_acos(x: f32) -> f32 {
 struct GroundLight {
     light: vec4<f32>,
     bent: vec3<f32>,
+    open: f32,   // the sky's share the clouds leave (cloud_light_at's z)
 }
 fn ground_light(slot: i32, hz_coord: vec2<f32>, tu: vec3<f32>, tv: vec3<f32>, up: vec3<f32>,
                 n: vec3<f32>, rel: vec3<f32>, w: f32) -> GroundLight {
@@ -245,7 +258,7 @@ fn ground_light(slot: i32, hz_coord: vec2<f32>, tu: vec3<f32>, tv: vec3<f32>, up
         };
         sun_seen *= tree_shadow(place, eye + rel, eye, up, to_sun);
     }
-    return GroundLight { light: vec4<f32>(sun_seen, visible * 0.25 * sky.z, sky.x, sky.y), bent: bent };
+    return GroundLight { light: vec4<f32>(sun_seen, visible * 0.25 * sky.z, sky.x, sky.y), bent: bent, open: sky.z };
 }
 
 pub fn vertex(v_in: mesh::Vertex) -> mesh::Vertex {
@@ -306,7 +319,9 @@ pub fn vertex(v_in: mesh::Vertex) -> mesh::Vertex {
     let rs = bitcast<u32>(rl.w);
     v.uv = vec2<f32>((rs & 2047u) as f32, ((rs >> 11u) & 2047u) as f32) * (1.5 / 2047.0) - vec2<f32>(0.5);
     let kept = ((rs >> 22u) as f32) * (1.5 / 1023.0) - 0.5;
-    v.v0 = vec4<f32>(v_tex, v_skirt, c_w);
+    // z: the clouds' open sky, which the water's mirror needs apart from the
+    // horizons', less 2 on a skirt's bottom.
+    v.v0 = vec4<f32>(v_tex, clamp(gl.open, 0.0, 1.0) - 2.0 * v_skirt, c_w);
     v.v1 = vec4<f32>(up, dq.x);
     v.v2 = vec4<f32>(v_q, dq.y);
     v.v3 = vec4<f32>(v_swell, dq.z);
@@ -552,7 +567,8 @@ fn sea_slope(footprint: f32, up: vec3<f32>, v_swell: vec3<f32>, v_q: vec3<f32>, 
 pub fn fragment(v: mesh::Vertex, s_in: mesh::Surface) -> mesh::Surface {
     var s = s_in;
     let v_tex = v.v0.xy;
-    let v_skirt = v.v0.z;
+    let v_skirt = v.v0.z < -0.5 ? 1.0 : 0.0;
+    let v_open = clamp(v.v0.z, 0.0, 1.0);
     let v_height = v.v0.w;
     let v_up = v.v1.xyz;
     let v_q = v.v2.xyz;
@@ -779,8 +795,31 @@ pub fn fragment(v: mesh::Vertex, s_in: mesh::Surface) -> mesh::Surface {
     if (water > 0.001) {
         let calm = mix(1.0, WAVE_FRESH_SCALE, fresh);
         let sr = sea_slope(footprint * mix(1.0, 4.0, fresh), up, v_swell, v_q, fresh > 0.5 ? WAVE_FRESH : 0);
-        sea = normalize(up - sr.slope * calm);
-        sea_variance = sr.variance * calm * calm;
+        // A river's surface in streaks along its current: rippled lanes
+        // and glassy slicks between, and the gentle swell across them,
+        // which break its mirror into what reads as moving water. The
+        // current runs across the bed's slope (the texels' normal under
+        // the water is its bed's); the lanes are the noise averaged along
+        // it, so they stay periodic (no seam where the coordinates wrap),
+        // and turn to patches where the bed is level.
+        var lane: f32 = 0.0;
+        let sw = clamp(STREAK_W / footprint * 0.5 - 1.0, 0.0, 1.0) * fresh;
+        if (sw > 0.0) {
+            let across = n - up * dot(n, up);
+            let al = length(across);
+            let along = (al > 1.0e-5 ? cross(up, across / al) : vec3<f32>(0.0)) * (STREAK_LEN * smoothstep(0.002, 0.02, al));
+            var acc = vec4<f32>(0.0);
+            acc = perlin_grad((v_swell - along) / STREAK_W, (SWELL_PERIOD / STREAK_W) as i32, 81)
+                + perlin_grad((v_swell + along) / STREAK_W, (SWELL_PERIOD / STREAK_W) as i32, 81);
+            acc *= 0.5 * sw;
+            lane = acc.x;
+            let g = acc.yzw - up * dot(acc.yzw, up);
+            sea = normalize(up - (sr.slope * max(1.0 + STREAK_RIPPLE * lane, 0.1) + g * STREAK_SLOPE) * calm);
+        } else {
+            sea = normalize(up - sr.slope * calm);
+        }
+        let rip = max(1.0 + STREAK_RIPPLE * lane, 0.1);
+        sea_variance = sr.variance * calm * calm * rip * rip;
     }
     // Fresh water is smoother than its ripples' slopes say: a river or a
     // lake mirrors its sky and its banks, which is what reads as water from
@@ -801,7 +840,13 @@ pub fn fragment(v: mesh::Vertex, s_in: mesh::Surface) -> mesh::Surface {
     s.occluder_sun *= v_light.z;
     s.sun_diffuse = v_light.w;
     s.sky_normal = normalize(s.normal + v_bent);
-    let glint = water * (1.0 - mirror);
+    // Only a stream finer than a pixel glints in its share: one the pixels
+    // resolve is drawn as its water, and its glint over the texels' spread
+    // of it read as a wire laid over the ground. (A stream narrower than a
+    // texel spreads over about one and a half, so its width is about its
+    // share there times that, in pixels.)
+    let thread = 1.0 - smoothstep(0.6, 1.2, 1.5 * water * texel_m / footprint);
+    let glint = water * (1.0 - mirror) * thread;
     if (glint > 0.0) {
         let ls = lighting::Surface {
             position: v.world_pos, normal: sea, view: eye, cam_dist: length(v.world_pos),
@@ -811,6 +856,32 @@ pub fn fragment(v: mesh::Vertex, s_in: mesh::Surface) -> mesh::Surface {
             sky_normal: sea, occluder_sun: 0.0, sun_diffuse: 0.0,
         };
         s.emissive += glint * (lighting::direct_light(ls) + lighting::ambient(ls));
+    }
+    // The water's mirror of a cloudy sky. The scene's reflection is the
+    // clear sky's, and the clouds count as what hides it, so under cloud a
+    // river mirrored nothing and was its silt's matte brown. Here the
+    // reflected ray sees the sky through the clouds' gaps (closing along a
+    // grazing ray, as gaps do toward the horizon) and the clouds in them:
+    // their undersides by the light they scatter down (spread over the
+    // sky they cover), their sunlit sides low down. What the scene already
+    // adds of the clear sky is taken off. By Fresnel: from low over a
+    // river, mostly its sky and its banks' shade; from above, its water.
+    if (mirror > 0.0) {
+        let open = v_open;
+        let banks = clamp(v_light.y / max(open, 1.0e-3), 0.0, 1.0);
+        let nv = max(dot(s.normal, eye), 1.0e-4);
+        let r = reflect(-eye, s.normal);
+        let r_up = max(dot(r, up), 0.0);
+        let open_r = pow(open, 1.0 / max(r_up, 0.08));
+        let sun_up = max(dot(up, params.to_sun), 0.0);
+        let e = lighting::sun_light(v.world_pos) * (sun_up / GROUND_PI);
+        let under = e * (v_light.w / max(1.0 - open, 0.15));
+        let clouds = mix(e * CLOUD_SIDES, under, smoothstep(0.0, 0.5, r_up));
+        let sky_r = lighting::sky_along(r);
+        let fr = 0.02 + 0.98 * pow(1.0 - nv, 5.0) * (1.0 - s.roughness);
+        let seen = mix(sky_r, clouds, 1.0 - open_r) * mix(BANK_SHADE, 1.0, banks);
+        let scene = sky_r * lighting::specular_occlusion(nv, s.sky_visibility, s.roughness);
+        s.emissive += mirror * fr * max(seen - scene, vec3<f32>(0.0));
     }
 
     if (SCENE_DEBUG(water)) { s = mesh::debug(s, vec3<f32>(water)); }

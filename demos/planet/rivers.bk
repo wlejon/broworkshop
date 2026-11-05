@@ -757,7 +757,7 @@ const LAKE_WATER = vec3<f32>(0.006, 0.011, 0.009);
 const LAKE_BED = vec3<f32>(0.13, 0.11, 0.07);
 const LAKE_ATTENUATION = vec3<f32>(0.55, 0.30, 0.65);   // per metre
 const RIVER_SILT =vec3<f32>(0.085, 0.088, 0.045);
-const SILT_ATTENUATION = vec3<f32>(1.1, 1.2, 1.5);
+const SILT_ATTENUATION = vec3<f32>(0.7, 0.75, 0.95);
 pub fn fresh_water(depth: f32, silt: f32) -> vec3<f32> {
     let through = exp(mix(LAKE_ATTENUATION, SILT_ATTENUATION, silt) * (-2.0 * depth));
     return mix(mix(LAKE_WATER, RIVER_SILT, silt), LAKE_BED, through);
