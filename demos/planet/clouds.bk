@@ -64,7 +64,10 @@ pub fn column(q: vec3<f32>, w: f32, radius: f32) -> vec2<f32> {
     if (cells > 0.0) {
         let r = clamp(CELL_RESOLVE * inv_w * 0.5 - 1.0, 0.0, 1.0);
         if (r > 0.0) {
-            f += r * cells * CELL_AMP * (cell_ring(qf * (radius / CELL_SIZE)) - RING_MEAN);
+            // Open cells (cloud on the walls) or closed (cloud in the
+            // middles, clear lanes on the walls), by region.
+            let closed = clamp(perlin_f32(q * (radius / CELL_REGION), 228) * CELL_FLIP, -1.0, 1.0);
+            f += r * cells * CELL_AMP * closed * (cell_ring(qf * (radius / CELL_SIZE)) - RING_MEAN);
         }
         v += (1.0 - r * r) * cells * cells * CELL_AMP * CELL_AMP * RING_VAR;
     }
@@ -73,9 +76,17 @@ pub fn column(q: vec3<f32>, w: f32, radius: f32) -> vec2<f32> {
     // convection. Their clusters, the coarsest two, lie along the wind as
     // the weather's systems do (WEATHER_STRETCH): round, they were the same
     // spots everywhere, from orbit a leopard's coat.
+    // They gather in clusters CLUSTER_SIZE and its half across, sheared
+    // along the wind, with clear air between: the cumuli's strength (only
+    // ever lowered) and their mean both follow the clusters, so from orbit a
+    // field is crowds and gaps of every size, not one even speckle.
+    let cn = perlin_f32(vec3<f32>(qf.x, qf.y * WEATHER_STRETCH, qf.z) * (radius / CLUSTER_SIZE), 251)
+           + 0.6 * perlin_f32(qf * (2.0 * radius / CLUSTER_SIZE), 252);
+    let crowd = smoothstep(-0.2, 0.3, cn);
+    f += CLUSTER_LIFT * conv * (crowd - 0.5);
     wavelength = 12800.0;
     p = q * (radius / 12800.0);
-    amp = 0.32 * conv;
+    amp = 0.32 * conv * mix(CLUSTER_GAP, 1.0, crowd);
     for (var k: i32 = 0; k < 10; k += 1) {
         let r = clamp(wavelength * inv_w * 0.5 - 1.0, 0.0, 1.0);
         let a = amp * (1.0 - CELL_TAKE * cells * step(k as f32, 1.5));
@@ -132,6 +143,12 @@ const CELL_RESOLVE: f32 = 8000.0;
 const CELL_TAKE: f32 = 0.35;
 const CELL_REGION: f32 = 1500000.0;
 const CELL_WARP: f32 = 0.5;   // cell units, of Perlin noise 1 / 0.6 cells long
+const CELL_FLIP: f32 = 6.0;   // how sharply a region turns from open cells to closed
+// The cumuli's clusters: their size (m), the strength left in their gaps,
+// and how much their mean amount rises in them over their gaps.
+const CLUSTER_SIZE: f32 = 90000.0;
+const CLUSTER_GAP: f32 = 0.3;
+const CLUSTER_LIFT: f32 = 0.12;
 const RING_MEAN: f32 = 0.5349;
 const RING_VAR: f32 = 0.1313;
 fn cell_strength(q: vec3<f32>, radius: f32) -> f32 {

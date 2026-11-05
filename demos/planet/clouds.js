@@ -142,9 +142,17 @@ function gradientBound(w) {
     const stretch = 1 + Math.sqrt(3) * CELLS.warp * 0.6 * NOISE_SLOPE;
     g += rc * CELLS.amp * 2 * stretch * Math.sqrt(2 / Math.E) / CELLS.width / CELLS.size;
     g += 4 * NOISE_SLOPE / CELLS.region * (CELLS.amp + CELLS.take * 0.7 * (0.32 + 0.32 * 0.62));
+    // Their turn from open to closed across a region.
+    g += CELLS.amp * CELLS.flip * NOISE_SLOPE / CELLS.region;
+    // The clusters: their crowd (a smoothstep 3 a unit at its steepest, of
+    // two octaves, the first sheared along the wind) lifts the mean and
+    // scales every cumulus octave's strength.
+    const crowd = 3 * NOISE_SLOPE * (1.8 + 1.2) / CLUSTERS.size;
+    g += crowd * (CLUSTERS.lift + (1 - CLUSTERS.gap) * 0.32 / (1 - 0.62));
     return g;
 }
-const CELLS = { size: 25000, amp: 0.22, width: 0.22, resolve: 8000, take: 0.35, region: 1500000, warp: 0.5 };
+const CLUSTERS = { size: 90000, gap: 0.3, lift: 0.12 };
+const CELLS = { size: 25000, amp: 0.22, width: 0.22, resolve: 8000, take: 0.35, region: 1500000, warp: 0.5, flip: 6 };
 const STREETS = { spacing: 4000, amp: 0.09, region: 800000, warp: 80000, warpRows: 3 };
 
 // Cube face i (0..5): axis i % 3, its sign, and the plane's axes, the same
