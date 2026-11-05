@@ -317,7 +317,7 @@ pub fn level_part(segs: read_store<vec4<f32>, 1>, reaches: read_store<vec4<f32>,
     }
     return vec4<f32>(acc, dmin, streams_about(near, sig), water_word(t));
 }
-fn water_word(t: Tally) -> f32 {
+pub fn water_word(t: Tally) -> f32 {
     let share = (clamp(t.share, 0.0, 1.0) * 4095.0 + 0.5) as i32;
     let gallery = (clamp(t.gallery, 0.0, 1.0) * 4095.0 + 0.5) as i32;
     return (share + 4096 * gallery) as f32;

@@ -9,7 +9,9 @@
 // its centre (anchor.bk, found on the CPU): cell (x, y)'s corner is the plane
 // offset lost + e (du0 + x delta) + f (dv0 + y delta) from it.
 import std::noise::*;
-from planet::ground import tree_cover, variation, site_ground, woodland, wooded, banked, with_streams;
+from planet::ground import tree_cover, variation, site_ground_drained, site_probes, site_cell, SITE_STEP, woodland, wooded,
+    banked, with_streams;
+from planet::dendry_field import field_drain;
 from planet::rivers import water_share;
 from planet::climate import climate_at, landform_climate, landform_wood, landform_share;
 from planet::anchor import read_anchor, plane_offset;
@@ -18,12 +20,14 @@ from planet::anchor import read_anchor, plane_offset;
 // `face`, seven floats at `out` (row * width + x) * 7: its position about
 // `origin` (xyz), its size (0: no tree) and the colour variation (rgb).
 // `point` is the anchor's surface point (its direction times the radius)
-// less the origin.
+// less the origin. The drainage is the field's about the anchor (its sun
+// grid's, sun.bk k_field_*: dendry_field.bk), `reaches` and `segs`.
 @kernel @grid(2)
 fn k_tree_field(g: grid<2>, out: write_store<f32, 1>, anchor: read_store<vec4<i32>, 1>,
                 ex: f32, ey: f32, ez: f32, fx: f32, fy: f32, fz: f32,
                 du0: f32, dv0: f32, delta: f32, px: f32, py: f32, pz: f32, radius: f32, octaves: f32, seed: i32,
-                li: i32, lj: i32, face: i32, y0: i32, net: read_store<f32, 1>) {
+                li: i32, lj: i32, face: i32, y0: i32, net: read_store<f32, 1>,
+                reaches: read_store<vec4<f32>, 1>, segs: read_store<vec4<f32>, 1>) {
     let a = read_anchor(anchor, 0);
     let row = y0 + g.y();
     let hx = hash_primes3d(seed + 977, (li + g.x()) * PRIME_X, (lj + row) * PRIME_Y, face * PRIME_Z);
@@ -38,8 +42,11 @@ fn k_tree_field(g: grid<2>, out: write_store<f32, 1>, anchor: read_store<vec4<i3
     let e = plane_offset(a, a.lost + vec3<f32>(ex, ey, ez) * du + vec3<f32>(fx, fy, fz) * dv);
     // The ground, the soil's slope (the cover's rock, as the ground's colour
     // lays it), the water and the drainage, found together (ground.bk
-    // site_ground).
-    let site = site_ground(a, e, radius, octaves, seed, net);
+    // site_ground, its drainage the field's at the site's probes).
+    let pr = site_probes(a, e);
+    let site = site_ground_drained(a, e, radius, octaves, seed, net,
+                                   field_drain(reaches, segs, a, e, radius, site_cell(octaves), seed,
+                                               pr.t1 * SITE_STEP, pr.t2 * SITE_STEP, 5));
     let h = site.h;
     let grad = site.grad;
     // Forests grow as a mosaic, forests to glades (ground.bk woodland),

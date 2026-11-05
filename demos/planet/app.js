@@ -73,7 +73,8 @@ const WAVES = (() => {
 const MODULES = { 'planet::ground': readApp('ground.bk'), 'planet::relief': readApp('relief.bk'), 'planet::rivers': readApp('rivers.bk'),
                   'planet::clouds': readApp('clouds.bk'), 'planet::anchor': readApp('anchor.bk'),
                   'planet::climate': readApp('climate.bk'), 'planet::dendry': readApp('dendry.bk'),
-                  'planet::dendry_grid': readApp('dendry_grid.bk'), tiles: bro.tiles.module };
+                  'planet::dendry_grid': readApp('dendry_grid.bk'), 'planet::dendry_field': readApp('dendry_field.bk'),
+                  tiles: bro.tiles.module };
 const mod = bro.kernel.compile(readApp('planet.bk'), { file: 'planet.bk', modules: MODULES });
 const rivers = createRivers(bro.kernel.compile(readApp('riverbuild.bk'), { file: 'riverbuild.bk', modules: MODULES }), RADIUS, SEED);
 const kTile = mod.kernel('k_tile');

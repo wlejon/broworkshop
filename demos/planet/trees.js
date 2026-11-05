@@ -8,7 +8,8 @@
 // whether a tree stands there and how large, and the colour variation there.
 // It is produced again when the eye has moved SNAP sites, into a second
 // buffer a slice a frame, and swapped in when it is whole, so no frame pays
-// for all of it; the terrain's shadow on it (sun.js) follows the same way.
+// for all of it; the terrain's shadow on it (sun.js) goes first the same
+// way, and the drainage it finds under the field is what the sites read.
 //
 // The trees are drawn in blocks of B x B sites, one instance per block, the
 // GPU building every tree from its site and a hash of it (as the grass's
@@ -186,7 +187,10 @@ export function createTrees(scene, radius, module, sunModule, octaves, seed, net
             const back = 1 - front, out = fields[back];
             const hi = origin.map(Math.fround), lo = origin.map((x, k) => x - hi[k]);
             const at = planeAnchor(plane, ui * dl, vi * dl), point = anchorPoint(at.dir, radius, origin);
-            const steps = [];
+            // The sun grid first: its first step finds the drainage under it
+            // (sun.js), which the field's sites read (its anchor is the
+            // field's).
+            const steps = sunSteps(plane, u0, v0, dl, toSun);
             for (let s = 0; s < SLICES; s++) {
                 const y0 = s * N / SLICES;
                 steps.push(() => {
@@ -195,10 +199,10 @@ export function createTrees(scene, radius, module, sunModule, octaves, seed, net
                         anchor.write(1);
                     }
                     fieldKernel.dispatch([N, N / SLICES], out, anchor.buffer, ...frame.e, ...frame.f, -N / 2 * dl, -N / 2 * dl, dl,
-                                         ...point, radius, octaves, seed, li, lj, fc, y0, net);
+                                         ...point, radius, octaves, seed, li, lj, fc, y0, net,
+                                         sunGrid.drain.reaches, sunGrid.drain.segs);
                 });
             }
-            steps.push(...sunSteps(plane, u0, v0, dl, toSun));
             production = stepped(steps, () => {
                 front = back;
                 for (let by = 0; by < BLOCKS; by++)

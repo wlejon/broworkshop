@@ -380,6 +380,13 @@ fn shaped_rel(t: vec4<f32>, w: Water, d: Drain, rel: f32, radius: f32) -> vec4<f
 pub fn terrain(a: Anchor, e: vec3<f32>, radius: f32, octaves: f32, seed: i32, net: read_store<f32, 1>) -> f32 {
     return terrain_shaped(a, e, radius, octaves, seed, net).x;
 }
+// The same drained by d, found for a cell cell_width(octaves) wide (a
+// field's, dendry_field.bk field_drain).
+pub fn terrain_drained(a: Anchor, e: vec3<f32>, radius: f32, octaves: f32, seed: i32, net: read_store<f32, 1>,
+                       d: Drain) -> f32 {
+    return shaped_by(terrain_parts(a, e, radius, octaves, seed), water_at(a.dir, e, radius, cell_width(octaves), net, seed),
+                     d, radius).x;
+}
 
 // Whether the ground holds soil, grass and trees or lies bare as rock is
 // its slope over tens of metres, not over the bumps of a metre: soil creeps
@@ -411,14 +418,36 @@ pub struct Site {
     drain: Drain,
 }
 pub fn site_ground(a: Anchor, e: vec3<f32>, radius: f32, octaves: f32, seed: i32, net: read_store<f32, 1>) -> Site {
+    let s = site_probes(a, e);
+    let d = drain_probed(a.dir, e, radius, site_cell(octaves), net, seed, s.t1 * SITE_STEP, s.t2 * SITE_STEP, 5);
+    return site_ground_drained(a, e, radius, octaves, seed, net, d);
+}
+// Where a site's gradient is probed: SITE_STEP metres either side along t1
+// and t2, across the ground at offset e; and the cell its drainage is found
+// for. A field's sites find theirs from its grids (dendry_field.bk
+// field_drain at these probes).
+pub const SITE_STEP: f32 = 2.0;
+pub struct SiteProbes {
+    t1: vec3<f32>,
+    t2: vec3<f32>,
+}
+pub fn site_probes(a: Anchor, e: vec3<f32>) -> SiteProbes {
     let n = a.dir + e;
     let axis = abs(n.y) < 0.9 ? vec3<f32>(0.0, 1.0, 0.0) : vec3<f32>(1.0, 0.0, 0.0);
     let t1 = normalize(cross(n, axis));
-    let t2 = cross(n, t1);
-    let step: f32 = 2.0;   // metres either side
-    let cell = cell_width(max(octaves, SOIL_OCTAVES));
-    let w = water_at(a.dir, e, radius, cell, net, seed);
-    let d = drain_probed(a.dir, e, radius, cell, net, seed, t1 * step, t2 * step, 5);
+    return SiteProbes { t1: t1, t2: cross(n, t1) };
+}
+pub fn site_cell(octaves: f32) -> f32 {
+    return cell_width(max(octaves, SOIL_OCTAVES));
+}
+// The site with its drainage d found at its probes (site_probes) already.
+pub fn site_ground_drained(a: Anchor, e: vec3<f32>, radius: f32, octaves: f32, seed: i32, net: read_store<f32, 1>,
+                           d: Drain) -> Site {
+    let pr = site_probes(a, e);
+    let t1 = pr.t1;
+    let t2 = pr.t2;
+    let step = SITE_STEP;
+    let w = water_at(a.dir, e, radius, site_cell(octaves), net, seed);
     let k = step / radius;
     let hu = shaped_rel(terrain_parts(a, moved(a.dir, e, t1 * k), radius, SOIL_OCTAVES, seed), w, d, d.probe.x, radius).x
            - shaped_rel(terrain_parts(a, moved(a.dir, e, -t1 * k), radius, SOIL_OCTAVES, seed), w, d, d.probe.y, radius).x;
@@ -650,44 +679,6 @@ pub fn grass_cover(h: f32, grad: f32, cl: Climate) -> f32 {
     c *= 1.0 - max(smoothstep(0.2, 0.4, slope), 1.0 - smoothstep(-8.0, -4.5, temp_at(cl, h)));
     c *= 1.0 - snow_at(cl, h) * (1.0 - smoothstep(0.35, 0.6, slope));
     return c;
-}
-
-// The sun's disc over the terrain from the ground at offset e: the highest
-// the ground rises toward the sun, out to 1.8 km at SUN_STEPS steps 1.3
-// apart, against the sun's elevation, over the disc's 0.53 degrees. The
-// steps are independent, so a kernel takes them in parallel
-// (sun_step_height) and another gathers them (sun_seen). Far steps read
-// coarser octaves: what is finer than the step does not cast its shadow.
-pub const SUN_STEPS: i32 = 28;
-pub fn sun_step_dist(k: i32) -> f32 { return 1.5 * pow(1.3, k as f32); }
-
-// The ground's height (sea level and up) at step k toward the sun.
-pub fn sun_step_height(a: Anchor, e: vec3<f32>, toSun: vec3<f32>, k: i32, radius: f32, octaves: f32, seed: i32,
-                       net: read_store<f32, 1>) -> f32 {
-    let n = a.dir + e;
-    let sunUp = dot(toSun, n);
-    let level = normalize(toSun - n * sunUp);
-    let dist = sun_step_dist(k);
-    let q = moved(a.dir, e, level * (dist / radius));
-    let o = max(octaves - log2(max(dist, 1.0)) * 0.7, 8.0);
-    return max(terrain(a, q, radius, o, seed, net), 0.0);
-}
-
-// The share of the disc seen from `up` over ground rising to the angle
-// `highest` (the largest of sun_step_angle's).
-pub fn sun_elevation_seen(up: vec3<f32>, toSun: vec3<f32>, highest: f32) -> f32 {
-    let sunUp = dot(toSun, up);
-    if (sunUp <= -0.01) { return 0.0; }
-    let sunElev = asin(clamp(sunUp, -1.0, 1.0));
-    return clamp((sunElev - highest) / 0.0093 + 0.5, 0.0, 1.0);
-}
-
-// Step k's elevation angle seen from `h` up: above the point's tangent
-// plane, the sphere's fall included.
-pub fn sun_step_angle(h: f32, hk: f32, k: i32, radius: f32) -> f32 {
-    let dist = sun_step_dist(k);
-    let rise = hk - max(h, 0.0) - dist * dist / (2.0 * radius);
-    return atan(rise / dist);
 }
 
 // The share of the ground at one height and gradient under forest (the
