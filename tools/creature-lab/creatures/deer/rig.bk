@@ -99,7 +99,10 @@ const BREAKOVER: f32 = 0.55;     // rad the hoof rolls onto its toe before lift
 const WITHERS_Z: f32 = 0.69;     // hips (pelvis head) to withers, along the back
 
 // Lying (sternal): each leg joint's flexion, by bone, from scapula / femur down.
-const FOLD_FRONT: array<f32, 5> = [-0.19, 0.77, -2.0, 2.62, 0.25];
+// The fore legs fold under the chest: the forearm runs forward and down from
+// the elbow to the carpus on the ground, the cannon folded back flat under it
+// (the carpus shut to 163 degrees), the hoof's sole turned up behind.
+const FOLD_FRONT: array<f32, 5> = [-0.19, 0.77, -1.88, 2.85, 0.5];
 const FOLD_HIND: array<f32, 4> = [-0.76, 1.37, -2.06, 0.03];
 
 fn rest_angle(b: i32) -> f32 {

@@ -27,7 +27,7 @@ function frontLeg(side, tag) {
         { name: `radius${tag}`, parent: `humerus${tag}`, head: [x(0.11), 0.52, 0.33], tail: [x(0.11), 0.27, 0.345],
           limits: { x: [-125, 32], y: [-4, 4], z: [-6, 6] }, mass: 0.6 },
         { name: `mc${tag}`, parent: `radius${tag}`, head: [x(0.11), 0.27, 0.345], tail: [x(0.11), 0.075, 0.355],
-          limits: { x: [-6, 155], y: [-4, 4], z: [-5, 5] }, mass: 0.25 },
+          limits: { x: [-6, 165], y: [-4, 4], z: [-5, 5] }, mass: 0.25 },
         { name: `fhoof${tag}`, parent: `mc${tag}`, head: [x(0.11), 0.075, 0.355], tail: [x(0.11), 0.0, 0.415],
           limits: { x: [-70, 100], y: [-4, 4], z: [-8, 8] }, mass: 0.15 },
     ];
