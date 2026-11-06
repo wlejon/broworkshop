@@ -700,13 +700,24 @@ pub fn fragment(v: mesh::Vertex, s_in: mesh::Surface) -> mesh::Surface {
     // clouds at most CLOUD_OVER_SKY of it: the sky is the eye's, and from
     // above the air it is black, where a ratio to it drew every cloud's
     // shadow on the sea white).
+    // The clouds are read over the reflected rays' spread where they cross
+    // the clouds' floor: across the pixel (from a grazing eye a resolved
+    // ripple turns the ray from one pixel to the next, and the crossing
+    // moves CLOUD_FLOOR / r_up^2 per radian of it, kilometres) and over the
+    // ripples finer than it (a slope spread s turns the ray by 2s). Read at
+    // a point per pixel, the gaps over a river flickered from one pixel to
+    // the next between 0.005 and 0.65 of the open sky. (Derivatives here,
+    // outside the branch below, where they hold.)
+    let r = reflect(-eye, sea);
+    let r_up = max(dot(r, level_up), 0.0);
+    let reach = CLOUD_FLOOR / max(r_up, 0.05);
+    let r_at = v.world_pos + (r - level_up * r_up) * reach;
+    let r_spread = max(length(dpdx(r_at)), length(dpdy(r_at)))
+                 + 2.0 * sqrt(sea_variance) * CLOUD_FLOOR / max(r_up * r_up, 0.0025);
     var seen = vec3<f32>(1.0);
     if (glint > 0.0 || mirror > 0.0) {
         let banks = clamp(v_light.y / max(v_open, 1.0e-3), 0.0, 1.0);
-        let r = reflect(-eye, sea);
-        let r_up = max(dot(r, level_up), 0.0);
-        let reach = CLOUD_FLOOR / max(r_up, 0.05);
-        let far = cloud_light_at((params.cam_hi + params.cam_lo) + v.world_pos + (r - level_up * r_up) * reach, 0.25 * reach);
+        let far = cloud_light_at((params.cam_hi + params.cam_lo) + r_at, max(0.25 * reach, r_spread));
         let open_r = pow(far.z, 1.0 / max(r_up, 0.08));
         let sun_up = max(dot(level_up, params.to_sun), 0.0);
         let e = lighting::sun_light(v.world_pos) * (sun_up / GROUND_PI);
