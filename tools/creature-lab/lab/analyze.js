@@ -132,8 +132,8 @@ export function series(rec) {
 
 const claimed = (rec, k, i) => rec.tele[k * TELE + T.FOOT + 4 * i] > 0.5;
 
+// (No timings in the report: it is bit-identical across reruns.)
 export function analyze(rec, opts = {}) {
-    const t0 = Date.now();
     const skel = rec.creature.skel, n = rec.steps, nf = skel.feet.length;
     const S = series(rec);
     const flags = [];
@@ -303,25 +303,39 @@ export function analyze(rec, opts = {}) {
         distance: r3(dist), meanSpeed: r3(dist / (n * rec.dt)),
         body: { heightRange: rng(hs), pitchRangeDeg: rng(ps) },
         feet, jointSink: { depth: r3(jointSink.depth), bone: jointSink.bone, t: r3(jointSink.t) },
-        joints, support, head, footfalls, flags, thresholds: LIMITS, ms: Date.now() - t0,
+        joints, support, head, footfalls, flags, thresholds: LIMITS,
     };
 }
 
 // Duty factor and touchdown offsets per leg over every steady cycle (by
 // measured contact), with the creature's reference when given.
-export function footfallStats(rec, S, steadyFrom, reference, steady = true) {
-    const skel = rec.creature.skel, nf = skel.feet.length, n = rec.steps;
+// Touchdowns by measured contact (a run of 3 steps down, so a grazing swing
+// doesn't count), per foot.
+export function contactTouchdowns(rec) {
+    const S = series(rec), nf = rec.creature.skel.feet.length, n = rec.steps;
     const down = (k, i) => S.contact[k * nf + i] === 1;
-    // Touchdowns by measured contact (a run of 3 steps down, so a grazing
-    // swing doesn't count); cycles from the first foot's.
-    const tds = skel.feet.map((_, i) => {
+    return rec.creature.skel.feet.map((_, i) => {
         const t = [];
         for (let k = 1; k + 2 < n; k++) if (!down(k - 1, i) && down(k, i) && down(k + 1, i) && down(k + 2, i)) t.push(k);
         return t;
     });
+}
+
+// The run's steady cycles: first-foot touchdown to the next, by measured
+// contact, from `fromT` s (default 40% into the run).
+export function steadyCycles(rec, fromT) {
+    const from = Math.round((fromT ?? rec.scenario.duration * 0.4) / rec.dt);
+    const t0 = contactTouchdowns(rec)[0].filter((k) => k >= from);
     const cyc = [];
-    const t0 = tds[0].filter((k) => k >= steadyFrom);
     for (let i = 0; i + 1 < t0.length; i++) cyc.push({ a: t0[i], b: t0[i + 1], period: (t0[i + 1] - t0[i]) * rec.dt });
+    return cyc;
+}
+
+export function footfallStats(rec, S, steadyFrom, reference, steady = true) {
+    const skel = rec.creature.skel, nf = skel.feet.length;
+    const down = (k, i) => S.contact[k * nf + i] === 1;
+    const tds = contactTouchdowns(rec);
+    const cyc = steadyCycles(rec, steadyFrom * rec.dt);
     const perLeg = {};
     const flags = [];
     if (!cyc.length) return { cycles: 0, legs: perLeg, flags };

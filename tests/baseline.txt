@@ -316,8 +316,12 @@ PASS test tools/algo-viz/tests/test_isosurface.js
 PASS test tools/algo-viz/tests/test_pathfinding.js 
 PASS test tools/algo-viz/tests/test_smoke.js 
 PASS test tools/algo-viz/tests/test_terrain.js 
-PASS smoke tools/csg-sculptor 
-PASS test tools/csg-sculptor/tests/test_main.js 
+PASS smoke tools/creature-lab
+PASS test tools/creature-lab/tests/test_live.js
+PASS test tools/creature-lab/tests/test_oracle.js
+PASS test tools/creature-lab/tests/test_sheets.js
+PASS smoke tools/csg-sculptor
+PASS test tools/csg-sculptor/tests/test_main.js
 PASS smoke tools/desktop-notebook 
 PASS test tools/desktop-notebook/tests/test_notebook.js 
 PASS smoke tools/inpainting-studio 

@@ -27,7 +27,7 @@ export default {
     variants: {
         slip: { FAULT_SLIP: 0.25 },
         sink: { FAULT_SINK: 0.06 },
-        overbend: { FAULT_OVERBEND: 1.2 },
+        overbend: { FAULT_OVERBEND: 2.4 },
         stumble: { FAULT_STUMBLE: 0.18 },
     },
     scenarios,

@@ -53,6 +53,8 @@ const D_GAZE_YAW: i32 = 24;
 const D_GAZE_PITCH: i32 = 25;
 const D_GRAZE_T: i32 = 26;
 const D_STRIDES: i32 = 27;
+const D_PITCH_S: i32 = 28;    // the body's pitch and withers height, slowly smoothed
+const D_FY_S: i32 = 29;       //   (what the neck holds the head against)
 const D_LEG: i32 = 40;        // per leg, LEG_REC floats
 const LEG_REC: i32 = 16;
 const L_PLANT: i32 = 0;
@@ -83,9 +85,14 @@ const GALLOP_DOWN: f32 = 4.0;
 const SETTLE_TRIG: f32 = 0.05;   // m a still hoof may stray before it steps home
 const REACH_TRIG: f32 = 0.52;    // m a planted hoof may trail its home before it must step
 const SETTLE_T: f32 = 0.34;
-const SCAP_PIVOT: f32 = 0.4;     // where along the blade the fore leg swings about
-const REACH_FORE: f32 = 0.89;    // m from that pivot to the toe the fore leg can hold
-const REACH_HIND: f32 = 0.835;   // m from the femur head to the toe the hind leg can hold
+@knob const HEAD_HOLD: f32 = 1.0;      // share of the body's bob and pitch the neck takes up
+@knob const NECK_LEVER: f32 = 0.35;    // m the head rises per radian of neck extension
+@knob const SCAP_PIVOT: f32 = 0.4;     // where along the blade the fore leg swings about
+@knob const REACH_FORE: f32 = 0.90;    // m from that pivot to the toe the fore leg can hold
+@knob const REACH_FORE_TOP: f32 = 0.965; // m from the blade's top to the toe, the fore leg near straight
+@knob const LIE_HIP: f32 = 0.36;     // m the hips rest over the ground, lying
+@knob const LIE_WITHERS: f32 = 0.53;   // m the withers rest over the ground, lying
+@knob const REACH_HIND: f32 = 0.835;   // m from the femur head to the toe the hind leg can hold
 @knob const SWING_REACH: f32 = 1.0;  // share of the swing by which the hoof is over its mark
 @knob const SCAP_FOLLOW: f32 = 0.6;  // of the leg's swing the scapula takes
 const BREAKOVER: f32 = 0.55;     // rad the hoof rolls onto its toe before lift
@@ -465,10 +472,17 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
         let hd = length(vec2<f32>(feet[l].x - top.x, feet[l].z - top.z));
         let ymax = feet[l].y + sqrt(max(rmax * rmax - hd * hd, 0.49 * rmax * rmax));
         if (hind) { cap_h = min(cap_h, ymax + HEAD[B_PELVIS].y - piv.y); }
-        else { cap_f = min(cap_f, ymax + HEAD[B_SCAPL].y - piv.y); }
+        else {
+            cap_f = min(cap_f, ymax + HEAD[B_SCAPL].y - piv.y);
+            // And the whole leg straight from the blade's top: a trailing
+            // fore leg runs out of length there before its swing pivot says so.
+            let top0 = pos + q_rot(qyaw, HEAD[b0] - HEAD[B_PELVIS]);
+            let hd0 = length(vec2<f32>(feet[l].x - top0.x, feet[l].z - top0.z));
+            cap_f = min(cap_f, feet[l].y + sqrt(max(REACH_FORE_TOP * REACH_FORE_TOP - hd0 * hd0, 0.49 * REACH_FORE_TOP * REACH_FORE_TOP)) + HEAD[B_SCAPL].y - HEAD[b0].y);
+        }
     }
-    let hy_t = mix(min(hind_ground + HEAD[B_PELVIS].y + bob_h, cap_h) + crouch + breath, hip_g + 0.30, lie_h);
-    let fy_t = mix(min(fore_ground + HEAD[B_SCAPL].y + bob_f, cap_f) + crouch - 0.05 * graze, height(env, wpos.x, wpos.z) + 0.46, lie_f);
+    let hy_t = mix(min(hind_ground + HEAD[B_PELVIS].y + bob_h, cap_h) + crouch + breath, hip_g + LIE_HIP, lie_h);
+    let fy_t = mix(min(fore_ground + HEAD[B_SCAPL].y + bob_f, cap_f) + crouch - 0.05 * graze, height(env, wpos.x, wpos.z) + LIE_WITHERS, lie_f);
     var hy = state[s + D_HY];
     var hv = state[s + D_HV];
     var fy = state[s + D_FY];
@@ -515,8 +529,19 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
     state[s + D_GAZE_YAW] = gyaw_s;
     state[s + D_GAZE_PITCH] = gpitch_s;
 
+    // Head carriage: the neck takes up the body's pitch and the withers' bob
+    // against their slow means, so the head rides level through the stride.
+    var pitch_s = state[s + D_PITCH_S];
+    var fy_s = state[s + D_FY_S];
+    if (clock <= dt * 1.5) { pitch_s = pitch; fy_s = fy; }
+    pitch_s = damp(pitch_s, pitch, 2.5, dt);
+    fy_s = damp(fy_s, fy, 2.5, dt);
+    state[s + D_PITCH_S] = pitch_s;
+    state[s + D_FY_S] = fy_s;
+    let carry = (1.0 - graze) * (1.0 - lie) * HEAD_HOLD;
+    let steady = carry * ((pitch - pitch_s) + (fy - fy_s) / NECK_LEVER);
     let n_up = alert * (1.0 - graze);
-    let n1_base = gw.x * 0.18 + gw.y * 0.12 + gw.z * 0.38 + 0.05 * nod * gw.x - 0.42 * n_up - 0.15 * lie;
+    let n1_base = gw.x * 0.18 + gw.y * 0.12 + gw.z * 0.38 + 0.05 * nod * gw.x - 0.42 * n_up - 0.15 * lie + steady;
     let n2_base = gw.x * 0.05 + gw.y * 0.0 + gw.z * 0.12 - 0.22 * n_up;
     let hp_world = mix(gw.x * 0.12 + gw.y * 0.06 + gw.z * 0.2 - 0.15 * n_up + gpitch_s, 1.15, graze);
     let qh = q_mul(q_y(yaw + gyaw_s), q_x(hp_world));
@@ -584,8 +609,16 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
         let slope = atan2(-dot(n, vec3<f32>(fw.x, 0.0, fw.z)), n.y);
         let par_pitch = atan2(fw.y, length(vec2<f32>(fw.x, fw.z)));
         var ah = rest_angle(b0 + nb - 1) + slope - par_pitch;
-        if (planted && moving) { ah -= BREAKOVER * smooth01((ph - (duty - 0.12)) / 0.12); }
-        if (!planted) { ah -= hoof_flex * pow(sin(PI * u), 0.8); }
+        // The stance's place on the clock: a hoof down just before its beat
+        // (ph near 1) is at the start of its stance, not past its end.
+        var sp = ph;
+        if (ph > duty + 0.5 * (1.0 - duty)) { sp = ph - 1.0; }
+        if (planted && moving) { ah -= BREAKOVER * smooth01((sp - (duty - 0.12)) / 0.12); }
+        if (!planted) {
+            // The toe-off roll carries into the lift, then the hoof folds.
+            if (state[k + L_KIND] < 0.5) { ah -= BREAKOVER * (1.0 - smooth01(u / 0.3)); }
+            ah -= hoof_flex * pow(sin(PI * u), 0.8);
+        }
         var o: Leg;
         if (hind) { o = solve_hind(b0, d, ah); }
         else {

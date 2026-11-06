@@ -50,6 +50,7 @@
         { "dir": "tools/neural-playground" },
         { "dir": "tools/laya-triage" },
         { "dir": "tools/superopt-lab" },
+        { "dir": "tools/creature-lab" },
 
         { "dir": "demos/ai-arena" },
         { "dir": "demos/anim-lab" },

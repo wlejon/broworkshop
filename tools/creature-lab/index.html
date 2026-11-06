@@ -4,10 +4,47 @@
 <meta charset="utf-8">
 <title>Creature Lab</title>
 <link rel="stylesheet" href="/lib/kit/kit.css">
+<style>
+  #sheet { position: absolute; inset: 0; background: #ecebe6; overflow: auto; display: none; z-index: 5; }
+  #sheet.open { display: block; }
+  #sheet img { display: block; max-width: 100%; }
+  #sheet .note { color: #444; padding: 24px; font-size: 14px; }
+  #sheet button { position: sticky; top: 8px; left: 8px; z-index: 6; }
+  .k-side .k-field > span:first-child { width: 70px; }
+  #flags { font-size: 12px; color: var(--k-muted); white-space: pre-wrap; }
+</style>
 </head>
 <body class="k-app">
-  <main class="k-main">
-    <div class="k-viewport"><canvas id="view"></canvas></div>
-  </main>
+  <header class="k-header"><h1>Creature Lab</h1><span class="k-sub" id="sub"></span></header>
+  <div class="k-body">
+    <aside class="k-side">
+      <div class="k-panel"><h2>creature</h2>
+        <label class="k-field"><span>A</span><select id="specA"></select></label>
+        <label class="k-field"><span>B</span><select id="specB"></select></label>
+        <label class="k-field"><span>show</span><select id="show">
+          <option value="a">A</option><option value="b">B</option><option value="ab">A and B</option></select></label>
+      </div>
+      <div class="k-panel"><h2>scenario</h2>
+        <label class="k-field"><span>run</span><select id="scenario"></select></label>
+        <div class="k-row"><button id="play">pause</button><button id="restart">restart</button></div>
+        <label class="k-field"><span>time</span><input id="scrub" type="range" min="0" max="1" step="1" value="0"><output id="tval"></output></label>
+        <label class="k-field"><span>speed</span><input id="speed" type="range" min="0.05" max="2" step="0.05" value="1"><output id="sval">1.00x</output></label>
+        <label class="k-field"><span>follow</span><input id="follow" type="checkbox" checked></label>
+      </div>
+      <div class="k-panel"><h2>sheets</h2>
+        <label class="k-field"><span>sheet</span><select id="kind">
+          <option>turnaround</option><option>trajectory</option><option>range</option><option>charts</option></select></label>
+        <div class="k-row"><button id="open">open sheet</button></div>
+      </div>
+      <div class="k-panel"><h2>metrics</h2><div id="flags"></div></div>
+    </aside>
+    <main class="k-main">
+      <div class="k-viewport"><canvas id="view"></canvas>
+        <div id="sheet"><button id="close">close</button><div id="sheetBody"></div></div>
+      </div>
+    </main>
+  </div>
+  <footer class="k-statusbar"><span id="status">loading</span></footer>
+  <script type="module" src="main.js"></script>
 </body>
 </html>

@@ -70,6 +70,8 @@ ai/birds/tests/test_process_ml.js           ml
 
 # --- slow to boot ---------------------------------------------------------------
 demos/forest                                timeout=240
+# renders a dozen GPU sheets (about 12 s on a desktop GPU)
+tools/creature-lab/tests/test_sheets.js     timeout=180
 
 # --- needs a namespace that some build profiles compile out -------------------
 games/stompworld/tests/test_ai.js           needs=bro.ai.game.nn needs=bro.ai.game.grid needs=bro.ai.game.learn
