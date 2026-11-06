@@ -13,9 +13,10 @@
 //                      weights: the tube bends as a whole (limbs, neck)
 //   weights: 'vertex'  each vertex its own (a trunk, where the skin over a
 //                      shoulder follows the scapula and the belly the spine)
-//   weights: fn(p)     each vertex the weights fn gives for its rest point,
-//                      [[bone, weight], ...] (a field drawn by hand: which
-//                      skin a shoulder blade or a thigh carries)
+//   weights: fn(p, c)  each vertex the weights fn gives for its rest point
+//                      and its ring's centre, [[bone, weight], ...] (a field
+//                      drawn by hand: which skin a shoulder blade or a thigh
+//                      carries; a leg's top taking the trunk's weights)
 // A bone named as [name, influence] counts its distance divided by that.
 // A loft given a `name` is measured by lab/form.js, as are its key rings
 // that carry a `name`.
@@ -77,6 +78,12 @@ export class Sculpt {
         return out.map((x) => ({ index: x.index, w: x.w / s2 }));
     }
 
+    // The distance weights of point p among `bones` (names or [name,
+    // influence]), as [[bone, weight], ...]: for a weight field to build on.
+    distanceWeights(p, bones, sharp) {
+        return this.weigh(p, this.candidates(bones), sharp).map(({ index, w }) => [this.skel.bones[index].name, w]);
+    }
+
     // Weights given by name ([[bone, weight], ...]): the four largest, normalised.
     explicit(list) {
         const ws = list.filter(([, w]) => w > 0).map(([name, w]) => ({ index: this.skel.index(name), w }))
@@ -102,7 +109,7 @@ export class Sculpt {
         const centres = spline(rings, steps, (r) => r.c);
         const radii = spline(rings, steps, (r) => (Array.isArray(r.r) ? r.r : [r.r, r.r]));
         const shp = rings[0].s ? spline(rings, steps, (r) => r.s) : null;
-        const weigh = (p) => (fn ? this.explicit(fn(p)) : this.weigh(p, cands, opts.sharp));
+        const weigh = (p, c) => (fn ? this.explicit(fn(p, c)) : this.weigh(p, cands, opts.sharp));
         const n = centres.length;
         const hint = opts.hint || [0, 1, 0];
         const base = this.pos.length / 3;
@@ -118,7 +125,7 @@ export class Sculpt {
                 const f = opts.shape ? opts.shape(th, u, shp ? shp[i] : null) : 1;
                 const fs = Array.isArray(f) ? f : [f, f];
                 const p = add(centres[i], add(mul(side, Math.cos(th) * radii[i][0] * fs[0]), mul(up, Math.sin(th) * radii[i][1] * fs[1])));
-                this.vertex(p, ringW || weigh(p));
+                this.vertex(p, ringW || weigh(p, centres[i]));
             }
         }
         for (let i = 0; i < n - 1; i++) {
@@ -132,7 +139,7 @@ export class Sculpt {
         for (const [end, on] of [[0, caps[0]], [n - 1, caps[1]]]) {
             if (!on) continue;
             const ring = base + end * segs;
-            const ci = this.vertex(centres[end], weigh(centres[end]));
+            const ci = this.vertex(centres[end], weigh(centres[end], centres[end]));
             for (let j = 0; j < segs; j++) {
                 const a = ring + j, b = ring + (j + 1) % segs;
                 if (end === 0) this.idx.push(ci, b, a); else this.idx.push(ci, a, b);

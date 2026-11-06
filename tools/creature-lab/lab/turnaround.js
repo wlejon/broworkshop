@@ -27,17 +27,19 @@ export function restExtent(skel) {
     return { z0, z1, top: y1, len: z1 - z0, mid: (z0 + z1) / 2 };
 }
 
-// `cell` scales a cell (240 x 215 px at 1) for a close look, and `views`
-// (names of VIEWS) keeps only those columns.
-export function turnaroundSheet(recIn, { path, rows = 10, cycle = 'auto', title = '', cell = 1, views = null, labels = ['A', 'B'] } = {}) {
+// `cell` scales a cell (240 x 215 px at 1) for a close look, `views`
+// (names of VIEWS) keeps only those columns, and `phases` (shares of the
+// cycle) picks the rows instead of `rows` even ones.
+export function turnaroundSheet(recIn, { path, rows = 10, cycle = 'auto', title = '', cell = 1, views = null, phases = null, labels = ['A', 'B'] } = {}) {
     const t0 = Date.now();
+    if (phases) rows = phases.length;
     const cw = Math.round(240 * cell), ch = Math.round(215 * cell);
     const VIEWS = views ? ALL_VIEWS.filter((v) => views.includes(v.name)) : ALL_VIEWS;
     if (!VIEWS.length) throw new Error(`turnaround: no views among ${views} (have ${ALL_VIEWS.map((v) => v.name).join(', ')})`);
     const recs = Array.isArray(recIn) ? recIn : [recIn];
     const runs = recs.map((rec) => {
         const cyc = cycle === false ? null : (cycle && cycle !== 'auto' ? cycle : lastCycle(rec));
-        return { rec, cyc, samples: sampleRows(rec, rows, cyc) };
+        return { rec, cyc, samples: sampleRows(rec, rows, cyc, phases) };
     });
     const nr = rows * runs.length;
     const skel0 = recs[0].creature.skel;

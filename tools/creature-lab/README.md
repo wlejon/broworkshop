@@ -83,8 +83,9 @@ $B tools/creature-lab tools/creature-lab/cli.js -- scenarios deer
 - `--seed <n>`
 - `--knob NAME=v[,NAME=v]`: override rig `@knob` values. The knobs are added
   to the creature's label, so their outputs land in their own folder.
-- `--cell <scale>`, `--views right,front,...`: turnaround cells that much
-  bigger, and only those columns, for a close look at joints.
+- `--cell <scale>`, `--views right,front,...`, `--phases 0.4,0.45`:
+  turnaround cells that much bigger, only those columns, only those phases of
+  the cycle, for a close look at joints.
 
 **Where outputs go**
 

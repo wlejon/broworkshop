@@ -32,7 +32,8 @@ export const HELP = `creature-lab <command> <creature> [scenario ...] [options]
 <creature>: a folder of creatures/ (deer), a snapshot (deer@before), a variant (deer:slip).
 [scenario]: names, or 'all'. Defaults: walk trot gallop idle graze startle lie-down.
 options: --out <dir>  --rows <n>  --seed <n>  --knob NAME=v[,NAME=v] (rig @knob overrides)
-         --cell <scale>  --views right,front,...  (turnaround: bigger cells, some columns)`;
+         --cell <scale>  --views right,front,...  --phases 0.4,0.45  (turnaround: bigger cells,
+                                           some columns, chosen phases)`;
 
 export const MOTION = ['walk', 'trot', 'gallop'];
 export const ACTIONS = ['idle', 'graze', 'startle', 'lie-down'];
@@ -86,7 +87,10 @@ export function analyzeRun(rec) {
 export function sheet(kind, recs, path, opt = {}) {
     const rows = opt.rows ? +opt.rows : undefined;
     if (kind === 'turnaround') {
-        return turnaroundSheet(recs, { path, rows, cell: opt.cell ? +opt.cell : 1, views: opt.views ? String(opt.views).split(',') : null });
+        return turnaroundSheet(recs, {
+            path, rows, cell: opt.cell ? +opt.cell : 1, views: opt.views ? String(opt.views).split(',') : null,
+            phases: opt.phases ? String(opt.phases).split(',').map(Number) : null,
+        });
     }
     if (kind === 'trajectory') return trajectorySheet(recs, { path });
     if (kind === 'charts') return chartsSheet(recs, { path });

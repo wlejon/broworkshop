@@ -31,12 +31,12 @@ export function lastCycle(rec, fromT) {
 }
 
 // Rows for a sheet: `rows` samples of the cycle (phase 0 = left hind
-// touchdown) or, with no cycle, of the whole run.
-export function sampleRows(rec, rows, cycle) {
+// touchdown; or the given `phases`) or, with no cycle, of the whole run.
+export function sampleRows(rec, rows, cycle, phases = null) {
     const out = [];
     for (let r = 0; r < rows; r++) {
         if (cycle) {
-            const ph = r / rows;
+            const ph = phases ? phases[r] : r / rows;
             const step = Math.min(rec.steps - 1, Math.round(cycle.a + ph * (cycle.b - cycle.a)));
             out.push({ step, phase: ph, t: step * rec.dt, label: `phase ${ph.toFixed(2)}` });
         } else {
