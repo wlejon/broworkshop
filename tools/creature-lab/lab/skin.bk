@@ -1,0 +1,38 @@
+// The skinning hook every creature draws with: an instanced mesh whose
+// instance i is creature i of a pose buffer. Each vertex has up to four
+// bones in the `skin` buffer (two vec4 a vertex, by v.vertex_index: the
+// weights, then the bone indices), and is placed by each bone's pose rows
+// [R | p] as R (v - head) + p, in the node's space (the instance transform
+// applies after).
+module hook;
+import mesh;
+from creature::skeleton import NB, HEAD;
+
+@binding(4, 14) var pose: read_buffer<vec4<f32>>;
+@binding(4, 15) var skin: read_buffer<vec4<f32>>;
+
+pub fn vertex(v_in: mesh::Vertex) -> mesh::Vertex {
+    var v = v_in;
+    let k = v.vertex_index;
+    let wt = skin[2 * k];
+    let ix = skin[2 * k + 1];
+    let base = v.instance_index * NB;
+    var p = vec3<f32>(0.0);
+    var n = vec3<f32>(0.0);
+    for (var j: i32 = 0; j < 4; j += 1) {
+        let w = wt[j];
+        if (w > 0.0) {
+            let b = ix[j] as i32;
+            let r = 3 * (base + b);
+            let r0 = pose[r];
+            let r1 = pose[r + 1];
+            let r2 = pose[r + 2];
+            let q = vec4<f32>(v.pos - HEAD[b], 1.0);
+            p += w * vec3<f32>(dot(r0, q), dot(r1, q), dot(r2, q));
+            n += w * vec3<f32>(dot(r0.xyz, v.normal), dot(r1.xyz, v.normal), dot(r2.xyz, v.normal));
+        }
+    }
+    v.pos = p;
+    v.normal = normalize(n);
+    return v;
+}

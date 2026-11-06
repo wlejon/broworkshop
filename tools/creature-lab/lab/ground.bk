@@ -1,0 +1,54 @@
+// creature::ground — the lab's ground, the query every rig calls for the
+// height under a foot. A host supplies its own module of this name (the
+// planet will answer from its terrain); the rig sees only these functions
+// and the `env` record it is handed.
+//
+// The lab's env (floats):
+//   [0] slope angle (rad)        [1] uphill direction (yaw, rad: +Z is 0, +X is pi/2)
+//   [2] roughness amplitude (m)  [3] roughness wavelength (m)
+//   [4] seed                     [5] base height (m)
+module creature::ground;
+
+const TAU: f32 = 6.28318531;
+
+// A hash without sin (a GPU's sin of a large argument is not the CPU's, and
+// the rig on the GPU and the lab's measures on the CPU must see one ground).
+fn rnd(n: f32) -> f32 {
+    var p = n * 0.1031;
+    p = p - floor(p);
+    p = p * (p + 33.33);
+    p = p * (p + p);
+    return p - floor(p);
+}
+
+pub fn height(env: read_store<f32, 1>, x: f32, z: f32) -> f32 {
+    let up = vec2<f32>(sin(env[1]), cos(env[1]));
+    var h: f32 = env[5] + tan(env[0]) * (up.x * x + up.y * z);
+    let amp = env[2];
+    if (amp > 0.0) {
+        let wl = max(env[3], 0.05);
+        let seed = env[4];
+        var r: f32 = 0.0;
+        var norm: f32 = 0.0;
+        // Six waves over two octaves, at seeded directions and phases.
+        for (var k: i32 = 0; k < 6; k += 1) {
+            let fk = k as f32;
+            let oct = 1.0 + floor(fk / 3.0);
+            let a = TAU * rnd(seed * 7.13 + fk * 3.71);
+            let ph = TAU * rnd(seed * 3.17 + fk * 5.93);
+            let w = TAU * oct / wl;
+            r += sin((cos(a) * x + sin(a) * z) * w + ph) / oct;
+            norm += 1.0 / oct;
+        }
+        h += amp * r / norm * 1.6;
+    }
+    return h;
+}
+
+// The ground's unit normal, by central differences.
+pub fn normal(env: read_store<f32, 1>, x: f32, z: f32) -> vec3<f32> {
+    let e: f32 = 0.05;
+    let hx = height(env, x + e, z) - height(env, x - e, z);
+    let hz = height(env, x, z + e) - height(env, x, z - e);
+    return normalize(vec3<f32>(-hx, 2.0 * e, -hz));
+}

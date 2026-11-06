@@ -1,0 +1,167 @@
+// creature::common — the small helpers a rig may call. Nothing here knows a
+// species: angles, quaternions, two-bone IK in a plane, rate limits, a
+// support-plane fit, and reading and writing the per-creature records.
+//
+// Conventions (the lab's): +Y up, a creature at rest faces +Z with +X its
+// left. A bone's rotation is a quaternion vec4(x, y, z, w) from its rest
+// frame (the world's axes). A limb angle in its leg plane is measured from
+// straight down, positive toward +Z (forward).
+module creature::common;
+
+pub const PI: f32 = 3.14159265;
+pub const TAU: f32 = 6.28318531;
+
+pub fn clamp01(x: f32) -> f32 { return clamp(x, 0.0, 1.0); }
+
+// Hermite smoothstep of x in [0, 1].
+pub fn smooth01(x: f32) -> f32 {
+    let t = clamp(x, 0.0, 1.0);
+    return t * t * (3.0 - 2.0 * t);
+}
+
+pub fn fract01(x: f32) -> f32 { return x - floor(x); }
+
+pub fn wrap_pi(a: f32) -> f32 { return atan2(sin(a), cos(a)); }
+
+// The shortest signed difference b - a of two phases in cycles (-0.5, 0.5].
+pub fn phase_diff(a: f32, b: f32) -> f32 {
+    let d = fract01(b - a + 0.5) - 0.5;
+    return d;
+}
+
+// cur moved toward want by at most rate * dt.
+pub fn approach(cur: f32, want: f32, rate: f32, dt: f32) -> f32 {
+    let d = want - cur;
+    let s = rate * dt;
+    if (abs(d) <= s) { return want; }
+    return cur + sign(d) * s;
+}
+
+// Exponential approach with rate k (1/s).
+pub fn damp(cur: f32, want: f32, k: f32, dt: f32) -> f32 {
+    return want + (cur - want) * exp(-k * dt);
+}
+
+// A yaw turned toward `want` at most `rate` rad/s: (new yaw, its rate).
+pub fn turn_toward(cur: f32, want: f32, rate: f32, dt: f32) -> vec2<f32> {
+    let d = wrap_pi(want - cur);
+    let s = rate * dt;
+    var turn: f32 = d;
+    if (abs(d) > s) { turn = sign(d) * s; }
+    var omega: f32 = 0.0;
+    if (dt > 0.0) { omega = turn / dt; }
+    return vec2<f32>(wrap_pi(cur + turn), omega);
+}
+
+// --- quaternions ------------------------------------------------------------
+
+pub fn q_id() -> vec4<f32> { return vec4<f32>(0.0, 0.0, 0.0, 1.0); }
+
+pub fn q_mul(a: vec4<f32>, b: vec4<f32>) -> vec4<f32> {
+    return vec4<f32>(a.w * b.xyz + b.w * a.xyz + cross(a.xyz, b.xyz), a.w * b.w - dot(a.xyz, b.xyz));
+}
+
+pub fn q_conj(q: vec4<f32>) -> vec4<f32> { return vec4<f32>(-q.xyz, q.w); }
+
+pub fn q_axis(axis: vec3<f32>, a: f32) -> vec4<f32> {
+    let h = 0.5 * a;
+    return vec4<f32>(axis * sin(h), cos(h));
+}
+
+pub fn q_x(a: f32) -> vec4<f32> { return vec4<f32>(sin(0.5 * a), 0.0, 0.0, cos(0.5 * a)); }
+pub fn q_y(a: f32) -> vec4<f32> { return vec4<f32>(0.0, sin(0.5 * a), 0.0, cos(0.5 * a)); }
+pub fn q_z(a: f32) -> vec4<f32> { return vec4<f32>(0.0, 0.0, sin(0.5 * a), cos(0.5 * a)); }
+
+// R = Rx(a.x) Ry(a.y) Rz(a.z): the lab's joint-angle order.
+pub fn q_xyz(a: vec3<f32>) -> vec4<f32> {
+    return q_mul(q_mul(q_x(a.x), q_y(a.y)), q_z(a.z));
+}
+
+pub fn q_rot(q: vec4<f32>, v: vec3<f32>) -> vec3<f32> {
+    let t = 2.0 * cross(q.xyz, v);
+    return v + q.w * t + cross(q.xyz, t);
+}
+
+// The angles of q as R = Rx(x) Ry(y) Rz(z).
+pub fn q_to_xyz(q: vec4<f32>) -> vec3<f32> {
+    let x = q.x; let y = q.y; let z = q.z; let w = q.w;
+    let r02 = 2.0 * (x * z + w * y);
+    let r12 = 2.0 * (y * z - w * x);
+    let r22 = 1.0 - 2.0 * (x * x + y * y);
+    let r01 = 2.0 * (x * y - w * z);
+    let r00 = 1.0 - 2.0 * (y * y + z * z);
+    return vec3<f32>(atan2(-r12, r22), asin(clamp(r02, -1.0, 1.0)), atan2(-r01, r00));
+}
+
+// --- planar limbs -----------------------------------------------------------
+
+// The unit direction of a limb angle in its (z, y) plane.
+pub fn limb_dir(a: f32) -> vec2<f32> { return vec2<f32>(sin(a), -cos(a)); }
+
+// The limb angle of a (z, y) vector.
+pub fn limb_angle(d: vec2<f32>) -> f32 { return atan2(d.x, -d.y); }
+
+// Two segments of lengths a and b from the origin to d in the (z, y)
+// plane: their limb angles. bend > 0 puts the joint ahead of the line to d
+// (a stifle, a carpus held forward), bend < 0 behind it (an elbow, a hock).
+// A target out of reach is brought into reach along its line.
+pub fn two_bone(a: f32, b: f32, d: vec2<f32>, bend: f32) -> vec2<f32> {
+    let r = clamp(length(d), abs(a - b) + 1e-4, a + b - 1e-4);
+    let ad = limb_angle(d);
+    let c = clamp((a * a + r * r - b * b) / (2.0 * a * r), -1.0, 1.0);
+    let g = acos(c);
+    var aa: f32 = ad - g;
+    if (bend > 0.0) { aa = ad + g; }
+    let j = a * limb_dir(aa);
+    let t = r * limb_dir(ad);
+    return vec2<f32>(aa, limb_angle(t - j));
+}
+
+// --- support ----------------------------------------------------------------
+
+// A plane fit to four points: (height at c, dh/dx, dh/dz), least squares.
+pub fn fit_plane4(p0: vec3<f32>, p1: vec3<f32>, p2: vec3<f32>, p3: vec3<f32>, c: vec2<f32>) -> vec3<f32> {
+    let m = (p0 + p1 + p2 + p3) * 0.25;
+    var sxx: f32 = 1e-4;
+    var sxz: f32 = 0.0;
+    var szz: f32 = 1e-4;
+    var sxy: f32 = 0.0;
+    var szy: f32 = 0.0;
+    var pts: array<vec3<f32>, 4>;
+    pts[0] = p0; pts[1] = p1; pts[2] = p2; pts[3] = p3;
+    for (var i: i32 = 0; i < 4; i += 1) {
+        let d = pts[i] - m;
+        sxx += d.x * d.x; sxz += d.x * d.z; szz += d.z * d.z;
+        sxy += d.x * d.y; szy += d.z * d.y;
+    }
+    let det = sxx * szz - sxz * sxz;
+    let gx = (szz * sxy - sxz * szy) / det;
+    let gz = (sxx * szy - sxz * sxy) / det;
+    return vec3<f32>(m.y + gx * (c.x - m.x) + gz * (c.y - m.z), gx, gz);
+}
+
+// --- records ----------------------------------------------------------------
+
+pub fn ld3(s: rw_store<f32, 1>, i: i32) -> vec3<f32> { return vec3<f32>(s[i], s[i + 1], s[i + 2]); }
+
+pub fn st3(s: rw_store<f32, 1>, i: i32, v: vec3<f32>) {
+    s[i] = v.x; s[i + 1] = v.y; s[i + 2] = v.z;
+}
+
+// Bone k of a pose: the rows of its rotation with its head's position.
+pub fn put_bone(pose: write_store<vec4<f32>, 1>, k: i32, q: vec4<f32>, p: vec3<f32>) {
+    let x = q.x; let y = q.y; let z = q.z; let w = q.w;
+    pose[3 * k] = vec4<f32>(1.0 - 2.0 * (y * y + z * z), 2.0 * (x * y - w * z), 2.0 * (x * z + w * y), p.x);
+    pose[3 * k + 1] = vec4<f32>(2.0 * (x * y + w * z), 1.0 - 2.0 * (x * x + z * z), 2.0 * (y * z - w * x), p.y);
+    pose[3 * k + 2] = vec4<f32>(2.0 * (x * z - w * y), 2.0 * (y * z + w * x), 1.0 - 2.0 * (x * x + y * y), p.z);
+}
+
+// A small deterministic hash in [0, 1), without sin: a GPU's sin of a large
+// argument is not the CPU's, and the same seed must give the same value on
+// both (the lab measures on the CPU what the rig did on the GPU).
+pub fn hash01(n: f32) -> f32 {
+    var p = fract01(n * 0.1031);
+    p = p * (p + 33.33);
+    p = p * (p + p);
+    return fract01(p);
+}

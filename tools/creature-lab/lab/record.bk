@@ -1,0 +1,13 @@
+// The lab's recorder: copies a batch's pose and telemetry into step `step`
+// of a history, so a run reads everything back once at its end.
+@kernel @grid(1)
+fn k_record_pose(g: grid<1>, pose: read_store<vec4<f32>, 1>, hist: write_store<vec4<f32>, 1>, step: i32, n: i32) {
+    let i = g.x();
+    hist[step * n + i] = pose[i];
+}
+
+@kernel @grid(1)
+fn k_record_tele(g: grid<1>, tele: read_store<f32, 1>, hist: write_store<f32, 1>, step: i32, n: i32) {
+    let i = g.x();
+    hist[step * n + i] = tele[i];
+}

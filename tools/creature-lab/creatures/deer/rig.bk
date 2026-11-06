@@ -1,0 +1,667 @@
+// The deer's rig: one invocation per deer, its state in `state`, its bones
+// out to `pose` (the creature contract, lab/contract.js).
+//
+// How it moves. A gait clock (walk, trot, gallop, blended across a change
+// of gait) says when each leg wants to lift: a leg in stance whose phase
+// passes the duty factor lifts, swings for the rest of its cycle and lands
+// where its home under the hip will be by mid-stance. A planted hoof stays
+// where it landed; the body moves over it. Standing still, a hoof that has
+// strayed from its home past a few centimetres steps back, one at a time.
+// A hoof stretched past its reach steps at once whatever the clock says.
+//
+// The body is levelled to the hooves: the hips over the hind feet, the
+// withers over the fore, each on a spring, so the back pitches with the
+// ground. Legs are solved analytically in their plane: the hind leg as a
+// pantograph (femur and cannon kept at their rest angle to each other, the
+// reciprocal apparatus that ties stifle and hock), the fore leg with the
+// scapula swinging with the leg and the carpus folding in swing. The head
+// is held level in the world (stabilised against the body's bob) and turns
+// to a gaze target; it lowers to the ground to graze. Every joint is held
+// within its limits.
+import creature::common::*;
+import creature::contract::*;
+import creature::skeleton::*;
+from creature::ground import height, normal;
+
+// Deliberate faults, for testing the lab's measures (0 is the deer).
+@knob const FAULT_SLIP: f32 = 0.0;      // planted hooves slide back at this share of the body's speed
+@knob const FAULT_SINK: f32 = 0.0;      // metres the left fore plants below the ground
+@knob const FAULT_OVERBEND: f32 = 0.0;  // radians the left hock is driven past its limit in swing
+@knob const FAULT_STUMBLE: f32 = 0.0;   // cycles the right hind's phase jumps every other stride
+
+pub const STATE: i32 = 128;
+
+// --- state layout (after the contract's header) ------------------------------
+const D_SPEED: i32 = 5;
+const D_OMEGA: i32 = 6;
+const D_CLOCK: i32 = 7;
+const D_PHASE: i32 = 8;
+const D_GW: i32 = 9;          // gait weights walk, trot, gallop (3)
+const D_GAIT: i32 = 12;       // the gait chosen (contract GAIT_*)
+const D_MOVING: i32 = 13;
+const D_HY: i32 = 14;         // hip height and its speed
+const D_HV: i32 = 15;
+const D_FY: i32 = 16;         // withers height and its speed
+const D_FV: i32 = 17;
+const D_ROLL: i32 = 18;
+const D_LIE: i32 = 19;
+const D_GRAZE: i32 = 20;
+const D_ALERT: i32 = 21;
+const D_STARTLE_T: i32 = 22;
+const D_PREV_ACT: i32 = 23;
+const D_GAZE_YAW: i32 = 24;
+const D_GAZE_PITCH: i32 = 25;
+const D_GRAZE_T: i32 = 26;
+const D_STRIDES: i32 = 27;
+const D_LEG: i32 = 40;        // per leg, LEG_REC floats
+const LEG_REC: i32 = 16;
+const L_PLANT: i32 = 0;
+const L_TOE: i32 = 1;         // the toe: planted point, or where the swing has it
+const L_FROM: i32 = 4;
+const L_TO: i32 = 7;
+const L_U: i32 = 10;
+const L_T: i32 = 11;
+const L_ARMED: i32 = 12;
+const L_KIND: i32 = 13;       // 0 a gait step, 1 a settling step
+
+// --- legs, in the contract's foot order: LH, LF, RF, RH ----------------------
+const LEG_HIND: array<i32, 4> = [1, 0, 0, 1];
+const LEG_SIDE: array<f32, 4> = [1.0, 1.0, -1.0, -1.0];
+const LEG_B0: array<i32, 4> = [B_FEMURL, B_SCAPL, B_SCAPR, B_FEMURR];
+const LEG_NB: array<i32, 4> = [4, 5, 5, 4];
+
+// Gaits: when each leg touches down in the cycle.
+const OFF_WALK: array<f32, 4> = [0.0, 0.25, 0.75, 0.5];     // lateral sequence
+const OFF_TROT: array<f32, 4> = [0.0, 0.5, 0.0, 0.5];       // diagonal pairs
+const OFF_GALLOP: array<f32, 4> = [0.0, 0.46, 0.57, 0.1];   // transverse, right lead
+
+const WALK_UP: f32 = 1.9;
+const TROT_DOWN: f32 = 1.5;
+const TROT_UP: f32 = 4.6;
+const GALLOP_DOWN: f32 = 4.0;
+
+const SETTLE_TRIG: f32 = 0.05;   // m a still hoof may stray before it steps home
+const REACH_TRIG: f32 = 0.52;    // m a planted hoof may trail its home before it must step
+const SETTLE_T: f32 = 0.34;
+const SCAP_PIVOT: f32 = 0.4;     // where along the blade the fore leg swings about
+const REACH_FORE: f32 = 0.89;    // m from that pivot to the toe the fore leg can hold
+const REACH_HIND: f32 = 0.835;   // m from the femur head to the toe the hind leg can hold
+@knob const SWING_REACH: f32 = 1.0;  // share of the swing by which the hoof is over its mark
+@knob const SCAP_FOLLOW: f32 = 0.6;  // of the leg's swing the scapula takes
+const BREAKOVER: f32 = 0.55;     // rad the hoof rolls onto its toe before lift
+const WITHERS_Z: f32 = 0.69;     // hips (pelvis head) to withers, along the back
+
+// Lying (sternal): each leg joint's flexion, by bone, from scapula / femur down.
+const FOLD_FRONT: array<f32, 5> = [-0.19, 0.77, -2.0, 2.62, 0.25];
+const FOLD_HIND: array<f32, 4> = [-0.76, 1.37, -2.06, 0.03];
+
+fn rest_angle(b: i32) -> f32 {
+    let v = TAIL[b] - HEAD[b];
+    return limb_angle(vec2<f32>(v.z, v.y));
+}
+
+fn rest_len(b: i32) -> f32 {
+    let v = TAIL[b] - HEAD[b];
+    return length(vec2<f32>(v.z, v.y));
+}
+
+// Leg l's touchdown phase, the gaits' blended by weight (around the circle).
+fn off_mix(a: array<f32, 4>, b: array<f32, 4>, c: array<f32, 4>, w: vec3<f32>, l: i32) -> f32 {
+    return a[l] + w.y * phase_diff(a[l], b[l]) + w.z * phase_diff(a[l], c[l]);
+}
+
+// --- the planar leg solutions ---------------------------------------------------
+
+struct Leg { rho: f32, a0: f32, a1: f32, a2: f32, a3: f32, a4: f32 }
+
+// The abduction that puts the leg's plane through d (parent-local, from
+// the leg's root) and d in that plane as (z, y).
+fn leg_plane(b0: i32, toe: i32, d: vec3<f32>) -> vec3<f32> {
+    let rx = TAIL[toe].x - HEAD[b0].x;
+    let r2 = d.x * d.x + d.y * d.y;
+    let rho = atan2(d.x, -d.y) - atan2(rx, sqrt(max(r2 - rx * rx, 1e-6)));
+    let y = -d.x * sin(rho) + d.y * cos(rho);
+    return vec3<f32>(rho, d.z, y);
+}
+
+// A hind leg from its femur head to toe d with the hoof at limb angle ah.
+fn solve_hind(b0: i32, d: vec3<f32>, ah: f32) -> Leg {
+    var o: Leg;
+    let pl = leg_plane(b0, b0 + 3, d);
+    o.rho = pl.x;
+    let lf = rest_len(b0);
+    let lt = rest_len(b0 + 1);
+    let lm = rest_len(b0 + 2);
+    let lh = rest_len(b0 + 3);
+    let fet = vec2<f32>(pl.y, pl.z) - lh * limb_dir(ah);
+    let c = rest_angle(b0 + 2) - rest_angle(b0);
+    let v0 = lf * limb_dir(0.0) + lm * limb_dir(c);
+    let s = two_bone(length(v0), lt, fet, 1.0);
+    o.a0 = s.x - limb_angle(v0);
+    o.a1 = s.y;
+    o.a2 = o.a0 + c;
+    o.a3 = ah;
+    o.a4 = 0.0;
+    return o;
+}
+
+// A fore leg from its scapula's top to toe d: hoof at ah, carpus folded by k.
+fn solve_front(b0: i32, d: vec3<f32>, ah: f32, k: f32) -> Leg {
+    var o: Leg;
+    let pl = leg_plane(b0, b0 + 4, d);
+    o.rho = pl.x;
+    let ls = rest_len(b0);
+    let lu = rest_len(b0 + 1);
+    let lr = rest_len(b0 + 2);
+    let lc = rest_len(b0 + 3);
+    let lh = rest_len(b0 + 4);
+    let fet = vec2<f32>(pl.y, pl.z) - lh * limb_dir(ah);
+    let rf = TAIL[b0 + 3] - HEAD[b0];
+    let line0 = limb_angle(vec2<f32>(rf.z, rf.y));
+    o.a0 = rest_angle(b0) + SCAP_FOLLOW * (limb_angle(fet) - line0);
+    let sh = ls * limb_dir(o.a0);
+    let c0 = rest_angle(b0 + 3) - rest_angle(b0 + 2);
+    let w0 = lr * limb_dir(0.0) + lc * limb_dir(c0 - k);
+    let s = two_bone(lu, length(w0), fet - sh, -1.0);
+    o.a1 = s.x;
+    o.a2 = s.y - limb_angle(w0);
+    o.a3 = o.a2 + c0 - k;
+    o.a4 = ah;
+    return o;
+}
+
+fn leg_angle(o: Leg, k: i32) -> f32 {
+    if (k == 0) { return o.a0; }
+    if (k == 1) { return o.a1; }
+    if (k == 2) { return o.a2; }
+    if (k == 3) { return o.a3; }
+    return o.a4;
+}
+
+fn clamp_xyz(a: vec3<f32>, b: i32) -> vec3<f32> { return clamp(a, LIM_LO[b], LIM_HI[b]); }
+
+// The muzzle's height with the neck flexed by t of its grazing reach.
+fn muzzle_y(qt: vec4<f32>, pt: vec3<f32>, n1: vec3<f32>, n2: vec3<f32>, qh: vec4<f32>) -> f32 {
+    let p1 = pt + q_rot(qt, HEAD[B_NECK1] - HEAD[B_THORAX]);
+    let q1 = q_mul(qt, q_xyz(clamp_xyz(n1, B_NECK1)));
+    let p2 = p1 + q_rot(q1, HEAD[B_NECK2] - HEAD[B_NECK1]);
+    let q2 = q_mul(q1, q_xyz(clamp_xyz(n2, B_NECK2)));
+    let ph = p2 + q_rot(q2, HEAD[B_HEAD] - HEAD[B_NECK2]);
+    return (ph + q_rot(qh, TAIL[B_HEAD] - HEAD[B_HEAD])).y;
+}
+
+fn place(st: rw_store<f32, 1>, env: read_store<f32, 1>, s: i32) {
+    let p = ld3(st, s + S_POS);
+    let yaw = st[s + S_YAW];
+    let q = q_y(yaw);
+    for (var l: i32 = 0; l < 4; l += 1) {
+        let toe0 = TAIL[LEG_B0[l] + LEG_NB[l] - 1] - HEAD[B_PELVIS];
+        let w = q_rot(q, vec3<f32>(toe0.x, 0.0, toe0.z)) + vec3<f32>(p.x, 0.0, p.z);
+        let t = vec3<f32>(w.x, height(env, w.x, w.z), w.z);
+        let k = s + D_LEG + l * LEG_REC;
+        st[k + L_PLANT] = 1.0;
+        st3(st, k + L_TOE, t);
+        st3(st, k + L_TO, t);
+        st[k + L_U] = 0.0;
+        st[k + L_ARMED] = 1.0;
+    }
+    let gp = height(env, p.x, p.z);
+    let pf = p + q_rot(q, vec3<f32>(0.0, 0.0, WITHERS_Z));
+    st[s + D_HY] = gp + HEAD[B_PELVIS].y;
+    st[s + D_FY] = height(env, pf.x, pf.z) + HEAD[B_SCAPL].y;
+    st[s + D_HV] = 0.0;
+    st[s + D_FV] = 0.0;
+    st[s + D_GW] = 1.0;
+    st[s + D_GAIT] = GAIT_WALK as f32;
+    st[s + S_PLACED] = 1.0;
+}
+
+@kernel @grid(1)
+fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state: rw_store<f32, 1>,
+         pose: write_store<vec4<f32>, 1>, tele: write_store<f32, 1>, dt: f32) {
+    let c = g.x();
+    let s = c * STATE;
+    let ii = c * INTENT;
+    if (state[s + S_PLACED] < 0.5) { place(state, env, s); }
+
+    // --- intent and actions -------------------------------------------------------
+    var vdes = vec2<f32>(intent[ii + I_VEL_X], intent[ii + I_VEL_Z]);
+    let act = intent[ii + I_ACTION] as i32;
+    let seed = intent[ii + I_SEED];
+    let clock = state[s + D_CLOCK] + dt;
+    state[s + D_CLOCK] = clock;
+
+    var lie = approach(state[s + D_LIE], select_f(act == ACT_LIE, 1.0, 0.0), 0.42, dt);
+    var graze = approach(state[s + D_GRAZE], select_f(act == ACT_GRAZE, 1.0, 0.0), 1.1, dt);
+    let alert_want = select_f(act == ACT_STARTLE || act == ACT_ALERT, 1.0, 0.0);
+    var alert = state[s + D_ALERT];
+    if (alert_want > alert) { alert = approach(alert, 1.0, 9.0, dt); } else { alert = approach(alert, 0.0, 0.7, dt); }
+    var st_t = state[s + D_STARTLE_T];
+    if (act == ACT_STARTLE && (state[s + D_PREV_ACT] as i32) != ACT_STARTLE) { st_t = 0.0; }
+    if (st_t >= 0.0) { st_t += dt; }
+    if (st_t > 3.0) { st_t = -1.0; }
+    state[s + D_LIE] = lie;
+    state[s + D_GRAZE] = graze;
+    state[s + D_ALERT] = alert;
+    state[s + D_STARTLE_T] = st_t;
+    state[s + D_PREV_ACT] = act as f32;
+    if (lie > 0.001 || act == ACT_LIE) { vdes = vec2<f32>(0.0); }
+    let graze_slow = 1.0 - 0.8 * graze;
+    vdes *= graze_slow;
+
+    // --- heading and speed ---------------------------------------------------------
+    var yaw = state[s + S_YAW];
+    var speed = state[s + D_SPEED];
+    var want = yaw;
+    let vd = length(vdes);
+    if (intent[ii + I_HEADING_MODE] > 0.5) { want = intent[ii + I_HEADING]; }
+    else if (vd > 0.05) { want = atan2(vdes.x, vdes.y); }
+    let rate = 2.1 / (1.0 + 0.3 * speed);
+    let tw = turn_toward(yaw, want, rate, dt);
+    yaw = tw.x;
+    let omega = tw.y;
+    let err = wrap_pi(want - yaw);
+    let vt = vd * clamp(cos(err), 0.15, 1.0);
+    if (vt > speed) { speed = approach(speed, vt, 1.6 + 0.6 * speed, dt); }
+    else { speed = approach(speed, vt, 3.5, dt); }
+    let fwd = vec3<f32>(sin(yaw), 0.0, cos(yaw));
+    let left = vec3<f32>(cos(yaw), 0.0, -sin(yaw));
+    let vel = fwd * speed;
+    var pos = ld3(state, s + S_POS);
+    pos += vel * dt;
+
+    // --- gait ------------------------------------------------------------------------
+    var gait = state[s + D_GAIT] as i32;
+    if (gait == GAIT_WALK && speed > WALK_UP) { gait = GAIT_TROT; }
+    else if (gait == GAIT_TROT && speed < TROT_DOWN) { gait = GAIT_WALK; }
+    else if (gait == GAIT_TROT && speed > TROT_UP) { gait = GAIT_GALLOP; }
+    else if (gait == GAIT_GALLOP && speed < GALLOP_DOWN) { gait = GAIT_TROT; }
+    var gw = ld3(state, s + D_GW);
+    gw.x = approach(gw.x, select_f(gait == GAIT_WALK, 1.0, 0.0), 2.2, dt);
+    gw.y = approach(gw.y, select_f(gait == GAIT_TROT, 1.0, 0.0), 2.2, dt);
+    gw.z = approach(gw.z, select_f(gait == GAIT_GALLOP, 1.0, 0.0), 2.2, dt);
+    gw = gw / max(gw.x + gw.y + gw.z, 1e-4);
+    let veff = max(speed, 0.45 * abs(omega));
+    let freq = gw.x * (0.62 + 0.45 * veff) + gw.y * (1.55 + 0.12 * veff) + gw.z * (2.0 + 0.06 * veff);
+    let duty = gw.x * clamp(0.70 - 0.05 * veff, 0.6, 0.7) + gw.y * 0.42 + gw.z * 0.27;
+    let lift_h = gw.x * vec2<f32>(0.065, 0.085) + gw.y * vec2<f32>(0.10, 0.14) + gw.z * vec2<f32>(0.14, 0.18);
+    let carpus = gw.x * 1.3 + gw.y * 1.75 + gw.z * 2.0;
+    let hoof_flex = gw.x * 0.6 + gw.y * 0.9 + gw.z * 1.1;
+
+    var phase = state[s + D_PHASE];
+    let was_moving = state[s + D_MOVING] > 0.5;
+    var moving = vd > 0.06 || speed > 0.06 || abs(err) > 0.12;
+    if (was_moving) { moving = moving || speed > 0.03 || vd > 0.03 || abs(err) > 0.05; }
+    if (lie > 0.001) { moving = false; }
+    var offs: array<f32, 4>;
+    for (var l: i32 = 0; l < 4; l += 1) {
+        offs[l] = off_mix(OFF_WALK, OFF_TROT, OFF_GALLOP, gw, l);
+    }
+    // A stumble: the right hind's beat jumps every other stride.
+    let cyc = floor(phase);
+    if (cyc - 2.0 * floor(cyc * 0.5) > 0.5) { offs[3] += FAULT_STUMBLE; }
+    if (moving && !was_moving) {
+        // Start with the left hind's lift.
+        phase = floor(phase) + 1.0 + offs[0] + duty;
+        for (var l: i32 = 0; l < 4; l += 1) {
+            let k = s + D_LEG + l * LEG_REC;
+            state[k + L_ARMED] = 1.0;   // a leg the clock has in swing lifts now
+        }
+    }
+    if (moving) { phase += freq * dt; }
+
+    // --- feet --------------------------------------------------------------------------
+    let qyaw = q_y(yaw);
+    var any_swing = false;
+    var worst: i32 = -1;
+    var worst_e: f32 = SETTLE_TRIG;
+    for (var l: i32 = 0; l < 4; l += 1) {
+        let k = s + D_LEG + l * LEG_REC;
+        if (state[k + L_PLANT] < 0.5) { any_swing = true; }
+        else {
+            let toe0 = TAIL[LEG_B0[l] + LEG_NB[l] - 1] - HEAD[B_PELVIS];
+            let home = pos + q_rot(qyaw, vec3<f32>(toe0.x, 0.0, toe0.z));
+            let t = ld3(state, k + L_TOE);
+            let e = length(vec2<f32>(t.x - home.x, t.z - home.z));
+            if (e > worst_e) { worst_e = e; worst = l; }
+        }
+    }
+    var sw: array<f32, 4>;
+    var feet: array<vec3<f32>, 4>;
+    var swing_sum_hind: f32 = 0.0;
+    var swing_max: f32 = 0.0;
+    var sway: f32 = 0.0;
+    var hip_drop: f32 = 0.0;
+    var nod: f32 = 0.0;
+    for (var l: i32 = 0; l < 4; l += 1) {
+        let k = s + D_LEG + l * LEG_REC;
+        let hind = LEG_HIND[l] == 1;
+        let toe0 = TAIL[LEG_B0[l] + LEG_NB[l] - 1] - HEAD[B_PELVIS];
+        let home_off = vec3<f32>(toe0.x, 0.0, toe0.z);
+        let home = pos + q_rot(qyaw, home_off);
+        let ph = fract01(phase - offs[l]);
+        var planted = state[k + L_PLANT] > 0.5;
+        var toe = ld3(state, k + L_TOE);
+        var lift = false;
+        var lift_t: f32 = SETTLE_T;
+        var kind: f32 = 1.0;
+        if (planted) {
+            if (FAULT_SLIP > 0.0) { toe -= vel * (FAULT_SLIP * dt); }
+            if (ph < duty) { state[k + L_ARMED] = 1.0; }
+            let stray = length(vec2<f32>(toe.x - home.x, toe.z - home.z));
+            if (moving && state[k + L_ARMED] > 0.5 && ph >= duty) {
+                lift = true;
+                lift_t = clamp((1.0 - ph) / max(freq, 0.1), 0.12, 0.6);
+                kind = 0.0;
+            } else if (moving && stray > REACH_TRIG) {
+                // Out of reach early: step now, but land on the clock's beat so
+                // the leg falls back into the gait instead of keeping the lead.
+                lift = true;
+                lift_t = clamp((1.0 - ph) / max(freq, 0.1), 0.2, 0.5);
+            } else if (!moving && !any_swing && worst == l) {
+                lift = true;
+            }
+            if (lift) {
+                planted = false;
+                any_swing = true;
+                state[k + L_ARMED] = 0.0;
+                st3(state, k + L_FROM, toe);
+                state[k + L_U] = 0.0;
+                state[k + L_T] = lift_t;
+                state[k + L_KIND] = kind;
+            }
+        }
+        var u: f32 = 0.0;
+        if (!planted) {
+            let tt = state[k + L_T];
+            u = state[k + L_U];
+            var target = home;
+            if (moving) {
+                let lead = (1.0 - u) * tt + 0.5 * duty / max(freq, 0.1);
+                target = pos + vel * lead + q_rot(q_y(yaw + omega * lead), home_off);
+            }
+            target.y = height(env, target.x, target.z);
+            if (l == 1) { target.y -= FAULT_SINK; }
+            st3(state, k + L_TO, target);
+            u = u + dt / tt;
+            let lifted = ld3(state, k + L_FROM);
+            if (u >= 1.0) {
+                u = 1.0;
+                toe = target;
+                planted = true;
+                state[k + L_ARMED] = select_f(ph < duty || !moving, 1.0, 0.0);
+            } else {
+                let e = smooth01(u / SWING_REACH);
+                var hgt = lift_h.y;
+                if (hind) { hgt = lift_h.x; }
+                if (state[k + L_KIND] > 0.5) { hgt = 0.05; }
+                toe = vec3<f32>(mix(lifted.x, target.x, e), mix(lifted.y, target.y, smooth01(u)), mix(lifted.z, target.z, e));
+                toe.y += hgt * sin(PI * pow(u, 0.8));
+                // A swinging hoof is carried within the leg's reach of its
+                // girdle (as it stood last step): one ahead of what the leg
+                // can hold hangs back over its mark instead of being dragged
+                // through the ground by a stretched leg.
+                let b0 = LEG_B0[l];
+                var piv = HEAD[b0];
+                var rmax = REACH_HIND;
+                var top_y = state[s + D_HY] - HEAD[B_PELVIS].y;
+                if (!hind) { piv = mix(HEAD[b0], TAIL[b0], SCAP_PIVOT); rmax = REACH_FORE; top_y = state[s + D_FY] - HEAD[B_SCAPL].y; }
+                let top = pos + q_rot(qyaw, piv - HEAD[B_PELVIS]);
+                let dy = top_y + piv.y - toe.y;
+                let hmax = sqrt(max(rmax * rmax - dy * dy, 0.0));
+                let hv2 = vec2<f32>(toe.x - top.x, toe.z - top.z);
+                let hl = length(hv2);
+                if (hl > hmax && hl > 1e-4) {
+                    toe.x = top.x + hv2.x * (hmax / hl);
+                    toe.z = top.z + hv2.y * (hmax / hl);
+                }
+            }
+            state[k + L_U] = u;
+        }
+        state[k + L_PLANT] = select_f(planted, 1.0, 0.0);
+        st3(state, k + L_TOE, toe);
+        var sh: f32 = 0.0;
+        if (!planted) { sh = sin(PI * u); }
+        sw[l] = sh;
+        feet[l] = toe;
+        if (!planted) { feet[l] = ld3(state, k + L_TO); }
+        if (hind) { swing_sum_hind += sh; hip_drop += LEG_SIDE[l] * sh; }
+        swing_max = max(swing_max, sh);
+        sway -= LEG_SIDE[l] * sh;
+        if (!hind && planted && moving) { nod += sin(PI * clamp(ph / max(duty, 0.1) * 2.0, 0.0, 1.0)); }
+    }
+
+    // --- the body, levelled to the hooves ----------------------------------------------
+    let lie_f = smooth01(lie * 1.8);
+    let lie_h = smooth01((lie - 0.35) / 0.65);
+    let hip_g = height(env, pos.x, pos.z);
+    let wpos = pos + fwd * WITHERS_Z;
+    let plane_c = fit_plane4(feet[0], feet[1], feet[2], feet[3], vec2<f32>(pos.x, pos.z));
+    let hind_ground = 0.5 * (feet[0].y + feet[3].y);
+    let fore_ground = 0.5 * (feet[1].y + feet[2].y);
+    var bob_h = -0.012 * swing_sum_hind * gw.x + gw.y * 0.03 * (swing_max - 0.5) + gw.z * 0.035 * sin(TAU * (phase - 0.1));
+    var bob_f = gw.y * 0.03 * (swing_max - 0.5) + gw.z * 0.035 * sin(TAU * (phase + 0.15));
+    // Startle: a crouch, then a lift as it gathers.
+    var crouch: f32 = 0.0;
+    if (st_t >= 0.0) { crouch = -0.05 * sin(PI * clamp(st_t / 0.3, 0.0, 1.0)) + 0.02 * smooth01((st_t - 0.25) / 0.2) * (1.0 - smooth01((st_t - 1.2) / 0.8)); }
+    let breath = 0.004 * sin(TAU * 0.33 * clock + seed);
+    // Reach: neither girdle may stand higher than its planted (or landing)
+    // hooves can hold it, so a long stride lowers the body instead of
+    // pulling the hoof off its mark.
+    var cap_h: f32 = 1e4;
+    var cap_f: f32 = 1e4;
+    for (var l: i32 = 0; l < 4; l += 1) {
+        let k = s + D_LEG + l * LEG_REC;
+        let down = state[k + L_PLANT] > 0.5 || state[k + L_U] > 0.6;
+        if (!down) { continue; }
+        let hind = LEG_HIND[l] == 1;
+        // The fore leg swings about the middle of its shoulder blade (the
+        // blade turns with it), the hind about the femur head.
+        let b0 = LEG_B0[l];
+        var piv = HEAD[b0];
+        var rmax = REACH_HIND;
+        if (!hind) { piv = mix(HEAD[b0], TAIL[b0], SCAP_PIVOT); rmax = REACH_FORE; }
+        let top = pos + q_rot(qyaw, piv - HEAD[B_PELVIS]);
+        let hd = length(vec2<f32>(feet[l].x - top.x, feet[l].z - top.z));
+        let ymax = feet[l].y + sqrt(max(rmax * rmax - hd * hd, 0.49 * rmax * rmax));
+        if (hind) { cap_h = min(cap_h, ymax + HEAD[B_PELVIS].y - piv.y); }
+        else { cap_f = min(cap_f, ymax + HEAD[B_SCAPL].y - piv.y); }
+    }
+    let hy_t = mix(min(hind_ground + HEAD[B_PELVIS].y + bob_h, cap_h) + crouch + breath, hip_g + 0.30, lie_h);
+    let fy_t = mix(min(fore_ground + HEAD[B_SCAPL].y + bob_f, cap_f) + crouch - 0.05 * graze, height(env, wpos.x, wpos.z) + 0.46, lie_f);
+    var hy = state[s + D_HY];
+    var hv = state[s + D_HV];
+    var fy = state[s + D_FY];
+    var fv = state[s + D_FV];
+    let wh: f32 = 16.0;
+    hv += (wh * wh * (hy_t - hy) - 2.0 * wh * hv) * dt;
+    hy += hv * dt;
+    fv += (wh * wh * (fy_t - fy) - 2.0 * wh * fv) * dt;
+    fy += fv * dt;
+    let pitch = atan2((fy - HEAD[B_SCAPL].y) - (hy - HEAD[B_PELVIS].y), WITHERS_Z);
+    let grad_x = dot(vec2<f32>(plane_c.y, plane_c.z), vec2<f32>(left.x, left.z));
+    var roll = damp(state[s + D_ROLL], clamp(0.3 * atan(grad_x), -0.1, 0.1), 6.0, dt);
+    state[s + D_ROLL] = roll;
+    let sway_v = left * (0.012 * sway * gw.x);
+    let root = vec3<f32>(pos.x, hy, pos.z) + sway_v;
+
+    // --- spine, neck and head --------------------------------------------------------------
+    var rq: array<vec4<f32>, NB>;
+    var rp: array<vec3<f32>, NB>;
+    let qbody = q_mul(q_mul(qyaw, q_x(-pitch)), q_z(roll));
+    let flex = gw.z * 0.13 * sin(TAU * (phase - 0.2));
+    let drop = -0.05 * hip_drop * gw.x;
+    let bend = clamp(0.1 * omega, -0.18, 0.18);
+    rq[B_PELVIS] = q_mul(qbody, q_mul(q_z(drop), q_x(flex)));
+    rp[B_PELVIS] = root;
+    let breath_x = 0.01 * sin(TAU * 0.33 * clock + seed) * (1.0 - gw.x * select_f(moving, 1.0, 0.0));
+    rq[B_LUMBAR] = q_mul(rq[B_PELVIS], q_xyz(clamp_xyz(vec3<f32>(-0.5 * flex, bend, -0.5 * drop), B_LUMBAR)));
+    rq[B_THORAX] = q_mul(rq[B_LUMBAR], q_xyz(clamp_xyz(vec3<f32>(-0.5 * flex + breath_x, bend, -0.5 * drop), B_THORAX)));
+    rp[B_LUMBAR] = rp[B_PELVIS] + q_rot(rq[B_PELVIS], HEAD[B_LUMBAR] - HEAD[B_PELVIS]);
+    rp[B_THORAX] = rp[B_LUMBAR] + q_rot(rq[B_LUMBAR], HEAD[B_THORAX] - HEAD[B_LUMBAR]);
+
+    // Gaze: where the head would turn, smoothed.
+    var gyaw: f32 = 0.0;
+    var gpitch: f32 = 0.0;
+    let gwt = intent[ii + I_GAZE_W];
+    if (gwt > 0.0) {
+        let hpos = rp[B_THORAX] + q_rot(rq[B_THORAX], HEAD[B_HEAD] - HEAD[B_THORAX]);
+        let d = vec3<f32>(intent[ii + I_GAZE_X], intent[ii + I_GAZE_Y], intent[ii + I_GAZE_Z]) - hpos;
+        gyaw = clamp(wrap_pi(atan2(d.x, d.z) - yaw), -1.5, 1.5) * gwt;
+        gpitch = clamp(atan2(-d.y, length(vec2<f32>(d.x, d.z))), -0.8, 0.9) * gwt;
+    }
+    let gyaw_s = damp(state[s + D_GAZE_YAW], gyaw, 7.0, dt);
+    let gpitch_s = damp(state[s + D_GAZE_PITCH], gpitch, 7.0, dt);
+    state[s + D_GAZE_YAW] = gyaw_s;
+    state[s + D_GAZE_PITCH] = gpitch_s;
+
+    let n_up = alert * (1.0 - graze);
+    let n1_base = gw.x * 0.18 + gw.y * 0.12 + gw.z * 0.38 + 0.05 * nod * gw.x - 0.42 * n_up - 0.15 * lie;
+    let n2_base = gw.x * 0.05 + gw.y * 0.0 + gw.z * 0.12 - 0.22 * n_up;
+    let hp_world = mix(gw.x * 0.12 + gw.y * 0.06 + gw.z * 0.2 - 0.15 * n_up + gpitch_s, 1.15, graze);
+    let qh = q_mul(q_y(yaw + gyaw_s), q_x(hp_world));
+    // Grazing: how far down the neck must go for the muzzle to reach the ground.
+    var gt: f32 = 0.0;
+    if (graze > 0.0) {
+        let mz = rp[B_THORAX] + q_rot(rq[B_THORAX], TAIL[B_HEAD] - HEAD[B_THORAX]);
+        let gy0 = height(env, mz.x, mz.z) + 0.03;
+        var lo: f32 = 0.0;
+        var hi: f32 = 1.0;
+        for (var it: i32 = 0; it < 7; it += 1) {
+            let m = 0.5 * (lo + hi);
+            let y = muzzle_y(rq[B_THORAX], rp[B_THORAX], vec3<f32>(n1_base + 1.3 * m, 0.3 * gyaw_s, 0.0),
+                             vec3<f32>(n2_base + 0.75 * m, 0.3 * gyaw_s, 0.0), qh);
+            if (y > gy0) { lo = m; } else { hi = m; }
+        }
+        gt = 0.5 * (lo + hi) * graze;
+    }
+    let nib = graze * 0.05 * sin(TAU * 1.7 * clock);
+    rq[B_NECK1] = q_mul(rq[B_THORAX], q_xyz(clamp_xyz(vec3<f32>(n1_base + 1.3 * gt, 0.3 * gyaw_s, 0.0), B_NECK1)));
+    rp[B_NECK1] = rp[B_THORAX] + q_rot(rq[B_THORAX], HEAD[B_NECK1] - HEAD[B_THORAX]);
+    rq[B_NECK2] = q_mul(rq[B_NECK1], q_xyz(clamp_xyz(vec3<f32>(n2_base + 0.75 * gt + nib, 0.3 * gyaw_s, 0.0), B_NECK2)));
+    rp[B_NECK2] = rp[B_NECK1] + q_rot(rq[B_NECK1], HEAD[B_NECK2] - HEAD[B_NECK1]);
+    let hl = q_to_xyz(q_mul(q_conj(rq[B_NECK2]), qh));
+    rq[B_HEAD] = q_mul(rq[B_NECK2], q_xyz(clamp_xyz(hl, B_HEAD)));
+    rp[B_HEAD] = rp[B_NECK2] + q_rot(rq[B_NECK2], HEAD[B_HEAD] - HEAD[B_NECK2]);
+
+    // Ears: up and forward when alert, toward the gaze, and an idle flick now and then.
+    for (var e: i32 = 0; e < 2; e += 1) {
+        let b = B_EARL + e;
+        let side = 1.0 - 2.0 * (e as f32);
+        let fl = fract01(clock * 0.21 + seed * 0.37 + 0.5 * (e as f32));
+        var flick: f32 = 0.0;
+        if (fl < 0.035) { flick = sin(PI * fl / 0.035); }
+        let a = vec3<f32>(-0.5 * alert + 0.25 * lie, side * (0.4 * gyaw_s - 0.35 * alert) + side * 0.7 * flick, side * (0.35 * alert - 0.15 * lie));
+        rq[b] = q_mul(rq[B_HEAD], q_xyz(clamp_xyz(a, b)));
+        rp[b] = rp[B_HEAD] + q_rot(rq[B_HEAD], HEAD[b] - HEAD[B_HEAD]);
+    }
+    // Tail: a swish with the stride, raised in the gallop, flagged in alarm.
+    let swish = (gw.x + gw.y) * 0.22 * sin(TAU * (phase + 0.25)) * select_f(moving, 1.0, 0.0);
+    rq[B_TAIL1] = q_mul(rq[B_PELVIS], q_xyz(clamp_xyz(vec3<f32>(0.6 * gw.z + 1.75 * alert, swish, 0.0), B_TAIL1)));
+    rp[B_TAIL1] = rp[B_PELVIS] + q_rot(rq[B_PELVIS], HEAD[B_TAIL1] - HEAD[B_PELVIS]);
+    rq[B_TAIL2] = q_mul(rq[B_TAIL1], q_xyz(clamp_xyz(vec3<f32>(0.2 * gw.z + 0.5 * alert, 0.6 * swish, 0.0), B_TAIL2)));
+    rp[B_TAIL2] = rp[B_TAIL1] + q_rot(rq[B_TAIL1], HEAD[B_TAIL2] - HEAD[B_TAIL1]);
+
+    // --- legs ----------------------------------------------------------------------------
+    for (var l: i32 = 0; l < 4; l += 1) {
+        let k = s + D_LEG + l * LEG_REC;
+        let hind = LEG_HIND[l] == 1;
+        let b0 = LEG_B0[l];
+        let nb = LEG_NB[l];
+        var par = B_THORAX;
+        if (hind) { par = B_PELVIS; }
+        let qp = rq[par];
+        let j = rp[par] + q_rot(qp, HEAD[b0] - HEAD[par]);
+        let toe = ld3(state, k + L_TOE);
+        let d = q_rot(q_conj(qp), toe - j);
+        let planted = state[k + L_PLANT] > 0.5;
+        let u = state[k + L_U];
+        let ph = fract01(phase - offs[l]);
+        // The hoof flat on the ground in stance (rolling onto the toe before
+        // lift), hanging flexed in swing.
+        let n = normal(env, toe.x, toe.z);
+        let fw = q_rot(qp, vec3<f32>(0.0, 0.0, 1.0));
+        let slope = atan2(-dot(n, vec3<f32>(fw.x, 0.0, fw.z)), n.y);
+        let par_pitch = atan2(fw.y, length(vec2<f32>(fw.x, fw.z)));
+        var ah = rest_angle(b0 + nb - 1) + slope - par_pitch;
+        if (planted && moving) { ah -= BREAKOVER * smooth01((ph - (duty - 0.12)) / 0.12); }
+        if (!planted) { ah -= hoof_flex * pow(sin(PI * u), 0.8); }
+        var o: Leg;
+        if (hind) { o = solve_hind(b0, d, ah); }
+        else {
+            var kf: f32 = 0.0;
+            if (!planted) { kf = carpus * pow(sin(PI * u), 0.9); }
+            o = solve_front(b0, d, ah, kf);
+        }
+        // Rotations from the limb angles, each joint held within its limits.
+        var lie_l = lie_h;
+        if (!hind) { lie_l = lie_f; }
+        let rho = mix(clamp(o.rho, LIM_LO[b0].z, LIM_HI[b0].z), 0.0, lie_l);
+        let qr = q_mul(qp, q_z(rho));
+        var prev: f32 = 0.0;
+        for (var i: i32 = 0; i < nb; i += 1) {
+            let b = b0 + i;
+            let abs_t = -(leg_angle(o, i) - rest_angle(b));
+            var loc = abs_t - prev;
+            if (hind) { loc = mix(loc, FOLD_HIND[i], lie_l); } else { loc = mix(loc, FOLD_FRONT[i], lie_l); }
+            if (l == 0 && i == 2 && FAULT_OVERBEND > 0.0) {
+                loc -= FAULT_OVERBEND * sw[l];
+            } else {
+                loc = clamp(loc, LIM_LO[b].x, LIM_HI[b].x);
+            }
+            prev = prev + loc;
+            rq[b] = q_mul(qr, q_x(prev));
+            if (i == 0) { rp[b] = j; }
+            else { rp[b] = rp[b - 1] + q_rot(rq[b - 1], HEAD[b] - HEAD[b - 1]); }
+        }
+    }
+
+    // --- out --------------------------------------------------------------------------
+    for (var b: i32 = 0; b < NB; b += 1) { put_bone(pose, c * NB + b, rq[b], rp[b]); }
+    st3(state, s + S_POS, vec3<f32>(pos.x, hy, pos.z));
+    state[s + S_YAW] = yaw;
+    state[s + D_SPEED] = speed;
+    state[s + D_OMEGA] = omega;
+    state[s + D_PHASE] = phase;
+    st3(state, s + D_GW, gw);
+    state[s + D_GAIT] = gait as f32;
+    state[s + D_MOVING] = select_f(moving, 1.0, 0.0);
+    state[s + D_HY] = hy;
+    state[s + D_HV] = hv;
+    state[s + D_FY] = fy;
+    state[s + D_FV] = fv;
+
+    let t0 = c * TELE;
+    tele[t0 + T_POS] = root.x;
+    tele[t0 + T_POS + 1] = root.y;
+    tele[t0 + T_POS + 2] = root.z;
+    tele[t0 + T_YAW] = yaw;
+    tele[t0 + T_SPEED] = speed;
+    var gshow = gait;
+    if (!moving) { gshow = GAIT_STAND; }
+    tele[t0 + T_GAIT] = gshow as f32;
+    tele[t0 + T_PHASE] = fract01(phase);
+    tele[t0 + T_ACTION] = act as f32;
+    tele[t0 + T_HEIGHT] = hy - hip_g;
+    tele[t0 + T_PITCH] = pitch;
+    tele[t0 + T_ROLL] = roll;
+    tele[t0 + T_FREQ] = freq * select_f(moving, 1.0, 0.0);
+    for (var l: i32 = 0; l < 4; l += 1) {
+        let k = s + D_LEG + l * LEG_REC;
+        let f0 = t0 + T_FOOT + 4 * l;
+        var pl = state[k + L_PLANT];
+        let lie_l = select_f(LEG_HIND[l] == 1, lie_h, lie_f);
+        if (lie_l > 0.05) { pl = 0.0; }
+        tele[f0] = pl;
+        var at = ld3(state, k + L_TOE);
+        if (state[k + L_PLANT] < 0.5) { at = ld3(state, k + L_TO); }
+        tele[f0 + 1] = at.x;
+        tele[f0 + 2] = at.y;
+        tele[f0 + 3] = at.z;
+    }
+}
+
+fn select_f(c: bool, a: f32, b: f32) -> f32 {
+    if (c) { return a; }
+    return b;
+}
