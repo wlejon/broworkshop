@@ -24,11 +24,12 @@
 // gone and the ground's colour is what is left. A blade is a tapered strip
 // of three segments, bent toward its facing by its own amount and swayed by
 // a gusting breeze.
-import { faceFrame } from "/app/clouds.js";
-import { createSunGrid } from "/app/sun.js";
-import { anchorPoint, createAnchors, planeAnchor } from "/app/anchors.js";
-import { stepped } from "/app/stepped.js";
-import { constants, readApp } from "/app/shaders.js";
+import { faceFrame } from "/app/worlds/earth/clouds.js";
+import { createSunGrid } from "/app/worlds/earth/sun.js";
+import { anchorPoint, createAnchors, planeAnchor } from "/app/core/anchors.js";
+import { stepped } from "/app/core/stepped.js";
+import { constants, readApp as readAppPath } from "/app/core/shaders.js";
+const readApp = (f) => readAppPath('worlds/earth/' + f);
 
 const N = 128;             // field cells along an edge
 const P = N + 1;           // field points along an edge

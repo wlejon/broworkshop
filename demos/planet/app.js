@@ -9,12 +9,13 @@
 // in doubles on the CPU, so nothing ever holds a planet-sized f32.
 import { boot } from "/lib/kit/app.js";
 import { bindControl, logMap } from "/lib/kit/params.js";
-import { GROUND_LIGHT, createClouds } from "/app/clouds.js";
-import { createGrass, grassModules } from "/app/grass.js";
-import { createTrees, treeModules } from "/app/trees.js";
-import { createRivers } from "/app/rivers.js";
-import { createAnchors } from "/app/anchors.js";
-import { constants, readApp } from "/app/shaders.js";
+import { GROUND_LIGHT, createClouds } from "/app/worlds/earth/clouds.js";
+import { createGrass, grassModules } from "/app/worlds/earth/grass.js";
+import { createTrees, treeModules } from "/app/worlds/earth/trees.js";
+import { createRivers } from "/app/worlds/earth/rivers.js";
+import { createAnchors } from "/app/core/anchors.js";
+import { constants, readApp as readAppPath } from "/app/core/shaders.js";
+const readApp = (f) => readAppPath((f === 'anchor.bk' || f === 'ground_mesh.bk' ? 'core/' : 'worlds/earth/') + f);
 
 boot();
 
@@ -90,7 +91,7 @@ const MODULES = { 'planet::ground': readApp('ground.bk'), 'planet::surface': rea
                   'planet::dendry_grid': readApp('dendry_grid.bk'), 'planet::dendry_field': readApp('dendry_field.bk'),
                   'planet::cloud_field': readApp('cloud_field.bk'), 'planet::cloud_lighting': readApp('cloud_lighting.bk'),
                   tiles: bro.tiles.module };
-const mod = bro.kernel.compile(readApp('planet.bk'), { file: 'planet.bk', modules: MODULES });
+const mod = bro.kernel.compile(readApp('produce.bk'), { file: 'planet.bk', modules: MODULES });
 const rivers = createRivers(bro.kernel.compile(readApp('riverbuild.bk'), { file: 'riverbuild.bk', modules: MODULES }), RADIUS, SEED);
 const kTile = mod.kernel('k_tile');
 const kHeight = mod.kernel('k_height');

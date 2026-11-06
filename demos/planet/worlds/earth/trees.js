@@ -20,11 +20,12 @@
 // models). Near, seven tiers of seven; out to MID, three of five; beyond, the
 // cone's silhouette facing the eye; past FAR they shrink into the ground,
 // whose forest colour is what they average to (ground.bk tree_cover).
-import { faceFrame } from "/app/clouds.js";
-import { createSunGrid } from "/app/sun.js";
-import { anchorPoint, createAnchors, planeAnchor } from "/app/anchors.js";
-import { stepped } from "/app/stepped.js";
-import { constants, readApp } from "/app/shaders.js";
+import { faceFrame } from "/app/worlds/earth/clouds.js";
+import { createSunGrid } from "/app/worlds/earth/sun.js";
+import { anchorPoint, createAnchors, planeAnchor } from "/app/core/anchors.js";
+import { stepped } from "/app/core/stepped.js";
+import { constants, readApp as readAppPath } from "/app/core/shaders.js";
+const readApp = (f) => readAppPath('worlds/earth/' + f);
 
 const N = 512;             // sites along an edge
 const B = 8;               // sites along a block's edge

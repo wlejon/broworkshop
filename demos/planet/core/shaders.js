@@ -6,14 +6,23 @@ const fs = require('fs');
 // The text of the app's file at `path`.
 export const readApp = (path) => fs.readFileSync(bro.resolvePath('/app/' + path), 'utf-8');
 
+// Where the app's modules live: planet::name is name.bk in one of these
+// folders, the core's first.
+const MODULE_DIRS = ['core', 'worlds/earth'];
+export function modulePath(name) {
+    const file = name.slice('planet::'.length) + '.bk';
+    for (const dir of MODULE_DIRS) {
+        const path = dir + '/' + file;
+        if (fs.existsSync(bro.resolvePath('/app/' + path))) return path;
+    }
+    return null;
+}
+
 if (typeof bro !== 'undefined' && bro.kernel && typeof bro.kernel.resolve === 'function') {
     bro.kernel.resolve((name) => {
         if (typeof name === 'string' && name.startsWith('planet::')) {
-            try {
-                return readApp(name.slice('planet::'.length) + '.bk');
-            } catch (_) {
-                return undefined;
-            }
+            const path = modulePath(name);
+            return path ? readApp(path) : undefined;
         }
         return undefined;
     });

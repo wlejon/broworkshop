@@ -7,8 +7,8 @@
 // the back buffer, a step a frame beside the frames (stepped.js), and swap()
 // shows it once they are done. The grid is anchored at its centre
 // (anchors.js), found in the production's first step.
-import { CLOUD_DETAIL_VAR } from "/app/clouds.js";
-import { createAnchors, planeAnchor } from "/app/anchors.js";
+import { CLOUD_DETAIL_VAR } from "/app/worlds/earth/clouds.js";
+import { createAnchors, planeAnchor } from "/app/core/anchors.js";
 
 export const SUN_STEPS = 28;   // sun.bk SUN_STEPS
 const SUN_REACH = 1800;        // metres: the farthest step (sun.bk sun_step_dist)
