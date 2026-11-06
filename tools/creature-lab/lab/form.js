@@ -69,10 +69,11 @@ export function skinPositions(creature, P, o = 0) {
 const at = (X, v) => [X[3 * v], X[3 * v + 1], X[3 * v + 2]];
 
 // A ring's area (its vector area's length, so any tilt reads the same) and
-// perimeter, and its extents in x and y.
+// perimeter, and its extents in x (width), y (depth) and z (length: a leg's
+// ring front to back).
 export function ringMeasure(X, ring) {
     let ax = 0, ay = 0, az = 0, per = 0;
-    let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity;
+    let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity, z0 = Infinity, z1 = -Infinity;
     const c = [0, 0, 0];
     for (let j = 0; j < ring.segs; j++) { const p = at(X, ring.first + j); for (let k = 0; k < 3; k++) c[k] += p[k] / ring.segs; }
     for (let j = 0; j < ring.segs; j++) {
@@ -81,8 +82,9 @@ export function ringMeasure(X, ring) {
         ax += p[1] * q[2] - p[2] * q[1]; ay += p[2] * q[0] - p[0] * q[2]; az += p[0] * q[1] - p[1] * q[0];
         per += Math.hypot(b[0] - a[0], b[1] - a[1], b[2] - a[2]);
         x0 = Math.min(x0, a[0]); x1 = Math.max(x1, a[0]); y0 = Math.min(y0, a[1]); y1 = Math.max(y1, a[1]);
+        z0 = Math.min(z0, a[2]); z1 = Math.max(z1, a[2]);
     }
-    return { area: 0.5 * Math.hypot(ax, ay, az), girth: per, width: x1 - x0, depth: y1 - y0, top: y1, bottom: y0, z: c[2] };
+    return { area: 0.5 * Math.hypot(ax, ay, az), girth: per, width: x1 - x0, depth: y1 - y0, length: z1 - z0, top: y1, bottom: y0, z: c[2] };
 }
 
 // A closed part's volume (divergence theorem over its triangles).
@@ -163,7 +165,7 @@ export function restForm(creature) {
     const out = { rings: {}, parts: {} };
     for (const r of rings) {
         const m = ringMeasure(X, r);
-        out.rings[r.name] = { girth: r4(m.girth), width: r4(m.width), depth: r4(m.depth), top: r4(m.top), bottom: r4(m.bottom), z: r4(m.z) };
+        out.rings[r.name] = { girth: r4(m.girth), width: r4(m.width), depth: r4(m.depth), length: r4(m.length), top: r4(m.top), bottom: r4(m.bottom), z: r4(m.z) };
     }
     for (const p of parts) {
         const e = partExtent(X, p);

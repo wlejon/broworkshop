@@ -29,8 +29,11 @@ export default {
     // tolerance] in metres.
     form: {
         // The legs' tops stay under the trunk's skin: the fore leg above the
-        // elbow, the hind leg above the stifle fold.
-        inside: { trunk: { foreL: 0.61, hindL: 0.64 } },
+        // upper arm's mass, the hind leg above the thigh's (both stand out
+        // of the trunk's lower side below that, by design: legs.js).
+        // The stifle stands out below the flank's floor (0.61 m), so the
+        // hind leg is checked above it.
+        inside: { trunk: { foreL: 0.70, hindL: 0.62 } },
         reference: {
             'shoulder.top': [0.975, 0.015],
             'girth.depth': [0.41, 0.02],
@@ -41,9 +44,27 @@ export default {
             'rump.width': [0.25, 0.02],
             'trunk.length': [1.20, 0.03],
             'neckbase.width': [0.18, 0.02],
-            'neckmid.width': [0.115, 0.015],
-            'forearm.width': [0.064, 0.008],
-            'gaskin.width': [0.068, 0.01],
+            'neckmid.width': [0.124, 0.012],
+            'throat.width': [0.108, 0.01],
+            'eyes.width': [0.13, 0.01],
+            'cheeks.width': [0.104, 0.01],
+            // The upper legs' muscle (legs.js has the sources).
+            // Leg rings: width side to side, length front to back.
+            // The thighs are the trunk's lobes, hanging to 0.52 m at the hip.
+            'hip.bottom': [0.52, 0.02],
+            'hip.width': [0.275, 0.015],
+            'stifle.girth': [0.45, 0.04],
+            'stifle.width': [0.082, 0.008],
+            'stifle.length': [0.19, 0.02],
+            'gaskin.girth': [0.32, 0.03],
+            'gaskin.width': [0.074, 0.008],
+            'gaskin.length': [0.11, 0.015],
+            'arm.girth': [0.42, 0.03],
+            'arm.width': [0.092, 0.008],
+            'arm.length': [0.16, 0.015],
+            'forearm.girth': [0.27, 0.02],
+            'forearm.width': [0.072, 0.008],
+            'forearm.length': [0.096, 0.01],
         },
     },
     variants: {

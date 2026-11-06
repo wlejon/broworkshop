@@ -19,7 +19,10 @@
 //   trunk volume                   about 85 l, the whole body about 0.1 m3:
 //                                  the 75 to 85 kg of a deer this tall
 //   neck                           0.30 m deep where it leaves the chest,
-//                                  0.17 m at mid neck, 0.13 m at the throat
+//                                  0.17 m at mid neck, 0.13 m at the throat;
+//                                  from the front 0.12 m across at mid neck
+//                                  and 0.11 m under the jaw, as wide as the
+//                                  cheeks, so the head does not sit on a stalk
 //   head                           0.29 m, ears 0.15 m, tail 0.2 m
 //
 // The trunk carries the shoulders and the thighs in its own skin: a hand
@@ -51,7 +54,9 @@ function trunkWeights(skel) {
         const q = [sx, p[1], p[2]];
         let ws = sstep(0.02, 0.08, sx) * (1 - sstep(0.05, 0.12, segDist(q, ...scap)));
         let wh = sstep(0.03, 0.09, sx) * (1 - sstep(0.02, 0.15, segDist(q, ...hum)));
-        let wf = sstep(0.02, 0.08, sx) * (1 - sstep(0.04, 0.20, segDist(q, ...fem)));
+        let wf = sstep(0.02, 0.08, sx) * (1 - sstep(0.04, 0.14, segDist(q, ...fem)));
+        // The thigh lobes (trunkShape) below the haunch go with the femur.
+        wf = Math.max(wf, sstep(0.02, 0.09, sx) * sstep(0.88, 0.56, p[1]) * sstep(-0.70, -0.58, p[2]) * sstep(-0.18, -0.30, p[2]));
         let limb = ws + wh + wf;
         if (limb > 1) { ws /= limb; wh /= limb; wf /= limb; limb = 1; }
         const spine = 1 - limb;
@@ -66,14 +71,23 @@ function trunkWeights(skel) {
 // A trunk section: its upper and lower halves superellipses of exponents
 // nt and nb (2 an ellipse, 3 squarer: full sides down to the elbows and the
 // stifles, where the arm and the thigh lie on the body), narrowed toward
-// the spine by kt (the withers' blade).
+// the spine by kt (the withers' blade). Over the hindquarters the lower half
+// hangs in two lobes, the thighs, `lobe` of the half height below the
+// section's floor at 0.62 of the half width out, the crotch between them
+// raised by `notch`: the section is an inverted U, and the thigh is the
+// trunk's own skin down to the stifle, one surface with the haunch.
 function trunkShape(th, u, s) {
-    const [nt, nb, kt] = s;
+    const [nt, nb, kt, lobe = 0, notch = 0] = s;
     const v = Math.sin(th), c = Math.abs(Math.cos(th));
     const n = v > 0 ? nt : nb;
     let f = c > 1e-4 ? Math.pow(1 - Math.pow(Math.abs(v), n), 1 / n) / c : 1;
     if (v > 0) f *= 1 - kt * Math.pow(v, 1.6);
-    return [f, 1];
+    let g = 1;
+    if (v < 0) {
+        const x = c * f;   // the point's x as a share of the half width
+        g = 1 + Math.abs(v) * (lobe * Math.exp(-(((x - 0.62) / 0.3) ** 2)) - notch * Math.exp(-((x / 0.3) ** 2)));
+    }
+    return [f, g];
 }
 
 // A trunk key ring from its z, the back's and the belly's heights and its half width.
@@ -81,19 +95,19 @@ const ring = (z, top, bottom, hw, s, name) => ({ c: [0, (top + bottom) / 2, z], 
 
 function trunk(S, field) {
     S.loft([
-        ring(-0.640, 0.845, 0.680, 0.030, [2.0, 2.0, 0.2]),
-        ring(-0.615, 0.890, 0.635, 0.082, [2.2, 2.2, 0.35]),
-        ring(-0.555, 0.930, 0.598, 0.126, [2.3, 2.6, 0.35], 'rump'),
-        ring(-0.450, 0.968, 0.572, 0.138, [2.2, 3.8, 0.3], 'hip'),
-        ring(-0.310, 0.966, 0.612, 0.126, [2.2, 3.4, 0.3], 'flank'),
-        ring(-0.180, 0.956, 0.600, 0.118, [2.2, 2.2, 0.3], 'waist'),
-        ring(-0.020, 0.956, 0.566, 0.126, [2.2, 2.2, 0.35], 'ribs'),
-        ring(0.160, 0.958, 0.556, 0.120, [2.2, 2.2, 0.42], 'girth'),
-        ring(0.300, 0.982, 0.556, 0.142, [2.1, 3.5, 0.55], 'shoulder'),
-        ring(0.420, 0.955, 0.568, 0.130, [2.1, 3.5, 0.5]),
-        ring(0.485, 0.925, 0.630, 0.100, [2.0, 2.8, 0.4]),
-        ring(0.525, 0.875, 0.690, 0.058, [2.0, 2.2, 0.3]),
-        ring(0.545, 0.815, 0.740, 0.022, [2.0, 2.0, 0.3]),
+        ring(-0.640, 0.845, 0.680, 0.030, [2.0, 2.0, 0.2, 0, 0]),
+        ring(-0.615, 0.890, 0.635, 0.082, [2.2, 2.2, 0.35, 0.2, 0.0]),
+        ring(-0.555, 0.930, 0.598, 0.126, [2.3, 2.6, 0.35, 0.47, 0.25], 'rump'),
+        ring(-0.450, 0.968, 0.572, 0.138, [2.2, 2.6, 0.3, 0.5, 0.3], 'hip'),
+        ring(-0.310, 0.966, 0.612, 0.126, [2.2, 2.6, 0.3, 0.18, 0.0], 'flank'),
+        ring(-0.180, 0.956, 0.600, 0.118, [2.2, 2.2, 0.3, 0, 0], 'waist'),
+        ring(-0.020, 0.956, 0.566, 0.126, [2.2, 2.2, 0.35, 0, 0], 'ribs'),
+        ring(0.160, 0.958, 0.556, 0.120, [2.2, 2.2, 0.42, 0, 0], 'girth'),
+        ring(0.300, 0.982, 0.556, 0.142, [2.1, 2.9, 0.55, 0, 0], 'shoulder'),
+        ring(0.420, 0.955, 0.568, 0.130, [2.1, 2.9, 0.5, 0, 0]),
+        ring(0.485, 0.925, 0.630, 0.100, [2.0, 2.8, 0.4, 0, 0]),
+        ring(0.525, 0.875, 0.690, 0.058, [2.0, 2.2, 0.3, 0, 0]),
+        ring(0.545, 0.815, 0.740, 0.022, [2.0, 2.0, 0.3, 0, 0]),
     ], { weights: field, segs: 40, steps: 4, hint: [0, 1, 0], name: 'trunk',
          shape: trunkShape, color: trunkColor });
 }
@@ -105,32 +119,34 @@ function neck(S) {
         { c: [0, 0.80, 0.40], r: [0.10, 0.18] },
         { c: [0, 0.91, 0.48], r: [0.092, 0.165], name: 'neckbase' },
         { c: [0, 1.00, 0.555], r: [0.074, 0.12] },
-        { c: [0, 1.10, 0.625], r: [0.058, 0.088], name: 'neckmid' },
-        { c: [0, 1.19, 0.67], r: [0.052, 0.074] },
-        { c: [0, 1.265, 0.705], r: [0.048, 0.066] },
-        { c: [0, 1.30, 0.72], r: [0.044, 0.058] },
+        { c: [0, 1.10, 0.625], r: [0.062, 0.088], name: 'neckmid' },
+        { c: [0, 1.19, 0.67], r: [0.057, 0.074] },
+        { c: [0, 1.265, 0.705], r: [0.054, 0.066], name: 'throat' },
+        { c: [0, 1.30, 0.72], r: [0.050, 0.058] },
     ], { bones: [['thorax', 0.7], 'neck1', 'neck2', 'head'], segs: 24, hint: [0, 0, 1], name: 'neck',
          color: neckColor, caps: [false, false] });
 }
 
-// Head: 0.29 m from poll to nose. The skull is 0.11 m across the orbits and
-// the cheeks, and 0.13 m deep from the crown to the angle of the jaw, which
-// hangs below the eyes; from there the face is a wedge, deeper than it is
-// wide (the muzzle 5 cm across and 6.5 cm deep), with a straight top line
-// from the forehead to the nose. Eyes 3 cm across, set on the side of the
-// skull where it is widest; ears (0.15 m, broad) above them.
+// Head: 0.29 m from poll to nose. Seen from the front a deer's face is a
+// broad wedge, not a snout on a stalk: 0.13 m across the eyes (the orbits
+// stand out from the skull), the cheeks (the masseters over the molars)
+// still 0.10 m across below and before the eyes, narrowing to a muzzle 6 cm
+// across and 6.5 cm deep. The skull is 0.13 m deep from the crown to the
+// angle of the jaw, which hangs below the eyes, under a straight top line
+// from the forehead to the nose. Eyes 3 cm across, set where the skull is
+// widest; ears (0.16 m, broad) above them.
 function head(S) {
     S.loft([
-        { c: [0, 1.31, 0.695], r: [0.045, 0.045] },
-        { c: [0, 1.305, 0.735], r: [0.060, 0.072] },
-        { c: [0, 1.29, 0.785], r: [0.056, 0.068] },
-        { c: [0, 1.27, 0.835], r: [0.040, 0.056] },
-        { c: [0, 1.243, 0.895], r: [0.030, 0.044] },
-        { c: [0, 1.215, 0.950], r: [0.025, 0.035] },
-        { c: [0, 1.199, 0.986], r: [0.019, 0.025] },
+        { c: [0, 1.31, 0.695], r: [0.050, 0.048] },
+        { c: [0, 1.305, 0.735], r: [0.063, 0.072] },
+        { c: [0, 1.29, 0.785], r: [0.064, 0.068], name: 'eyes' },
+        { c: [0, 1.272, 0.832], r: [0.052, 0.058], name: 'cheeks' },
+        { c: [0, 1.246, 0.890], r: [0.038, 0.046] },
+        { c: [0, 1.218, 0.946], r: [0.031, 0.036] },
+        { c: [0, 1.201, 0.984], r: [0.023, 0.026] },
     ], { bones: ['head'], segs: 20, hint: [0, 1, 0], name: 'head', color: headColor });
     for (const s of [1, -1]) {
-        S.blob([0.050 * s, 1.315, 0.79], [0.012, 0.015, 0.016], { bones: ['head'], color: NOSE, segs: 10, rows: 6 });
+        S.blob([0.058 * s, 1.315, 0.79], [0.012, 0.015, 0.016], { bones: ['head'], color: NOSE, segs: 10, rows: 6 });
         S.loft([
             { c: [0.045 * s, 1.325, 0.75], r: [0.022, 0.009] },
             { c: [0.08 * s, 1.355, 0.738], r: [0.040, 0.012] },
