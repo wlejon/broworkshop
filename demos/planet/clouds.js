@@ -327,6 +327,8 @@ export function createClouds(scene, radius, module, readers, seed, hook, maxGrou
         // The volume's tile cache, and the ground light's; the unit
         // direction to the sun they were last lit for.
         cache, ground, sun: toSun,
+        // Both caches produced again (their kernels changed).
+        refresh() { cache.refresh(); ground.refresh(); },
         // `view` is the camera as a tile cache takes it (TileCache.update).
         update(eye, altitude, sun, view) {
             // A sun moved by a tenth of a degree lights everything anew: the

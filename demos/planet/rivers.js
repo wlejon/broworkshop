@@ -18,9 +18,22 @@ const POINTS = 6 * N * N;
 // on a continent.
 const STEPS = 1024;
 
+// The network in `net` (a KernelBuffer the ground's kernels and hooks bind)
+// and its copy in `cpu`; rebuild() builds it again into both, in place, for
+// a module whose kernels changed (bro.kernel.reload).
 export function createRivers(module, radius, seed) {
-    const grid = [N, N, 6];
     const net = bro.kernel.createBuffer(POINTS * REC * 4);
+    const cpu = new Float32Array(POINTS * REC);
+    const build = () => {
+        buildInto(module, net, radius, seed);
+        net.read(cpu);
+    };
+    build();
+    return { net, cpu, rebuild: build };
+}
+
+function buildInto(module, net, radius, seed) {
+    const grid = [N, N, 6];
     let src = bro.kernel.createBuffer(POINTS * 4), dst = bro.kernel.createBuffer(POINTS * 4);
     const swap = () => { [src, dst] = [dst, src]; };
     module.kernel('k_river_height').dispatch(grid, net, src, radius, seed);
@@ -52,6 +65,4 @@ export function createRivers(module, radius, seed) {
     module.kernel('k_river_tangent').dispatch(grid, net);
     module.kernel('k_river_lake').dispatch(grid, net, b, radius, seed);
     module.kernel('k_river_lake_store').dispatch(grid, net, b);
-    const cpu = net.read(new Float32Array(POINTS * REC));
-    return { net, cpu };
 }

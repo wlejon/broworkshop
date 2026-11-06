@@ -273,6 +273,8 @@ export function createGrass(scene, radius, module, sunModule, octaves, seed, net
     return {
         nodes,
         field,
+        // The field produced again at the next update (its kernels changed).
+        refresh() { face = -1; },
         // cone: the half-angle of the view's diagonal, radians.
         update(eye, altitude, toSun, camHi, camLo, forward, cone, time) {
             // A band whose blades all stand farther than its reach (with a

@@ -319,6 +319,9 @@ export function createTrees(scene, radius, module, sunModule, octaves, seed, net
 
     return {
         nodes,
+        // The field and its sun grid produced again at the next update (their
+        // kernels changed).
+        refresh() { face = -1; },
         // How far off the trees are drawn (0: not at all), the last sixth of
         // it shrinking: beyond, the ground draws the forest's average.
         get far() { return shown ? FAR : 0; },

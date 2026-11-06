@@ -508,5 +508,43 @@ function loop() {
 }
 requestAnimationFrame(loop);
 
+// Hot reload: the app's .bk files named (['relief.bk']) read again and
+// swapped into every module and hook reading them (bro.kernel.reload, the
+// scene's reloadShaders), then what a changed kernel feeds made again: the
+// rivers, and from them or their own kernels the ground's tiles, the clouds,
+// the grass and the trees, each kept drawn while it changes over. A hook's
+// change is its pipeline alone. Returns the kernels changed by module, what
+// was produced again and the milliseconds each part took. `texts` ({ file: source }) stands in for a file's
+// text on disk: a candidate tried without writing it.
+function reload(files, texts = {}) {
+    const sources = {};
+    for (const f of files) {
+        const text = texts[f] ?? readApp(f);
+        sources[f] = text;                                   // a root module or hook, by its file
+        sources['planet::' + f.replace(/\.bk$/, '')] = text; // an imported module, by its name
+    }
+    const t0 = Date.now();
+    const changed = {};
+    for (const { file, kernels } of bro.kernel.reload(sources)) {
+        if (kernels.length) changed[file] = kernels;
+    }
+    for (const name of Object.keys(MODULES)) {
+        if (name in sources) MODULES[name] = sources[name];
+    }
+    const t1 = Date.now();
+    scene.reloadShaders(sources);
+    const t2 = Date.now();
+    const redo = (file) => file in changed;
+    const redone = [];
+    if (redo('riverbuild.bk')) { rivers.rebuild(); redone.push('rivers'); }
+    const ms = { kernels: t1 - t0, hooks: t2 - t1, rivers: Date.now() - t2 };
+    const drained = redo('riverbuild.bk');
+    if (drained || redo('planet.bk')) { cache.refresh(); redone.push('ground'); }
+    if (drained || redo('planet.bk') || redo('clouds.bk')) { clouds.refresh(); redone.push('clouds'); }
+    if (drained || redo('planet.bk') || redo('sun.bk') || redo('grass.bk')) { grass.refresh(); redone.push('grass'); }
+    if (drained || redo('planet.bk') || redo('sun.bk') || redo('trees.bk')) { trees.refresh(); redone.push('trees'); }
+    return { changed, redone, ms };
+}
+
 // For tests and tools.
-globalThis.planet = { cam, setHour, ground, makeCache, get cache() { return cache; }, clouds, grass, trees, rivers, groundHeight, get stats() { return lastStats; }, get lastView() { return lastView; }, frame };
+globalThis.planet = { cam, setHour, ground, makeCache, get cache() { return cache; }, clouds, grass, trees, rivers, groundHeight, get stats() { return lastStats; }, get lastView() { return lastView; }, frame, reload };
