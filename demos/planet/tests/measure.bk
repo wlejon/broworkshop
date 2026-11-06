@@ -5,7 +5,8 @@ import std::noise::*;
 import tiles;
 from planet::ground import spread, expected_surface, gradient, variation, strata, terrain, octaves_for,
     frame_dir, SOIL_OCTAVES, cell_ground, sea_floor;
-from planet::relief import simplex_grad, ridge_cell_mean, ridge_cell_slope;
+from planet::relief import ridge_cell_mean, ridge_cell_slope;
+from planet::noise import simplex_grad;
 from planet::climate import climate_at;
 from planet::anchor import Anchor, anchor_of, anchor_at, lattice_of, simplex_from, plane_offset;
 

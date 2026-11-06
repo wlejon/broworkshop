@@ -58,7 +58,7 @@ module planet::dendry;
 import std::noise::*;
 from planet::rivers import RIV_N, RIV_REC, alpha_dir, face_of, face_a, face_e, face_f, cell_of, cell_next, point_index,
     river_width, meander_from, meander_across, erf_approx;
-from planet::relief import simplex_grad_f32, GRAD_TO_VALUE;
+from planet::noise import simplex_grad_f32, GRAD_TO_VALUE;
 from planet::climate import moist_broad;
 
 pub const DRAIN_LEVELS: i32 = 4;

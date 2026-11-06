@@ -6,8 +6,10 @@ import std::noise::*;
 from planet::rivers import Water, RIM_CREST, sea_water;
 from planet::dendry import Drain, drained;
 from planet::climate import Climate, cover_at, temp_at, snow_at;
-from planet::relief import BASE_WAVELENGTH, normal_cdf;
-from planet::anchor import Anchor, PerlinAt, VARY_FIRST, STRATA_FOLD, twice, doubled, perlin_from;
+from planet::relief import BASE_WAVELENGTH;
+from planet::noise import normal_cdf;
+from planet::world_lattice import VARY_FIRST, STRATA_FOLD;
+from planet::anchor import Anchor, PerlinAt, twice, doubled, perlin_from;
 
 fn p_offset(e: vec3<f32>, radius: f32) -> vec3<f32> {
     return e * (radius / BASE_WAVELENGTH);

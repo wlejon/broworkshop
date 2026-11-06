@@ -1,16 +1,10 @@
 // The mountains' ridged relief, shared by the truth (ground.bk relief) and
 // the ground's shader (ground_mesh.bk), which adds per pixel the octaves
 // finer than a tile's texels: the octaves and their amplitudes, a ridge
-// octave's mean over a cell, and the ground's noise with its gradient at a
-// lattice cell and an offset in it (anchor.bk simplex_from finds them).
+// octave's mean over a cell. The noise is the core's (core/noise.bk).
 module planet::relief;
-import std::noise::*;
+from planet::noise import NOISE_VAR, NOISE_BOX, normal_cdf;
 
-pub const NOISE_VAR: f32 = 0.1504;
-pub const NOISE_GRAD_VAR: f32 = 2.027;
-// An octave's factor over a cell (ground.bk noise_mean_factor), per unit of
-// span^2.
-pub const NOISE_BOX: f32 = 2.0 * NOISE_GRAD_VAR / NOISE_VAR / 24.0;
 pub const RIDGE_MEAN: f32 = 0.4999;
 // The ridged octaves, and how far past a cell's own they carry on.
 pub const RIDGE_FIRST: i32 = 4;
@@ -61,11 +55,6 @@ pub fn mean_factor(o: i32, octaves: f32) -> f32 {
     return exp(-NOISE_BOX * s * s);
 }
 
-// The standard normal CDF.
-pub fn normal_cdf(z: f32) -> f32 {
-    return 0.5 * (1.0 + tanh(0.7978846 * (z + 0.044715 * z * z * z)));
-}
-
 // A ridge octave's mean over a cell, from the noise n at the centre and its
 // factor f there (mean_factor). The ridge is (1 - |n|)^2 of a smooth noise,
 // whose cell mean is nonlinear: on a crest (n ~ 0) the centre is the ridge's
@@ -106,161 +95,4 @@ pub fn ridge_cell_slope(n: f32, f: f32) -> f32 {
     let scale = (1.0 + NOISE_VAR - RIDGE_MEAN) * 0.5 / (0.7978846 * sqrt(NOISE_VAR));
     let dfold = 1.0 - 2.0 * normal_cdf(-mu / sd) + 0.7978846 * (1.0 - scale) * mu * exp(-0.5 * mu * mu / spread2) / sd;
     return f * (2.0 * mu - 2.0 * dfold);
-}
-
-// Where a point is on the noise's lattice: its skewed cell and the offset
-// inside it (anchor.bk simplex_from finds them).
-pub struct SimplexAt {
-    cell: vec3<i32>,
-    sk: vec3<f32>,
-    // What sk lost to f32, in the noise's coordinates (anchor.bk
-    // simplex_from): 2^-24 of a cell, which for the broad octaves' 150 km
-    // cells is 9 mm, so every point within 9 mm read the same value and a
-    // steep slope stood in 9 mm stairs (the regular stripes its lighting
-    // showed close up). simplex_grad adds its gradient's share of it.
-    res: vec3<f32>,
-}
-// The skew onto the lattice, of an offset in the noise's coordinates.
-pub fn skew(x: vec3<f32>) -> vec3<f32> {
-    return x + vec3<f32>(0.3333333432674407958984375 * (x.x + x.y + x.z));
-}
-// The point `offset` (noise coordinates) past an anchor.
-pub fn simplex_past(at: SimplexAt, offset: vec3<f32>) -> SimplexAt {
-    let s = at.sk + skew(offset);
-    let fl = floor(s);
-    return SimplexAt { cell: at.cell + vec3<i32>(fl.x as i32, fl.y as i32, fl.z as i32), sk: s - fl, res: at.res };
-}
-
-// The ground's noise at an f32 point q (noise coordinates), for broad
-// fields whose wavelengths are hundreds of kilometres and more, where f32's
-// step is nothing: no anchor, the lattice cell taken from q itself. (The
-// std supersimplex3d is the same noise, at several times the cost on the
-// GPU.)
-pub fn simplex_f32(q: vec3<f32>, seed: i32) -> f32 {
-    return simplex_grad_f32(q, seed).x;
-}
-// The same with its gradient (yzw), whose components are themselves fields
-// of the noise's scale, decorrelated from its value and each other: a
-// broad field's call gives four (GRAD_TO_VALUE scales one to the value's
-// spread), or a warp's displacement in one call instead of three.
-pub const GRAD_TO_VALUE: f32 = 0.272;   // sqrt(NOISE_VAR / NOISE_GRAD_VAR)
-pub fn simplex_grad_f32(q: vec3<f32>, seed: i32) -> vec4<f32> {
-    let s = skew(q);
-    let fl = floor(s);
-    let at = SimplexAt { cell: vec3<i32>(fl.x as i32, fl.y as i32, fl.z as i32), sk: s - fl, res: vec3<f32>(0.0) };
-    return simplex_grad(at, seed);
-}
-
-// The same point an octave finer: q doubled lands at twice the cell plus
-// the floor of twice the offset, exactly (the skew is linear), and what the
-// offset lost doubles with it.
-pub fn simplex_twice(at: SimplexAt) -> SimplexAt {
-    let twice = at.sk * 2.0;
-    let fl = floor(twice);
-    return SimplexAt { cell: at.cell * 2 + vec3<i32>(fl.x as i32, fl.y as i32, fl.z as i32), sk: twice - fl,
-                       res: at.res * 2.0 };
-}
-
-// One lattice point's share and its gradient: its falloff f = (0.75 -
-// |r|^2) / 2 (r the point's offset from it) to the fourth, times its
-// gradient's dot with r.
-fn corner(seed: i32, xp: i32, yp: i32, zp: i32, r: vec3<f32>) -> vec4<f32> {
-    // Past the point's reach f is 0 and so is its share: no branch, so the
-    // lanes of a warp take the corners alike.
-    let f = max(0.5 * (0.75 - dot(r, r)), 0.0);
-    // The gradient grad_dot_common3d dots with: bit 0 the sign of one axis
-    // (y where hash & 13 is over 7, else x), bit 1 of another (y under 2,
-    // x at 12, else z).
-    let h = hash_primes3d(seed, xp, yp, zp);
-    let h13 = h & 13;
-    let s1: f32 = (h & 1) != 0 ? -1.0 : 1.0;
-    let s2: f32 = (h & 2) != 0 ? -1.0 : 1.0;
-    let g = vec3<f32>((h13 > 7 ? 0.0 : s1) + (h13 == 12 ? s2 : 0.0), (h13 > 7 ? s1 : 0.0) + (h13 < 2 ? s2 : 0.0),
-                      (h13 < 2 || h13 == 12) ? 0.0 : s2);
-    let gr = dot(g, r);
-    let f2 = f * f;
-    return vec4<f32>(f2 * f2 * gr, g * (f2 * f2) - r * (4.0 * f2 * f * gr));
-}
-
-// The ground's noise (ground.bk noise: OpenSimplex2S) at a lattice cell and
-// offset, x, and its gradient in the noise's coordinates, yzw: the same
-// lattice points as noise() takes, each corner's share differentiated.
-pub fn simplex_grad(at: SimplexAt, seed: i32) -> vec4<f32> {
-    var dx_skewed = at.sk.x;
-    var dy_skewed = at.sk.y;
-    var dz_skewed = at.sk.z;
-    var x_base: i32 = 0;
-    var y_base: i32 = 0;
-    var z_base: i32 = 0;
-    let tu0: f32 = -0.25 * (dx_skewed + dy_skewed + dz_skewed);
-    let xn0: f32 = dx_skewed + tu0;
-    let yn0: f32 = dy_skewed + tu0;
-    let zn0: f32 = dz_skewed + tu0;
-    let xyzn0: f32 = -tu0;
-    var max_score: f32 = 0.375;
-    var move_bits: i32 = (xyzn0 > max_score) ? -1 : 0;
-    max_score = max(max_score, xyzn0);
-    if xn0 > max_score { move_bits = 1; max_score = xn0; }
-    if yn0 > max_score { move_bits = 2; max_score = yn0; }
-    if zn0 > max_score { move_bits = 4; max_score = zn0; }
-    max_score += 0.125 - xyzn0;
-    if (-zn0) > max_score { move_bits = 3; max_score = -zn0; }
-    if (-yn0) > max_score { move_bits = 5; max_score = -yn0; }
-    if (-xn0) > max_score { move_bits = 6; max_score = -xn0; }
-    if (move_bits & 1) != 0 { x_base += 1; dx_skewed -= 1.0; }
-    if (move_bits & 2) != 0 { y_base += 1; dy_skewed -= 1.0; }
-    if (move_bits & 4) != 0 { z_base += 1; dz_skewed -= 1.0; }
-    let xp: i32 = (x_base + at.cell.x) * PRIME_X;
-    let yp: i32 = (y_base + at.cell.y) * PRIME_Y;
-    let zp: i32 = (z_base + at.cell.z) * PRIME_Z;
-    let sk_sum: f32 = dx_skewed + dy_skewed + dz_skewed;
-    let tu: f32 = -0.25 * sk_sum;
-    let xn: f32 = dx_skewed + tu;
-    let yn: f32 = dy_skewed + tu;
-    let zn: f32 = dz_skewed + tu;
-    let xyzn: f32 = -tu;
-    let unskew_d: f32 = -0.5 * sk_sum;
-    let d = vec3<f32>(dx_skewed + unskew_d, dy_skewed + unskew_d, dz_skewed + unskew_d);
-
-    var sum = corner(seed, xp, yp, zp, d);
-    // <1,1,1> or <-1,-1,-1>
-    let sm1 = xyzn < 0.0;
-    let off1: f32 = sm1 ? 0.5 : -0.5;
-    sum += corner(seed, xp + (sm1 ? -PRIME_X : PRIME_X), yp + (sm1 ? -PRIME_Y : PRIME_Y), zp + (sm1 ? -PRIME_Z : PRIME_Z),
-                  d - vec3<f32>(off1));
-    // <1,1,0> or <-1,-1,0>
-    let sm2 = xyzn < zn;
-    let off2: f32 = sm2 ? 1.0 : -1.0;
-    sum += corner(seed, xp + (sm2 ? -PRIME_X : PRIME_X), yp + (sm2 ? -PRIME_Y : PRIME_Y), zp,
-                  d - vec3<f32>(0.0, 0.0, off2));
-    // <1,0,1> or <-1,0,-1>
-    let sm3 = xyzn < yn;
-    let off3: f32 = sm3 ? 1.0 : -1.0;
-    sum += corner(seed, xp + (sm3 ? -PRIME_X : PRIME_X), yp, zp + (sm3 ? -PRIME_Z : PRIME_Z),
-                  d - vec3<f32>(0.0, off3, 0.0));
-    // <0,1,1> or <0,-1,-1>
-    let sm4 = xyzn < xn;
-    let off4: f32 = sm4 ? 1.0 : -1.0;
-    sum += corner(seed, xp, yp + (sm4 ? -PRIME_Y : PRIME_Y), zp + (sm4 ? -PRIME_Z : PRIME_Z),
-                  d - vec3<f32>(off4, 0.0, 0.0));
-    // <1,0,0> or <-1,0,0>
-    let sm5 = xn < 0.0;
-    let off5: f32 = sm5 ? 0.5 : -0.5;
-    sum += corner(seed, xp + (sm5 ? -PRIME_X : PRIME_X), yp, zp, d + vec3<f32>(off5, -off5, -off5));
-    // <0,1,0> or <0,-1,0>
-    let sm6 = yn < 0.0;
-    let off6: f32 = sm6 ? 0.5 : -0.5;
-    sum += corner(seed, xp, yp + (sm6 ? -PRIME_Y : PRIME_Y), zp, d + vec3<f32>(-off6, off6, -off6));
-    // <0,0,1> or <0,0,-1>
-    let sm7 = zn < 0.0;
-    let off7: f32 = sm7 ? 0.5 : -0.5;
-    sum += corner(seed, xp, yp, zp + (sm7 ? -PRIME_Z : PRIME_Z), d + vec3<f32>(-off7, -off7, off7));
-    // The offsets are the input reflected, d = (I - 2/3 11^T) q + const (the
-    // skew by 1/3, then the unskew by -1/2 of the skewed sum), so the
-    // gradient in the input is the same reflection of the offsets'. And
-    // noise()'s output scale: its value over 0.0069091.
-    let g = sum.yzw - vec3<f32>((2.0 / 3.0) * (sum.y + sum.z + sum.w));
-    let out = vec4<f32>(sum.x, g) * (1.0 / 0.0069091119803488254547119140625);
-    // At the point itself, not where f32 put it: first order in what sk lost.
-    return vec4<f32>(out.x + dot(out.yzw, at.res), out.yzw);
 }

@@ -26,7 +26,7 @@ const BASE_WAVELENGTH = 2400000;   // ground.bk's first octave
 const MAX_HEIGHT = 9000;
 
 const MODULES = {
-    'planet::world': read('world.bk'),
+    'planet::world': read('world.bk'), 'planet::world_lattice': read('world_lattice.bk'),
     'planet::ground': read('ground.bk'), 'planet::surface': read('surface.bk'),
     'planet::relief': read('relief.bk'), 'planet::rivers': read('rivers.bk'),
     'planet::clouds': read('clouds.bk'),

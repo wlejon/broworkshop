@@ -22,7 +22,11 @@
 //   modules       { 'planet::world': source, ... }: its brokernel modules by
 //                 name, which the core's kernels import (core/tiles.bk reads
 //                 planet::world's octaves_for, range_margin, detail_ratio and
-//                 surface_height)
+//                 surface_height; core/anchor.bk reads planet::world_lattice's
+//                 lattice_points and lattice_points_near, where its noise
+//                 lattices lie at a direction). The core's own modules
+//                 (planet::noise, planet::anchor, planet::layers) are the
+//                 world's to import.
 //   create(core)  makes the world's half of the planet. `core` is
 //                 { scene, modules (the core's and the world's, by name),
 //                 kAnchors (the f64 anchor kernel), tile (the cache's layout,
@@ -61,7 +65,9 @@ export function checkWorld(world) {
     for (const k of REQUIRED) {
         if (world[k] === undefined) throw new Error(`planet: the world ${world.name ?? '?'} has no ${k}`);
     }
-    if (!world.modules['planet::world']) throw new Error(`planet: the world ${world.name} has no planet::world module`);
+    for (const m of ['planet::world', 'planet::world_lattice']) {
+        if (!world.modules[m]) throw new Error(`planet: the world ${world.name} has no ${m} module`);
+    }
 }
 
 // What create(core) returns must hold these.

@@ -1,23 +1,21 @@
 // Where the ground's noise lattices lie about an anchor. GPU code is f32,
-// and an Earth-radius point in f32 is good to half a metre: so every lattice
-// the ground's noise reads (ground.bk) is found once at an anchor near the
-// work, on the CPU in f64 (anchor_of: a tile's centre, the grass's field, the
-// camera), and a point is the anchor's direction plus an f32 offset from it.
+// and a planet-radius point in f32 is good to about half a metre: so every
+// lattice a world's ground reads is found once at an anchor near the work,
+// on the CPU in f64 (anchor_of: a tile's centre, a field's, the camera), and
+// a point is the anchor's direction plus an f32 offset from it.
+//
+// An anchor carries four lattices, two simplex (p, r: skewed) and two
+// Perlin (v, f), at the points the world gives for a direction
+// (planet::world_lattice: lattice_points in f64, lattice_points_near in
+// f32); what each is for is the world's.
 // A lattice's point there is held in fixed point, its cell and 64 bits of
 // fraction an axis, so doubling it for each finer octave (twice) is exact
 // integer work, and an octave's point is that plus the offset scaled to the
 // octave, in f32 (simplex_from, perlin_from): exact to a part in 2^24 of the
 // offset at every scale.
 module planet::anchor;
-from planet::relief import BASE_WAVELENGTH, SimplexAt, skew;
-
-// The lattices' scales: the ranges' mask reads the noise at RANGE times the
-// continents' (ground.bk masks), the albedo's variation from octave
-// VARY_FIRST of the base wavelength (variation), the strata's folds at
-// STRATA_FOLD metres (strata).
-pub const RANGE: f32 = 1.7;
-pub const VARY_FIRST: i32 = 5;
-pub const STRATA_FOLD: f32 = 3500.0;
+from planet::noise import SimplexAt, skew;
+from planet::world_lattice import lattice_points, lattice_points_near;
 
 // A lattice's point: its cell, and the fraction in it in 64 bits an axis
 // (hi the top 32).
@@ -31,10 +29,10 @@ pub struct Anchor {
     dir_lo: vec3<f32>,   // normalize(base) less dir
     base: vec3<f32>,     // its point in base coordinates (cube-sphere or a face's plane), f32
     lost: vec3<f32>,     // what base lost to f32
-    p: Lattice,          // the simplex lattice at dir * radius / BASE_WAVELENGTH (ground.bk's p), skewed
-    r: Lattice,          // at RANGE p, skewed
-    v: Lattice,          // the Perlin lattice at p 2^VARY_FIRST
-    f: Lattice,          // at dir * radius / STRATA_FOLD
+    p: Lattice,          // the world's first simplex lattice, skewed
+    r: Lattice,          // its second, skewed
+    v: Lattice,          // its first Perlin lattice
+    f: Lattice,          // its second
 }
 // An anchor in a buffer (read_store<vec4<i32>, 1>): ANCHOR_VEC4S vec4s, the
 // four vectors (xyz, float bits) then each lattice's cell, hi and lo.
@@ -97,7 +95,8 @@ fn frac_rest(l: Lattice) -> vec3<f32> {
 // The simplex lattice's point `off` past l (the noise's coordinates, at l's
 // octave): its cell and offset (relief.bk SimplexAt), and what the offset's
 // f32 lost of the fraction, unskewed (the skew adds a third of the sum, so
-// its inverse takes a sixth), which simplex_grad puts back to first order.
+// its inverse takes a sixth), which simplex_grad (noise.bk) puts back to
+// first order.
 pub fn simplex_from(l: Lattice, off: vec3<f32>) -> SimplexAt {
     let s = frac_top(l) + skew(off);
     let fl = floor(s);
@@ -159,14 +158,14 @@ fn lattice_near(q: vec3<f32>, skewed: bool) -> Lattice {
     };
 }
 pub fn anchor_near(dir: vec3<f32>, radius: f32) -> Anchor {
-    let p = dir * (radius / BASE_WAVELENGTH);
+    let q = lattice_points_near(dir, radius);
     let z = vec3<f32>(0.0);
     return Anchor {
         dir: dir, dir_lo: z, base: dir, lost: z,
-        p: lattice_near(p, true),
-        r: lattice_near(p * RANGE, true),
-        v: lattice_near(p * exp2(VARY_FIRST as f32), false),
-        f: lattice_near(dir * (radius / STRATA_FOLD), false),
+        p: lattice_near(q.p, true),
+        r: lattice_near(q.r, true),
+        v: lattice_near(q.v, false),
+        f: lattice_near(q.f, false),
     };
 }
 
@@ -199,16 +198,16 @@ pub fn anchor_of(base: vec3<f64>, dir: vec3<f32>, radius: f64) -> Anchor {
     let n = normalize(bd);
     let d = vec3<f64>(dir.x as f64, dir.y as f64, dir.z as f64);
     let lo = n - d;
-    let p = d * (radius / (BASE_WAVELENGTH as f64));
+    let q = lattice_points(d, radius);
     return Anchor {
         dir: dir,
         dir_lo: vec3<f32>(lo.x as f32, lo.y as f32, lo.z as f32),
         base: b,
         lost: vec3<f32>(lost.x as f32, lost.y as f32, lost.z as f32),
-        p: lattice_of(p, true),
-        r: lattice_of(p * (RANGE as f64), true),
-        v: lattice_of(p * exp2(VARY_FIRST as f64), false),
-        f: lattice_of(d * (radius / (STRATA_FOLD as f64)), false),
+        p: lattice_of(q.p, true),
+        r: lattice_of(q.r, true),
+        v: lattice_of(q.v, false),
+        f: lattice_of(q.f, false),
     };
 }
 // An anchor at the unit direction `dir` itself, and dir's offset from it.

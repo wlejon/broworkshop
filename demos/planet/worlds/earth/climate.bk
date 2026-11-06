@@ -13,7 +13,7 @@
 // hundreds of kilometres, where its 0.4 m step is nothing.
 module planet::climate;
 
-from planet::relief import simplex_grad_f32, GRAD_TO_VALUE;
+from planet::noise import simplex_grad_f32, GRAD_TO_VALUE;
 
 pub struct Climate {
     // Sea-level temperature (deg C) and moisture (0 dry to 1 wet).

@@ -14,7 +14,8 @@ from planet::ground import terrain, terrain_parts, shaped_by, cell_ground_draine
                            SOIL_OCTAVES, cell_width, woodland, wooded, banked, with_streams, sea_floor;
 from planet::climate import climate_fields, climate_of, cover_at, snow_at, Climate, landform_climate, landform_wood,
                             landform_share;
-from planet::relief import BASE_WAVELENGTH, RIDGE_FIRST, WARP_OCTAVE, WARP_DISPLACE, simplex_grad, SimplexAt;
+from planet::relief import BASE_WAVELENGTH, RIDGE_FIRST, WARP_OCTAVE, WARP_DISPLACE;
+from planet::noise import simplex_grad, SimplexAt;
 from planet::rivers import water_at, water_share, fresh_water, water_depth;
 from planet::anchor import Anchor, read_anchor, anchor_at, doubled, simplex_from, plane_offset;
 from planet::layers import HZ_MARGIN, HZ_DENSITY, unorm, gather_span, detail_words;

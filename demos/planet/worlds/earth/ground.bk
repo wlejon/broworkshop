@@ -15,11 +15,12 @@ from planet::climate import Climate, climate_at, cover_at, temp_at, snow_at;
 // RIDGE_MEAN E[(1 - |noise|)^2] and NOISE_VAR Var(noise), measured over 200k
 // samples; NOISE_GRAD_VAR the variance of the noise's gradient along one axis
 // per unit of input.
-from planet::relief import BASE_WAVELENGTH, RIDGE_MEAN, NOISE_VAR, NOISE_GRAD_VAR, NOISE_BOX, RIDGE_FIRST, RIDGE_LAST,
-    RIDGE_PAST, FINE_FIRST, WARP_OCTAVE, WARP_DISPLACE, ridge_amp, normal_cdf, ridge_cell_mean, span_at, mean_factor, SimplexAt,
-    simplex_grad, simplex_f32, simplex_grad_f32, GRAD_TO_VALUE, kept_share;
-from planet::anchor import Anchor, Lattice, PerlinAt, RANGE, VARY_FIRST, STRATA_FOLD, twice, doubled, simplex_from,
-    perlin_from, moved, anchor_near;
+from planet::relief import BASE_WAVELENGTH, RIDGE_MEAN, RIDGE_FIRST, RIDGE_LAST,
+    RIDGE_PAST, FINE_FIRST, WARP_OCTAVE, WARP_DISPLACE, ridge_amp, ridge_cell_mean, span_at, mean_factor, kept_share;
+from planet::noise import NOISE_VAR, NOISE_GRAD_VAR, NOISE_BOX, normal_cdf, SimplexAt, simplex_grad, simplex_f32,
+    simplex_grad_f32, GRAD_TO_VALUE;
+from planet::world_lattice import RANGE, VARY_FIRST, STRATA_FOLD;
+from planet::anchor import Anchor, Lattice, PerlinAt, twice, doubled, simplex_from, perlin_from, moved, anchor_near;
 
 // Var((1 - |noise|)^2), and the variance of its gradient along one axis per
 // unit of input, measured the same way.

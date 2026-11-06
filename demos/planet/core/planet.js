@@ -39,7 +39,7 @@ export const TILE_LAYOUT = { TILE, BORDER, CELLS, DETAIL, TEXELS, HZ, HZ_GRID, C
 
 // The core's modules, by name, which a world's kernels and hooks import.
 const CORE_MODULES = { 'planet::anchor': readApp('core/anchor.bk'), 'planet::layers': readApp('core/layers.bk'),
-                       tiles: bro.tiles.module };
+                       'planet::noise': readApp('core/noise.bk'), tiles: bro.tiles.module };
 
 // Start the planet of `world` (core/world.js) on the page's #stage canvas.
 export function startPlanet(world) {

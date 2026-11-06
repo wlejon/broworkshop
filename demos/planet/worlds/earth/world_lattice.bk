@@ -1,0 +1,37 @@
+// Where Earth's noise lattices lie (planet::world_lattice, which the core's
+// anchors read, core/anchor.bk): the points at a direction, in the noise's
+// coordinates, of the anchor's two simplex lattices and two Perlin ones.
+//   p  the relief's first octave, BASE_WAVELENGTH (ground.bk's p)
+//   r  RANGE times it, the ranges' mask (ground.bk masks)
+//   v  the albedo's variation, from octave VARY_FIRST of it (variation)
+//   f  the strata's folds, every STRATA_FOLD metres (strata)
+module planet::world_lattice;
+from planet::relief import BASE_WAVELENGTH;
+
+pub const RANGE: f32 = 1.7;
+pub const VARY_FIRST: i32 = 5;
+pub const STRATA_FOLD: f32 = 3500.0;
+
+pub struct LatticePoints {
+    p: vec3<f32>,
+    r: vec3<f32>,
+    v: vec3<f32>,
+    f: vec3<f32>,
+}
+pub struct LatticePoints64 {
+    p: vec3<f64>,
+    r: vec3<f64>,
+    v: vec3<f64>,
+    f: vec3<f64>,
+}
+
+// At a unit direction known only to f32 (anchor.bk anchor_near).
+pub fn lattice_points_near(dir: vec3<f32>, radius: f32) -> LatticePoints {
+    let p = dir * (radius / BASE_WAVELENGTH);
+    return LatticePoints { p: p, r: p * RANGE, v: p * exp2(VARY_FIRST as f32), f: dir * (radius / STRATA_FOLD) };
+}
+// At a unit direction in f64, on the CPU (anchor.bk anchor_of).
+pub fn lattice_points(d: vec3<f64>, radius: f64) -> LatticePoints64 {
+    let p = d * (radius / (BASE_WAVELENGTH as f64));
+    return LatticePoints64 { p: p, r: p * (RANGE as f64), v: p * exp2(VARY_FIRST as f64), f: d * (radius / (STRATA_FOLD as f64)) };
+}
