@@ -74,7 +74,9 @@ export function turnaroundSheet(recIn, { path, rows = 10, cycle = 'auto', title 
     // Cells, labels, height lines.
     for (let r = 0; r < nr; r++) for (let c = 0; c < VIEWS.length; c++) {
         const x = LM + c * cw, y = TM + r * ch;
-        rect(g, x, y, cw, ch, runs.length > 1 && r % 2 ? '#e6e9ee' : null, FAINT);
+        // B's shading lies under the scene, its frame over it.
+        if (runs.length > 1 && r % 2) rect(S.under, x, y, cw, ch, '#e6e9ee');
+        rect(g, x, y, cw, ch, null, FAINT);
         const by = y + ch - 26;
         for (const h of [0.5, 1.0, 1.5]) {
             const yy = by - h * cam.vk;

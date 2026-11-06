@@ -80,4 +80,38 @@ test('draws any sheet of the shown run on demand, beside the live view', () => {
     check(drawn(), 'the live view still draws');
 });
 
+// The creature's coat in a cell of a sheet: pixels warm enough to be the deer.
+function bodyPixels(img, x, y, w, h) {
+    let n = 0;
+    for (let j = y; j < y + h; j++) for (let i = x; i < x + w; i++) {
+        const o = 4 * (j * img.width + i), r = img.data[o], g = img.data[o + 1], b = img.data[o + 2];
+        if (r > 110 && r - b > 60 && r > g + 15) n++;
+    }
+    return n;
+}
+
+// As a window runs it: the windowed frame loop on a HiDPI display, A and B
+// shown. Every cell of the turnaround's first A row and first B row holds a
+// body (the scene captured at the sheet's own size, B's shading under it).
+await test('a turnaround of A and B from the windowed frame loop on a HiDPI display', async () => {
+    setDeviceScaleFactor(1.5);
+    await lab.load('deer', 'deer:stumble', 'walk');
+    lab.setShow('ab');
+    S.playing = true;
+    runFrames(40, { stepMs: 16 });
+    q('#kind').value = 'turnaround';
+    lab.openSheet();
+    runFrames(4, { stepMs: 16 });
+    check(!!document.querySelector('#sheetBody img'), `drawn (${q('#sheetBody').textContent.slice(0, 300)})`);
+    const s = S.sheet;
+    const img = s.canvas.getContext('2d').getImageData(0, 0, s.width, s.height);
+    const cw = 240, ch = 215, LM = 112, TM = 78;
+    for (const [row, tag] of [[0, 'A'], [1, 'B']]) for (let c = 0; c < 8; c++) {
+        const n = bodyPixels(img, LM + c * cw + 4, TM + row * ch + 4, cw - 8, ch - 8);
+        check(n > 600, `${tag} row, column ${c}: a body (${n} coat pixels)`);
+    }
+    shot('sheet-ab-hidpi');
+    setDeviceScaleFactor(1);
+});
+
 done('creature-lab live');

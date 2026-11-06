@@ -37,6 +37,7 @@ const S = {
     t: 0, playing: true, speed: 1, steps: 0, dt: 1 / 120,
     scenario: 'walk', specA: 'deer', specB: '', show: 'a',
     disposed: false,
+    sheet: null,       // the sheet last opened: { width, height, png, canvas, ... }
 };
 
 function status(s) { $('status').textContent = s; }
@@ -144,6 +145,7 @@ function openSheet() {
     try {
         const t0 = Date.now();
         const s = sheet(kind, runs.map((r) => r.rec), null);
+        S.sheet = s;
         const img = document.createElement('img');
         img.src = URL.createObjectURL(new Blob([s.png], { type: 'image/png' }));
         body.replaceChildren(img);

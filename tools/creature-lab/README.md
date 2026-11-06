@@ -186,9 +186,12 @@ back.
 - See the run's metric flags.
 - Open any sheet of the shown run (both, when A and B show), drawn there and
   then from the code as it is, in about a second. A sheet is composited in
-  memory (`lab/page.js`: the scene through `captureFrame` under a 2D
-  overlay), the same way in a window and headless, so the page around it
-  stays as it was.
+  memory (`lab/page.js`: the paper, a 2D under layer, the scene through
+  `captureFrame`, a 2D overlay), the same way in a window and headless, so
+  the page around it stays as it was. The sheet's scene is parked between
+  sheets and put on a hidden canvas of the document for each capture (a
+  parked scene is not rendered), and it renders at one pixel a CSS px
+  whatever the display's scale.
 
 Headless runs drive the view through `globalThis.creatureLab`.
 
@@ -208,7 +211,9 @@ Headless runs drive the view through `globalThis.creatureLab`.
   - `ab --diff` writes its files
   - the time from a fresh load to sheets stays within seconds
 - `tests/test_live.js`: the live view loads, scrubs, shows A/B, draws every
-  sheet kind on demand and still draws after. It writes screenshots to
+  sheet kind on demand and still draws after, and through the windowed frame
+  loop (`runFrames`) on a HiDPI display draws an A/B turnaround with a body
+  in every cell of its first A and B rows. It writes screenshots to
   `tests/out/shots/`.
 
 ## Adding a creature

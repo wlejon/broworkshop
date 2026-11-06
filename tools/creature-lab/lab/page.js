@@ -1,8 +1,10 @@
-// What a sheet is drawn on: a 3D scene under a 2D overlay, both the size of
-// the sheet, composited in memory over the paper (scene.captureFrame renders
-// the scene on its own), so a sheet is made the same way in a window and
-// headless and the page around it is left alone. One page is kept for a
-// run; each sheet sizes it and adds what it draws.
+// What a sheet is drawn on: a 3D scene between two 2D layers, all the size
+// of the sheet, composited in memory over the paper (scene.captureFrame
+// renders the scene on its own), so a sheet is made the same way in a window
+// and headless and the page around it is left alone. The under layer holds
+// what lies beneath the scene (a shaded row), the overlay what lies on it
+// (labels, hoof marks). One page is kept for a run; each sheet sizes it and
+// adds what it draws.
 
 export const INK = '#26241f', DIM = '#77736a', FAINT = '#c9c5bc', PAPER = '#ecebe6', CELL = '#e2e0da';
 export const FOOT_COLORS = ['#c0392b', '#e67e22', '#2471a3', '#17a589', '#8e44ad', '#7d6608', '#5d6d7e', '#a04000'];
@@ -15,32 +17,41 @@ export function getPage() {
     const view = document.createElement('canvas');
     const over = document.createElement('canvas');
     const out = document.createElement('canvas');
-    page = { view, over, out, scene: null, nodes: [], W: 0, H: 0 };
+    const under = document.createElement('canvas');
+    page = { view, over, under, out, scene: null, nodes: [], W: 0, H: 0 };
     return page;
 }
 
 // Size the page for a sheet, clear what the last sheet drew, and hand back
-// its scene (when `scene` is wanted) and a cleared 2D context.
+// its scene (when `scene` is wanted), a cleared 2D overlay `g` and a cleared
+// under layer `under`.
 export function beginSheet(W, H, { scene = false } = {}) {
     const p = getPage();
     for (const n of p.nodes) { try { n.destroy(); } catch (_) { n.visible = false; } }
     p.nodes = [];
     p.W = W; p.H = H;
-    for (const c of [p.view, p.over, p.out]) { c.width = W; c.height = H; }
+    for (const c of [p.view, p.over, p.under, p.out]) { c.width = W; c.height = H; }
     p.drawScene = scene;
     if (scene && !p.scene) {
+        // The scene's canvas sits in the document, never shown. The scene is
+        // parked between sheets (a parked scene costs no GPU time and is not
+        // rendered at all: captureFrame would hand back its last image), and
+        // saveSheet puts it on its canvas for the one capture.
+        p.view.style.display = 'none';
+        document.body.append(p.view);
         p.scene = p.view.getContext('scene');
-        // Its canvas is never in the document, which reclaims a scene at the
-        // next frame; kept alive it is parked instead, and captureFrame
-        // renders it all the same.
         p.scene.keepAlive = true;
         p.scene.setAmbient({ color: [1, 1, 1], intensity: 0.55 });
         p.key = p.scene.createLight({ type: 'directional', direction: [0.45, -0.75, 0.5], intensity: 2.2, castShadow: false });
     }
-    const g = p.over.getContext('2d');
-    g.setTransform(1, 0, 0, 1, 0, 0);
-    g.clearRect(0, 0, W, H);
-    return { page: p, scene: scene ? p.scene : null, g, W, H, add: (n) => { p.nodes.push(n); return n; } };
+    // A scene renders at the display's device scale: on a HiDPI window its
+    // capture would come back larger than the sheet. The sheet is drawn in
+    // sheet pixels, one a CSS px, on every display, as headless draws it.
+    const rs = 1 / (globalThis.devicePixelRatio || 1);
+    if (scene && Math.abs(p.scene.renderScale - rs) > 1e-6) p.scene.renderScale = rs;
+    const clear = (c) => { const x = c.getContext('2d'); x.setTransform(1, 0, 0, 1, 0, 0); x.clearRect(0, 0, W, H); return x; };
+    const g = clear(p.over), under = clear(p.under);
+    return { page: p, scene: scene ? p.scene : null, g, under, W, H, add: (n) => { p.nodes.push(n); return n; } };
 }
 
 // The sheet as drawn: the paper, the scene over it, the overlay over both,
@@ -52,9 +63,15 @@ export function saveSheet(path = null) {
     g.setTransform(1, 0, 0, 1, 0, 0);
     g.fillStyle = PAPER;
     g.fillRect(0, 0, p.W, p.H);
+    g.drawImage(p.under, 0, 0);
     if (p.drawScene) {
-        const f = p.scene.captureFrame(p.W, p.H);
+        if (!p.scene.attached) p.scene.attachTo(p.view);
+        let f;
+        try { f = p.scene.captureFrame(p.W, p.H); } finally { p.scene.detach(); }
         if (!f) throw new Error('creature-lab: the sheet scene rendered nothing');
+        if (f.width !== p.W || f.height !== p.H) {
+            throw new Error(`creature-lab: the sheet scene came back ${f.width}x${f.height} for a ${p.W}x${p.H} sheet`);
+        }
         const tmp = document.createElement('canvas');
         tmp.width = f.width; tmp.height = f.height;
         tmp.getContext('2d').putImageData(f instanceof ImageData ? f : new ImageData(f.data, f.width, f.height), 0, 0);
