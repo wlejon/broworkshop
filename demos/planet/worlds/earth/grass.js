@@ -127,7 +127,7 @@ export function createGrass(scene, radius, module, sunModule, octaves, seed, net
         const node = scene.createInstancedMesh({
             mesh: bladeCell(blades), color: [1, 1, 1],
             castsShadow: false, receivesShadow: false, doubleSided: true,
-            module: HOOK, file: 'grass_mesh.bk', modules: { 'planet::grass_layout': LAYOUT },
+            module: HOOK, file: 'worlds/earth/grass_mesh.bk', modules: { 'planet::grass_layout': LAYOUT },
         });
         node.cullMargin = 4 * radius;   // the shader places the blades
         node.drawOrder = 6;             // before the ground it hides

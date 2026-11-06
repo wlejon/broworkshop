@@ -1,5 +1,5 @@
 // Anchors for the GPU's work (anchor.bk): where the ground's noise lattices
-// lie at a point near the work, found on the CPU in f64 (planet.bk
+// lie at a point near the work, found on the CPU in f64 (core/tiles.bk
 // k_anchors), so a kernel places its points as f32 offsets from it.
 
 export const ANCHOR_WORDS = 64;   // anchor.bk ANCHOR_VEC4S * 4

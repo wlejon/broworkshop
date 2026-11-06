@@ -1,0 +1,68 @@
+// What a world is: the folder worlds/<name>/ and its entry worlds/<name>.js,
+// whose default export is the world's definition. The core (core/planet.js)
+// draws whatever world it is given; app.js picks it (--world=<name>, Earth
+// by default).
+//
+// The definition:
+//   name          the folder's name
+//   radius        metres
+//   minHeight, maxHeight
+//                 metres about the radius the drawn surface keeps within
+//                 (the tile cache's culling bounds; the core's kernels clamp
+//                 a tile's heights at minHeight, so a world whose sea stands
+//                 at its floor gives the sea's level)
+//   sunIntensity  the sun's lux above the air
+//   atmosphere    scene.setAtmosphere's settings, less the planet's radius
+//                 and centre (the core's)
+//   start         optional { lat, lon (radians), alt (m), heading, pitch
+//                 (degrees) }: where the camera starts
+//   views, quickViews
+//                 its view ladder (core/views.js) and the names of its quick
+//                 subset, the globe first
+//   modules       { 'planet::world': source, ... }: its brokernel modules by
+//                 name, which the core's kernels import (core/tiles.bk reads
+//                 planet::world's octaves_for, range_margin, detail_ratio and
+//                 surface_height)
+//   create(core)  makes the world's half of the planet. `core` is
+//                 { scene, modules (the core's and the world's, by name),
+//                 kAnchors (the f64 anchor kernel), tile (the cache's layout,
+//                 core/planet.js TILE_LAYOUT) }. It returns:
+//     layers        the tile layers it adds, { name: bytes a cell }
+//     ground        { layout: constants for planet::ground_layout,
+//                   modules: the ground hook's modules by name }
+//     produce(batch, { cache, anchors, span, horizonHeights })
+//                   fills a batch's tiles (core/layers.bk's formats): the
+//                   position and detail layers, its own layers, the span
+//                   and the horizon heights; the core runs the horizons,
+//                   ranges and split errors after it
+//     bindGround(ground, cache)
+//                   binds its layers and buffers to the ground's hook, at
+//                   each new cache
+//     attach(ground)
+//                   makes its systems, once the ground exists
+//     surfaceHeight(dir)
+//                   the drawn surface's height (m over the radius) under a
+//                   unit direction, on the CPU
+//     update(frame) per frame, after the core's camera and uniforms: frame
+//                   is { pos, alt, surface, toSun, camHi, camLo, fwd, cone,
+//                   view }
+//     reload(changed, { redone, ms, refreshGround, coreChanged })
+//                   after a hot reload: `changed` the kernels changed by
+//                   root file name (brokernel keeps a module's file name
+//                   alone, so a world's .bk files are named apart from the
+//                   core's); it makes again what they feed
+//     api           optional property descriptors' source: its handles
+//                   on globalThis.planet (Earth's clouds, grass, trees,
+//                   rivers)
+
+const REQUIRED = ['name', 'radius', 'minHeight', 'maxHeight', 'sunIntensity', 'atmosphere', 'views', 'quickViews', 'modules', 'create'];
+
+export function checkWorld(world) {
+    for (const k of REQUIRED) {
+        if (world[k] === undefined) throw new Error(`planet: the world ${world.name ?? '?'} has no ${k}`);
+    }
+    if (!world.modules['planet::world']) throw new Error(`planet: the world ${world.name} has no planet::world module`);
+}
+
+// What create(core) returns must hold these.
+export const WORLD_PARTS = ['layers', 'ground', 'produce', 'bindGround', 'attach', 'surfaceHeight', 'update', 'reload'];

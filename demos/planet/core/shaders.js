@@ -6,16 +6,30 @@ const fs = require('fs');
 // The text of the app's file at `path`.
 export const readApp = (path) => fs.readFileSync(bro.resolvePath('/app/' + path), 'utf-8');
 
-// Where the app's modules live: planet::name is name.bk in one of these
-// folders, the core's first.
+// Where the app's modules live: planet::name is name.bk in the core's
+// folder or the active world's (setWorld), the core's first.
 const MODULE_DIRS = ['core', 'worlds/earth'];
-export function modulePath(name) {
-    const file = name.slice('planet::'.length) + '.bk';
+export function setWorld(name) {
+    MODULE_DIRS[1] = 'worlds/' + name;
+}
+export const worldDir = () => MODULE_DIRS[1];
+
+// The app-relative path of a .bk file: a path as given, or a file name
+// alone found in the core's folder or the world's.
+export function sourcePath(file) {
+    if (file.includes('/')) return file;
     for (const dir of MODULE_DIRS) {
         const path = dir + '/' + file;
         if (fs.existsSync(bro.resolvePath('/app/' + path))) return path;
     }
-    return null;
+    return file;
+}
+// The module name a .bk file is imported by: planet::<its name>.
+export const moduleName = (path) => 'planet::' + path.slice(path.lastIndexOf('/') + 1).replace(/\.bk$/, '');
+
+export function modulePath(name) {
+    const path = sourcePath(name.slice('planet::'.length) + '.bk');
+    return path.includes('/') ? path : null;
 }
 
 if (typeof bro !== 'undefined' && bro.kernel && typeof bro.kernel.resolve === 'function') {

@@ -39,7 +39,7 @@ pub const POT_R: i32 = 51;
 pub const POT_GRID: i32 = 103;
 
 // The cells a tile's consumers resolve the drainage at: its texels' (found
-// every other texel, for two texels' width, planet.bk tex_drains), and its
+// every other texel, for two texels' width, produce.bk tex_drains), and its
 // horizons' (its own cells': the horizons march over valleys two cells wide
 // and more).
 pub fn texel_cell(rec: tiles::Record, inv_size: f32, d: f32) -> f32 {
@@ -59,7 +59,7 @@ pub fn grid_reach(a: Anchor, rec: tiles::Record, level: i32, radius: f32, inv_si
     let tc = texel_cell(rec, inv_size, d);
     let hc = horizon_cell(rec, inv_size);
     let centre = normalize(a.dir + rec.dir_lo);
-    // A tile fine enough for the soil (planet.bk k_soil) reads it out to
+    // A tile fine enough for the soil (produce.bk k_soil) reads it out to
     // its soil points a spacing past its texels.
     let soil = octaves_for(rec.extent, inv_size / d) > SOIL_OCTAVES;
     var rk: i32 = -1;

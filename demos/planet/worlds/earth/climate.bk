@@ -50,7 +50,7 @@ pub fn climate_at(dir_in: vec3<f32>, cell: f32, seed: i32) -> Climate {
     return climate_of(f.a, f.b);
 }
 // The climate's fields, which vary over tens of kilometres and more, so a
-// tile's texels take them bilinearly from every other one's (planet.bk
+// tile's texels take them bilinearly from every other one's (produce.bk
 // k_detail): a the temperature, the moisture and the desert's hue fields,
 // b (xy) the rock's.
 pub struct ClimateFields {

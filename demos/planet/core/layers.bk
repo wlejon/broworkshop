@@ -1,0 +1,52 @@
+// The tile layers' formats the core reads and a world's kernels write
+// (core/tiles.bk, the ground's hook): what every world's production fills.
+//
+// position  vec4 a cell: the cell's drawn surface point relative to the
+//           tile's centre (xyz), and its height above the radius (w).
+// span      two int32 a batch record, gathered by atomics while the cells
+//           are written (gather_span): the lowest and highest drawn surface
+//           over the cache's minHeight, for k_range.
+// heights   the horizon heights' grid (core/tiles.bk k_horizon reads it):
+//           an e^2 grid a tile, HZ_DENSITY points a cell, point (x, y) at
+//           cell (x, y) / HZ_DENSITY - HZ_MARGIN, the drawn surface's height
+//           there.
+// detail    two words a texel (detail_words): the colour and the normal.
+module planet::layers;
+
+pub const HZ_MARGIN: i32 = 16;   // cells of heights past the tile, beyond the farthest step from its points
+pub const HZ_DENSITY: i32 = 2;
+
+// 0 to 1 into `bits` bits, rounded.
+pub fn unorm(x: f32, bits: i32) -> i32 {
+    let top = ((1 << bits) - 1) as f32;
+    return (clamp(x, 0.0, 1.0) * top + 0.5) as i32;
+}
+
+// Record z's drawn surface `over` metres over the cache's minHeight into
+// the batch's span: INT_MAX less the lowest's float bits and the highest's
+// (non-negative floats order as their bits).
+pub fn gather_span(span: rw_store<i32, 1>, z: i32, over: f32) {
+    let bits = bitcast<i32>(over);
+    span.atomic_max(2 * z, 2147483647 - bits);
+    span.atomic_max(2 * z + 1, bits);
+}
+
+// A detail texel's two words. The first: the colour square-rooted, as 8
+// linear bits band a dark forest's greens in steps a tenth of its value
+// (the ground's hook squares it back), and a.w linear: 8 bits each. The
+// second: the normal n of the ground's mean surface over the texel
+// (octahedral: onto the octahedron |x| + |y| + |z| = 1, its lower half
+// folded over, 12 bits a coordinate) and `b` in the top 8 bits. What a.w
+// and b hold is the world's (Earth: the share of water, and of forest).
+pub fn detail_words(a: vec4<f32>, n: vec3<f32>, b: f32) -> vec2<i32> {
+    let o = n / (abs(n.x) + abs(n.y) + abs(n.z));
+    var ox = o.x;
+    var oy = o.y;
+    if (o.z < 0.0) {
+        ox = (1.0 - abs(o.y)) * sign(o.x);
+        oy = (1.0 - abs(o.x)) * sign(o.y);
+    }
+    let enc = sqrt(max(a.xyz, vec3<f32>(0.0)));
+    return vec2<i32>(unorm(enc.x, 8) | (unorm(enc.y, 8) << 8) | (unorm(enc.z, 8) << 16) | (unorm(a.w, 8) << 24),
+                     unorm(ox * 0.5 + 0.5, 12) | (unorm(oy * 0.5 + 0.5, 12) << 12) | (unorm(b, 8) << 24));
+}

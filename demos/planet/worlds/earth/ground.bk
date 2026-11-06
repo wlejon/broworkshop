@@ -1,5 +1,5 @@
 // The planet's ground: one height function of the unit direction, and the
-// colour of the truth under a cell. planet.bk's kernels fill tiles with it;
+// colour of the truth under a cell. produce.bk's kernels fill tiles with it;
 // the tests measure it. GPU code is f32: a direction is an anchor's (anchor.bk,
 // its noise lattices found in f64 on the CPU) plus an f32 offset e from it, so
 // a cell lands exactly at any scale, Earth radius included.
@@ -90,7 +90,7 @@ fn fbm_to(l: Lattice, off: vec3<f32>, octaves: f32, first: i32, last: i32, seed:
 }
 
 // The octaves a tile `extent` wide with cells of `inv_size` of its edge can
-// carry: down to a wavelength of 2.5 cells (app.js octavesFor, the same).
+// carry: down to a wavelength of 2.5 cells (world.js octavesFor, the same).
 pub fn octaves_for(extent: f32, inv_size: f32) -> f32 {
     let ratio = BASE_WAVELENGTH / (2.5 * extent * inv_size);
     return clamp(log2(ratio), 1.0, 30.0);

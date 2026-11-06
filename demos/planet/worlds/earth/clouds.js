@@ -188,7 +188,7 @@ export function faceFrame(i) {
 // altitude, the unit direction to the sun and the view.
 export function createClouds(scene, radius, module, readers, seed, hook, maxGround) {
     const node = scene.createVolume({
-        module: hook.source, file: 'clouds_volume.bk', modules: hook.modules, name: 'clouds',
+        module: hook.source, file: 'worlds/earth/clouds_volume.bk', modules: hook.modules, name: 'clouds',
     });
     const toSun = [0, 0, 0];   // none yet: the first update lights them all
 

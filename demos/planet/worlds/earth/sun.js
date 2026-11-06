@@ -16,7 +16,7 @@ const SUN_REACH = 1800;        // metres: the farthest step (sun.bk sun_step_dis
 const FIELD = 193, FPOT = 195, DRAIN_LEVELS = 4;
 
 // net: the rivers' network (rivers.js), which the ground's height reads;
-// kAnchors: planet.bk k_anchors.
+// kAnchors: core/tiles.bk k_anchors.
 export function createSunGrid(module, P, net, slices, kAnchors, radius) {
     const stepsKernel = module.kernel('k_sun_steps'), sunKernel = module.kernel('k_sun');
     const reachKernel = module.kernel('k_field_reaches'), pointKernel = module.kernel('k_field_points');

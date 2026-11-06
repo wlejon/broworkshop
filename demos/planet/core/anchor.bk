@@ -172,7 +172,7 @@ pub fn anchor_near(dir: vec3<f32>, radius: f32) -> Anchor {
 
 // ── On the CPU, in f64 ──────────────────────────────────────────────────────
 //
-// Only @cpu kernels reach these (planet.bk k_anchors, k_height).
+// Only @cpu kernels reach these (core/tiles.bk k_anchors, a world's surface height: Earth's produce.bk k_height).
 
 pub fn lattice_of(q: vec3<f64>, skewed: bool) -> Lattice {
     var s = q;

@@ -1,0 +1,26 @@
+// Earth's answers to the core's kernels (planet::world, imported by
+// core/tiles.bk and the core's tests): how many octaves a cell carries,
+// what finer octaves can still add to a tile's heights, the share of a
+// tile's surface error its split takes away, and the drawn surface.
+module planet::world;
+
+from planet::ground import terrain;
+from planet::anchor import Anchor;
+pub use planet::ground::{octaves_for, range_margin};
+
+// The error splitting a tile takes away, as a share of what its own split
+// shows from inside (core/tiles.bk k_split_detail). The ground is
+// self-similar, so the tile's own cells say it beforehand; the share falls
+// from 0.85 at level 6 to 0.46 from level 11 on as the alpine octaves give
+// out (measured over leaf quads; within 10% at a level).
+pub fn detail_ratio(level: i32) -> f32 {
+    return 0.46 + 0.39 * clamp((11.0 - (level as f32)) / 5.0, 0.0, 1.0);
+}
+
+// The drawn surface at offset e from the anchor, metres above the radius,
+// at `octaves`: the ground, or the sea's level where the ground is under it.
+// `data` is the world's store its height reads (the rivers' network,
+// rivers.js).
+pub fn surface_height(a: Anchor, e: vec3<f32>, radius: f32, octaves: f32, seed: i32, data: read_store<f32, 1>) -> f32 {
+    return max(terrain(a, e, radius, octaves, seed, data), 0.0);
+}

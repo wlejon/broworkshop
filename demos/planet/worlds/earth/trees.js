@@ -116,7 +116,7 @@ export function createTrees(scene, radius, module, sunModule, octaves, seed, net
         const node = scene.createInstancedMesh({
             mesh: treeBlock(tiers, rim, trunk), color: [1, 1, 1],
             castsShadow: false, receivesShadow: false, doubleSided: true,
-            module: HOOK, file: 'trees_mesh.bk',
+            module: HOOK, file: 'worlds/earth/trees_mesh.bk',
             modules: { ...treeModules, tree_band: constants('tree_band', { RAGGED: ['bool', ragged] }) },
         });
         node.cullMargin = 4 * radius;   // the shader places the trees
