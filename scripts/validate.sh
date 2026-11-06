@@ -6,8 +6,9 @@
 # Modes (default: both):
 #   --smoke          boot each app headless, advance frames, fail on uncaught
 #                    JS errors or a failed boot (non-zero bro-headless exit)
-#   --tests          run each app's test scripts: <app>/tests/test_*.js and
-#                    <app>/test*.js (plus lib/**/test_*.js under lib-tests)
+#   --tests          run each app's test scripts: <app>/tests/test_*.js,
+#                    <app>/test*.js and <app>/**/tests/test_*.js (plus
+#                    lib/**/test_*.js under lib-tests)
 #
 # Selection:
 #   glob ...         app dirs (demos/*-lab, games/snake) or test scripts
@@ -214,6 +215,8 @@ selected() {   # selected <app> [script]
 tests_of() {   # tests_of <app> -> script paths, one per line
     local f
     for f in "$1"/tests/test_*.js "$1"/test*.js; do [ -f "$f" ] && echo "$f"; done
+    # And a part's own tests folder inside the app (demos/planet/worlds/earth/tests).
+    [ -d "$1" ] && find "$1" -mindepth 3 -path '*/tests/test_*.js' -not -path '*/node_modules/*' -not -path '*/tests/out/*' | sort
     if [ "$1" = lib-tests ]; then
         find lib -name 'test_*.js' -not -path '*/node_modules/*' | sort
     fi

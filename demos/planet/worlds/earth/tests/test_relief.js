@@ -1,14 +1,17 @@
 // Planet — the ridged relief's noise as the ground's shader evaluates it
-// (relief.bk simplex_grad): from a lattice point found in f64 (anchor.bk
+// (core/noise.bk simplex_grad): from a lattice point found in f64 (anchor.bk
 // lattice_of) and an offset in f32 (simplex_from), the same value as std
 // supersimplex3d in f64 at the same point, and a gradient that matches its
 // finite differences, far from the origin too.
-//   Run: scripts/validate.sh demos/planet/tests/test_relief.js
+//   Run: scripts/validate.sh demos/planet/worlds/earth/tests/test_relief.js
 import { check, test, done, tier } from "/lib/kit/test.js";
+import { readApp as readAppPath, sourcePath } from "/app/core/shaders.js";
 
 const fs = require('fs');
-const readApp = (path) => fs.readFileSync(bro.resolvePath('/app/' + (path.includes('/') ? path : (path === 'anchor.bk' ? 'core/' : 'worlds/earth/') + path)), 'utf-8');
-const mod = bro.kernel.compile(readApp('tests/measure.bk'),
+// A file by its path from the app's folder, or a .bk file's name alone (the
+// core's or Earth's: core/shaders.js sourcePath).
+const readApp = (path) => readAppPath(sourcePath(path));
+const mod = bro.kernel.compile(readApp('worlds/earth/tests/measure.bk'),
                                { file: 'measure.bk', modules: { 'planet::ground': readApp('ground.bk'), 'planet::relief': readApp('relief.bk'), 'planet::rivers': readApp('rivers.bk'),
                                                                 'planet::anchor': readApp('anchor.bk'), 'planet::climate': readApp('climate.bk'), 'planet::dendry': readApp('dendry.bk'), tiles: bro.tiles.module } });
 const k = mod.kernel('k_simplex');

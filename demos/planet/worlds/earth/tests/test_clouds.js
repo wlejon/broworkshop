@@ -7,10 +7,13 @@
 //   Run: scripts/validate.sh demos/planet
 import { check, frames, test, done, tier } from "/lib/kit/test.js";
 import { GROUND_LIGHT, CLOUD_DETAIL_VAR } from "/app/worlds/earth/clouds.js";
+import { readApp as readAppPath, sourcePath } from "/app/core/shaders.js";
 
 const fs = require('fs');
-const readApp = (path) => fs.readFileSync(bro.resolvePath('/app/' + (path.includes('/') ? path : (path === 'anchor.bk' ? 'core/' : 'worlds/earth/') + path)), 'utf-8');
-const mod = bro.kernel.compile(readApp('tests/measure_clouds.bk'), {
+// A file by its path from the app's folder, or a .bk file's name alone (the
+// core's or Earth's: core/shaders.js sourcePath).
+const readApp = (path) => readAppPath(sourcePath(path));
+const mod = bro.kernel.compile(readApp('worlds/earth/tests/measure_clouds.bk'), {
     file: 'measure_clouds.bk',
     modules: { 'planet::ground': readApp('ground.bk'), 'planet::relief': readApp('relief.bk'), 'planet::rivers': readApp('rivers.bk'),
                'planet::clouds': readApp('clouds.bk'), 'planet::anchor': readApp('anchor.bk'), 'planet::climate': readApp('climate.bk'), 'planet::dendry': readApp('dendry.bk'), tiles: bro.tiles.module },
