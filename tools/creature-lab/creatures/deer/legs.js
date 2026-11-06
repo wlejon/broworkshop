@@ -65,7 +65,7 @@ export function frontLeg(S, s, trunkField) {
     // The point of shoulder is at (y 0.72, z 0.45), the elbow joint at
     // (0.52, 0.33) with the olecranon behind it, the carpus at 0.27.
     S.loft([
-        ring(x(0.094), 0.72, 0.465, 0.275, 0.045),
+        ring(x(0.088), 0.72, 0.445, 0.285, 0.038),
         ring(x(0.104), 0.64, 0.445, 0.250, 0.050),
         ring(x(0.108), 0.575, 0.410, 0.245, 0.046, nm('arm')),
         ring(x(0.110), 0.515, 0.378, 0.268, 0.039, nm('elbow')),

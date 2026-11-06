@@ -61,8 +61,12 @@ function trunkWeights(skel) {
         if (limb > 1) { ws /= limb; wh /= limb; wf /= limb; limb = 1; }
         const spine = 1 - limb;
         const a = sstep(-0.24, -0.04, p[2]), b = sstep(0.04, 0.22, p[2]);
+        // The brisket, under the neck's base, goes partly with the neck as
+        // the neck's own skin there does (neckWeights), so the throat runs
+        // on into the chest as the neck rises or falls.
+        const nk = 0.35 * sstep(0.40, 0.56, p[2]) * sstep(0.60, 0.76, p[1]);
         return [
-            ['pelvis', spine * (1 - a)], ['lumbar', spine * a * (1 - b)], ['thorax', spine * b],
+            ['pelvis', spine * (1 - a)], ['lumbar', spine * a * (1 - b)], ['thorax', spine * b * (1 - nk)], ['neck1', spine * b * nk],
             [`scap${t}`, ws], [`humerus${t}`, wh], [`femur${t}`, wf],
         ];
     };
@@ -104,17 +108,34 @@ function trunk(S, field) {
         ring(-0.020, 0.956, 0.566, 0.126, [2.2, 2.2, 0.35, 0, 0], 'ribs'),
         ring(0.160, 0.958, 0.556, 0.120, [2.2, 2.2, 0.42, 0, 0], 'girth'),
         ring(0.300, 0.982, 0.556, 0.142, [2.1, 2.9, 0.55, 0, 0], 'shoulder'),
-        ring(0.420, 0.955, 0.568, 0.130, [2.1, 2.9, 0.5, 0, 0]),
-        ring(0.485, 0.925, 0.630, 0.100, [2.0, 2.8, 0.4, 0, 0]),
-        ring(0.525, 0.875, 0.690, 0.058, [2.0, 2.2, 0.3, 0, 0]),
-        ring(0.545, 0.815, 0.740, 0.022, [2.0, 2.0, 0.3, 0, 0]),
+        ring(0.420, 0.955, 0.572, 0.130, [2.1, 2.6, 0.5, 0, 0]),
+        ring(0.485, 0.925, 0.640, 0.100, [2.0, 2.2, 0.4, 0, 0]),
+        ring(0.525, 0.875, 0.660, 0.064, [2.0, 2.2, 0.3, 0, 0]),
+        ring(0.555, 0.815, 0.690, 0.026, [2.0, 2.0, 0.3, 0, 0]),
     ], { weights: field, segs: 40, steps: 4, hint: [0, 1, 0], name: 'trunk',
          shape: trunkShape, color: trunkColor });
 }
 
+// The neck's skin weights: along neck1 from its head (s, metres) the skin
+// hands from the thorax to the neck's bones over the first 0.24 m, so a
+// neck lowered to graze or thrown up in a startle bends its base over that
+// length, the crest running on from the withers and the throat from the
+// brisket, instead of turning as one piece about the joint and standing out
+// of the trunk as a wall.
+function neckWeights(S, skel) {
+    const b = skel.bones[skel.index('neck1')];
+    const d = sub(b.tail, b.head), len = Math.hypot(...d);
+    const dir = d.map((v) => v / len);
+    return (p, c) => {
+        const t = 1 - sstep(-0.02, 0.22, dot(sub(p, b.head), dir));
+        const w = S.distanceWeights(c, ['neck1', 'neck2', 'head']).map(([n, v]) => [n, v * (1 - t)]);
+        return t > 0 ? [...w, ['thorax', t]] : w;
+    };
+}
+
 // The neck: from inside the chest, deep at its base where it meets the
 // brisket and the withers, tapering to the throat under the skull.
-function neck(S) {
+function neck(S, skel) {
     S.loft([
         { c: [0, 0.80, 0.40], r: [0.10, 0.18] },
         { c: [0, 0.91, 0.48], r: [0.092, 0.165], name: 'neckbase' },
@@ -123,7 +144,7 @@ function neck(S) {
         { c: [0, 1.19, 0.67], r: [0.057, 0.074] },
         { c: [0, 1.265, 0.705], r: [0.054, 0.066], name: 'throat' },
         { c: [0, 1.30, 0.72], r: [0.050, 0.058] },
-    ], { bones: [['thorax', 0.7], 'neck1', 'neck2', 'head'], segs: 24, hint: [0, 0, 1], name: 'neck',
+    ], { weights: neckWeights(S, skel), segs: 24, hint: [0, 0, 1], name: 'neck',
          color: neckColor, caps: [false, false] });
 }
 
@@ -170,7 +191,7 @@ export function body(skel) {
     const S = new Sculpt(skel);
     const field = trunkWeights(skel);
     trunk(S, field);
-    neck(S);
+    neck(S, skel);
     head(S);
     tail(S);
     for (const s of [1, -1]) { frontLeg(S, s, field); hindLeg(S, s, field); }
