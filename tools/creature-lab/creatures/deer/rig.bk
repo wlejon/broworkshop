@@ -95,6 +95,7 @@ const SETTLE_T: f32 = 0.34;
 @knob const REACH_HIND: f32 = 0.835;   // m from the femur head to the toe the hind leg can hold
 @knob const SWING_REACH: f32 = 1.0;  // share of the swing by which the hoof is over its mark
 @knob const SCAP_FOLLOW: f32 = 0.6;  // of the leg's swing the scapula takes
+@knob const STRIDE_VAR: f32 = 1.0;   // share of the stride-to-stride variation (0: every stride alike)
 const BREAKOVER: f32 = 0.55;     // rad the hoof rolls onto its toe before lift
 const WITHERS_Z: f32 = 0.69;     // hips (pelvis head) to withers, along the back
 
@@ -104,6 +105,17 @@ const WITHERS_Z: f32 = 0.69;     // hips (pelvis head) to withers, along the bac
 // (the carpus shut to 163 degrees), the hoof's sole turned up behind.
 const FOLD_FRONT: array<f32, 5> = [-0.19, 0.77, -1.88, 2.85, 0.5];
 const FOLD_HIND: array<f32, 4> = [-0.76, 1.37, -2.06, 0.03];
+
+// The individual's stride-to-stride variation on channel ch, in [-1, 1]: a
+// value per stride from the seed and the stride's count, eased from one
+// stride's into the next's across the stride, so no stride is the last one
+// copied and nothing jumps within one.
+fn stride_var(seed: f32, phase: f32, ch: f32) -> f32 {
+    let k = floor(phase);
+    let a = hash01(k * 7.13 + seed * 13.7 + ch * 101.3);
+    let b = hash01((k + 1.0) * 7.13 + seed * 13.7 + ch * 101.3);
+    return 2.0 * mix(a, b, smooth01(phase - k)) - 1.0;
+}
 
 fn rest_angle(b: i32) -> f32 {
     let v = TAIL[b] - HEAD[b];
@@ -292,9 +304,19 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
     gw.z = approach(gw.z, select_f(gait == GAIT_GALLOP, 1.0, 0.0), 2.2, dt);
     gw = gw / max(gw.x + gw.y + gw.z, 1e-4);
     let veff = max(speed, 0.45 * abs(omega));
-    let freq = gw.x * (0.62 + 0.45 * veff) + gw.y * (1.55 + 0.12 * veff) + gw.z * (2.0 + 0.06 * veff);
+    // No two strides alike (stride_var): the stride's rate, so its length
+    // at a speed, within 3%, and the hooves' lift within 15%. The variation
+    // belongs to steady going: it fades out under 0.6 m/s (a turn on the
+    // spot steps as it must), while one gait gives way to another and while
+    // the speed is still changing.
+    let ph_v = state[s + D_PHASE];
+    let vary = STRIDE_VAR * smooth01(speed / 0.6) * smooth01((max(gw.x, max(gw.y, gw.z)) - 0.8) / 0.2)
+             * smooth01(1.0 - abs(vd - speed) / 0.4);
+    let freq = (gw.x * (0.62 + 0.45 * veff) + gw.y * (1.55 + 0.12 * veff) + gw.z * (2.0 + 0.06 * veff))
+             * (1.0 + vary * 0.03 * stride_var(seed, ph_v, 0.0));
     let duty = gw.x * clamp(0.70 - 0.05 * veff, 0.6, 0.7) + gw.y * 0.42 + gw.z * 0.27;
-    let lift_h = gw.x * vec2<f32>(0.065, 0.085) + gw.y * vec2<f32>(0.10, 0.14) + gw.z * vec2<f32>(0.14, 0.18);
+    let lift_h = (gw.x * vec2<f32>(0.065, 0.085) + gw.y * vec2<f32>(0.10, 0.14) + gw.z * vec2<f32>(0.14, 0.18))
+               * (1.0 + vary * 0.15 * stride_var(seed, ph_v, 1.0));
     let carpus = gw.x * 1.3 + gw.y * 1.75 + gw.z * 2.0;
     let hoof_flex = gw.x * 0.6 + gw.y * 0.9 + gw.z * 1.1;
 
@@ -449,8 +471,10 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
     let plane_c = fit_plane4(feet[0], feet[1], feet[2], feet[3], vec2<f32>(pos.x, pos.z));
     let hind_ground = 0.5 * (feet[0].y + feet[3].y);
     let fore_ground = 0.5 * (feet[1].y + feet[2].y);
-    var bob_h = -0.012 * swing_sum_hind * gw.x + gw.y * 0.03 * (swing_max - 0.5) + gw.z * 0.035 * sin(TAU * (phase - 0.1));
-    var bob_f = gw.y * 0.03 * (swing_max - 0.5) + gw.z * 0.035 * sin(TAU * (phase + 0.15));
+    // The body's dip, deeper or shallower stride to stride (25%).
+    let dip = 1.0 + vary * 0.25 * stride_var(seed, phase, 2.0);
+    var bob_h = (-0.012 * swing_sum_hind * gw.x + gw.y * 0.03 * (swing_max - 0.5) + gw.z * 0.035 * sin(TAU * (phase - 0.1))) * dip;
+    var bob_f = (gw.y * 0.03 * (swing_max - 0.5) + gw.z * 0.035 * sin(TAU * (phase + 0.15))) * dip;
     // Startle: a crouch, then a lift as it gathers.
     var crouch: f32 = 0.0;
     if (st_t >= 0.0) { crouch = -0.05 * sin(PI * clamp(st_t / 0.3, 0.0, 1.0)) + 0.02 * smooth01((st_t - 0.25) / 0.2) * (1.0 - smooth01((st_t - 1.2) / 0.8)); }
@@ -499,13 +523,18 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
     let grad_x = dot(vec2<f32>(plane_c.y, plane_c.z), vec2<f32>(left.x, left.z));
     var roll = damp(state[s + D_ROLL], clamp(0.3 * atan(grad_x), -0.1, 0.1), 6.0, dt);
     state[s + D_ROLL] = roll;
-    let sway_v = left * (0.012 * sway * gw.x);
+    // The trunk's sway over the supporting hooves and its roll with each
+    // hind step, each varied stride to stride (30%, 50%).
+    let mv = select_f(moving, 1.0, 0.0) * smooth01(speed / 0.6);
+    let sway_v = left * (0.012 * sway * gw.x * (1.0 + vary * 0.3 * stride_var(seed, phase, 3.0)));
     let root = vec3<f32>(pos.x, hy, pos.z) + sway_v;
+    let roll_g = mv * (gw.x + 0.6 * gw.y) * 0.014 * sin(TAU * (phase - 0.1))
+               * (1.0 + vary * 0.5 * stride_var(seed, phase, 4.0)) * (1.0 - lie);
 
     // --- spine, neck and head --------------------------------------------------------------
     var rq: array<vec4<f32>, NB>;
     var rp: array<vec3<f32>, NB>;
-    let qbody = q_mul(q_mul(qyaw, q_x(-pitch)), q_z(roll));
+    let qbody = q_mul(q_mul(qyaw, q_x(-pitch)), q_z(roll + roll_g));
     let flex = gw.z * 0.13 * sin(TAU * (phase - 0.2));
     let drop = -0.05 * hip_drop * gw.x;
     let bend = clamp(0.1 * omega, -0.18, 0.18);
@@ -544,10 +573,14 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
     let carry = (1.0 - graze) * (1.0 - lie) * HEAD_HOLD;
     let steady = carry * ((pitch - pitch_s) + (fy - fy_s) / NECK_LEVER);
     let n_up = alert * (1.0 - graze);
-    let n1_base = gw.x * 0.18 + gw.y * 0.12 + gw.z * 0.38 + 0.05 * nod * gw.x - 0.42 * n_up - 0.15 * lie + steady;
+    // The neck's carriage and the head's pitch and turn drift a little stride
+    // to stride while moving (0.05, 0.03 and 0.04 rad at most).
+    let nv = select_f(moving, 1.0, 0.0) * vary * (1.0 - graze);
+    let n1_base = gw.x * 0.18 + gw.y * 0.12 + gw.z * 0.38 + 0.05 * nod * gw.x - 0.42 * n_up - 0.15 * lie + steady
+                + nv * 0.05 * stride_var(seed, phase * 0.5, 5.0);
     let n2_base = gw.x * 0.05 + gw.y * 0.0 + gw.z * 0.12 - 0.22 * n_up;
-    let hp_world = mix(gw.x * 0.12 + gw.y * 0.06 + gw.z * 0.2 - 0.15 * n_up + gpitch_s, 1.15, graze);
-    let qh = q_mul(q_y(yaw + gyaw_s), q_x(hp_world));
+    let hp_world = mix(gw.x * 0.12 + gw.y * 0.06 + gw.z * 0.2 - 0.15 * n_up + gpitch_s + nv * 0.03 * stride_var(seed, phase * 0.5, 6.0), 1.15, graze);
+    let qh = q_mul(q_y(yaw + gyaw_s + nv * 0.04 * stride_var(seed, phase * 0.5, 7.0)), q_x(hp_world));
     // Grazing: how far down the neck must go for the muzzle to reach the ground.
     var gt: f32 = 0.0;
     if (graze > 0.0) {
@@ -680,7 +713,7 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
     tele[t0 + T_ACTION] = act as f32;
     tele[t0 + T_HEIGHT] = hy - hip_g;
     tele[t0 + T_PITCH] = pitch;
-    tele[t0 + T_ROLL] = roll;
+    tele[t0 + T_ROLL] = roll + roll_g;
     tele[t0 + T_FREQ] = freq * select_f(moving, 1.0, 0.0);
     for (var l: i32 = 0; l < 4; l += 1) {
         let k = s + D_LEG + l * LEG_REC;
