@@ -52,7 +52,10 @@ function trunkWeights(skel) {
     return (p) => {
         const sx = Math.abs(p[0]), t = p[0] >= 0 ? 'L' : 'R';
         const q = [sx, p[1], p[2]];
-        let ws = sstep(0.02, 0.08, sx) * (1 - sstep(0.05, 0.12, segDist(q, ...scap)));
+        // The blade's top slides under the withers, whose skin stays on the
+        // spine; below, the blade carries the skin over it at most 80%, fading
+        // out over 13 cm, so its outline never stands as a plate.
+        let ws = 0.8 * sstep(0.02, 0.08, sx) * sstep(0.95, 0.84, p[1]) * (1 - sstep(0.03, 0.16, segDist(q, ...scap)));
         let wh = sstep(0.03, 0.09, sx) * (1 - sstep(0.02, 0.15, segDist(q, ...hum)));
         let wf = sstep(0.02, 0.08, sx) * (1 - sstep(0.04, 0.14, segDist(q, ...fem)));
         // The thigh lobes (trunkShape) below the haunch go with the femur.
@@ -137,8 +140,8 @@ function neckWeights(S, skel) {
 // brisket and the withers, tapering to the throat under the skull.
 function neck(S, skel) {
     S.loft([
-        { c: [0, 0.80, 0.40], r: [0.10, 0.18] },
-        { c: [0, 0.91, 0.48], r: [0.092, 0.165], name: 'neckbase' },
+        { c: [0, 0.78, 0.40], r: [0.10, 0.17] },
+        { c: [0, 0.89, 0.48], r: [0.092, 0.15], name: 'neckbase' },
         { c: [0, 1.00, 0.555], r: [0.074, 0.12] },
         { c: [0, 1.10, 0.625], r: [0.062, 0.088], name: 'neckmid' },
         { c: [0, 1.19, 0.67], r: [0.057, 0.074] },
