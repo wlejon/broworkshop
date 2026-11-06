@@ -2,7 +2,7 @@
 // the sheets read) and played back through the creature's batch mesh, with
 // a scrub bar, playback speed, an orbit camera (right-drag orbit, middle-drag
 // pan, wheel zoom), a second version beside it for A/B, the run's metric
-// flags, and the sheets of the shown run (made by cli.js) on demand.
+// flags, and any sheet of the shown runs, drawn on demand.
 //
 // globalThis.creatureLab drives it from a headless test: load(), setTime(),
 // state, dispose().
@@ -14,7 +14,7 @@ import { scenariosFor } from "./lab/scenarios.js";
 import { drawBatch } from "./lab/batch.js";
 import { ROWS } from "./lab/skeleton.js";
 import { T, TELE } from "./lab/contract.js";
-import { analyzeRun } from "./lab/commands.js";
+import { analyzeRun, sheet } from "./lab/commands.js";
 
 const fs = require('fs');
 const $ = (id) => document.getElementById(id);
@@ -135,24 +135,24 @@ vp.onFrame((dt) => {
     setTime(t);
 });
 
-// The sheet of the shown run, as cli.js wrote it.
+// The sheet of the shown run (both, A/B, when both show), drawn now from the
+// runs on screen: the same code and recording cli.js draws from.
 function openSheet() {
-    const label = (S.show === 'b' && S.specB ? S.specB : S.specA).replace(/[:@+=,]/g, '_');
     const kind = $('kind').value;
-    const path = appPath(`../../tests/out/creature-lab/${label}/${S.scenario}-${kind}.png`);
+    const runs = S.show === 'ab' ? S.runs : S.runs.filter((_, i) => (S.show === 'b' ? i === 1 : i === 0));
     const body = $('sheetBody');
-    body.innerHTML = '';
-    if (fs.existsSync(path)) {
-        const raw = fs.readFileSync(path);
+    try {
+        const t0 = Date.now();
+        const s = sheet(kind, runs.map((r) => r.rec), null);
         const img = document.createElement('img');
-        img.src = URL.createObjectURL(new Blob([new Uint8Array(raw.buffer, raw.byteOffset, raw.byteLength)], { type: 'image/png' }));
-        body.append(img);
-    } else {
+        img.src = URL.createObjectURL(new Blob([s.png], { type: 'image/png' }));
+        body.replaceChildren(img);
+        status(`${kind} sheet: ${s.width}x${s.height} in ${Date.now() - t0} ms`);
+    } catch (e) {
         const p = document.createElement('div');
         p.className = 'note';
-        p.textContent = `No ${kind} sheet for ${label} / ${S.scenario} yet. From the broworkshop root:\n` +
-            `bro-headless tools/creature-lab tools/creature-lab/cli.js -- ${kind} ${label} ${S.scenario}`;
-        body.append(p);
+        p.textContent = `the ${kind} sheet failed: ${e.message}`;
+        body.replaceChildren(p);
     }
     $('sheet').classList.add('open');
 }

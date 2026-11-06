@@ -164,8 +164,11 @@ back.
 - Play, scrub, change the speed, and follow the creature or orbit the camera.
 - Show A, B, or both side by side. B is a variant or a snapshot.
 - See the run's metric flags.
-- Open any sheet already on disk. For a missing sheet, it shows the command
-  that renders it.
+- Open any sheet of the shown run (both, when A and B show), drawn there and
+  then from the code as it is, in about a second. A sheet is composited in
+  memory (`lab/page.js`: the scene through `captureFrame` under a 2D
+  overlay), the same way in a window and headless, so the page around it
+  stays as it was.
 
 Headless runs drive the view through `globalThis.creatureLab`.
 
@@ -184,8 +187,9 @@ Headless runs drive the view through `globalThis.creatureLab`.
   - a sheet rendered twice is the same bytes
   - `ab --diff` writes its files
   - the time from a fresh load to sheets stays within seconds
-- `tests/test_live.js`: the live view loads, scrubs, shows A/B and opens a
-  sheet. It writes screenshots to `tests/out/shots/`.
+- `tests/test_live.js`: the live view loads, scrubs, shows A/B, draws every
+  sheet kind on demand and still draws after. It writes screenshots to
+  `tests/out/shots/`.
 
 ## Adding a creature
 

@@ -65,15 +65,19 @@ await test('an action scenario', async () => {
     shot('graze');
 });
 
-test('opens a sheet (or says how to make it)', () => {
-    q('#kind').value = 'charts';
-    lab.openSheet();
-    frames(2);
-    check(q('#sheet').classList.contains('open'), 'sheet overlay open');
-    check(q('#sheetBody img') || q('#sheetBody .note').textContent.includes('cli.js'), 'an image or the command');
-    shot('sheet');
+test('draws any sheet of the shown run on demand, beside the live view', () => {
+    for (const kind of ['charts', 'turnaround', 'trajectory', 'range']) {
+        q('#kind').value = kind;
+        lab.openSheet();
+        frames(2);
+        check(q('#sheet').classList.contains('open'), `${kind}: sheet overlay open`);
+        check(!!document.querySelector('#sheetBody img'), `${kind}: drawn (${document.querySelector('#sheetBody').textContent.slice(0, 300)})`);
+        shot(`sheet-${kind}`);
+    }
     q('#close').click();
     check(!q('#sheet').classList.contains('open'), 'closed');
+    frames(3);
+    check(drawn(), 'the live view still draws');
 });
 
 done('creature-lab live');
