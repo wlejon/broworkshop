@@ -86,7 +86,7 @@ const ROCK_RELIEF: f32 = 3.0;
 const LITTER: f32 = 0.8;
 const NEEDLES: vec3<f32> = vec3<f32>(0.070, 0.047, 0.026);
 const MOSS: vec3<f32> = vec3<f32>(0.030, 0.055, 0.016);
-const FRESH_GLOSS: f32 = 0.35;   // fresh water's roughness, of its ripples'
+@knob const FRESH_GLOSS: f32 = 0.35;   // fresh water's roughness, of its ripples'
 // Fresh water's lanes along the wind: STREAK_W metres across, STREAK_LEN
 // between the samples averaged along it, how much they gather and calm the
 // ripples (STREAK_RIPPLE) and tilt the surface (slope per unit of the
@@ -667,7 +667,8 @@ pub fn fragment(v: mesh::Vertex, s_in: mesh::Surface) -> mesh::Surface {
     // water's mirror is added in its share: a roughness between the two
     // mirrors nothing, so a stream finer than the pixels lost its glint and
     // vanished into the ground about it.
-    let mirror = smoothstep(0.5, 1.0, water);
+    let mirror = probe("mirror", smoothstep(0.5, 1.0, water));
+    probe("water", water);
     s.normal = normalize(mix(n, sea, mirror));
     s.roughness = mix(0.9, water_rough, mirror);
     s.metallic = 0.0;
@@ -715,7 +716,8 @@ pub fn fragment(v: mesh::Vertex, s_in: mesh::Surface) -> mesh::Surface {
         let clouds = mix(e * CLOUD_SIDES, under, smoothstep(0.0, 0.5, r_up)) + lit;
         let sky_r = lighting::sky_along(r);
         let cover = min(clouds / max(sky_r, vec3<f32>(1.0e-4)), vec3<f32>(CLOUD_OVER_SKY));
-        seen = mix(vec3<f32>(1.0), cover, 1.0 - open_r) * mix(BANK_SHADE, 1.0, banks);
+        seen = probe("seen", mix(vec3<f32>(1.0), cover, 1.0 - open_r) * mix(BANK_SHADE, 1.0, banks));
+        probe("open_r", open_r);
     }
     if (glint > 0.0) {
         let ls = lighting::Surface {

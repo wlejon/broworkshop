@@ -1,15 +1,16 @@
-// demos/planet/views.js — canonical view ladder and look/A/B runner for Planet.
+// demos/planet/views.js — canonical view ladder and look/A/B runner for
+// Planet. Importing it only exports; look.js runs it.
 //
 // Usage (from repo root):
-//   LOOK_SET=baseline bro-headless --grant declared,files,env demos/planet demos/planet/views.js
-//   LOOK_SET=candidate LOOK_COMPARE=baseline,candidate bro-headless --grant declared,files,env demos/planet demos/planet/views.js
-//   LOOK_VIEWS=coast,river LOOK_QUICK=1 bro-headless --grant declared,files,env demos/planet demos/planet/views.js
+//   LOOK_SET=baseline bro-headless --grant declared,files,env demos/planet demos/planet/look.js
+//   LOOK_SET=candidate LOOK_COMPARE=baseline,candidate bro-headless --grant declared,files,env demos/planet demos/planet/look.js
+//   LOOK_VIEWS=river,m4-dusk LOOK_QUICK=1 bro-headless --grant declared,files,env demos/planet demos/planet/look.js
 //
 // Environment variables (`LOOK_*` with `--grant env`, or `BRO_LOOK_*` without):
 //   LOOK_OUT=tests/out/look/planet   Output directory root
 //   LOOK_SET=<name>                  Capture view set into <LOOK_OUT>/<name> (default: 'current')
 //   LOOK_VIEWS=v1,v2                 Comma-separated subset of view names
-//   LOOK_QUICK=1                     Quick subset (orbit, coast, river) with shorter settle/timing
+//   LOOK_QUICK=1                     Quick subset (orbit, river, m4-dusk) with shorter settle/timing
 //   LOOK_COMPARE=setA,setB           Compare two captured sets in <LOOK_OUT>/<setA> and <LOOK_OUT>/<setB>
 //   LOOK_AB=1                        Run an in-process A/B timing check on the selected views
 
@@ -45,93 +46,82 @@ function arg(name) {
  * Coordinates: `lat`, `lon` in radians; `alt` in metres above surface/sea;
  * `pitch`, `heading` in degrees; `hour` in 0..24 solar time.
  */
+// The sites the look rounds were judged at (seed 7): a river in hill
+// country, the M4 river (where the white rivers showed at dusk), a lake and
+// the sea. `hour` is a number, 'noon' (the sun highest over the site) or
+// 'low' (8 degrees up after noon, the camera turned to face it, for glints).
+const SITES = {
+    river: { lat: 0.4488, lon: -3.0869, heading: 0 },
+    m4: { lat: 0.218244, lon: 0.48744, heading: -36.5 },
+    lake: { lat: 0.30386, lon: -3.01224, heading: 0 },
+    sea: { lat: 0.46627, lon: -3.05927, heading: 0 },
+};
+const at = (site, rest) => ({ ...SITES[site], ...rest });
+const WIDE = [{ name: 'middle', x: 560, y: 380, w: 800, h: 400 }];
+const LOW = [{ name: 'near', x: 560, y: 560, w: 800, h: 400 }, { name: 'far', x: 560, y: 200, w: 800, h: 300 }];
+
 export const PLANET_VIEWS = [
-    {
-        name: 'orbit',
-        description: 'Full-globe orbital overview with continental drainage, clouds, and limb atmosphere',
-        lat: 0.45, lon: 0.30, alt: 1.8e7, pitch: -90, heading: 0, hour: 12.0,
-        crops: [
-            { name: 'center', x: 760, y: 340, w: 400, h: 400 },
-            { name: 'limb',   x: 380, y: 200, w: 320, h: 320 },
-        ],
-    },
-    {
-        name: 'coast',
-        description: 'Coastal headland, surf zone, and river mouth looking across a bay',
-        lat: 0.448, lon: 0.295, alt: 420, pitch: -14, heading: 35, hour: 13.5,
-        crops: [
-            { name: 'horizon', x: 640, y: 200, w: 640, h: 240 },
-            { name: 'shore',   x: 560, y: 520, w: 640, h: 360 },
-        ],
-    },
-    {
-        name: 'alpine',
-        description: 'High alpine ridges, snowline transitions, and steep valley shadows',
-        lat: 0.515, lon: 0.345, alt: 2600, pitch: -12, heading: 110, hour: 10.5,
-        crops: [
-            { name: 'peaks',  x: 560, y: 220, w: 800, h: 300 },
-            { name: 'slopes', x: 560, y: 540, w: 800, h: 360 },
-        ],
-    },
-    {
-        name: 'river',
-        description: 'Carved river valley with meanders, banks, and screen-space water reflections',
-        lat: 0.452, lon: 0.302, alt: 280, pitch: -16, heading: 165, hour: 14.0,
-        crops: [
-            { name: 'channel', x: 600, y: 480, w: 720, h: 420 },
-            { name: 'banks',   x: 480, y: 300, w: 640, h: 280 },
-        ],
-    },
-    {
-        name: 'forest',
-        description: 'Low-altitude view over wooded hills and grass clearings',
-        lat: 0.458, lon: 0.308, alt: 95, pitch: -10, heading: 60, hour: 11.2,
-        crops: [
-            { name: 'canopy', x: 560, y: 420, w: 800, h: 420 },
-        ],
-    },
-    {
-        name: 'clouds',
-        description: 'Cumulus cloud deck seen from above the cloud base with ground shadows below',
-        lat: 0.450, lon: 0.300, alt: 2200, pitch: -18, heading: 0, hour: 12.5,
-        crops: [
-            { name: 'deck',    x: 480, y: 240, w: 960, h: 360 },
-            { name: 'shadows', x: 560, y: 620, w: 800, h: 320 },
-        ],
-    },
-    {
-        name: 'dusk',
-        description: 'Low golden-hour sun grazing ridges with long horizon shadows and warm scatter',
-        lat: 0.465, lon: 0.312, alt: 850, pitch: -9, heading: 255, hour: 17.4,
-        crops: [
-            { name: 'glint',  x: 560, y: 180, w: 800, h: 320 },
-            { name: 'relief', x: 560, y: 520, w: 800, h: 360 },
-        ],
-    },
-    {
-        name: 'shallows',
-        description: 'Shallow coastal shelf color, wave spectrum, and underwater drainage floor',
-        lat: 0.442, lon: 0.288, alt: 160, pitch: -28, heading: 200, hour: 12.8,
-        crops: [
-            { name: 'water', x: 560, y: 420, w: 800, h: 460 },
-        ],
-    },
+    { name: 'orbit', description: 'the globe from 18000 km', lat: 0.45, lon: 0.30, alt: 1.8e7, pitch: -90, heading: 0, hour: 12, crops: WIDE },
+    { name: 'continent', description: 'the river site from 800 km', ...at('river', { alt: 8e5, pitch: -27, hour: 'noon' }), crops: WIDE },
+    { name: 'hills', description: 'the M4 hill country from 40 km', ...at('m4', { alt: 4e4, pitch: -45, hour: 'noon' }), crops: WIDE },
+    { name: 'river-high', description: 'the river and its valley from 1.5 km', ...at('river', { alt: 1500, pitch: -22, hour: 'noon' }), crops: LOW },
+    { name: 'river', description: 'the river from 300 m at noon', ...at('river', { alt: 300, pitch: -20, hour: 'noon' }), crops: LOW },
+    { name: 'river-near', description: 'the river bank from 50 m', ...at('river', { alt: 50, pitch: -12, hour: 'noon' }), crops: LOW },
+    { name: 'm4-dusk', description: 'the M4 river from 300 m at dusk (the white-river view)', ...at('m4', { alt: 300, pitch: -20, hour: 17.88 }), crops: LOW },
+    { name: 'lake', description: 'the lake from 300 m', ...at('lake', { alt: 300, pitch: -20, hour: 'noon' }), crops: LOW },
+    { name: 'sea-glint', description: 'the sea from 300 m facing a low sun', ...at('sea', { alt: 300, pitch: -20, hour: 'low' }), crops: LOW },
+    { name: 'ground', description: 'the river site from eye height', ...at('river', { alt: 2, pitch: -6, hour: 'noon' }), crops: LOW },
 ];
 
-export const QUICK_VIEW_NAMES = ['orbit', 'coast', 'river'];
+export const QUICK_VIEW_NAMES = ['orbit', 'river', 'm4-dusk'];
+
+// The sun's model (app.js setHour): NOON turned about the y axis by the hour.
+const NOON = [-0.55, -0.35, -0.75];
+const toSun = (hour) => {
+    const a = (hour - 12) / 24 * 2 * Math.PI, c = Math.cos(a), s = Math.sin(a);
+    const d = [NOON[0] * c + NOON[2] * s, NOON[1], -NOON[0] * s + NOON[2] * c];
+    const l = Math.hypot(...d);
+    return d.map((x) => -x / l);
+};
+const frameAt = (lat, lon) => {
+    const up = [Math.cos(lat) * Math.sin(lon), Math.sin(lat), Math.cos(lat) * Math.cos(lon)];
+    const e = [up[2], 0, -up[0]], el = Math.hypot(...e);
+    const east = e.map((x) => x / el);
+    const north = [up[1] * east[2] - up[2] * east[1], up[2] * east[0] - up[0] * east[2], up[0] * east[1] - up[1] * east[0]];
+    return { up, east, north };
+};
+const dot = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+// The hour of 'noon' or 'low' over a site.
+function siteHour(lat, lon, which) {
+    const up = frameAt(lat, lon).up;
+    const el = [];
+    for (let h = 0; h < 24; h += 0.02) el.push([h, dot(toSun(h), up)]);
+    let top = 0;
+    for (let k = 1; k < el.length; k++) if (el[k][1] > el[top][1]) top = k;
+    if (which === 'noon') return el[top][0];
+    const target = Math.sin(8 * Math.PI / 180);
+    for (let k = 0; k < el.length; k++) {
+        const x = el[(top + k) % el.length];
+        if (x[1] <= target) return x[0];
+    }
+    return 12;
+}
+const headingTo = (lat, lon, hour) => {
+    const f = frameAt(lat, lon), t = toSun(hour);
+    return Math.atan2(dot(t, f.east), dot(t, f.north)) * 180 / Math.PI;
+};
 
 export function applyPlanetView(view) {
     if (typeof view.setup === 'function') view.setup(view);
     const p = globalThis.planet;
     if (!p) throw new Error('views.js: globalThis.planet is not initialized');
-    for (const k of ['lat', 'lon', 'alt', 'pitch', 'heading']) {
+    const hour = typeof view.hour === 'number' ? view.hour : siteHour(view.lat, view.lon, view.hour ?? 'noon');
+    const heading = view.hour === 'low' ? headingTo(view.lat, view.lon, hour) : view.heading;
+    for (const k of ['lat', 'lon', 'alt', 'pitch']) {
         if (view[k] != null) p.cam[k] = view[k];
     }
-    if (view.hour != null && typeof p.setHour === 'function') {
-        p.setHour(view.hour);
-    } else if (typeof p.setHour === 'function') {
-        p.setHour(12);
-    }
+    if (heading != null) p.cam.heading = heading;
+    p.setHour(hour);
     if (typeof p.frame === 'function') p.frame();
 }
 
@@ -190,7 +180,7 @@ export function runPlanetLook(opts = {}) {
 
     let ab = null;
     if (doAb) {
-        const targetName = (only && only[0]) || 'coast';
+        const targetName = (only && only[0]) || 'river';
         const view = PLANET_VIEWS.find((v) => v.name === targetName) || PLANET_VIEWS[1];
         applyPlanetView(view);
         settlePlanetView(view, { settleFrames, held: false });
@@ -220,6 +210,3 @@ export function runPlanetLook(opts = {}) {
     return { manifest, comparison, ab };
 }
 
-if (!globalThis.__PLANET_VIEWS_NO_AUTORUN) {
-    runPlanetLook();
-}
