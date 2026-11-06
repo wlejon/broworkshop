@@ -166,7 +166,7 @@ function create(core) {
     // tiles (clouds.js), and the relief, trees' and grass's modules.
     const groundPart = {
         layout: {
-            DETAIL_PERIOD: ['f32', DETAIL_PERIOD], SWELL_PERIOD: ['f32', SWELL_PERIOD],
+            DETAIL_PERIOD: ['f32', DETAIL_PERIOD], FAR_PERIOD: ['f32', SWELL_PERIOD],
             SEED: ['i32', SEED], WIND: ['vec3<f32>', WIND],
             GL_TILE: ['i32', GROUND_LIGHT.tile], GL_BORDER: ['i32', GROUND_LIGHT.border],
             GL_ATLAS: ['i32', GROUND_LIGHT.atlas], GL_LEVELS: ['i32', GROUND_LIGHT.levels],
@@ -178,8 +178,15 @@ function create(core) {
             WAVE_K: ['vec4<f32>', WAVES.list.map((w) => [...w.n.map((c) => c * 2 * Math.PI / w.period), Math.PI / 2 / w.k])],
             WAVE_F: ['vec4<f32>', WAVES.list.map((w) => [w.omega, w.tail, w.slope / w.k, w.slope * w.slope / 2])],
         },
-        modules: { 'planet::ground_detail': read('ground_detail.bk'), 'planet::relief': modules['planet::relief'],
-                   ...treeModules, ...grassModules },
+        // Its fields of the hook's uniform block, after the core's: the
+        // waves' clock, the drawn trees' reach, the clouds' ground light
+        // cache's footprint, and where the grass's and trees' fields lie
+        // (grass.js, trees.js, clouds.js set them).
+        params: [['time', 'f32'], ['trees_far', 'f32'], ['cloud_w0', 'f32'],
+                 ...['grass_a', 'grass_e', 'grass_f', 'grass_uv', 'tree_o_hi', 'tree_o_lo', 'tree_lattice',
+                     'tree_a', 'tree_e', 'tree_f', 'tree_uv'].map((n) => [n, 'vec3<f32>'])],
+        modules: { 'planet::world_ground': read('world_ground.bk'), 'planet::ground_detail': read('ground_detail.bk'),
+                   'planet::relief': modules['planet::relief'], ...treeModules, ...grassModules },
     };
 
     let ground = null, clouds = null, grass = null, trees = null;

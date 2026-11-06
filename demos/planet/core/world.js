@@ -32,8 +32,18 @@
 //                 kAnchors (the f64 anchor kernel), tile (the cache's layout,
 //                 core/planet.js TILE_LAYOUT) }. It returns:
 //     layers        the tile layers it adds, { name: bytes a cell }
-//     ground        { layout: constants for planet::ground_layout,
-//                   modules: the ground hook's modules by name }
+//     ground        its part of the ground's hook (core/ground_mesh.bk):
+//                   { layout: constants for planet::ground_layout (it must
+//                   give DETAIL_PERIOD and FAR_PERIOD, the periods, powers
+//                   of two, of the hook's periodic coordinates),
+//                   params: its fields of the hook's uniform block,
+//                   [[name, type]] after the core's cam_hi, cam_lo, to_sun,
+//                   modules: the hook's modules by name, planet::world_ground
+//                   among them: ground_sky (what stands between a vertex and
+//                   the sun and sky), ground_vertex (its four varyings and
+//                   a pair, planet::ground_core GroundVarying) and
+//                   ground_fragment (the pixel's surface, calling
+//                   planet::ground_core lit for the vertex's light) }
 //     produce(batch, { cache, anchors, span, horizonHeights })
 //                   fills a batch's tiles (core/layers.bk's formats): the
 //                   position and detail layers, its own layers, the span

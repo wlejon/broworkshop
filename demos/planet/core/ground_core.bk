@@ -1,0 +1,111 @@
+// What the ground's hook (core/ground_mesh.bk) gives a world's shading of
+// it (planet::world_ground): the tile layers the core binds, read as
+// core/layers.bk lays them out, and a fragment's inputs and its light.
+module planet::ground_core;
+import mesh;
+from planet::ground_layout import CELLS, TEXELS;
+from planet::ground_params import params;
+
+@binding(4, 1) pub var pos: texture2d_array<vec4<f32>>;
+@binding(4, 14) pub var tiles: read_buffer<vec4<i32>>;
+@binding(4, 15) pub var det: read_buffer<u32>;
+@binding(4, 16) pub var hz: read_buffer<vec4<u32>>;
+
+pub const GROUND_PI: f32 = 3.14159265;
+
+pub fn vec4_at(v: vec4<f32>, i: i32) -> f32 {
+    return i == 0 ? v.x : (i == 1 ? v.y : (i == 2 ? v.z : v.w));
+}
+
+// Cell (x, y) of tile `slot`'s position layer.
+pub fn pos_at(slot: i32, x: i32, y: i32) -> vec4<f32> {
+    let cell = slot & 3;
+    return pos.fetch(vec3<i32>((cell & 1) * CELLS + x, (cell >> 1) * CELLS + y, slot >> 2), 0);
+}
+
+// Texel (x, y) of this tile: colour (rgb, a: the world's), the octahedral
+// normal unfolded and the second word's byte (the world's: Earth's forest).
+pub struct DetailTexel {
+    col: vec4<f32>,
+    nrm: vec3<f32>,
+    cover: f32,
+}
+pub fn detail_texel(slot: i32, t_in: vec2<i32>) -> DetailTexel {
+    let t = clamp(t_in, vec2<i32>(0), vec2<i32>(TEXELS - 1));
+    let k = ((slot * TEXELS + t.y) * TEXELS + t.x) * 2;
+    // The colour is stored square-rooted (layers.bk detail_words).
+    let raw = unpack_unorm4x8(det[k]);
+    let col = vec4<f32>(raw.xyz * raw.xyz, raw.w);
+    let w = det[k + 1];
+    let ox = ((w & 4095u) as f32) * (2.0 / 4095.0) - 1.0;
+    let oy = (((w >> 12u) & 4095u) as f32) * (2.0 / 4095.0) - 1.0;
+    let cover = ((w >> 24u) as f32) / 255.0;
+    let nz = 1.0 - abs(ox) - abs(oy);
+    let nx = nz < 0.0 ? (1.0 - abs(oy)) * (ox >= 0.0 ? 1.0 : -1.0) : ox;
+    let ny = nz < 0.0 ? (1.0 - abs(ox)) * (oy >= 0.0 ? 1.0 : -1.0) : oy;
+    return DetailTexel { col: col, nrm: normalize(vec3<f32>(nx, ny, nz)), cover: cover };
+}
+// Texel t's colour's a alone.
+pub fn detail_alpha(slot: i32, t_in: vec2<i32>) -> f32 {
+    let t = clamp(t_in, vec2<i32>(0), vec2<i32>(TEXELS - 1));
+    return ((det[((slot * TEXELS + t.y) * TEXELS + t.x) * 2] >> 24u) as f32) / 255.0;
+}
+// A uniform cubic B-spline's four weights at fraction f past the second.
+pub fn bspline(f: f32) -> vec4<f32> {
+    let g = 1.0 - f;
+    let f2 = f * f;
+    let f3 = f2 * f;
+    return vec4<f32>(g * g * g, 3.0 * f3 - 6.0 * f2 + 4.0, -3.0 * f3 + 3.0 * f2 + 3.0 * f + 1.0, f3) / 6.0;
+}
+
+// The world's varyings: four floats and a pair, from its ground_vertex to
+// its ground_fragment.
+pub struct GroundVarying {
+    a: vec4<f32>,
+    uv: vec2<f32>,
+}
+
+// A fragment of the ground, as the hook's vertex left it.
+pub struct GroundFrag {
+    tex: vec2<f32>,       // the detail layer's texel coordinate (texel t centred at t)
+    skirt: f32,           // 1 on a skirt's bottom
+    height: f32,          // the cell's height above the radius (the position layer's w)
+    up: vec3<f32>,        // away from the planet's centre (not unit)
+    q: vec3<f32>,         // the point modulo DETAIL_PERIOD, good to micrometres near the eye
+    far: vec3<f32>,       // and modulo FAR_PERIOD
+    light: vec4<f32>,     // what the world's ground_sky made of the light (lit)
+    bent: vec3<f32>,      // how the sky's mean direction turns from the normal
+    slot: i32,            // the tile's slot and level
+    level: i32,
+    footprint: f32,       // metres a pixel spans in q
+    pos: vec3<f32>,       // the point, camera-relative
+    world: GroundVarying,
+}
+pub fn ground_frag(v: mesh::Vertex) -> GroundFrag {
+    let q = v.v2.xyz;
+    return GroundFrag {
+        tex: v.v0.xy, skirt: v.v0.z < -0.5 ? 1.0 : 0.0, height: v.v0.w, up: v.v1.xyz, q: q, far: v.v3.xyz,
+        light: v.v4, bent: v.v5.xyz, slot: v.vi.x, level: v.vi.y,
+        footprint: max(length(dpdx(q)), length(dpdy(q))), pos: v.world_pos,
+        world: GroundVarying { a: vec4<f32>(v.v1.w, v.v2.w, v.v3.w, v.v5.w), uv: v.uv },
+    };
+}
+
+// The light the vertex saw, on a surface the world has shaded: the sun's
+// share, the sky's (times the world's `sky_share` of it at the pixel), the
+// occluders' and the sun scattered down shadowless, and the sky's bent
+// normal. A world's ground_fragment calls it once its normal is set.
+pub fn lit(g: GroundFrag, s_in: mesh::Surface, sky_share: f32) -> mesh::Surface {
+    var s = s_in;
+    s.sun_visibility *= g.light.x;
+    s.sky_visibility *= g.light.y * sky_share;
+    s.occluder_sun *= g.light.z;
+    s.sun_diffuse = g.light.w;
+    s.sky_normal = normalize(s.normal + g.bent);
+    return s;
+}
+
+// The camera, about the planet's centre (hi + lo).
+pub fn camera() -> vec3<f32> {
+    return params.cam_hi + params.cam_lo;
+}

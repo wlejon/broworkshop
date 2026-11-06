@@ -41,6 +41,16 @@ export const TILE_LAYOUT = { TILE, BORDER, CELLS, DETAIL, TEXELS, HZ, HZ_GRID, C
 const CORE_MODULES = { 'planet::anchor': readApp('core/anchor.bk'), 'planet::layers': readApp('core/layers.bk'),
                        'planet::noise': readApp('core/noise.bk'), tiles: bro.tiles.module };
 
+// The module planet::ground_params: the ground hook's uniform block, its
+// fields [name, type] in order, at the one uniform binding (4, 0).
+function groundParams(fields) {
+    const src = 'module planet::ground_params;\n\npub struct Params {\n' +
+        fields.map(([name, type]) => `    ${name}: ${type},\n`).join('') +
+        '}\n@binding(4, 0) pub var params: uniform<Params>;\n';
+    bro.kernel.registerModule('planet::ground_params', src);
+    return src;
+}
+
 // Start the planet of `world` (core/world.js) on the page's #stage canvas.
 export function startPlanet(world) {
     checkWorld(world);
@@ -171,12 +181,20 @@ export function startPlanet(world) {
         ...w.ground.layout,
     });
 
+    // The hook's one uniform block: the core's fields, then the world's
+    // (its ground.params, [name, type] in order), which the world's systems
+    // set by name (ground.setShaderUniform).
+    const GROUND_PARAMS = groundParams([['cam_hi', 'vec3<f32>'], ['cam_lo', 'vec3<f32>'], ['to_sun', 'vec3<f32>'],
+                                        ...w.ground.params]);
+
+    const groundModules = { tiles: bro.tiles.module, 'planet::ground_layout': GROUND_LAYOUT, 'planet::ground_params': GROUND_PARAMS,
+                            'planet::ground_core': readApp('core/ground_core.bk'), 'planet::noise': modules['planet::noise'],
+                            ...w.ground.modules };
     let ground = null;
     ground = scene.createInstancedMesh({
         mesh: patchMesh(), color: [1, 1, 1],
         castsShadow: false, receivesShadow: false, doubleSided: true,
-        module: readApp('core/ground_mesh.bk'), file: 'core/ground_mesh.bk',
-        modules: { tiles: bro.tiles.module, 'planet::ground_layout': GROUND_LAYOUT, ...w.ground.modules },
+        module: readApp('core/ground_mesh.bk'), file: 'core/ground_mesh.bk', modules: groundModules,
     });
     ground.cullMargin = 4 * RADIUS;   // the shader places tiles; the cache culls them
     makeCache(Number(document.querySelector('#detail').value));
@@ -388,7 +406,10 @@ export function startPlanet(world) {
 
     // For tests and tools: the core's handles and the world's (Earth's
     // clouds, grass, trees and rivers).
-    globalThis.planet = Object.defineProperties({ cam, setHour, ground, makeCache, groundHeight, frame, reload, world, kAnchors }, {
+    // groundModules: the ground hook's modules by name, as given to it (an
+    // A/B's set B names what it replaces: perf.compareShaders).
+    globalThis.planet = Object.defineProperties({ cam, setHour, ground, groundModules, makeCache, groundHeight, frame, reload,
+                                                  world, kAnchors }, {
         cache: { get: () => cache, enumerable: true },
         stats: { get: () => lastStats, enumerable: true },
         lastView: { get: () => lastView, enumerable: true },
