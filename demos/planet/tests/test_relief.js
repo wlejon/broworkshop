@@ -4,7 +4,7 @@
 // supersimplex3d in f64 at the same point, and a gradient that matches its
 // finite differences, far from the origin too.
 //   Run: scripts/validate.sh demos/planet/tests/test_relief.js
-import { check, test, done } from "/lib/kit/test.js";
+import { check, test, done, tier } from "/lib/kit/test.js";
 
 const fs = require('fs');
 const readApp = (path) => fs.readFileSync(bro.resolvePath('/app/' + path), 'utf-8');
@@ -21,7 +21,7 @@ const rnd = () => { seed = (seed * 16807) % 2147483647; return seed / 2147483647
 for (const scale of [16, 4096, 5.5e6]) {
     test(`simplex_grad matches supersimplex3d at |q| ~ ${scale}`, () => {
         let worstV = 0, worstG = 0, gsum = 0;
-        const n = 200, h = 1e-3;
+        const n = tier(40, 200), h = 1e-3;
         for (let i = 0; i < n; i++) {
             const q = [(rnd() * 2 - 1) * scale, (rnd() * 2 - 1) * scale, (rnd() * 2 - 1) * scale];
             const o = [(rnd() * 2 - 1) * 3, (rnd() * 2 - 1) * 3, (rnd() * 2 - 1) * 3];

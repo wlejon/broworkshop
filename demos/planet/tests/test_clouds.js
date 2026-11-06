@@ -5,7 +5,7 @@
 // logistic over its unresolved variance). And the ground's light cache
 // holds, where a tile is drawn, what the light is at that point.
 //   Run: scripts/validate.sh demos/planet
-import { check, frames, test, done } from "/lib/kit/test.js";
+import { check, frames, test, done, tier } from "/lib/kit/test.js";
 import { GROUND_LIGHT, CLOUD_DETAIL_VAR } from "/app/clouds.js";
 
 const fs = require('fs');
@@ -19,13 +19,18 @@ const kColumn = mod.kernel('k_column'), kLight = mod.kernel('k_ground_light');
 const RADIUS = 6371000, SEED = 7;
 const sigmoid = (x) => 1 / (1 + Math.exp(-x));
 const norm = (a) => { const l = Math.hypot(a[0], a[1], a[2]); return [a[0] / l, a[1] / l, a[2] / l]; };
-const column = (d, w) => [kColumn.run(1, d[0], d[1], d[2], w, RADIUS, 0)[0], kColumn.run(1, d[0], d[1], d[2], w, RADIUS, 1)[0]];
+const col2 = new Float64Array(2);
+const column = (d, w) => {
+    kColumn.run(1, d[0], d[1], d[2], 0, 0, 0, 0, 0, 0, 1, w, RADIUS, 0, col2);
+    return [col2[0], col2[1]];
+};
 // A tangent frame at d, its axes `a` radians long.
-function frame(d, a) {
-    const t = norm(Math.abs(d[1]) < 0.9 ? [d[2], 0, -d[0]] : [0, -d[2], d[1]]);
-    const b = [d[1] * t[2] - d[2] * t[1], d[2] * t[0] - d[0] * t[2], d[0] * t[1] - d[1] * t[0]];
-    return (s, u) => norm([0, 1, 2].map((c) => d[c] + (t[c] * s + b[c] * u) * a));
+function frameAxes(d, a) {
+    const t0 = norm(Math.abs(d[1]) < 0.9 ? [d[2], 0, -d[0]] : [0, -dir0(d), d[1]]);
+    const b0 = [d[1] * t0[2] - d[2] * t0[1], d[2] * t0[0] - d[0] * t0[2], d[0] * t0[1] - d[1] * t0[0]];
+    return { d, t: t0.map((x) => x * a), b: b0.map((x) => x * a) };
 }
+function dir0(d) { return d[2]; }
 
 test('every footprint agrees with the finest within what it leaves unresolved', () => {
     for (const d of [norm([0.3, 0.8, 0.5]), norm([-0.7, 0.1, 0.7]), norm([0.2, -0.9, -0.4])]) {
@@ -42,17 +47,19 @@ test('every footprint agrees with the finest within what it leaves unresolved', 
 // Over patches `span` metres across about several points (one patch holds
 // too few clouds to say), so the comparison is of expectations.
 test('fine footprints count the cover a coarse one predicts', () => {
-    const points = [[0.3, 0.8, 0.5], [-0.7, 0.1, 0.7], [0.2, -0.9, -0.4], [0.9, -0.2, 0.3], [-0.4, -0.5, -0.8], [0.1, 0.4, -0.9]];
+    const allPoints = [[0.3, 0.8, 0.5], [-0.7, 0.1, 0.7], [0.2, -0.9, -0.4], [0.9, -0.2, 0.3], [-0.4, -0.5, -0.8], [0.1, 0.4, -0.9]];
+    const points = allPoints.slice(0, tier(3, 6));
+    const n = tier(32, 64), m = 16;
+    const coarseBuf = new Float64Array(m * m * 2);
     for (const [wf, wc] of [[100, 6400], [400, 25600], [1600, 51200]]) {
         const span = 16 * wc;
         let cover = 0, predicted = 0;
-        const n = 64, m = 16;
         for (const p of points) {
-            const at = frame(norm(p), span / RADIUS);
-            for (let j = 0; j < n; j++) for (let i = 0; i < n; i++)
-                if (column(at((i + 0.5) / n - 0.5, (j + 0.5) / n - 0.5), wf)[0] > 0.02) cover++;
-            for (let j = 0; j < m; j++) for (let i = 0; i < m; i++) {
-                const [F, V] = column(at((i + 0.5) / m - 0.5, (j + 0.5) / m - 0.5), wc);
+            const { d, t, b } = frameAxes(norm(p), span / RADIUS);
+            cover += kColumn.run(1, d[0], d[1], d[2], t[0], t[1], t[2], b[0], b[1], b[2], n, wf, RADIUS, 0, col2)[0];
+            kColumn.run(1, d[0], d[1], d[2], t[0], t[1], t[2], b[0], b[1], b[2], m, wc, RADIUS, 1, coarseBuf);
+            for (let k = 0; k < m * m; k++) {
+                const F = coarseBuf[k * 2], V = coarseBuf[k * 2 + 1];
                 predicted += sigmoid(1.7 * (F - 0.02) / Math.sqrt(V + 1e-5));
             }
         }
@@ -65,13 +72,18 @@ test('fine footprints count the cover a coarse one predicts', () => {
 
 test("the ground's light cache holds the light where its tiles are", () => {
     Object.assign(planet.cam, { lat: 0.45, lon: 0.3, alt: 2000, pitch: -20, heading: 0 });
-    perf.settle({ held: false });
     const g = planet.clouds.ground, sun = planet.clouds.sun;
+    for (let i = 0, quiet = 0; i < 600 && quiet < 6; i++) {
+        frames(1);
+        quiet = i >= 4 && g.pending === 0 ? quiet + 1 : 0;
+    }
     const cells = GROUND_LIGHT.tile + 2 * GROUND_LIGHT.border;
     const pool = g.layer('light').read(new Uint32Array(g.capacity * cells * cells));
     const errors = [];
     const drawn = g.drawn;
-    for (let k = 0; k < drawn.length; k += Math.max(1, Math.floor(drawn.length / 40))) {
+    const sampleCount = tier(16, 40);
+    const truth = new Float64Array(3);
+    for (let k = 0; k < drawn.length; k += Math.max(1, Math.floor(drawn.length / sampleCount))) {
         const t = drawn[k];
         // The tile's centre, between its four central cells.
         const c0 = GROUND_LIGHT.border + GROUND_LIGHT.tile / 2 - 1;
@@ -87,9 +99,9 @@ test("the ground's light cache holds the light where its tiles are", () => {
         const u = uv[0] || 0, v = uv[1] || 0;
         const stretch = Math.sqrt(1 + Math.max(u * u, v * v)) / (1 + u * u + v * v);
         const w = 2 * RADIUS * (2 / 2 ** t.level / GROUND_LIGHT.tile) * stretch;
+        kLight.run(1, d[0], d[1], d[2], w, sun[0], sun[1], sun[2], RADIUS, SEED, CLOUD_DETAIL_VAR, 0, truth);
         for (let ch = 0; ch < 3; ch++) {
-            const truth = kLight.run(1, d[0], d[1], d[2], w, sun[0], sun[1], sun[2], RADIUS, SEED, CLOUD_DETAIL_VAR, ch)[0];
-            errors.push(Math.abs(held[ch] - truth));
+            errors.push(Math.abs(held[ch] - truth[ch]));
         }
     }
     errors.sort((a, b) => a - b);

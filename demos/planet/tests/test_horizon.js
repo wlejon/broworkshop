@@ -7,7 +7,7 @@
 // often a sun at LOW degrees is lit by one and shadowed by the other, which
 // with the bias it holds.
 //   Run: scripts/validate.sh demos/planet/tests/test_horizon.js
-import { check, frames, test, done } from "/lib/kit/test.js";
+import { check, frames, test, done, tier } from "/lib/kit/test.js";
 
 const fs = require('fs');
 const readApp = (path) => fs.readFileSync(bro.resolvePath('/app/' + path), 'utf-8');
@@ -16,7 +16,7 @@ const mod = bro.kernel.compile(readApp('tests/measure.bk'),
                                                                 'planet::anchor': readApp('anchor.bk'), 'planet::climate': readApp('climate.bk'), 'planet::dendry': readApp('dendry.bk'), tiles: bro.tiles.module } });
 // The drainage network the app built (rivers.js), which the ground carves.
 const NET = planet.rivers.cpu;
-const kTruth = mod.kernel('k_horizon_truth');
+const kTruthPoint = mod.kernel('k_horizon_truth');
 const RADIUS = 6371000, SEED = 7, BASE_WAVELENGTH = 2400000;
 const TILE = 32, BORDER = 2, C = TILE + 2 * BORDER, N = C / 2;
 const REACH = 300000, LOW = 6;
@@ -47,7 +47,7 @@ test('horizons follow the ground', () => {
     const angle = (a, b) => Math.acos(Math.min(1, a[0] * b[0] + a[1] * b[1] + a[2] * b[2]));
 
     // Spread the sample over the levels drawn: up to 6 tiles a level, 4
-    // points a tile.
+    // points a tile (2 tiles, 2 points in quick tier).
     const byLevel = new Map();
     for (const t of drawn) {
         if (!byLevel.has(t.level)) byLevel.set(t.level, []);
@@ -57,13 +57,15 @@ test('horizons follow the ground', () => {
     const rnd = (n) => { seed = (seed * 16807) % 2147483647; return seed % n; };
     const rows = [];
     let all = [], flips = 0, lows = 0;
+    const tilesPerLevel = tier(2, 6), pointsPerTile = tier(2, 4);
+    const tks = new Float64Array(8 * 3), truths = new Float64Array(16);
     for (const [level, tiles] of [...byLevel].sort((a, b) => a[0] - b[0])) {
         const errs = [], farErrs = [];
-        for (let k = 0; k < Math.min(6, tiles.length); k++) {
+        for (let k = 0; k < Math.min(tilesPerLevel, tiles.length); k++) {
             const t = tiles[rnd(tiles.length)];
             const extent = RADIUS * angle(dirAt(t, BORDER, C / 2), dirAt(t, BORDER + TILE, C / 2));
             const cell = extent / TILE, octaves = octavesFor(extent) + 1;
-            for (let p = 0; p < 4; p++) {
+            for (let p = 0; p < pointsPerTile; p++) {
                 const gx = 1 + rnd(N - 2), gy = 1 + rnd(N - 2);
                 const dir = dirAt(t, 2 * gx, 2 * gy);
                 // The grid's axes on the tangent plane: direction k is cos * gu + sin * gv.
@@ -77,16 +79,21 @@ test('horizons follow the ground', () => {
                 const at = ((t.slot * N + gy) * N + gx) * 16;
                 for (let d = 0; d < 8; d++) {
                     const ang = d * Math.PI / 4, c = Math.cos(ang), s = Math.sin(ang);
-                    const tk = [gu[0] * c + gv[0] * s, gu[1] * c + gv[1] * s, gu[2] * c + gv[2] * s];
+                    tks[d * 3] = gu[0] * c + gv[0] * s;
+                    tks[d * 3 + 1] = gu[1] * c + gv[1] * s;
+                    tks[d * 3 + 2] = gu[2] * c + gv[2] * s;
+                }
+                kTruthPoint.run(1, dir[0], dir[1], dir[2], tks, cell, REACH, RATIO, FILTER,
+                                RADIUS, octaves, SEED, NET, truths);
+                for (let d = 0; d < 8; d++) {
                     const word = hz[at + (d >> 1)];
                     const stored = ((d & 1 ? word >>> 16 : word & 65535) / 65535) * 2 - 1;
-                    const truth = kTruth.run(1, dir[0], dir[1], dir[2], tk[0], tk[1], tk[2], cell, REACH, RATIO, FILTER,
-                                              RADIUS, octaves, SEED, NET)[0];
+                    const truth = truths[d];
                     const e = (Math.asin(stored) - Math.asin(truth)) * DEG;
                     errs.push(e);
                     const fw = hz[at + 4 + d];
                     const storedFar = ((fw & 65535) / 65535) * 2 - 1;
-                    const truthFar = kTruth.run(1, dir[0], dir[1], dir[2], tk[0], tk[1], tk[2], cell * 8, REACH, RATIO, FILTER, RADIUS, octaves, SEED, NET)[0];
+                    const truthFar = truths[8 + d];
                     farErrs.push((Math.asin(storedFar) - Math.asin(truthFar)) * DEG);
                     const sun = Math.sin(LOW / DEG);
                     if ((stored < sun) !== (truth < sun)) flips++;
@@ -119,4 +126,4 @@ test('horizons follow the ground', () => {
     check(flips / lows < 0.045, `sun at ${LOW} deg disagrees ${(100 * flips / lows).toFixed(1)}%`);
 });
 
-done();
+done('planet horizon');

@@ -6,7 +6,7 @@
 // cover it. The bias (a systematic shift) must be near zero; the spread is
 // the detail the finer cells add, zero-mean, and must stay small.
 //   Run: scripts/validate.sh demos/planet/tests/test_refine.js
-import { check, test, done } from "/lib/kit/test.js";
+import { check, test, done, tier } from "/lib/kit/test.js";
 
 const fs = require('fs');
 const readApp = (path) => fs.readFileSync(bro.resolvePath('/app/' + path), 'utf-8');
@@ -23,10 +23,13 @@ let seed = 12345;
 const rnd = () => { seed = (seed * 16807) % 2147483647; return seed / 2147483647; };
 const norm = (a) => { const l = Math.hypot(a[0], a[1], a[2]); return [a[0] / l, a[1] / l, a[2] / l]; };
 
+const gndBuf = new Float64Array(7);
+const colBuf = new Float64Array(4);
+
 // A cell `size` (in units of `a`) about (s, t) of the frame (dir; t, b).
 const cell = (dir, t, b, s, tt, size, octaves) =>
     kCell.run(1, dir[0] + t[0] * s + b[0] * tt, dir[1] + t[1] * s + b[1] * tt, dir[2] + t[2] * s + b[2] * tt,
-               t[0], t[1], t[2], b[0], b[1], b[2], size, RADIUS, octaves, SEED, NET)[0];
+               t[0], t[1], t[2], b[0], b[1], b[2], 1, size, RADIUS, octaves, SEED, NET, gndBuf)[0];
 
 function patch(dir, coarse) {
     // The frame: tangent axes scaled to one coarse cell, so the coarse cell
@@ -35,18 +38,15 @@ function patch(dir, coarse) {
     const t0 = norm(Math.abs(dir[1]) < 0.9 ? [dir[2], 0, -dir[0]] : [0, -dir[2], dir[1]]);
     const b0 = [dir[1] * t0[2] - dir[2] * t0[1], dir[2] * t0[0] - dir[0] * t0[2], dir[0] * t0[1] - dir[1] * t0[0]];
     const t = t0.map((x) => x * a), b = b0.map((x) => x * a);
-    const N = 8;
-    let sum = 0;
-    for (let j = 0; j < N; j++)
-        for (let i = 0; i < N; i++)
-            sum += cell(dir, t, b, (i + 0.5) / N - 0.5, (j + 0.5) / N - 0.5, 1 / N, coarse + 3);
-    return { fine: sum / (N * N), coarse: cell(dir, t, b, 0, 0, 1, coarse) };
+    const fine = kCell.run(1, dir[0], dir[1], dir[2], t[0], t[1], t[2], b[0], b[1], b[2], 8, 1 / 8, RADIUS, coarse + 3, SEED, NET, gndBuf)[0];
+    const c = kCell.run(1, dir[0], dir[1], dir[2], t[0], t[1], t[2], b[0], b[1], b[2], 1, 1, RADIUS, coarse, SEED, NET, gndBuf)[0];
+    return { fine, coarse: c };
 }
 
 for (const coarse of [1.5, 3.5, 6.5, 9.5]) {
     test(`a ${coarse}-octave cell is the average of the cells three octaves finer`, () => {
         let bias = 0, sq = 0, range = 0;
-        const n = 40;
+        const n = tier(12, 40);
         for (let k = 0; k < n; k++) {
             const p = patch(norm([rnd() * 2 - 1, rnd() * 2 - 1, rnd() * 2 - 1]), coarse);
             bias += p.fine - p.coarse;
@@ -67,21 +67,47 @@ for (const coarse of [1.5, 3.5, 6.5, 9.5]) {
 // to snow, coasts to sea); the mean colour of the truth under it must not.
 // The naive colour is measured the same way, to show what is gained.
 const TRUTH = Math.log2(BASE_WAVELENGTH / (2.5 * RADIUS * Math.PI / 2 / 2 ** 22 / 32));
-const colorAt = (dir, t, b, s, tt, size, octaves, ch, naive) =>
-    kCellColor.run(1, dir[0] + t[0] * s + b[0] * tt, dir[1] + t[1] * s + b[1] * tt, dir[2] + t[2] * s + b[2] * tt,
-                    t[0], t[1], t[2], b[0], b[1], b[2], size, RADIUS, octaves, TRUTH, SEED, ch, naive, NET)[0];
+function evalCellColors(cx, cy, cz, t, b, size, octaves) {
+    kCell.run(1, cx, cy, cz, t[0], t[1], t[2], b[0], b[1], b[2], 0, size, RADIUS, octaves, SEED, NET, gndBuf);
+    kCellColor.run(1, cx, cy, cz, t[0], t[1], t[2], b[0], b[1], b[2], size, RADIUS, octaves, TRUTH, SEED, 0, 0, gndBuf, colBuf);
+    return [colBuf[0], colBuf[1], colBuf[2], colBuf[3]];
+}
 
-function colorPatch(dir, coarse, ch, naive) {
+function colorPatch4(dir, coarse) {
     const a = BASE_WAVELENGTH / (2.5 * Math.pow(2, coarse)) / RADIUS;
     const t0 = norm(Math.abs(dir[1]) < 0.9 ? [dir[2], 0, -dir[0]] : [0, -dir[2], dir[1]]);
     const b0 = [dir[1] * t0[2] - dir[2] * t0[1], dir[2] * t0[0] - dir[0] * t0[2], dir[0] * t0[1] - dir[1] * t0[0]];
     const t = t0.map((x) => x * a), b = b0.map((x) => x * a);
-    const N = 4;
-    let sum = 0;
-    for (let j = 0; j < N; j++)
-        for (let i = 0; i < N; i++)
-            sum += colorAt(dir, t, b, (i + 0.5) / N - 0.5, (j + 0.5) / N - 0.5, 1 / N, coarse + 2, ch, naive);
-    return { fine: sum / (N * N), coarse: colorAt(dir, t, b, 0, 0, 1, coarse, ch, naive) };
+    const n = 4;
+    const fine = [0, 0, 0, 0];
+    for (let j = 0; j < n; j++) {
+        for (let i = 0; i < n; i++) {
+            const s = (i + 0.5) / n - 0.5, tt = (j + 0.5) / n - 0.5;
+            const c = evalCellColors(dir[0] + t[0] * s + b[0] * tt, dir[1] + t[1] * s + b[1] * tt, dir[2] + t[2] * s + b[2] * tt,
+                                     t, b, 1 / n, coarse + 2);
+            for (let k = 0; k < 4; k++) fine[k] += c[k] / (n * n);
+        }
+    }
+    const coarseCols = evalCellColors(dir[0], dir[1], dir[2], t, b, 1, coarse);
+    return { fine, coarse: coarseCols };
+}
+
+function varyPatch(dir, coarse) {
+    const a = BASE_WAVELENGTH / (2.5 * Math.pow(2, coarse)) / RADIUS;
+    const t0 = norm(Math.abs(dir[1]) < 0.9 ? [dir[2], 0, -dir[0]] : [0, -dir[2], dir[1]]);
+    const b0 = [dir[1] * t0[2] - dir[2] * t0[1], dir[2] * t0[0] - dir[0] * t0[2], dir[0] * t0[1] - dir[1] * t0[0]];
+    const t = t0.map((x) => x * a), b = b0.map((x) => x * a);
+    const n = 4;
+    let fine = 0;
+    for (let j = 0; j < n; j++) {
+        for (let i = 0; i < n; i++) {
+            const s = (i + 0.5) / n - 0.5, tt = (j + 0.5) / n - 0.5;
+            fine += kCellColor.run(1, dir[0] + t[0] * s + b[0] * tt, dir[1] + t[1] * s + b[1] * tt, dir[2] + t[2] * s + b[2] * tt,
+                                   t[0], t[1], t[2], b[0], b[1], b[2], 1 / n, RADIUS, coarse + 2, TRUTH, SEED, 2, 0, gndBuf, colBuf)[0];
+        }
+    }
+    const c = kCellColor.run(1, dir[0], dir[1], dir[2], t[0], t[1], t[2], b[0], b[1], b[2], 1, RADIUS, coarse, TRUTH, SEED, 2, 0, gndBuf, colBuf)[0];
+    return { fine: fine / (n * n), coarse: c };
 }
 
 // Most of the planet is open sea or flat lowland, one colour at every
@@ -89,13 +115,13 @@ function colorPatch(dir, coarse, ch, naive) {
 // in the mountains.
 function places(coarse, n) {
     const out = [];
+    let coast = 0;
     const a = BASE_WAVELENGTH / (2.5 * Math.pow(2, coarse)) / RADIUS;
     for (let tries = 0; out.length < n && tries < 20000; tries++) {
         const dir = norm([rnd() * 2 - 1, rnd() * 2 - 1, rnd() * 2 - 1]);
         const t = norm(Math.abs(dir[1]) < 0.9 ? [dir[2], 0, -dir[0]] : [0, -dir[2], dir[1]]).map((x) => x * a);
-        const h = kCell.run(1, dir[0], dir[1], dir[2], t[0], t[1], t[2], 0, 0, 0, 1, RADIUS, coarse, SEED, NET)[0];
-        const coast = out.filter((p) => p.coast).length;
-        if (Math.abs(h) < 150 && coast < n / 2) out.push({ dir, coast: true });
+        const h = cell(dir, t, [0, 0, 0], 0, 0, 1, coarse);
+        if (Math.abs(h) < 150 && coast < n / 2) { out.push({ dir, coast: true }); coast++; }
         else if (h > 2200 && out.length - coast < n / 2) out.push({ dir, coast: false });
     }
     return out.map((p) => p.dir);
@@ -110,21 +136,22 @@ function places(coarse, n) {
 // (a crest a hundred metres high across a snow line), which the height
 // checks above measure; the colour model can only take the height it is
 // given.
-const PATCHES = 120;
+const PATCHES = tier(30, 120);
 for (const coarse of [3.5, 6.5, 9.5]) {
     test(`a ${coarse}-octave cell's colour is the mean of the cells two octaves finer`, () => {
         seed = 777;
         const where = places(coarse, PATCHES);
         check(where.length === PATCHES, `found coasts and mountains to measure (${where.length})`);
+        const patches = where.map((dir) => colorPatch4(dir, coarse));
         for (const [ch, what] of [[0, 'luminance'], [1, 'water']]) {
             const stats = [0, 1].map((naive) => {
                 let bias = 0, sq = 0, abs = 0;
-                const n = where.length;
-                for (const dir of where) {
-                    const p = colorPatch(dir, coarse, ch, naive);
-                    bias += p.fine - p.coarse;
-                    sq += (p.fine - p.coarse) ** 2;
-                    abs += Math.abs(p.fine - p.coarse);
+                const n = patches.length, idx = naive * 2 + ch;
+                for (const p of patches) {
+                    const diff = p.fine[idx] - p.coarse[idx];
+                    bias += diff;
+                    sq += diff * diff;
+                    abs += Math.abs(diff);
                 }
                 return { bias: bias / n, rms: Math.sqrt(sq / n), mae: abs / n };
             });
@@ -149,10 +176,10 @@ for (const coarse of [3.5, 6.5, 9.5]) {
 for (const coarse of [6.5, 12.5, 18.5]) {
     test(`a ${coarse}-octave cell's albedo variation is the mean of the cells two octaves finer`, () => {
         seed = 909;
-        const n = 120;
+        const n = tier(30, 120);
         let bias = 0, sq = 0, mean = 0;
         for (let k = 0; k < n; k++) {
-            const p = colorPatch(norm([rnd() * 2 - 1, rnd() * 2 - 1, rnd() * 2 - 1]), coarse, 2, 0);
+            const p = varyPatch(norm([rnd() * 2 - 1, rnd() * 2 - 1, rnd() * 2 - 1]), coarse);
             bias += p.fine - p.coarse;
             sq += (p.fine - p.coarse) ** 2;
             mean += p.coarse;

@@ -18,6 +18,7 @@
 #   --list           print the selected targets with their tags and exit
 #
 # Options:
+#   --quick          run quick test tier (BRO_TEST_QUICK=1, 20 smoke frames)
 #   --timeout N      per-run timeout in seconds (overrides tags/defaults)
 #   --frames N       frames the smoke advances (default 60, 16 ms each)
 #   --shots          smoke saves tests/out/shots/<app>.png
@@ -45,13 +46,14 @@ set -u
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT" || exit 2
 
-ONLY_REG=0 DO_SMOKE=0 DO_TESTS=0 WANT_ML=0 ONLY_ML=0 WANT_NET=0 LIST=0 QUIET=0 SHOTS=0
-FRAMES=60 TIMEOUT_OVERRIDE="" OUT="tests/out" COMPARE="" NO_COMPARE=0 WRITE_BASELINE=""
+ONLY_REG=0 DO_SMOKE=0 DO_TESTS=0 WANT_ML=0 ONLY_ML=0 WANT_NET=0 LIST=0 QUIET=0 SHOTS=0 QUICK=0
+FRAMES=60 FRAMES_SET=0 TIMEOUT_OVERRIDE="" OUT="tests/out" COMPARE="" NO_COMPARE=0 WRITE_BASELINE=""
 GLOBS=()
 while [ $# -gt 0 ]; do
     case "$1" in
         --smoke) DO_SMOKE=1 ;;
         --tests) DO_TESTS=1 ;;
+        --quick) QUICK=1; export BRO_TEST_QUICK=1 ;;
         --ml) WANT_ML=1 ;;
         --only-ml) WANT_ML=1; ONLY_ML=1 ;;
         --net) WANT_NET=1 ;;
@@ -59,18 +61,20 @@ while [ $# -gt 0 ]; do
         --shots) SHOTS=1 ;;
         -q) QUIET=1 ;;
         --timeout) TIMEOUT_OVERRIDE="$2"; shift ;;
-        --frames) FRAMES="$2"; shift ;;
+        --frames) FRAMES="$2"; FRAMES_SET=1; shift ;;
         --out) OUT="$2"; shift ;;
         --compare) COMPARE="$2"; shift ;;
         --no-compare) NO_COMPARE=1 ;;
         --write-baseline) WRITE_BASELINE="$2"; shift ;;
         --regressions) ONLY_REG=1 ;;
-        -h|--help) sed -n '2,42p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+        -h|--help) sed -n '2,43p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
         -*) echo "validate.sh: unknown option $1" >&2; exit 2 ;;
         *) GLOBS+=("${1%/}") ;;
     esac
     shift
 done
+[ "${BRO_TEST_QUICK:-0}" = 1 ] && QUICK=1
+[ $QUICK = 1 ] && [ $FRAMES_SET = 0 ] && FRAMES=20
 [ $DO_SMOKE = 0 ] && [ $DO_TESTS = 0 ] && { DO_SMOKE=1; DO_TESTS=1; }
 
 # --- engine binary ----------------------------------------------------------
