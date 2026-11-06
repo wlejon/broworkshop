@@ -203,10 +203,6 @@ function setHour(hour) {
 // A touch under the meter: the land's colour reads richer than metered
 // grey, as a photographer exposes a landscape.
 scene.setExposure({ mode: 'auto', meter: 'incident', compensation: -0.6 });
-// Water mirrors its banks: screen-space reflections out to 600 m (the
-// engine weighs them by Fresnel at the angle the water is seen at and skips
-// rough ground).
-scene.setSSR({ enabled: true, maxDistance: 600, steps: 64, thickness: 20 });
 // The planet's center moves with the camera (the scene is camera-relative):
 // frame() sets it. A clear day's haze; the ground's average albedo lights
 // the air from below.
