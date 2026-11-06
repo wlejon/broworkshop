@@ -1,159 +1,153 @@
-// The deer's body, sculpted in code in the rest pose: a barrel trunk, a
-// neck rising from the chest, a long-muzzled head with big ears, a short
-// flagging tail, and slender legs ending in split hooves. Coat: tawny above,
-// cream underneath and inside the legs, a white throat patch and tail
-// underside, a dark muzzle.
+// The deer's body, sculpted in code in the rest pose: a white-tailed deer
+// of 0.95 m at the withers (skeleton.js).
+//
+// The proportions, from white-tailed deer, as the reasons for the shapes:
+//   withers (scapula top + skin)   0.97 m; the croup level with it
+//   chest depth (withers to the    0.41 m, 43% of the withers height, so the
+//     floor behind the elbows)     legs under the chest are 1.35x its depth
+//   heart girth                    0.98 m: girth-weight tables give 0.94 to
+//                                  1.0 m for the 75 to 85 kg a deer this tall
+//                                  weighs (0.84 m is a 55 kg doe of 0.85 m)
+//   chest width                    0.24 m behind the elbows, 0.28 m across
+//                                  the arms: a deep, narrow section, its
+//                                  sides full down to the elbows
+//   belly line                     rising 7 cm from the girth to the flank
+//   haunches                       0.25 m across, full down to the stifle
+//   trunk, point of shoulder to    1.06 m, 1.1x the withers height; brisket
+//     point of buttock             to buttock 1.29 m
+//   neck                           0.30 m deep where it leaves the chest,
+//                                  0.17 m at mid neck, 0.13 m at the throat
+//   head                           0.29 m, ears 0.15 m, tail 0.2 m
+//
+// The trunk carries the shoulders and the thighs in its own skin: a hand
+// drawn weight field gives the skin over each scapula, upper arm and thigh
+// to that bone and the rest to the spine, so the blade slides under the
+// skin and the leg swings out of the body instead of a tube ending at its
+// surface. The legs below (legs.js) start inside the trunk.
 
 import { Sculpt } from "/app/lab/sculpt.js";
+import { frontLeg, hindLeg } from "./legs.js";
+import { trunkColor, neckColor, headColor, tailColor, earColor, NOSE, sstep } from "./coat.js";
 
-const COAT = [0.55, 0.37, 0.22];
-const BACK = [0.45, 0.30, 0.18];
-const CREAM = [0.88, 0.82, 0.72];
-const WHITE = [0.95, 0.94, 0.90];
-const MUZZLE = [0.20, 0.15, 0.12];
-const NOSE = [0.05, 0.05, 0.05];
-const HOOF = [0.12, 0.11, 0.10];
-const LEGS = [0.50, 0.36, 0.25];
-
-const mix = (a, b, t) => a.map((x, i) => x + (b[i] - x) * Math.max(0, Math.min(1, t)));
-const sstep = (e0, e1, x) => { const t = Math.max(0, Math.min(1, (x - e0) / (e1 - e0))); return t * t * (3 - 2 * t); };
-
-// The trunk's coat: darker along the back, cream under the belly and
-// between the legs, a white rump patch round the tail.
-function trunkColor(p, n) {
-    let c = mix(COAT, BACK, sstep(0.3, 0.9, n[1]));
-    c = mix(c, CREAM, sstep(-0.25, -0.65, n[1]));
-    c = mix(c, WHITE, sstep(-0.52, -0.6, p[2]) * sstep(0.7, 0.85, p[1]) * sstep(0.08, 0.02, Math.abs(p[0])));
-    return c;
+const sub = (a, b) => [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
+const dot = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+function segDist(p, a, b) {
+    const ab = sub(b, a), t = Math.max(0, Math.min(1, dot(sub(p, a), ab) / dot(ab, ab)));
+    return Math.hypot(p[0] - a[0] - ab[0] * t, p[1] - a[1] - ab[1] * t, p[2] - a[2] - ab[2] * t);
 }
 
-function legColor(front) {
-    return (p, n) => {
-        let c = mix(LEGS, COAT, sstep(0.35, 0.6, p[1]));
-        // Cream on the inner face of the leg.
-        const inner = -Math.sign(p[0]) * n[0];
-        c = mix(c, CREAM, sstep(0.2, 0.7, inner) * sstep(0.7, 0.4, p[1]));
-        if (!front) c = mix(c, CREAM, sstep(0.5, 0.9, -n[2]) * sstep(0.62, 0.5, p[1]) * sstep(0.38, 0.45, p[1]));
-        return c;
+// The trunk's skin weights at rest point p. Each side's scapula, humerus
+// and femur take the skin within a few centimetres of them, fading over
+// 6 to 9 cm; the midline (back, chest floor, belly) stays on the spine,
+// which hands from pelvis to lumbar to thorax along the body.
+function trunkWeights(skel) {
+    const seg = (name) => { const b = skel.bones[skel.index(name)]; return [b.head, b.tail]; };
+    const scap = seg('scapL'), hum = seg('humerusL'), fem = seg('femurL');
+    return (p) => {
+        const sx = Math.abs(p[0]), t = p[0] >= 0 ? 'L' : 'R';
+        const q = [sx, p[1], p[2]];
+        let ws = sstep(0.02, 0.08, sx) * (1 - sstep(0.05, 0.12, segDist(q, ...scap)));
+        let wh = sstep(0.04, 0.09, sx) * (1 - sstep(0.05, 0.11, segDist(q, ...hum)));
+        let wf = sstep(0.03, 0.08, sx) * (1 - sstep(0.07, 0.16, segDist(q, ...fem)));
+        let limb = ws + wh + wf;
+        if (limb > 1) { ws /= limb; wh /= limb; wf /= limb; limb = 1; }
+        const spine = 1 - limb;
+        const a = sstep(-0.24, -0.04, p[2]), b = sstep(0.04, 0.22, p[2]);
+        return [
+            ['pelvis', spine * (1 - a)], ['lumbar', spine * a * (1 - b)], ['thorax', spine * b],
+            [`scap${t}`, ws], [`humerus${t}`, wh], [`femur${t}`, wf],
+        ];
     };
 }
 
-function frontLeg(S, s) {
-    const t = s > 0 ? 'L' : 'R';
-    const x = (v) => v * s;
-    S.loft([
-        { c: [x(0.085), 0.93, 0.32], r: [0.055, 0.10] },
-        { c: [x(0.10), 0.80, 0.38], r: [0.06, 0.10] },
-        { c: [x(0.11), 0.70, 0.41], r: [0.062, 0.088] },
-        { c: [x(0.11), 0.60, 0.375], r: [0.052, 0.074] },
-        { c: [x(0.11), 0.52, 0.335], r: [0.043, 0.056] },
-        { c: [x(0.11), 0.45, 0.336], r: [0.036, 0.046] },
-        { c: [x(0.11), 0.35, 0.341], r: [0.025, 0.030] },
-        { c: [x(0.11), 0.28, 0.345], r: [0.023, 0.030] },
-        { c: [x(0.11), 0.24, 0.346], r: [0.017, 0.022] },
-        { c: [x(0.11), 0.12, 0.351], r: [0.016, 0.020] },
-        { c: [x(0.11), 0.078, 0.355], r: [0.020, 0.023] },
-        { c: [x(0.11), 0.05, 0.37], r: [0.018, 0.020] },
-    ], { bones: [['thorax', 0.5], `scap${t}`, `humerus${t}`, `radius${t}`, `mc${t}`, `fhoof${t}`], segs: 16, hint: [0, 0, 1],
-         color: legColor(true), caps: [true, false] });
-    hoof(S, x(0.11), 0.355, `mc${t}`, `fhoof${t}`);
+// A trunk section: its upper and lower halves superellipses of exponents
+// nt and nb (2 an ellipse, 3 squarer: full sides down to the elbows and the
+// stifles, where the arm and the thigh lie on the body), narrowed toward
+// the spine by kt (the withers' blade).
+function trunkShape(th, u, s) {
+    const [nt, nb, kt] = s;
+    const v = Math.sin(th), c = Math.abs(Math.cos(th));
+    const n = v > 0 ? nt : nb;
+    let f = c > 1e-4 ? Math.pow(1 - Math.pow(Math.abs(v), n), 1 / n) / c : 1;
+    if (v > 0) f *= 1 - kt * Math.pow(v, 1.6);
+    return [f, 1];
 }
 
-function hindLeg(S, s) {
-    const t = s > 0 ? 'L' : 'R';
-    const x = (v) => v * s;
+// A trunk key ring from its z, the back's and the belly's heights and its half width.
+const ring = (z, top, bottom, hw, s, name) => ({ c: [0, (top + bottom) / 2, z], r: [hw, (top - bottom) / 2], s, name });
+
+function trunk(S, skel) {
     S.loft([
-        { c: [x(0.075), 0.84, -0.40], r: [0.07, 0.12] },
-        { c: [x(0.095), 0.73, -0.37], r: [0.075, 0.125] },
-        { c: [x(0.105), 0.63, -0.335], r: [0.064, 0.10] },
-        { c: [x(0.105), 0.555, -0.315], r: [0.05, 0.075] },
-        { c: [x(0.105), 0.49, -0.365], r: [0.042, 0.062] },
-        { c: [x(0.105), 0.42, -0.44], r: [0.03, 0.042] },
-        { c: [x(0.105), 0.365, -0.495], r: [0.023, 0.036] },
-        { c: [x(0.105), 0.31, -0.492], r: [0.018, 0.024] },
-        { c: [x(0.105), 0.16, -0.477], r: [0.016, 0.021] },
-        { c: [x(0.105), 0.078, -0.465], r: [0.020, 0.023] },
-        { c: [x(0.105), 0.05, -0.45], r: [0.018, 0.020] },
-    ], { bones: [['pelvis', 0.6], `femur${t}`, `tibia${t}`, `mt${t}`, `hhoof${t}`], segs: 16, hint: [0, 0, 1],
-         color: legColor(false), caps: [true, false] });
-    hoof(S, x(0.105), -0.465, `mt${t}`, `hhoof${t}`);
+        ring(-0.655, 0.855, 0.705, 0.030, [2.0, 2.0, 0.2]),
+        ring(-0.630, 0.885, 0.640, 0.080, [2.2, 2.2, 0.35]),
+        ring(-0.570, 0.925, 0.600, 0.125, [2.3, 2.6, 0.35], 'rump'),
+        ring(-0.450, 0.968, 0.572, 0.138, [2.2, 3.8, 0.3], 'hip'),
+        ring(-0.310, 0.966, 0.622, 0.124, [2.2, 3.0, 0.3], 'flank'),
+        ring(-0.180, 0.956, 0.600, 0.118, [2.2, 2.2, 0.3], 'waist'),
+        ring(-0.020, 0.956, 0.566, 0.126, [2.2, 2.2, 0.35], 'ribs'),
+        ring(0.160, 0.958, 0.556, 0.120, [2.2, 2.2, 0.42], 'girth'),
+        ring(0.300, 0.982, 0.556, 0.142, [2.1, 3.5, 0.55], 'shoulder'),
+        ring(0.420, 0.955, 0.585, 0.130, [2.1, 3.2, 0.5]),
+        ring(0.500, 0.920, 0.640, 0.095, [2.0, 2.6, 0.4]),
+        ring(0.550, 0.870, 0.700, 0.052, [2.0, 2.2, 0.3]),
+        ring(0.572, 0.810, 0.745, 0.020, [2.0, 2.0, 0.3]),
+    ], { weights: trunkWeights(skel), segs: 40, steps: 4, hint: [0, 1, 0], name: 'trunk',
+         shape: trunkShape, color: trunkColor });
 }
 
-// A cloven hoof: pastern into a dark wedge whose sole sits on the ground.
-function hoof(S, x, z, upper, bone) {
+// The neck: from inside the chest, deep at its base where it meets the
+// brisket and the withers, tapering to the throat under the skull.
+function neck(S) {
     S.loft([
-        { c: [x, 0.06, z + 0.012], r: [0.018, 0.02] },
-        { c: [x, 0.035, z + 0.03], r: [0.021, 0.026] },
-        { c: [x, 0.015, z + 0.045], r: [0.022, 0.028] },
-        { c: [x, 0.004, z + 0.055], r: [0.018, 0.022] },
-    ], { bones: [upper, bone], segs: 14, hint: [0, 0, 1], steps: 2,
-         color: (p) => (p[1] < 0.042 ? HOOF : LEGS) });
+        { c: [0, 0.80, 0.42], r: [0.10, 0.17] },
+        { c: [0, 0.90, 0.50], r: [0.092, 0.15], name: 'neckbase' },
+        { c: [0, 1.00, 0.57], r: [0.072, 0.112] },
+        { c: [0, 1.10, 0.625], r: [0.058, 0.088], name: 'neckmid' },
+        { c: [0, 1.19, 0.67], r: [0.052, 0.074] },
+        { c: [0, 1.265, 0.705], r: [0.048, 0.066] },
+        { c: [0, 1.30, 0.72], r: [0.044, 0.058] },
+    ], { bones: [['thorax', 0.7], 'neck1', 'neck2', 'head'], segs: 24, hint: [0, 0, 1], name: 'neck',
+         color: neckColor, caps: [false, false] });
 }
 
-export function body(skel) {
-    const S = new Sculpt(skel);
-    // Trunk: rump to brisket, deeper than wide, the back narrowing to the spine.
-    S.loft([
-        { c: [0, 0.80, -0.635], r: [0.05, 0.06] },
-        { c: [0, 0.795, -0.60], r: [0.105, 0.105] },
-        { c: [0, 0.785, -0.51], r: [0.145, 0.14] },
-        { c: [0, 0.775, -0.36], r: [0.155, 0.165] },
-        { c: [0, 0.765, -0.17], r: [0.148, 0.17] },
-        { c: [0, 0.76, 0.03], r: [0.158, 0.19] },
-        { c: [0, 0.765, 0.20], r: [0.165, 0.21] },
-        { c: [0, 0.775, 0.34], r: [0.152, 0.205] },
-        { c: [0, 0.79, 0.46], r: [0.12, 0.17] },
-        { c: [0, 0.81, 0.53], r: [0.07, 0.10] },
-    ], { bones: ['pelvis', 'lumbar', 'thorax', ['scapL', 0.55], ['scapR', 0.55], ['femurL', 0.5], ['femurR', 0.5]],
-         weights: 'vertex', segs: 36, steps: 4, hint: [0, 1, 0],
-         shape: (th) => [1 - 0.22 * Math.pow(Math.max(0, Math.sin(th)), 3), 1],
-         color: trunkColor });
-    // Neck: from inside the chest up to the back of the skull.
-    S.loft([
-        { c: [0, 0.82, 0.40], r: [0.11, 0.15] },
-        { c: [0, 0.90, 0.50], r: [0.088, 0.125] },
-        { c: [0, 1.00, 0.585], r: [0.072, 0.10] },
-        { c: [0, 1.10, 0.645], r: [0.062, 0.085] },
-        { c: [0, 1.20, 0.695], r: [0.056, 0.072] },
-        { c: [0, 1.28, 0.725], r: [0.054, 0.064] },
-    ], { bones: [['thorax', 0.7], 'neck1', 'neck2', 'head'], segs: 22, hint: [0, 0, 1],
-         color: (p, n) => mix(mix(COAT, BACK, sstep(0.0, 0.8, n[2] < 0 ? -n[2] : 0)), WHITE,
-             sstep(0.4, 0.8, n[2] > 0 ? n[2] : 0) * sstep(1.12, 1.2, p[1]) * sstep(1.27, 1.22, p[1])),
-         caps: [false, false] });
-    // Head: cranium to muzzle.
+// Head: cranium to muzzle, widest across the eyes; eyes, ears.
+function head(S) {
     S.loft([
         { c: [0, 1.31, 0.695], r: [0.045, 0.045] },
-        { c: [0, 1.315, 0.735], r: [0.064, 0.064] },
-        { c: [0, 1.30, 0.79], r: [0.06, 0.058] },
-        { c: [0, 1.27, 0.85], r: [0.045, 0.05] },
-        { c: [0, 1.24, 0.91], r: [0.034, 0.042] },
-        { c: [0, 1.21, 0.958], r: [0.028, 0.034] },
-        { c: [0, 1.195, 0.99], r: [0.02, 0.024] },
-    ], { bones: ['head'], segs: 20, hint: [0, 1, 0],
-         color: (p, n) => {
-             let c = mix(COAT, MUZZLE, sstep(0.9, 0.96, p[2]));
-             c = mix(c, NOSE, sstep(0.965, 0.985, p[2]));
-             return mix(c, WHITE, sstep(-0.5, -0.8, n[1]) * sstep(0.88, 0.94, p[2]));
-         } });
+        { c: [0, 1.315, 0.735], r: [0.062, 0.063] },
+        { c: [0, 1.30, 0.785], r: [0.06, 0.058] },
+        { c: [0, 1.272, 0.845], r: [0.045, 0.05] },
+        { c: [0, 1.242, 0.905], r: [0.034, 0.042] },
+        { c: [0, 1.212, 0.955], r: [0.028, 0.034] },
+        { c: [0, 1.197, 0.988], r: [0.02, 0.024] },
+    ], { bones: ['head'], segs: 20, hint: [0, 1, 0], name: 'head', color: headColor });
     for (const s of [1, -1]) {
         S.blob([0.046 * s, 1.30, 0.80], [0.012, 0.012, 0.014], { bones: ['head'], color: NOSE, segs: 10, rows: 6 });
-        const e = s > 0 ? 'earL' : 'earR';
         S.loft([
             { c: [0.045 * s, 1.325, 0.75], r: [0.022, 0.009] },
             { c: [0.08 * s, 1.355, 0.738], r: [0.036, 0.011] },
             { c: [0.12 * s, 1.39, 0.725], r: [0.032, 0.009] },
             { c: [0.155 * s, 1.42, 0.715], r: [0.008, 0.004] },
-        ], { bones: [e], segs: 12, hint: [0, 0, 1],
-             color: (p, n) => (n[2] > 0.3 ? [0.85, 0.72, 0.65] : COAT) });
+        ], { bones: [s > 0 ? 'earL' : 'earR'], segs: 12, hint: [0, 0, 1], color: earColor });
     }
-    // Tail: brown above, white beneath.
+}
+
+// Tail: brown above, white beneath, broad and flat.
+function tail(S) {
     S.loft([
-        { c: [0, 0.855, -0.57], r: [0.035, 0.025] },
-        { c: [0, 0.83, -0.64], r: [0.05, 0.028] },
-        { c: [0, 0.79, -0.695], r: [0.05, 0.026] },
+        { c: [0, 0.865, -0.585], r: [0.035, 0.025] },
+        { c: [0, 0.835, -0.645], r: [0.05, 0.028] },
+        { c: [0, 0.79, -0.698], r: [0.05, 0.026] },
         { c: [0, 0.74, -0.745], r: [0.03, 0.02] },
-    ], { bones: [['pelvis', 0.6], 'tail1', 'tail2'], segs: 14, hint: [0, 1, 0],
-         color: (p, n) => mix(BACK, WHITE, sstep(0.0, -0.4, n[1])) });
+    ], { bones: [['pelvis', 0.6], 'tail1', 'tail2'], segs: 14, hint: [0, 1, 0], color: tailColor });
+}
+
+export function body(skel) {
+    const S = new Sculpt(skel);
+    trunk(S, skel);
+    neck(S);
+    head(S);
+    tail(S);
     for (const s of [1, -1]) { frontLeg(S, s); hindLeg(S, s); }
     return S.build();
 }
