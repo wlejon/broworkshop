@@ -8,7 +8,7 @@
 // in f32.
 from planet::ground import terrain, terrain_parts, shaped_by, cell_ground_drained, spread, expected_surface, expected_cover,
                            gradient, variation, strata, octaves_for, range_margin, relief_offset, frame_dir,
-                           SOIL_OCTAVES, cell_width, woodland, wooded, banked, with_streams;
+                           SOIL_OCTAVES, cell_width, woodland, wooded, banked, with_streams, sea_floor;
 from planet::climate import climate_fields, climate_of, cover_at, snow_at, Climate, landform_climate, landform_wood,
                             landform_share;
 from planet::relief import BASE_WAVELENGTH, RIDGE_FIRST, WARP_OCTAVE, WARP_DISPLACE, simplex_grad, SimplexAt;
@@ -413,7 +413,8 @@ const BAR_SAND = vec3<f32>(0.44, 0.40, 0.32);
 fn k_detail(g: grid<3>, table: read_store<vec4<i32>, 1>, anchors: read_store<vec4<i32>, 1>, texels: read_store<vec4<f32>, 1>,
             out: write_store<i32, 1>, radius: f32, border: f32, inv_size: f32, d: f32, truth: f32, seed: i32,
             net: read_store<f32, 1>, soil_grid: read_store<f32, 1>, rock: write_store<i32, 1>,
-            drains: read_store<vec4<f32>, 1>, climates: read_store<vec4<f32>, 1>) {
+            drains: read_store<vec4<f32>, 1>, climates: read_store<vec4<f32>, 1>, point_drains: read_store<vec4<f32>, 1>,
+            hz: i32, point_drops: read_store<vec4<f32>, 1>) {
     let rec = tiles::record(table, g.z());
     let a = read_anchor(anchors, g.z());
     let z = g.z();
@@ -476,18 +477,22 @@ fn k_detail(g: grid<3>, table: read_store<vec4<i32>, 1>, anchors: read_store<vec
         let k = (tx == c1 ? 1 : 0) + (ty == c1 ? 2 : 0);
         rock[slot * ANCHOR_WORDS + 20 + k] = unorm(r.x, 8) | (unorm(r.y, 8) << 8) | (unorm(r.z, 8) << 16);
     }
+    // The drainage the texel's height was found with (k_detail_height), for
+    // the sea's share of it (ground.bk sea_floor).
+    let pb = z * drain_points(w, hz);
+    let fl = sea_floor(h, drain_held(halved4(point_drains, pb, td, tx, ty), halved4(point_drops, pb, td, tx, ty)), radius);
     var col = expected_surface(h, grad, length(du) * 0.5, sp.x, soil, variation(a, e, radius, octaves, seed),
-                               strata(a, e, radius, h, sd, seed), cl);
+                               strata(a, e, radius, h, sd, seed), cl, fl);
     // The rivers and lakes: the share of the texel under their water, a
     // river as deep as its channel runs there (shallow at its banks, its bed
     // showing through), a lake as deep as its water stands over its
     // valley's bed (rivers.bk lake_surface).
-    let wa = with_streams(water_at(a.dir, e, radius, length(du) * 0.5, net, seed), dr.z, dr.w, cl_region);
+    let wa = with_streams(water_at(a.dir, e, radius, length(du) * 0.5, net, seed), dr.z, dr.w, cl_region, h);
     // A great river's floodplain is the land's wettest: its colour is the
     // climate's with the river's water (the green ribbon a desert river
     // draws from orbit, a darker forest along a temperate one), and its
     // forest the gallery along the banks.
-    var cover = wooded(banked(expected_cover(h, grad, length(du) * 0.5, sp.x, soil, cl), h, grad, cl, wa),
+    var cover = wooded(banked(expected_cover(h, grad, length(du) * 0.5, sp.x, soil, cl, fl), h, grad, cl, wa),
                        landform_wood(woodland(a, e, radius, octaves, seed), dr.x, dr.y));
     if (wa.plain > 0.0) {
         let wet = Climate { temp: cl.temp, moist: min(cl.moist + RIPARIAN_MOIST, 1.0), sand: cl.sand, rock: cl.rock };

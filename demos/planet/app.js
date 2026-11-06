@@ -264,7 +264,7 @@ function makeCache(pixelsPerTexel, select = {}) {
             kSoil.dispatch([SOIL_STRIDE, SOIL_STRIDE, batch.count], batch.table, at, soilGrid, TEXELS, RADIUS, BORDER, 1 / TILE, DETAIL, SEED, rivers.net,
                            pointDrains, HZ_GRID, pointDrops);
             kDetail.dispatch(texels, batch.table, at, texelHeights, this.layer('detail'), RADIUS, BORDER, 1 / TILE, DETAIL, TRUTH, SEED,
-                             rivers.net, soilGrid, anchors, texelDrains, texelClimates);
+                             rivers.net, soilGrid, anchors, texelDrains, texelClimates, pointDrains, HZ_GRID, pointDrops);
             kRange.dispatch([batch.count], batch.table, span, this.ranges, 1 / TILE, MAX_HEIGHT);
             if (this.detail) {
                 const half = TILE * DETAIL / 2;

@@ -802,8 +802,14 @@ pub fn fragment(v: mesh::Vertex, s_in: mesh::Surface) -> mesh::Surface {
     // The relief's gradient along the surface tilts the normal against it.
     n = normalize(n - (slope - dot(slope, n) * n) * land);
     var sea_variance: f32 = 0.0;
-    let up = normalize(v_up);
+    // Fresh water lies on its bed's slope: a lake's texels are level, a
+    // stream down a hillside falls with it. Mirrored about the level, a
+    // stream on a slope faced the eye at grazing incidence and drew the
+    // sky's white down every hillside; tilted with its bed, it shows its own
+    // dark water as a stream seen from across the valley does.
+    let level_up = normalize(v_up);
     let fresh = smoothstep(0.0, 1.0, v_height);
+    let up = normalize(mix(level_up, n, fresh * smoothstep(0.02, 0.1, 1.0 - dot(n, level_up))));
     var sea = up;
     if (water > 0.001) {
         let calm = mix(1.0, WAVE_FRESH_SCALE, fresh);
@@ -885,9 +891,9 @@ pub fn fragment(v: mesh::Vertex, s_in: mesh::Surface) -> mesh::Surface {
         let banks = clamp(v_light.y / max(open, 1.0e-3), 0.0, 1.0);
         let nv = max(dot(s.normal, eye), 1.0e-4);
         let r = reflect(-eye, s.normal);
-        let r_up = max(dot(r, up), 0.0);
+        let r_up = max(dot(r, level_up), 0.0);
         let open_r = pow(open, 1.0 / max(r_up, 0.08));
-        let sun_up = max(dot(up, params.to_sun), 0.0);
+        let sun_up = max(dot(level_up, params.to_sun), 0.0);
         let e = lighting::sun_light(v.world_pos) * (sun_up / GROUND_PI);
         let under = e * (v_light.w / max(1.0 - open, 0.15));
         let clouds = mix(e * CLOUD_SIDES, under, smoothstep(0.0, 0.5, r_up));

@@ -96,17 +96,11 @@ pub fn octaves_for(extent: f32, inv_size: f32) -> f32 {
     return clamp(log2(ratio), 1.0, 30.0);
 }
 
-// The mountains' relief: ridged octaves RIDGE_FIRST to RIDGE_LAST - 1, each
-// (1 - |noise|)^2 less its mean, so two-sided: crests above, valleys and
-// basins between, and an octave a tile cannot resolve adds nothing on
-// average. The amplitude (metres at full uplift) peaks at octave 8, a 9.4 km
-// wavelength, the scale a range is composed at: the broader octaves organise
-// the ridges into ranges, the finer fall off by 0.45, a little faster than
-// equal slope (0.5), so the slope settles near 33 degrees instead of growing
-// with every octave down. They go on to a 2.3 m wavelength: spurs, gullies
-// and knolls down to a few metres (relief.bk RIDGE_FIRST, RIDGE_LAST, ridge_amp).
-// Where ranges are, their ground is lifted this far (metres): the belt the
-// relief stands on.
+// The relief: ridged octaves RIDGE_FIRST to RIDGE_LAST - 1, each (1 -
+// |noise|)^2 less its mean, so two-sided and adding nothing on average where
+// a tile cannot resolve it; amplitudes peak at octave 8 (9.4 km) and fall
+// off by 0.45, down to 2.3 m (relief.bk ridge_amp). Where ranges are, their
+// ground is lifted this far (metres): the belt the relief stands on.
 const UPLIFT: f32 = 2500.0;
 // The detail fbm's first amplitude (octave 4), metres: the plains', and
 // what the ranges add on top.
@@ -227,13 +221,9 @@ fn masks(a: Anchor, off: vec3<f32>, radius: f32, octaves: f32, seed: i32) -> vec
 // The relief reads its octaves through a warp: a smooth displacement (one
 // octave of noise per axis at octave WARP_OCTAVE, a 19 km wavelength, twice
 // the relief's strongest; about 1.2 km on average, 3 km at most) that bends
-// ridgelines off the noise lattice's directions, which otherwise run straight
-// and parallel, and breaks the round basins between them into valleys. A
-// warp much broader than the relief only moves it. Its largest stretch stays
-// short of folding the ground over itself (a displacement gradient of -1).
-// Where it compresses the ground a cell spans more of an octave than its
-// size says, which the mean factors do not follow. (WARP_OCTAVE and
-// WARP_DISPLACE, in p units per unit of noise, are relief.bk's.)
+// ridgelines off the noise lattice's directions and breaks the round basins
+// between them into valleys, short of folding the ground over itself.
+// (WARP_OCTAVE and WARP_DISPLACE, in p units per unit of noise, are relief.bk's.)
 //
 // The relief's point at `off` from the anchor's p: off moved by the warp (p
 // units), from which the relief's octaves run on the p lattice.
@@ -285,9 +275,9 @@ fn p_offset(e: vec3<f32>, radius: f32) -> vec3<f32> {
 // from the anchor's direction: x its broad shape, y the fine relief over it
 // (FINE_FIRST). Continents from the broad octaves, ranges where a broad mask
 // allows them on land (lifted, and carrying the ridged relief), and the fine
-// octaves over both, rougher in the ranges. z the uplift, which scales the
-// relief; w the fine relief finer than the drainage's gullies (relief), which
-// the drainage leaves as it is.
+// octaves over both, rougher in the ranges. z how much of the relief the
+// land carries (relief_scale); w the fine relief finer than the drainage's
+// gullies (relief), which the drainage leaves as it is.
 pub fn terrain_parts(a: Anchor, e: vec3<f32>, radius: f32, octaves: f32, seed: i32) -> vec4<f32> {
     return terrain_parts_over(a, e, masks(a, p_offset(e, radius), radius, octaves, seed), radius, octaves, seed);
 }
@@ -299,12 +289,22 @@ fn terrain_parts_over(a: Anchor, e: vec3<f32>, m: vec4<f32>, radius: f32, octave
     let off = p_offset(e, radius);
     let land = clamp_mean(m.x * 3.0 + 0.15, m.y * 3.0, -1.0, 1.0);
     let uplift = m.z * m.w;
+    let rs = relief_scale(a, off, m, radius, seed);
     let r = relief(a, off, octaves, seed);
     let amp = DETAIL_PLAINS + DETAIL_RANGES * uplift;
     let broad = fbm_to(a.p, off, octaves, 4, FINE_FIRST, seed + 200);
     let fine = fbm_to(a.p, off, octaves, FINE_FIRST, 64, seed + 200) * exp2((4 - FINE_FIRST) as f32);
-    return vec4<f32>(land * 1100.0 + uplift * (UPLIFT + r.x) + broad * amp, uplift * r.y + fine * amp, uplift,
-                     uplift * r.z);
+    return vec4<f32>(land * 1100.0 + uplift * UPLIFT + rs * r.x + broad * amp, rs * r.y + fine * amp, rs, rs * r.z);
+}
+// The ridged relief the land carries (per unit at full uplift): all in the
+// ranges, between them hill country in ~1000 km regions, HILLS_LOW (rolling)
+// to HILLS_HIGH (foothills, low mountains). None at sea.
+const HILL_SCALE: f32 = 2.4;
+const HILLS_LOW: f32 = 0.1;
+const HILLS_HIGH: f32 = 0.5;
+fn relief_scale(a: Anchor, off: vec3<f32>, m: vec4<f32>, radius: f32, seed: i32) -> f32 {
+    let n = simplex_f32((a.dir * (radius / BASE_WAVELENGTH) + off) * HILL_SCALE, seed + 440);
+    return max(m.z, mix(HILLS_LOW, HILLS_HIGH, smoothstep(-0.15, 0.5, n))) * m.w;
 }
 pub fn terrain_base(a: Anchor, e: vec3<f32>, radius: f32, octaves: f32, seed: i32) -> f32 {
     let t = terrain_parts(a, e, radius, octaves, seed);
@@ -333,7 +333,7 @@ pub fn cell_width(octaves: f32) -> f32 {
 // VALLEY_FLOOR metres to its bed. y, z and w: how much the ground moves with
 // the relief's octaves below FINE_FIRST, from it on, and the part of those
 // finer than the gullies (relief), per metre of relief at full uplift: the
-// uplift where the ground stands, scaled as the drainage scales it (the
+// relief_scale where the ground stands, scaled as the drainage scales it (the
 // finest not), less where a river cuts it (the fine parts as its sides
 // carry them on), none under a lake. The ground's shader scales the
 // octaves finer than its texels by them (ground_mesh.bk).
@@ -347,9 +347,8 @@ pub fn terrain_shaped(a: Anchor, e: vec3<f32>, radius: f32, octaves: f32, seed: 
                      drain_at(a.dir, e, radius, cell_width(octaves), net, seed), radius);
 }
 // The ground's parts (terrain_parts) drained by d and cut by the water w
-// found for them. (A tile's kernels read their drainage, dendry_grid.bk,
-// only once they have the parts: held through the noise, it costs them
-// threads.)
+// found for them (read only once the parts are: held through the noise, a
+// tile's drainage costs its kernels threads).
 pub fn shaped_by(t: vec4<f32>, w: Water, d: Drain, radius: f32) -> vec4<f32> {
     return shaped_rel(t, w, d, d.rel, radius);
 }
@@ -365,12 +364,8 @@ fn shaped_rel(t: vec4<f32>, w: Water, d: Drain, rel: f32, radius: f32) -> vec4<f
     // Ground under the valley stays as it is; ground over it eases down to
     // it over a blend of twice its height over the bed, from CUT_SOFT (a low
     // bank), leaving the valley with the ground's own slope, so no crease:
-    // never under the valley, never over the ground. (A smooth minimum dips
-    // a quarter of its width under both: where drained ground stood at a
-    // floodplain's level it sank the plain most of a metre under the land,
-    // a scarp along the bluff's wobble that read as an engraved squiggle,
-    // and as a dashed rock line where it ran straight. Raising ground under
-    // the valley filled the dips a coarse cell's colour counts as water.)
+    // never under the valley, never over the ground (a smooth minimum sank
+    // floodplains under the land in engraved scarps).
     let blend = clamp(2.0 * (h - w.bed), CUT_SOFT, CUT_BLEND);
     let bx = blend;
     let tb = clamp(x / bx, 0.0, 1.0);
@@ -550,7 +545,7 @@ pub fn cell_ground_drained(a: Anchor, rec: tiles::Record, s: f32, t: f32, cell: 
 // of its mean: snow-capped peaks over green valleys read from orbit as the
 // mix they are. The truth under a cell is modelled as its own height and
 // gradient plus Gaussian spreads from the octaves it does not resolve.
-
+//
 // What the truth under a cell varies by about the cell's own values: x the
 // height (m) the cell's slope does not account for, y the gradient along
 // either axis (m/m). Each octave counts by unresolved_share in height and
@@ -574,8 +569,9 @@ pub fn spread(a: Anchor, e: vec3<f32>, radius: f32, octaves: f32, truth: f32, se
         cg += NOISE_GRAD_VAR * gradient_share(f, s);   // amplitude * frequency = 1
         amp *= 0.5;
     }
-    // The relief, in metres already (ridge_amp), under the uplift.
-    let mount = m.z * m.w;
+    // The relief, in metres already (ridge_amp), as the land carries it.
+    let mount = relief_scale(a, p_offset(e, radius), m, radius, seed);
+    let lift = m.z * m.w;
     var rh: f32 = 0.0;
     var rg: f32 = 0.0;
     for (var o: i32 = RIDGE_FIRST; o < RIDGE_LAST; o += 1) {
@@ -588,7 +584,7 @@ pub fn spread(a: Anchor, e: vec3<f32>, radius: f32, octaves: f32, truth: f32, se
         rg += rf * rf * RIDGE_GRAD_VAR * gradient_share(f, s) * w * w;
     }
     // The detail, octave 4 up at amplitude 0.5^(o - 4), to the truth's last.
-    let detail = DETAIL_PLAINS + DETAIL_RANGES * mount;
+    let detail = DETAIL_PLAINS + DETAIL_RANGES * lift;
     var dh: f32 = 0.0;
     var dg: f32 = 0.0;
     amp = 1.0;
@@ -601,8 +597,8 @@ pub fn spread(a: Anchor, e: vec3<f32>, radius: f32, octaves: f32, truth: f32, se
         dg += 256.0 * NOISE_GRAD_VAR * gradient_share(f, s) * w * w;   // amplitude * frequency = 16
         amp *= 0.5;
     }
-    let h2 = land * land * ch + mount * mount * rh + detail * detail * dh;
     let wl = BASE_WAVELENGTH;
+    let h2 = land * land * ch + mount * mount * rh + detail * detail * dh;
     let g2 = (land * land * cg + mount * mount * rg + detail * detail * dg) / (wl * wl);
     return vec2<f32>(sqrt(h2), sqrt(g2));
 }
@@ -711,9 +707,12 @@ pub fn banked(cover: f32, h: f32, grad: f32, cl: Climate, wa: Water) -> f32 {
 
 // The drainage's streams (dendry.bk) into the rivers' water w: their
 // channels' share of a cell and their banks' gallery strip, where the
-// climate is wet enough for them to run (dry washes elsewhere).
-pub fn with_streams(w: Water, share: f32, gallery: f32, cl: Climate) -> Water {
-    let runs = smoothstep(0.12, 0.35, cl.moist);
+// climate is wet enough for them to run (dry washes elsewhere), and only on
+// land h metres up out of the sea and any lake standing here: under one they
+// drew their silt in lines across its water.
+pub fn with_streams(w: Water, share: f32, gallery: f32, cl: Climate, h: f32) -> Water {
+    let lake = w.lake > -1.0e8 && w.shore < RIM_CREST ? 1.0 - smoothstep(w.near.z, w.near.z + 1.0, h) : 0.0;
+    let runs = smoothstep(0.12, 0.35, cl.moist) * smoothstep(0.0, 1.0, h) * (1.0 - lake);
     var o = w;
     o.near.y = max(w.near.y, share * runs);
     o.gallery = max(w.gallery, gallery * runs);
@@ -916,11 +915,11 @@ pub fn variation(a: Anchor, e: vec3<f32>, radius: f32, octaves: f32, seed: i32) 
 // slope (SOIL_OCTAVES): `soil` its gradient and spread, which for a cell
 // finer than the soil's scale are its point's and 0.
 pub fn expected_surface(h: f32, grad: f32, cell: f32, sh: f32, soil: vec2<f32>, vary: vec3<f32>, bed: f32,
-                        cl: Climate) -> vec4<f32> {
+                        cl: Climate, fl: vec2<f32>) -> vec4<f32> {
     var sum = vec4<f32>(0.0, 0.0, 0.0, 0.0);
     let trend = grad * cell;
     let sd = max(sqrt(sh * sh + trend * trend / 12.0), 1e-6);
-    let zs = -h / sd;
+    let zs = -sea_height(h, fl) / sd;
     let wet = normal_cdf(zs);
     if (wet > 1e-5) {
         for (var i: i32 = 0; i < 5; i += 1) {
@@ -949,12 +948,28 @@ pub fn expected_surface(h: f32, grad: f32, cell: f32, sh: f32, soil: vec2<f32>, 
     return sum;
 }
 
+// The spread is the relief's before the drainage, which planes the land down
+// toward its base level (a floodplain's floor stands flat a few metres over
+// the sea) and leaves what lies under it as it is, so the sea's share is the
+// undrained height's: `fl` the drainage's base and its slope d h / d h0 there
+// (sea_floor).
+pub fn sea_floor(h: f32, d: Drain, radius: f32) -> vec2<f32> {
+    let rel0 = d.rel + d.drops.x + d.drops.y + d.drops.z + d.drops.w;
+    let h0 = d.base + max(h - d.base, 0.0) / max(rel0, 0.02);
+    return vec2<f32>(d.base, drained(h0, d.base, d.rel, d, radius).y);
+}
+fn sea_height(h: f32, fl: vec2<f32>) -> f32 {
+    if (h <= fl.x) { return h; }
+    let k = max(fl.y, 0.02);
+    return fl.x > 0.0 ? fl.x + (h - fl.x) / k : h / k;
+}
+
 // tree_cover's mean over a cell, by expected_surface's quadrature over the
 // heights and soil gradients the cell holds.
-pub fn expected_cover(h: f32, grad: f32, cell: f32, sh: f32, soil: vec2<f32>, cl: Climate) -> f32 {
+pub fn expected_cover(h: f32, grad: f32, cell: f32, sh: f32, soil: vec2<f32>, cl: Climate, fl: vec2<f32>) -> f32 {
     let trend = grad * cell;
     let sd = max(sqrt(sh * sh + trend * trend / 12.0), 1e-6);
-    let wet = normal_cdf(-h / sd);
+    let wet = normal_cdf(-sea_height(h, fl) / sd);
     let dry = 1.0 - wet;
     var sum: f32 = 0.0;
     if (dry > 1e-5) {

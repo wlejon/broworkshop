@@ -4,8 +4,9 @@
 // farthest point inland; each point's downstream neighbour; then the
 // catchments, one step a dispatch, until the longest chain has settled; then
 // each point's floor (the full ground's lowest along its reach), the water
-// filled over the floors up every chain and breached the same way, the
-// water falling along every chain, each point's tangent, the way its
+// filled over the floors up every chain and breached the same way (no deeper
+// than a gorge the land's relief allows, and filled again where a hollow
+// needed more), the water falling along every chain, each point's tangent, the way its
 // water runs through it, and each reach's lake level, its water lowered to
 // the drained ground about its shore. The ground's kernels read the network's
 // buffer; the CPU's (the camera's height) a copy of it.
@@ -30,8 +31,8 @@ export function createRivers(module, radius, seed) {
     src.write(new Float32Array(POINTS));
     for (let i = 0; i < STEPS; i++) { step.dispatch(grid, net, src, dst); swap(); }
     const catchment = src;
-    const floor = bro.kernel.createBuffer(POINTS * 4);
-    module.kernel('k_river_floor').dispatch(grid, net, floor, radius, seed);
+    const floor = bro.kernel.createBuffer(POINTS * 4), least = bro.kernel.createBuffer(POINTS * 4);
+    module.kernel('k_river_floor').dispatch(grid, net, floor, least, radius, seed);
     let a = dst, b = bro.kernel.createBuffer(POINTS * 4);
     const rise = module.kernel('k_river_rise');
     rise.dispatch(grid, net, floor, floor, a);
@@ -39,7 +40,14 @@ export function createRivers(module, radius, seed) {
     module.kernel('k_river_breach_start').dispatch(grid, floor, a, b);
     [a, b] = [b, a];
     const breach = module.kernel('k_river_breach');
-    for (let i = 0; i < STEPS; i++) { breach.dispatch(grid, net, a, b); [a, b] = [b, a]; }
+    for (let i = 0; i < STEPS; i++) { breach.dispatch(grid, net, least, a, b); [a, b] = [b, a]; }
+    // A hollow the breach could not drain (riverbuild.bk GORGE_MIN) fills
+    // to its outlet: the water rises again up every chain over the
+    // breached water, so it never climbs on its way down.
+    const breached = a;
+    a = least;
+    rise.dispatch(grid, net, breached, breached, a);
+    for (let i = 1; i < STEPS; i++) { rise.dispatch(grid, net, breached, a, b); [a, b] = [b, a]; }
     module.kernel('k_river_store').dispatch(grid, net, catchment, a, floor);
     module.kernel('k_river_tangent').dispatch(grid, net);
     module.kernel('k_river_lake').dispatch(grid, net, b, radius, seed);

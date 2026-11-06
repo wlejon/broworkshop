@@ -124,15 +124,28 @@ fn k_river_catchment(g: grid<3>, net: read_store<f32, 1>, src: read_store<f32, 1
 // its heights: filled from the sea up each chain, so a hollow holds a lake
 // to its rim, then breached, so a lake stands no more than LAKE_MAX over
 // its deepest floor and its outlet cuts a gorge through the rim at that
-// level (Lindsay 2016, filling and breaching together).
+// level (Lindsay 2016, filling and breaching together). A breach cuts no
+// deeper than GORGE_MIN under a point's floor, and GORGE_RELIEF more per
+// unit of the relief the land carries there (ground.bk relief_scale): a
+// gorge through a range is deep, through rolling land shallow, and a hollow
+// whose outlet would need more is filled to its outlet instead (rivers.js
+// rises the water again after the breach). Breached to any depth, a hollow
+// in a plateau carried its level out across the plateau to the sea, a canyon
+// hundreds of metres deep and hundreds of kilometres long in flat land, its
+// sides dissected into a chain of peaks the land about did not have. `least`:
+// how low the breach may take each point's water.
 const FLOOR_SAMPLES: i32 = 9;
 const FLOOR_OCTAVES: f32 = 12.0;
+const GORGE_MIN: f32 = 30.0;
+const GORGE_RELIEF: f32 = 500.0;
 @kernel @grid(3)
-fn k_river_floor(g: grid<3>, net: read_store<f32, 1>, dst: write_store<f32, 1>, radius: f32, seed: i32) {
+fn k_river_floor(g: grid<3>, net: read_store<f32, 1>, dst: write_store<f32, 1>, least: write_store<f32, 1>,
+                 radius: f32, seed: i32) {
     let c = vec3<i32>(g.z(), g.x(), g.y());
     let k = point_index(c);
     let dir = point_dir(c, seed);
-    var floor = max(terrain_base_near(dir, radius, FLOOR_OCTAVES, seed), 0.0);
+    let t = terrain_parts(anchor_near(dir, radius), vec3<f32>(0.0), radius, FLOOR_OCTAVES, seed);
+    var floor = max(t.x + t.y + t.w, 0.0);
     let down = net[k * RIV_REC + 1] as i32;
     if (down >= 0) {
         let b = point_dir(point_cell(down), seed);
@@ -143,6 +156,7 @@ fn k_river_floor(g: grid<3>, net: read_store<f32, 1>, dst: write_store<f32, 1>, 
         }
     }
     dst[k] = floor;
+    least[k] = floor - GORGE_MIN - GORGE_RELIEF * t.z;
 }
 
 // One step of the fill up the chains: a point's water stands at its floor,
@@ -166,10 +180,12 @@ fn k_river_breach_start(g: grid<3>, floor: read_store<f32, 1>, src: read_store<f
 }
 
 // One step of the breach: a point's water is no higher than the water of
-// the points draining into it, so it falls all along its way to the sea; a
-// chain n points long settles in n steps.
+// the points draining into it, so it falls all along its way to the sea,
+// and no lower than `least` (k_river_floor); a chain n points long settles
+// in n steps.
 @kernel @grid(3)
-fn k_river_breach(g: grid<3>, net: read_store<f32, 1>, src: read_store<f32, 1>, dst: write_store<f32, 1>) {
+fn k_river_breach(g: grid<3>, net: read_store<f32, 1>, least: read_store<f32, 1>, src: read_store<f32, 1>,
+                  dst: write_store<f32, 1>) {
     let c = vec3<i32>(g.z(), g.x(), g.y());
     let k = point_index(c);
     var w = src[k];
@@ -181,7 +197,7 @@ fn k_river_breach(g: grid<3>, net: read_store<f32, 1>, src: read_store<f32, 1>, 
             }
         }
     }
-    dst[k] = w;
+    dst[k] = max(w, min(least[k], src[k]));
 }
 
 // The catchments, the breached water and the floors into the records.

@@ -62,10 +62,10 @@ fn k_tree_field(g: grid<2>, out: write_store<f32, 1>, anchor: read_store<vec4<i3
     let dr = site.drain;
     let lf = landform_share(dr.dry);
     let cl = landform_climate(region, lf * dr.wet, lf * dr.ridge);
-    let wa = with_streams(site.water, dr.share, dr.gallery, region);
+    let wa = with_streams(site.water, dr.share, dr.gallery, region, h);
     let local = wooded(banked(tree_cover(h, grad, cl), h, grad, cl, wa),
                        landform_wood(woodland(a, e, radius, 99.0, seed), lf * dr.wet, lf * dr.ridge))
-              * (1.0 - water_share(h, wa, 0.0));
+              * (1.0 - smoothstep(0.1, 0.35, water_share(h, wa, 0.0)));
     var size: f32 = 0.0;
     if (pick < local * mix(1.0, OPEN_DENSITY, open)) { size = (0.6 + 0.4 * local) * mix(CLUMP_SIZE, OPEN_SIZE, open); }
     let vary = variation(a, e, radius, octaves, seed);

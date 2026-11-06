@@ -4,7 +4,7 @@
 import std::noise::*;
 import tiles;
 from planet::ground import cell_height, spread, expected_surface, gradient, variation, strata, terrain, octaves_for,
-    frame_dir, SOIL_OCTAVES;
+    frame_dir, SOIL_OCTAVES, cell_ground, sea_floor;
 from planet::relief import simplex_grad, ridge_cell_mean, ridge_cell_slope;
 from planet::climate import climate_at;
 from planet::anchor import Anchor, anchor_of, anchor_at, lattice_of, simplex_from, plane_offset;
@@ -84,7 +84,8 @@ fn k_cell_color(g: grid<1>, cx: f64, cy: f64, cz: f64, ux: f64, uy: f64, uz: f64
     let f = frame_at(vec3<f64>(cx, cy, cz), vec3<f64>(ux, uy, uz), vec3<f64>(vx, vy, vz), cell, radius);
     let r = radius as f32;
     let oct = octaves as f32;
-    let h = cell_height(f.a, f.rec, 0.5, 0.5, 1.0, r, oct, seed, net);
+    let cg = cell_ground(f.a, f.rec, 0.5, 0.5, 1.0, r, oct, seed, net);
+    let h = cg.h;
     let du = point(f, 1.0, 0.0, r, oct, seed, net) - point(f, -1.0, 0.0, r, oct, seed, net);
     let dv = point(f, 0.0, 1.0, r, oct, seed, net) - point(f, 0.0, -1.0, r, oct, seed, net);
     let e = frame_dir(f.rec, 0.5, 0.5);
@@ -99,7 +100,8 @@ fn k_cell_color(g: grid<1>, cx: f64, cy: f64, cz: f64, ux: f64, uy: f64, uz: f64
     if (ch == 2) { return (vary.x * 0.2126 + vary.y * 0.7152 + vary.z * 0.0722) as f64; }
     let trend = grad * width;
     let bed = strata(f.a, e, r, h, sqrt(sp.x * sp.x + trend * trend / 12.0), seed);
-    let c = expected_surface(h, grad, width, sp.x, soil, vec3<f32>(1.0, 1.0, 1.0), bed, climate_at(up, width / r, seed));
+    let c = expected_surface(h, grad, width, sp.x, soil, vec3<f32>(1.0, 1.0, 1.0), bed, climate_at(up, width / r, seed),
+                             sea_floor(h, cg.drain, r));
     if (ch == 0) { return (c.x * 0.2126 + c.y * 0.7152 + c.z * 0.0722) as f64; }
     return c.w as f64;
 }

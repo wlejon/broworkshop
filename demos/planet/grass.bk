@@ -60,7 +60,7 @@ fn k_grass_field(g: grid<2>, out: write_store<f32, 1>, heights: read_store<f32, 
     let albedo = surface(h, 0.0, cl).xyz * variation(a, e, radius, octaves, seed);
     // Under the trees (their share as trees.bk stands them) the floor is
     // their litter and little grass grows (ground_mesh.bk LITTER).
-    let wa = with_streams(site.water, site.drain.share, site.drain.gallery, region);
+    let wa = with_streams(site.water, site.drain.share, site.drain.gallery, region, h);
     let woods = wooded(banked(tree_cover(h, grad, cl), h, grad, cl, wa),
                        landform_wood(woodland(a, e, radius, 99.0, seed), lf * site.drain.wet, lf * site.drain.ridge));
 
@@ -69,8 +69,12 @@ fn k_grass_field(g: grid<2>, out: write_store<f32, 1>, heights: read_store<f32, 
     out[i] = rel.x;
     out[i + 1] = rel.y;
     out[i + 2] = rel.z;
-    // None in the rivers and lakes.
-    out[i + 3] = grass_cover(h, grad, cl) * (1.0 - WOODS_SHADE * woods) * (1.0 - water_share(h, wa, 0.0));
+    // None in the rivers and lakes, nor on the wet margin the ground's
+    // shader draws as water wherever its texels' share passes about half,
+    // its shore wandering by noise on either side (ground_mesh.bk): grown in
+    // proportion to the land's share, blades stood in open water.
+    out[i + 3] = grass_cover(h, grad, cl) * (1.0 - WOODS_SHADE * woods)
+               * (1.0 - smoothstep(0.1, 0.35, water_share(h, wa, 0.0)));
     out[i + 4] = albedo.x;
     out[i + 5] = albedo.y;
     out[i + 6] = albedo.z;
