@@ -202,5 +202,7 @@ globalThis.creatureLab = {
 };
 // Windowed it starts at once. Headless it waits for start(): a cli.js run
 // (which takes the page over for its sheets) pays nothing for the live view.
-if (typeof frameImage !== 'function') globalThis.creatureLab.start();
+// (A window installs the headless globals too, for its self-tests, so the
+// display mode is what tells them apart.)
+if (bro.window.displayMode !== 'headless') globalThis.creatureLab.start();
 else status('headless: creatureLab.start() loads the live view');
