@@ -14,7 +14,7 @@ import { groundHeights } from "./run.js";
 
 const DEG = Math.PI / 180;
 // Columns: where the camera stands, as the turn of the creature that shows it.
-export const VIEWS = [
+export const ALL_VIEWS = [
     { name: 'right', yaw: 0 }, { name: 'front-right', yaw: -45 }, { name: 'front', yaw: -90 },
     { name: 'front-left', yaw: -135 }, { name: 'left', yaw: 180 }, { name: 'back-left', yaw: 135 },
     { name: 'back', yaw: 90 }, { name: 'back-right', yaw: 45 },
@@ -27,8 +27,13 @@ export function restExtent(skel) {
     return { z0, z1, top: y1, len: z1 - z0, mid: (z0 + z1) / 2 };
 }
 
-export function turnaroundSheet(recIn, { path, rows = 10, cycle = 'auto', title = '', cw = 240, ch = 215, labels = ['A', 'B'] } = {}) {
+// `cell` scales a cell (240 x 215 px at 1) for a close look, and `views`
+// (names of VIEWS) keeps only those columns.
+export function turnaroundSheet(recIn, { path, rows = 10, cycle = 'auto', title = '', cell = 1, views = null, labels = ['A', 'B'] } = {}) {
     const t0 = Date.now();
+    const cw = Math.round(240 * cell), ch = Math.round(215 * cell);
+    const VIEWS = views ? ALL_VIEWS.filter((v) => views.includes(v.name)) : ALL_VIEWS;
+    if (!VIEWS.length) throw new Error(`turnaround: no views among ${views} (have ${ALL_VIEWS.map((v) => v.name).join(', ')})`);
     const recs = Array.isArray(recIn) ? recIn : [recIn];
     const runs = recs.map((rec) => {
         const cyc = cycle === false ? null : (cycle && cycle !== 'auto' ? cycle : lastCycle(rec));

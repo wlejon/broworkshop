@@ -11,6 +11,7 @@ import { turnaroundSheet } from "./turnaround.js";
 import { chartsSheet } from "./charts.js";
 import { trajectorySheet } from "./trajectory.js";
 import { rangeSheet } from "./range.js";
+import { restForm, formInMotion } from "./form.js";
 import { compareLookSets } from "/lib/kit/look.js";
 
 export const HELP = `creature-lab <command> <creature> [scenario ...] [options]
@@ -23,12 +24,15 @@ export const HELP = `creature-lab <command> <creature> [scenario ...] [options]
   metrics     <creature> [scenario ...]    JSON report per scenario, flags printed
   ab          <A> <B> [scenario ...]       the sheets of two versions interleaved / overlaid,
                                            metrics side by side (--diff: pixel diffs via look.js)
-  snapshot    <creature> <label>           copy creatures/<creature> to <creature>@<label> for A/B
+  form        <creature> [scenario ...]    the body measured: rest girths and extents against the
+                                           creature's reference, ring areas and volumes through a cycle
+  snapshot    <creature> <label>          copy creatures/<creature> to <creature>@<label> for A/B
   scenarios   <creature>                   list its scenarios
 
 <creature>: a folder of creatures/ (deer), a snapshot (deer@before), a variant (deer:slip).
 [scenario]: names, or 'all'. Defaults: walk trot gallop idle graze startle lie-down.
-options: --out <dir>  --rows <n>  --seed <n>  --knob NAME=v[,NAME=v] (rig @knob overrides)`;
+options: --out <dir>  --rows <n>  --seed <n>  --knob NAME=v[,NAME=v] (rig @knob overrides)
+         --cell <scale>  --views right,front,...  (turnaround: bigger cells, some columns)`;
 
 export const MOTION = ['walk', 'trot', 'gallop'];
 export const ACTIONS = ['idle', 'graze', 'startle', 'lie-down'];
@@ -81,7 +85,9 @@ export function analyzeRun(rec) {
 // One sheet of a kind for one run (or two, A/B), written to `path`.
 export function sheet(kind, recs, path, opt = {}) {
     const rows = opt.rows ? +opt.rows : undefined;
-    if (kind === 'turnaround') return turnaroundSheet(recs, { path, rows });
+    if (kind === 'turnaround') {
+        return turnaroundSheet(recs, { path, rows, cell: opt.cell ? +opt.cell : 1, views: opt.views ? String(opt.views).split(',') : null });
+    }
     if (kind === 'trajectory') return trajectorySheet(recs, { path });
     if (kind === 'charts') return chartsSheet(recs, { path });
     if (kind === 'range') return rangeSheet(recs[0], analyzeRun(recs[0]), { path });
@@ -134,7 +140,25 @@ export async function runCommand(argv) {
     const written = [];
     const t0 = Date.now();
 
-    if (cmd === 'metrics' || KINDS.includes(cmd) || cmd === 'sheets') {
+    if (cmd === 'form') {
+        const { X, form } = restForm(creature);
+        console.log(`rest: ${form.flags.length ? form.flags.length + ' off the reference' : 'on the reference'}`);
+        for (const f of form.flags) console.log(`  - ${f}`);
+        const runs = {};
+        for (const sc of (rest.length ? scenarios : MOTION.slice(0, 2))) {
+            const m = formInMotion(creature, runScenario(creature, sc, { seed }), X);
+            runs[sc] = m;
+            const span = (o) => Object.entries(o).map(([k, v]) => `${k} ${(100 * v.min).toFixed(1)}..${(100 * v.max).toFixed(1)}`).join(', ');
+            console.log(`${sc}: area % ${span(m.area)}`);
+            console.log(`${sc}: volume % ${span(m.volume)}`);
+            console.log(`${sc}: protrude ${Object.entries(m.protrude).map(([k, v]) => `${k} ${(100 * v.out).toFixed(1)} cm`).join(', ')}`);
+            console.log(`${sc}: fold ${Object.entries(m.fold).map(([k, v]) => `${k} ${v.min.toFixed(2)}..${v.max.toFixed(2)}`).join(', ')}`);
+            for (const f of m.flags) console.log(`  - ${f}`);
+        }
+        const path = `${dir}/form.json`;
+        writeFile(path, json({ creature: creature.label, rest: form, motion: runs }));
+        written.push(path);
+    } else if (cmd === 'metrics' || KINDS.includes(cmd) || cmd === 'sheets') {
         const kinds = cmd === 'sheets' ? KINDS : KINDS.includes(cmd) ? [cmd] : [];
         for (const sc of scenarios) {
             const rec = runScenario(creature, sc, { seed });

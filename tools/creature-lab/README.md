@@ -27,17 +27,18 @@ module `creature::contract`.
 
 One rig dispatch (`@kernel @grid(1) k_rig`) steps every creature of a batch
 once. Skinning is an instanced mesh's brokernel vertex hook (`lab/skin.bk`)
-reading the pose buffer through `setShaderBuffer`. The lab draws the same way
-everywhere: sheets, live view and tests.
+reading the pose buffer through `setShaderBuffer`; it blends a vertex's bones
+as dual quaternions, so a bent joint keeps its girth. The lab draws the same
+way everywhere: sheets, live view and tests.
 
 A creature folder (`creatures/<name>/`) has these files, and
 `creatures/<name>.js` re-exports its `creature.js`:
 
 | File | What |
 |------|------|
-| `creature.js` | `name`, `skeleton`, `body`, `rig: { file, kernel }`, `scale`, `cycles` (which scenario is each steady gait, with reference duty factors and footfall offsets), `variants` (named knob sets; the deer's broken ones are `slip`, `sink`, `overbend`, `stumble`), `scenarios` |
+| `creature.js` | `name`, `skeleton`, `body`, `rig: { file, kernel }`, `scale`, `cycles` (which scenario is each steady gait, with reference duty factors and footfall offsets), `form` (the body's reference measures, and which parts stay inside which), `variants` (named knob sets; the deer's broken ones are `slip`, `sink`, `overbend`, `stumble`), `scenarios` |
 | `skeleton.js` | bones (parent, head, tail, per-axis joint limits in degrees), feet, tracked points, chart joints |
-| `body.js` | the soft-skinned body, sculpted with `lab/sculpt.js` |
+| `body.js` | the soft-skinned body, sculpted with `lab/sculpt.js` (the deer splits it into `body.js`, `legs.js` and `coat.js`) |
 | `rig.bk` | the species' rig. `@knob` constants can be overridden from the command line |
 | `scenarios.js` | the species' own scenarios, added to the lab's |
 
@@ -56,6 +57,8 @@ Run the commands from the broworkshop root:
 B=../bro/build/Release/bro-headless.exe
 $B tools/creature-lab tools/creature-lab/cli.js -- sheets deer walk trot
 $B tools/creature-lab tools/creature-lab/cli.js -- turnaround deer gallop --rows 12
+$B tools/creature-lab tools/creature-lab/cli.js -- turnaround deer trot --rows 4 --cell 2.5 --views right,front-right
+$B tools/creature-lab tools/creature-lab/cli.js -- form deer walk trot
 $B tools/creature-lab tools/creature-lab/cli.js -- trajectory deer walk
 $B tools/creature-lab tools/creature-lab/cli.js -- range deer trot
 $B tools/creature-lab tools/creature-lab/cli.js -- charts deer gaits
@@ -80,6 +83,8 @@ $B tools/creature-lab tools/creature-lab/cli.js -- scenarios deer
 - `--seed <n>`
 - `--knob NAME=v[,NAME=v]`: override rig `@knob` values. The knobs are added
   to the creature's label, so their outputs land in their own folder.
+- `--cell <scale>`, `--views right,front,...`: turnaround cells that much
+  bigger, and only those columns, for a close look at joints.
 
 **Where outputs go**
 
@@ -131,6 +136,20 @@ Every output is deterministic. A rerun writes the same bytes.
 
   Contact is measured from the geometry: the sole within 1.2 cm of the
   ground. It is not taken from the rig's claim.
+- **Form JSON** (`lab/form.js`, the `form` command, `form.json`): the body
+  measured, its skin placed on the CPU exactly as `lab/skin.bk` places it.
+  - at rest: each named ring's girth, width, depth, top and bottom, and each
+    named part's extent and volume, checked against `form.reference`
+  - through a cycle of each scenario (walk and trot by default): each named
+    ring's area and girth and each closed part's volume as a share of rest;
+    folds (the skin along each part bunching, folding through itself or
+    stretching between rings); and how far the parts named in `form.inside`
+    (a leg's top above a height) show outside the part that should cover
+    them
+  - `flags`: one line per finding
+
+  Parts and rings are named in the body: a loft's `name`, a key ring's
+  `name`.
 
 ## Scenarios
 

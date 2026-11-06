@@ -13,7 +13,12 @@
 //                      weights: the tube bends as a whole (limbs, neck)
 //   weights: 'vertex'  each vertex its own (a trunk, where the skin over a
 //                      shoulder follows the scapula and the belly the spine)
+//   weights: fn(p)     each vertex the weights fn gives for its rest point,
+//                      [[bone, weight], ...] (a field drawn by hand: which
+//                      skin a shoulder blade or a thigh carries)
 // A bone named as [name, influence] counts its distance divided by that.
+// A loft given a `name` is measured by lab/form.js, as are its key rings
+// that carry a `name`.
 // `skin` is two vec4 a vertex (weights, then bone indices) for lab/skin.bk.
 
 const sub = (a, b) => [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
@@ -49,6 +54,7 @@ export class Sculpt {
         this.skel = skel;
         this.pos = []; this.nrm = []; this.col = []; this.idx = []; this.wts = [];
         this.parts = [];
+        this.rings = [];
     }
 
     candidates(bones) {
@@ -71,16 +77,32 @@ export class Sculpt {
         return out.map((x) => ({ index: x.index, w: x.w / s2 }));
     }
 
+    // Weights given by name ([[bone, weight], ...]): the four largest, normalised.
+    explicit(list) {
+        const ws = list.filter(([, w]) => w > 0).map(([name, w]) => ({ index: this.skel.index(name), w }))
+            .sort((x, y) => y.w - x.w).slice(0, 4);
+        const sum = ws.reduce((s, x) => s + x.w, 0);
+        const out = ws.map((x) => ({ index: x.index, w: x.w / sum })).filter((x) => x.w > 0.004);
+        const s2 = out.reduce((s, x) => s + x.w, 0);
+        return out.map((x) => ({ index: x.index, w: x.w / s2 }));
+    }
+
     // A tube through `rings` ({ c: centre, r: radius or [side, up] }), the
     // rings splined `steps` to a span. opts: bones, segs, hint (the up
     // direction the ellipse's second axis leans to), shape(theta, t) -> a
     // radius factor, color(p, n, t) -> [r, g, b], caps [start, end],
-    // weights 'ring' | 'vertex', sharp.
+    // weights 'ring' | 'vertex' | fn(p) -> [[bone, weight], ...], sharp.
+    // A ring may carry `s`, an array of numbers splined like the radii and
+    // handed to shape as its third argument (a cross-section that changes
+    // along the tube), and `name` (see `name` below).
     loft(rings, opts = {}) {
         const segs = opts.segs || 16, steps = opts.steps || 4;
-        const cands = this.candidates(opts.bones);
+        const fn = typeof opts.weights === 'function' ? opts.weights : null;
+        const cands = fn ? null : this.candidates(opts.bones);
         const centres = spline(rings, steps, (r) => r.c);
         const radii = spline(rings, steps, (r) => (Array.isArray(r.r) ? r.r : [r.r, r.r]));
+        const shp = rings[0].s ? spline(rings, steps, (r) => r.s) : null;
+        const weigh = (p) => (fn ? this.explicit(fn(p)) : this.weigh(p, cands, opts.sharp));
         const n = centres.length;
         const hint = opts.hint || [0, 1, 0];
         const base = this.pos.length / 3;
@@ -90,13 +112,13 @@ export class Sculpt {
             const side = norm(cross(hint, t));
             const up = cross(t, side);
             const u = i / (n - 1);
-            const ringW = opts.weights === 'vertex' ? null : this.weigh(centres[i], cands, opts.sharp);
+            const ringW = opts.weights === 'vertex' || fn ? null : weigh(centres[i]);
             for (let j = 0; j < segs; j++) {
                 const th = (j / segs) * Math.PI * 2;
-                const f = opts.shape ? opts.shape(th, u) : 1;
+                const f = opts.shape ? opts.shape(th, u, shp ? shp[i] : null) : 1;
                 const fs = Array.isArray(f) ? f : [f, f];
                 const p = add(centres[i], add(mul(side, Math.cos(th) * radii[i][0] * fs[0]), mul(up, Math.sin(th) * radii[i][1] * fs[1])));
-                this.vertex(p, ringW || this.weigh(p, cands, opts.sharp));
+                this.vertex(p, ringW || weigh(p));
             }
         }
         for (let i = 0; i < n - 1; i++) {
@@ -110,7 +132,7 @@ export class Sculpt {
         for (const [end, on] of [[0, caps[0]], [n - 1, caps[1]]]) {
             if (!on) continue;
             const ring = base + end * segs;
-            const ci = this.vertex(centres[end], this.weigh(centres[end], cands, opts.sharp));
+            const ci = this.vertex(centres[end], weigh(centres[end]));
             for (let j = 0; j < segs; j++) {
                 const a = ring + j, b = ring + (j + 1) % segs;
                 if (end === 0) this.idx.push(ci, b, a); else this.idx.push(ci, a, b);
@@ -120,6 +142,15 @@ export class Sculpt {
             const k = vi - base;
             return k < n * segs ? Math.floor(k / segs) / (n - 1) : (k === n * segs ? 0 : 1);
         });
+        // A named part, and its named rings (a key ring's `name`), for the
+        // lab's measures of the body in motion (lab/form.js).
+        if (opts.name) {
+            this.parts.push({ name: opts.name, base, count: this.pos.length / 3 - base, start, end: this.idx.length,
+                              closed: caps[0] && caps[1], rings: n, segs });
+            rings.forEach((r, i) => {
+                if (r.name) this.rings.push({ name: r.name, part: opts.name, first: base + i * steps * segs, segs });
+            });
+        }
     }
 
     // An ellipsoid at c with radii r, on the given bones.
@@ -186,6 +217,10 @@ export class Sculpt {
             positions: new Float32Array(this.pos), normals: new Float32Array(this.nrm),
             colors: new Float32Array(this.col), indices: new Uint32Array(this.idx),
         });
-        return { mesh, skin, vertices: nv, triangles: this.idx.length / 3 };
+        return {
+            mesh, skin, vertices: nv, triangles: this.idx.length / 3,
+            positions: new Float32Array(this.pos), indices: new Uint32Array(this.idx), weights: this.wts,
+            parts: this.parts, rings: this.rings,
+        };
     }
 }
