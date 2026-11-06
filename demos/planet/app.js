@@ -32,12 +32,15 @@ const BASE_WAVELENGTH = 2400000;   // ground.bk's first octave
 const DETAIL_PERIOD = 64;          // metres; the ground shader's fine detail repeats over it
 const SWELL_PERIOD = 1024;         // metres; and its long waves
 const WAVE_CLOCK = 1024;           // seconds the sea's waves repeat over
+// The wind over the planet, ground_mesh.bk's WIND (its lanes' direction):
+// what each place's waves run down is its share along the ground there.
+const WIND = (() => { const w = [0.48, 0.36, -0.8], l = Math.hypot(...w); return w.map((c) => c / l); })();
 
 // The sea's waves, a wind sea at about 7 m/s: from 256 m to half a metre,
 // six a halving (each somewhere in its sixth: whole ratios between them
 // would tile into a lattice), each a sinusoid of the shader's periodic
 // coordinates (a whole number of waves along each axis of the period) in a
-// random direction, and its frequency the deep-water ω^2 = g k made a whole number
+// direction spread about the wind, and its frequency the deep-water ω^2 = g k made a whole number
 // over WAVE_CLOCK. Their slopes share Cox and Munk's mean square slope for
 // that wind (0.003 + 0.00512 U), equally a halving above the peak (the
 // saturation range: elevation ~ k^-3) and falling off past it as
@@ -51,7 +54,14 @@ const WAVES = (() => {
         const lambda = 256 * 2 ** (-(i + rnd()) / 6);
         const period = lambda > 12 ? SWELL_PERIOD : DETAIL_PERIOD;
         const z = 2 * rnd() - 1, a = 2 * Math.PI * rnd(), r = Math.sqrt(1 - z * z);
-        const n = [r * Math.cos(a), r * Math.sin(a), z].map((c) => Math.round(c * period / lambda));
+        // Down the wind, spread about it (a random direction's share added:
+        // up to about 40 degrees off for the long waves, wider for the short
+        // ones, which the wind's gusts turn), so crests run long across it.
+        // (Directions all over the sphere crossed into a hatch of crests.)
+        const spread = lambda > 4 ? 0.65 : 1.0;
+        const d = [WIND[0] + spread * r * Math.cos(a), WIND[1] + spread * r * Math.sin(a), WIND[2] + spread * z];
+        const dl = Math.hypot(...d);
+        const n = d.map((c) => Math.round(c / dl * period / lambda));
         const k = 2 * Math.PI * Math.hypot(...n) / period;
         if (k === 0) continue;
         const omega = Math.round(Math.sqrt(9.81 * k) * WAVE_CLOCK / (2 * Math.PI)) * 2 * Math.PI / WAVE_CLOCK;

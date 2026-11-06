@@ -72,9 +72,10 @@ fn k_grass_field(g: grid<2>, out: write_store<f32, 1>, heights: read_store<f32, 
     // None in the rivers and lakes, nor on the wet margin the ground's
     // shader draws as water wherever its texels' share passes about half,
     // its shore wandering by noise on either side (ground_mesh.bk): grown in
-    // proportion to the land's share, blades stood in open water.
+    // proportion to the land's share, blades stood in open water; cut from
+    // 0.1 to 0.35, they stood where the shore's noise put the water.
     out[i + 3] = grass_cover(h, grad, cl) * (1.0 - WOODS_SHADE * woods)
-               * (1.0 - smoothstep(0.1, 0.35, water_share(h, wa, 0.0)));
+               * (1.0 - smoothstep(0.0, 0.08, water_share(h, wa, 0.0)));
     out[i + 4] = albedo.x;
     out[i + 5] = albedo.y;
     out[i + 6] = albedo.z;
