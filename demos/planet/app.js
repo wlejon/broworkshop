@@ -546,5 +546,19 @@ function reload(files, texts = {}) {
     return { changed, redone, ms };
 }
 
+// A window's edit loop: saved .bk files of the app swap in place (a compile
+// error keeps the running code and says why); any other change reloads.
+window.addEventListener('sourcechange', (e) => {
+    const files = e.detail.files;
+    if (!files.every((f) => f.endsWith('.bk') && !f.startsWith('/'))) return;
+    e.preventDefault();
+    try {
+        const r = reload(files);
+        console.log(`planet: ${files.join(', ')} reloaded; changed ${JSON.stringify(r.changed)}, redone [${r.redone}]`);
+    } catch (err) {
+        console.error(`planet: ${files.join(', ')} kept the running code: ${err.message}`);
+    }
+});
+
 // For tests and tools.
 globalThis.planet = { cam, setHour, ground, makeCache, get cache() { return cache; }, clouds, grass, trees, rivers, groundHeight, get stats() { return lastStats; }, get lastView() { return lastView; }, frame, reload };
