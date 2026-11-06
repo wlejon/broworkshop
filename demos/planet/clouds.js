@@ -255,11 +255,15 @@ export function createClouds(scene, radius, module, readers, seed, hook, maxGrou
         pixelsPerCell: TILE_PIXELS, producePerUpdate: 64,
         layers: { column: 4, sun: 8, sunFar: 8 },
         produce(batch) {
-            kTile.dispatch([TILE_CELLS, TILE_CELLS, batch.count], batch.table, this.layer('column'),
-                           TILE_CELLS, TILE, TILE_BORDER, radius);
-            kSun.dispatch([TILE_CELLS, TILE_CELLS, batch.count], batch.table, this.lookup, this.layer('column'),
-                          this.layer('sun'), this.layer('sunFar'), TILE_CELLS, TILE, TILE_BORDER, TILE_LEVELS, 4 * radius / TILE,
-                          radius, seed, toSun[0], toSun[1], toSun[2], CLOUD_DETAIL_VAR);
+            if (batch.hasLayer('column')) {
+                kTile.dispatch([TILE_CELLS, TILE_CELLS, batch.count], batch.table, this.layer('column'),
+                               TILE_CELLS, TILE, TILE_BORDER, radius);
+            }
+            if (batch.hasLayer('sun') || batch.hasLayer('sunFar')) {
+                kSun.dispatch([TILE_CELLS, TILE_CELLS, batch.count], batch.table, this.lookup, this.layer('column'),
+                              this.layer('sun'), this.layer('sunFar'), TILE_CELLS, TILE, TILE_BORDER, TILE_LEVELS, 4 * radius / TILE,
+                              radius, seed, toSun[0], toSun[1], toSun[2], CLOUD_DETAIL_VAR);
+            }
         },
     });
     // Per tile level: its cells' footprint at a face's centre, and the
@@ -331,7 +335,7 @@ export function createClouds(scene, radius, module, readers, seed, hook, maxGrou
                 toSun[0] = sun[0];
                 toSun[1] = sun[1];
                 toSun[2] = sun[2];
-                cache.refresh();
+                cache.invalidate(['sun', 'sunFar']);
                 ground.refresh();
             }
             cache.update(view);

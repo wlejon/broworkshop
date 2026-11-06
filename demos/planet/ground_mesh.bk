@@ -35,6 +35,7 @@ from planet::relief import BASE_WAVELENGTH, RIDGE_LAST, RIDGE_PAST, FINE_FIRST, 
     ridge_cell_slope, simplex_grad, simplex_past, simplex_twice, SimplexAt, kept_share;
 from planet::tree_crown import tree_shadow, TreePlace;
 from planet::grass_floor import grass_floor, GrassPlace;
+from planet::ground_detail import FLOOR_LAST, FLOOR_RELIEF, perlin_grad, cliff_rock, floor_noise, SeaResult, sea_slope;
 
 struct Params {
     cam_hi: vec3<f32>,
@@ -80,8 +81,6 @@ const PERLIN_VAR: f32 = 0.0728;  // ground.bk PERLIN_VAR
 const RELIEF: f32 = 0.08;        // slope per octave, per unit of the noise's gradient
 const ROCK_LUM: f32 = 1.8;
 const ROCK_RELIEF: f32 = 3.0;
-const FLOOR_LAST: f32 = 8.0;    // the floor's own relief's longest wavelength (m)
-const FLOOR_RELIEF: f32 = 0.2;   // its slope per octave, per unit of the noise's gradient
 // The forest's floor: needle and leaf litter, mossy in its hollows, over
 // LITTER of the ground under the trees.
 const LITTER: f32 = 0.8;
@@ -102,7 +101,12 @@ const WIND: vec3<f32> = vec3<f32>(0.48, 0.36, -0.8);   // the lanes' direction o
 // Clouds low in a reflection: their sunlit sides, of the sun's light on the
 // ground; the reflection where the horizons hide the sky: the banks' shade.
 const CLOUD_SIDES: f32 = 0.55;
-const BANK_SHADE: f32 = 0.35;// What the clouds leave of the light at the ground point g (about the
+const BANK_SHADE: f32 = 0.35;
+// The clouds' floor over the water (clouds.js CLOUD_BASE), where a reflected
+// ray meets their gaps.
+const CLOUD_FLOOR: f32 = 1100.0;
+const CLOUD_OVER_SKY: f32 = 4.0;   // the brightest a mirrored cloud is over the sky it hides
+// What the clouds leave of the light at the ground point g (about the
 // planet's centre) over a footprint of w metres, from clouds.js's ground
 // light cache (clouds.bk k_cloud_ground): the sun straight through (x),
 // scattered down (y), and the sky's (z). Between the two tile levels whose
@@ -368,82 +372,6 @@ fn bspline(f: f32) -> vec4<f32> {
     return vec4<f32>(g * g * g, 3.0 * f3 - 6.0 * f2 + 4.0, -3.0 * f3 + 3.0 * f2 + 3.0 * f + 1.0, f3) / 6.0;
 }
 
-// One of the 12 cube-edge gradients at lattice point c, the lattice
-// periodic over cells (a power of two).
-fn lattice_gradient(c: vec3<i32>, cells: i32, seed: i32) -> vec3<f32> {
-    let m = c & vec3<i32>(cells - 1);
-    let px = m.x as u32;
-    let py = m.y as u32;
-    let pz = m.z as u32;
-    var h = (px * 0x8da6b343u ^ py * 0xd8163841u ^ pz * 0xcb1ab31fu ^ (seed as u32)) * 0x27d4eb2du;
-    h = h ^ (h >> 15u);
-    let e = h % 12u;
-    let s1 = (e & 1u) != 0u ? -1.0 : 1.0;
-    let s2 = (e & 2u) != 0u ? -1.0 : 1.0;
-    let axis = e >> 2u;
-    return axis == 0u ? vec3<f32>(0.0, s1, s2) : (axis == 1u ? vec3<f32>(s1, 0.0, s2) : vec3<f32>(s1, s2, 0.0));
-}
-
-// Perlin noise at x (lattice units) and its gradient: x value, yzw gradient.
-fn perlin_grad(x: vec3<f32>, cells: i32, seed: i32) -> vec4<f32> {
-    let fl = floor(x);
-    let i = vec3<i32>(fl.x as i32, fl.y as i32, fl.z as i32);
-    let f = fract(x);
-    let u = f * f * f * (f * (f * 6.0 - 15.0) + 10.0);
-    let du = 30.0 * f * f * (f * (f - 2.0) + 1.0);
-    let ga = lattice_gradient(i, cells, seed);
-    let gb = lattice_gradient(i + vec3<i32>(1, 0, 0), cells, seed);
-    let gc = lattice_gradient(i + vec3<i32>(0, 1, 0), cells, seed);
-    let gd = lattice_gradient(i + vec3<i32>(1, 1, 0), cells, seed);
-    let ge = lattice_gradient(i + vec3<i32>(0, 0, 1), cells, seed);
-    let gf = lattice_gradient(i + vec3<i32>(1, 0, 1), cells, seed);
-    let gg = lattice_gradient(i + vec3<i32>(0, 1, 1), cells, seed);
-    let gh = lattice_gradient(i + vec3<i32>(1, 1, 1), cells, seed);
-    let va = dot(ga, f);
-    let vb = dot(gb, f - vec3<f32>(1.0, 0.0, 0.0));
-    let vc = dot(gc, f - vec3<f32>(0.0, 1.0, 0.0));
-    let vd = dot(gd, f - vec3<f32>(1.0, 1.0, 0.0));
-    let ve = dot(ge, f - vec3<f32>(0.0, 0.0, 1.0));
-    let vf = dot(gf, f - vec3<f32>(1.0, 0.0, 1.0));
-    let vg = dot(gg, f - vec3<f32>(0.0, 1.0, 1.0));
-    let vh = dot(gh, f - vec3<f32>(1.0, 1.0, 1.0));
-    let k1 = vb - va;
-    let k2 = vc - va;
-    let k3 = ve - va;
-    let k4 = va - vb - vc + vd;
-    let k5 = va - vc - ve + vg;
-    let k6 = va - vb - ve + vf;
-    let k7 = -va + vb + vc - vd + ve - vf - vg + vh;
-    let value = va + u.x * k1 + u.y * k2 + u.z * k3 + u.x * u.y * k4 + u.y * u.z * k5 + u.z * u.x * k6 + u.x * u.y * u.z * k7;
-    let grad = ga + u.x * (gb - ga) + u.y * (gc - ga) + u.z * (ge - ga)
-             + u.x * u.y * (ga - gb - gc + gd) + u.y * u.z * (ga - gc - ge + gg) + u.z * u.x * (ga - gb - ge + gf)
-             + u.x * u.y * u.z * (-ga + gb + gc - gd + ge - gf - gg + gh)
-             + du * (vec3<f32>(k1, k2, k3) + u.yzx * vec3<f32>(k4, k5, k6) + u.zxy * vec3<f32>(k6, k4, k5) + u.yzx * u.zxy * k7);
-    return vec4<f32>(value, grad);
-}
-
-// Bare rock in its beds at a point (metres about the planet's centre), as
-// ground.bk bedded_surface lays it with strata: three scales of bed level
-// along a surface folded by low-frequency noise, in log-luminance, each
-// fading as the pixel's footprint spans it.
-// A bed is a function of height alone: gradient noise along one axis, its
-// gradients hashed from the lattice point (its variance is 0.0194; scaled to
-// about 0.7 of a unit, as its even bands read stronger than 3D noise's).
-fn bed_slope(i: f32, seed: i32) -> f32 {
-    var h: u32 = ((i as i32) as u32) * 0x27d4eb2du ^ (seed as u32) * 0x165667b1u;
-    h = (h ^ (h >> 15u)) * 0x85ebca6bu;
-    h = h ^ (h >> 13u);
-    return ((h & 65535u) as f32) / 32767.5 - 1.0;
-}
-fn cliff_band(level: f32, length: f32, footprint: f32, seed: i32) -> f32 {
-    let x = level / length;
-    let i = floor(x);
-    let f = x - i;
-    let s = f * f * f * (f * (f * 6.0 - 15.0) + 10.0);
-    let n = mix(bed_slope(i, seed) * f, bed_slope(i + 1.0, seed) * (f - 1.0), s);
-    let t = 6.2831853 * footprint / length;
-    return n * 5.0 * exp(-0.5 * t * t);
-}
 // The region's stone at detail texel coordinate `tex` of tile `slot`: the
 // four corners k_anchor stored (planet.bk), bilinear over the tile.
 fn region_rock(slot: i32, tex: vec2<f32>) -> vec3<f32> {
@@ -453,117 +381,6 @@ fn region_rock(slot: i32, tex: vec2<f32>) -> vec3<f32> {
     let r = mix(mix(unpack_unorm4x8(w.x).xyz, unpack_unorm4x8(w.y).xyz, st.x),
                 mix(unpack_unorm4x8(w.z).xyz, unpack_unorm4x8(w.w).xyz, st.x), st.y);
     return r * r;
-}
-// The beds are not ruled lines: they buckle by a few metres over tens
-// (CLIFF_BUCKLE, at CLIFF_FOLD metres), and how strongly they show comes and
-// goes across the face, so a wall reads as layered stone, weathered in
-// places to one tone, rather than as even stripes. One noise for both (its
-// value and one component of its gradient, a field of its own), from
-// `swell`, the vertices' periodic position: p's f32 is half a metre at the
-// planet's radius.
-const CLIFF_FOLD: f32 = 64.0;
-const CLIFF_BUCKLE: f32 = 8.0;
-fn cliff_rock(p: vec3<f32>, swell: vec3<f32>, footprint: f32, stone: vec3<f32>) -> vec3<f32> {
-    let h = length(p) - FACE_EXTENT * 0.63661977;   // FACE_EXTENT is a quarter of the circumference
-    let fold = perlin_grad(swell / CLIFF_FOLD, (SWELL_PERIOD / CLIFF_FOLD) as i32, SEED + 331);
-    let level = h + perlin_grad(p * (1.0 / 3500.0), 4096, SEED + 307).x * 1600.0 + fold.x * CLIFF_BUCKLE;
-    let shows = clamp(0.75 + 0.6 * (fold.y + fold.z), 0.15, 1.3);
-    let bed = (0.10 * cliff_band(level, 9.0, footprint, SEED + 311)
-             + 0.16 * cliff_band(level, 41.0, footprint, SEED + 313)
-             + 0.18 * cliff_band(level, 130.0, footprint, SEED + 317)) * shows;
-    // The region's stone (climate.bk, region_rock), as ground.bk
-    // bedded_surface lays it.
-    return stone * exp(bed) + vec3<f32>(0.03, 0.012, -0.012) * bed;
-}
-
-// Gradient noise in 2D (lattice units, periodic over `cells`, a power of
-// two) and its gradient: x value, yz gradient. Half the 3D noise's corners,
-// for relief that lies along the ground.
-fn lattice_gradient2(c: vec2<i32>, cells: i32, seed: i32) -> vec2<f32> {
-    let m = c & vec2<i32>(cells - 1);
-    var h = ((m.x as u32) * 0x8da6b343u ^ (m.y as u32) * 0xd8163841u ^ (seed as u32)) * 0x27d4eb2du;
-    h = h ^ (h >> 15u);
-    let a = ((h >> 29u) as f32) * 0.78539816;
-    return vec2<f32>(cos(a), sin(a));
-}
-fn perlin2_grad(x: vec2<f32>, cells: i32, seed: i32) -> vec3<f32> {
-    let fl = floor(x);
-    let i = vec2<i32>(fl.x as i32, fl.y as i32);
-    let f = x - fl;
-    let u = f * f * f * (f * (f * 6.0 - 15.0) + 10.0);
-    let du = 30.0 * f * f * (f * (f - 2.0) + 1.0);
-    let ga = lattice_gradient2(i, cells, seed);
-    let gb = lattice_gradient2(i + vec2<i32>(1, 0), cells, seed);
-    let gc = lattice_gradient2(i + vec2<i32>(0, 1), cells, seed);
-    let gd = lattice_gradient2(i + vec2<i32>(1, 1), cells, seed);
-    let va = dot(ga, f);
-    let vb = dot(gb, f - vec2<f32>(1.0, 0.0));
-    let vc = dot(gc, f - vec2<f32>(0.0, 1.0));
-    let vd = dot(gd, f - vec2<f32>(1.0, 1.0));
-    let k4 = va - vb - vc + vd;
-    let value = va + u.x * (vb - va) + u.y * (vc - va) + u.x * u.y * k4;
-    let grad = ga + u.x * (gb - ga) + u.y * (gc - ga) + u.x * u.y * (ga - gb - gc + gd)
-             + du * (vec2<f32>(vb - va, vc - va) + u.yx * k4);
-    return vec3<f32>(value, grad);
-}
-// The floor's relief (fragment) in the plane of the two axes the ground's
-// up is furthest from, its coordinates the vertices' periodic positions as
-// they are (swell past a metre, q under): x its height in noise units, yzw
-// its gradient (per unit of the noise's lattice). In the octaves at 8, 2
-// and 0.5 m, each fading as a pixel spans it. Where two axes are about
-// equally far from up (a band along the cube's diagonal planes) the two
-// planes' blend, so the pattern changes there without a seam.
-fn floor_plane(p: vec3<f32>, axis: i32) -> vec2<f32> {
-    return axis == 0 ? p.yz : (axis == 1 ? p.zx : p.xy);
-}
-fn floor_axes(axis: i32, g: vec2<f32>) -> vec3<f32> {
-    return axis == 0 ? vec3<f32>(0.0, g.x, g.y) : (axis == 1 ? vec3<f32>(g.y, 0.0, g.x) : vec3<f32>(g.x, g.y, 0.0));
-}
-fn floor_octaves(swell: vec3<f32>, q: vec3<f32>, axis: i32, footprint: f32) -> vec4<f32> {
-    var out = vec4<f32>(0.0);
-    var wl = FLOOR_LAST;
-    for (var k: i32 = 0; k < 3; k += 1) {
-        let w = clamp(wl / footprint * 0.5 - 1.0, 0.0, 1.0);
-        if (w <= 0.0) { break; }
-        let far = wl >= 1.0;
-        let pg = perlin2_grad(floor_plane(far ? swell : q, axis) / wl, ((far ? SWELL_PERIOD : DETAIL_PERIOD) / wl) as i32, 61 + k);
-        out += vec4<f32>(pg.x, floor_axes(axis, pg.yz)) * w;
-        wl *= 0.25;
-    }
-    return out;
-}
-fn floor_noise(swell: vec3<f32>, q: vec3<f32>, up: vec3<f32>, footprint: f32) -> vec4<f32> {
-    let a = abs(up);
-    let first = a.x >= a.y && a.x >= a.z ? 0 : (a.y >= a.z ? 1 : 2);
-    let top = max(a.x, max(a.y, a.z));
-    let next = first == 0 ? max(a.y, a.z) : (first == 1 ? max(a.x, a.z) : max(a.x, a.y));
-    let second = first == 0 ? (a.y >= a.z ? 1 : 2) : (first == 1 ? (a.x >= a.z ? 0 : 2) : (a.x >= a.y ? 0 : 1));
-    let blend = 0.5 * (1.0 - smoothstep(0.0, 0.03, top - next));
-    var r = floor_octaves(swell, q, first, footprint);
-    if (blend > 0.0) { r = mix(r, floor_octaves(swell, q, second, footprint), blend); }
-    return r;
-}
-
-struct SeaResult {
-    slope: vec3<f32>,
-    variance: f32,
-}
-fn sea_slope(footprint: f32, up: vec3<f32>, v_swell: vec3<f32>, v_q: vec3<f32>, first: i32) -> SeaResult {
-    var slope = vec3<f32>(0.0);
-    var variance: f32 = WAVE_RESIDUAL;
-    for (var i: i32 = first; i < WAVE_COUNT; i += 1) {
-        let k = WAVE_K[i];
-        let f = WAVE_F[i];
-        let w = clamp(k.w / footprint - 1.0, 0.0, 1.0);
-        if (w <= 0.0) {
-            variance += f.y;
-            break;
-        }
-        let q = i < WAVE_SWELL ? v_swell : v_q;
-        slope += k.xyz * (f.z * w * cos(dot(k.xyz, q) - f.x * params.time));
-        variance += f.w * (1.0 - w);
-    }
-    return SeaResult { slope: slope - up * dot(slope, up), variance: variance };
 }
 
 pub fn fragment(v: mesh::Vertex, s_in: mesh::Surface) -> mesh::Surface {
@@ -813,7 +630,7 @@ pub fn fragment(v: mesh::Vertex, s_in: mesh::Surface) -> mesh::Surface {
     var sea = up;
     if (water > 0.001) {
         let calm = mix(1.0, WAVE_FRESH_SCALE, fresh);
-        let sr = sea_slope(footprint * mix(1.0, 2.0, fresh), up, v_swell, v_q, fresh > 0.5 ? WAVE_FRESH : 0);
+        let sr = sea_slope(footprint * mix(1.0, 2.0, fresh), up, v_swell, v_q, fresh > 0.5 ? WAVE_FRESH : 0, params.time);
         // Fresh water's surface in wind rows: rippled lanes and glassy
         // slicks between, and the gentle swell across them, which break its
         // mirror into what reads as moving water. The lanes are the noise
@@ -867,41 +684,66 @@ pub fn fragment(v: mesh::Vertex, s_in: mesh::Surface) -> mesh::Surface {
     // share there times that, in pixels.)
     let thread = 1.0 - smoothstep(0.6, 1.2, 1.5 * water * texel_m / footprint);
     let glint = water * (1.0 - mirror) * thread;
+    // The sky the water mirrors. The scene's reflection is the clear sky's,
+    // and the clouds count as what hides it, so under cloud a river mirrored
+    // nothing and was its silt's matte brown. Here the reflected ray sees the
+    // sky through the clouds' gaps where it crosses their floor (CLOUD_FLOOR
+    // up, kilometres off for a grazing ray: the gaps over the water said a
+    // river under a clear patch mirrored a clear sky down to the horizon,
+    // where the sky seen above it was a cloud bank, and at dusk mirrored the
+    // clear twilight brighter than the sky above it), closing along a
+    // grazing ray as gaps do toward the horizon, and the clouds in them:
+    // their undersides by the light they scatter down (spread over the sky
+    // they cover) and the sky's light on them (as clouds_volume.bk takes
+    // it), their sunlit sides low down; where the horizons hide the sky, the
+    // banks' shade. `seen` is that over the clear sky along the ray (the
+    // clouds at most CLOUD_OVER_SKY of it: the sky is the eye's, and from
+    // above the air it is black, where a ratio to it drew every cloud's
+    // shadow on the sea white).
+    var seen = vec3<f32>(1.0);
+    if (glint > 0.0 || mirror > 0.0) {
+        let banks = clamp(v_light.y / max(v_open, 1.0e-3), 0.0, 1.0);
+        let r = reflect(-eye, sea);
+        let r_up = max(dot(r, level_up), 0.0);
+        let reach = CLOUD_FLOOR / max(r_up, 0.05);
+        let far = cloud_light_at((params.cam_hi + params.cam_lo) + v.world_pos + (r - level_up * r_up) * reach, 0.25 * reach);
+        let open_r = pow(far.z, 1.0 / max(r_up, 0.08));
+        let sun_up = max(dot(level_up, params.to_sun), 0.0);
+        let e = lighting::sun_light(v.world_pos) * (sun_up / GROUND_PI);
+        let under = e * (far.y / max(1.0 - far.z, 0.15));
+        let lit = 0.5 * lighting::open_sky_irradiance(v.world_pos, level_up) / GROUND_PI;
+        let clouds = mix(e * CLOUD_SIDES, under, smoothstep(0.0, 0.5, r_up)) + lit;
+        let sky_r = lighting::sky_along(r);
+        let cover = min(clouds / max(sky_r, vec3<f32>(1.0e-4)), vec3<f32>(CLOUD_OVER_SKY));
+        seen = mix(vec3<f32>(1.0), cover, 1.0 - open_r) * mix(BANK_SHADE, 1.0, banks);
+    }
     if (glint > 0.0) {
         let ls = lighting::Surface {
             position: v.world_pos, normal: sea, view: eye, cam_dist: length(v.world_pos),
             base_color: vec3<f32>(0.0), metallic: 0.0, roughness: max(water_rough, 0.04),
             receives_shadow: false, two_sided: false, subsurface: 0.0, translucency: 0.0,
-            sun_visibility: clamp(s.sun_visibility, 0.0, 1.0), sky_visibility: clamp(s.sky_visibility, 0.0, 1.0),
+            sun_visibility: clamp(s.sun_visibility, 0.0, 1.0), sky_visibility: 1.0,
             sky_normal: sea, occluder_sun: 0.0, sun_diffuse: 0.0,
         };
-        s.emissive += glint * (lighting::direct_light(ls) + lighting::ambient(ls));
+        s.emissive += glint * (lighting::direct_light(ls) + lighting::ambient(ls) * seen);
     }
-    // The water's mirror of a cloudy sky. The scene's reflection is the
-    // clear sky's, and the clouds count as what hides it, so under cloud a
-    // river mirrored nothing and was its silt's matte brown. Here the
-    // reflected ray sees the sky through the clouds' gaps (closing along a
-    // grazing ray, as gaps do toward the horizon) and the clouds in them:
-    // their undersides by the light they scatter down (spread over the
-    // sky they cover), their sunlit sides low down. What the scene already
-    // adds of the clear sky is taken off. By Fresnel: from low over a
-    // river, mostly its sky and its banks' shade; from above, its water.
+    // The water's mirror: the scene's reflection of the open sky (its
+    // ambient with no diffuse colour, at its own Fresnel and roughness),
+    // which it adds dimmed by the sky's occlusion, is the sky seen instead,
+    // never below black. (Taken off at a Fresnel of the water's own, a shore
+    // pixel's rougher mix reflected less than was taken off and went
+    // negative.) By Fresnel: from low over a river, mostly its sky and its
+    // banks' shade; from above, its water.
     if (mirror > 0.0) {
-        let open = v_open;
-        let banks = clamp(v_light.y / max(open, 1.0e-3), 0.0, 1.0);
-        let nv = max(dot(s.normal, eye), 1.0e-4);
-        let r = reflect(-eye, s.normal);
-        let r_up = max(dot(r, level_up), 0.0);
-        let open_r = pow(open, 1.0 / max(r_up, 0.08));
-        let sun_up = max(dot(level_up, params.to_sun), 0.0);
-        let e = lighting::sun_light(v.world_pos) * (sun_up / GROUND_PI);
-        let under = e * (v_light.w / max(1.0 - open, 0.15));
-        let clouds = mix(e * CLOUD_SIDES, under, smoothstep(0.0, 0.5, r_up));
-        let sky_r = lighting::sky_along(r);
-        let fr = 0.02 + 0.98 * pow(1.0 - nv, 5.0) * (1.0 - s.roughness);
-        let seen = mix(sky_r, clouds, 1.0 - open_r) * mix(BANK_SHADE, 1.0, banks);
-        let scene = sky_r * lighting::specular_occlusion(nv, s.sky_visibility, s.roughness);
-        s.emissive += mirror * fr * max(seen - scene, vec3<f32>(0.0));
+        let rough = clamp(s.roughness, 0.04, 1.0);
+        let ls = lighting::Surface {
+            position: v.world_pos, normal: s.normal, view: eye, cam_dist: length(v.world_pos),
+            base_color: vec3<f32>(0.0), metallic: 0.0, roughness: rough,
+            receives_shadow: false, two_sided: false, subsurface: 0.0, translucency: 0.0,
+            sun_visibility: 0.0, sky_visibility: 1.0, sky_normal: s.sky_normal, occluder_sun: 0.0, sun_diffuse: 0.0,
+        };
+        let occ = lighting::specular_occlusion(max(dot(s.normal, eye), 1.0e-4), clamp(s.sky_visibility, 0.0, 1.0), rough);
+        s.emissive += mirror * lighting::ambient(ls) * (seen - vec3<f32>(occ));
     }
 
     if (SCENE_DEBUG(water)) { s = mesh::debug(s, vec3<f32>(water)); }

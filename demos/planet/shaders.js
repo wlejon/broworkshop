@@ -6,6 +6,19 @@ const fs = require('fs');
 // The text of the app's file at `path`.
 export const readApp = (path) => fs.readFileSync(bro.resolvePath('/app/' + path), 'utf-8');
 
+if (typeof bro !== 'undefined' && bro.kernel && typeof bro.kernel.resolve === 'function') {
+    bro.kernel.resolve((name) => {
+        if (typeof name === 'string' && name.startsWith('planet::')) {
+            try {
+                return readApp(name.slice('planet::'.length) + '.bk');
+            } catch (_) {
+                return undefined;
+            }
+        }
+        return undefined;
+    });
+}
+
 const f32 = (x) => (Number.isInteger(x) ? x.toFixed(1) : String(x));
 const literal = (type, x) => {
     if (type === 'f32') return f32(x);
@@ -28,6 +41,9 @@ export function constants(name, decls) {
         } else {
             src += `pub const ${key}: ${type} = ${literal(type, value)};\n`;
         }
+    }
+    if (typeof bro !== 'undefined' && bro.kernel && typeof bro.kernel.registerModule === 'function') {
+        bro.kernel.registerModule(name, src);
     }
     return src;
 }

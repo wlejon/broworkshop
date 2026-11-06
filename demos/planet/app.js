@@ -82,7 +82,8 @@ const WAVES = (() => {
     const freshScale = Math.sqrt((0.003 + 0.00512 * 2) / (list[fresh].tail + residual));
     return { list, residual, swell: list.filter((w) => w.period === SWELL_PERIOD).length, fresh, freshScale };
 })();
-const MODULES = { 'planet::ground': readApp('ground.bk'), 'planet::relief': readApp('relief.bk'), 'planet::rivers': readApp('rivers.bk'),
+const MODULES = { 'planet::ground': readApp('ground.bk'), 'planet::surface': readApp('surface.bk'),
+                  'planet::relief': readApp('relief.bk'), 'planet::rivers': readApp('rivers.bk'),
                   'planet::clouds': readApp('clouds.bk'), 'planet::anchor': readApp('anchor.bk'),
                   'planet::climate': readApp('climate.bk'), 'planet::dendry': readApp('dendry.bk'),
                   'planet::dendry_grid': readApp('dendry_grid.bk'), 'planet::dendry_field': readApp('dendry_field.bk'),
@@ -347,8 +348,8 @@ ground = scene.createInstancedMesh({
     mesh: patchMesh(), color: [1, 1, 1],
     castsShadow: false, receivesShadow: false, doubleSided: true,
     module: readApp('ground_mesh.bk'), file: 'ground_mesh.bk',
-    modules: { tiles: bro.tiles.module, 'planet::ground_layout': GROUND_LAYOUT, 'planet::relief': MODULES['planet::relief'],
-               ...treeModules, ...grassModules },
+    modules: { tiles: bro.tiles.module, 'planet::ground_layout': GROUND_LAYOUT, 'planet::ground_detail': readApp('ground_detail.bk'),
+               'planet::relief': MODULES['planet::relief'], ...treeModules, ...grassModules },
 });
 ground.cullMargin = 4 * RADIUS;   // the shader places tiles; the cache culls them
 makeCache(Number(document.querySelector('#detail').value));
