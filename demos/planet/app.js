@@ -32,8 +32,9 @@ const BASE_WAVELENGTH = 2400000;   // ground.bk's first octave
 const DETAIL_PERIOD = 64;          // metres; the ground shader's fine detail repeats over it
 const SWELL_PERIOD = 1024;         // metres; and its long waves
 const WAVE_CLOCK = 1024;           // seconds the sea's waves repeat over
-// The wind over the planet, ground_mesh.bk's WIND (its lanes' direction):
-// what each place's waves run down is its share along the ground there.
+// The wind over the planet (ground_mesh.bk reads it from ground_layout as
+// its lanes' direction): what each place's waves run down is its share
+// along the ground there.
 const WIND = (() => { const w = [0.48, 0.36, -0.8], l = Math.hypot(...w); return w.map((c) => c / l); })();
 
 // The sea's waves, a wind sea at about 7 m/s: from 256 m to half a metre,
@@ -331,7 +332,7 @@ const GROUND_LAYOUT = constants('planet::ground_layout', {
     CELLS: ['i32', CELLS], BORDER: ['i32', BORDER], TILE: ['i32', TILE], DETAIL: ['i32', DETAIL],
     TEXELS: ['i32', TEXELS], HZ: ['i32', HZ], FACE_EXTENT: ['f32', RADIUS * Math.PI / 2],
     DETAIL_PERIOD: ['f32', DETAIL_PERIOD], SWELL_PERIOD: ['f32', SWELL_PERIOD],
-    SEED: ['i32', SEED],
+    SEED: ['i32', SEED], WIND: ['vec3<f32>', WIND],
     GL_TILE: ['i32', GROUND_LIGHT.tile], GL_BORDER: ['i32', GROUND_LIGHT.border],
     GL_ATLAS: ['i32', GROUND_LIGHT.atlas], GL_LEVELS: ['i32', GROUND_LIGHT.levels],
     WAVE_COUNT: ['i32', WAVES.list.length], WAVE_SWELL: ['i32', WAVES.swell], WAVE_FRESH: ['i32', WAVES.fresh],

@@ -29,7 +29,7 @@ import lighting;
 import custom;
 import tiles;
 from planet::ground_layout import CELLS, BORDER, TILE, DETAIL, TEXELS, HZ, FACE_EXTENT, DETAIL_PERIOD, SWELL_PERIOD,
-    SEED, GL_TILE, GL_BORDER, GL_ATLAS, GL_LEVELS, WAVE_COUNT, WAVE_SWELL, WAVE_FRESH, WAVE_RESIDUAL,
+    SEED, WIND, GL_TILE, GL_BORDER, GL_ATLAS, GL_LEVELS, WAVE_COUNT, WAVE_SWELL, WAVE_FRESH, WAVE_RESIDUAL,
     WAVE_FRESH_SCALE, WAVE_K, WAVE_F;
 from planet::relief import BASE_WAVELENGTH, RIDGE_LAST, RIDGE_PAST, FINE_FIRST, ridge_amp, span_at, mean_factor,
     ridge_cell_slope, simplex_grad, simplex_past, simplex_twice, SimplexAt, kept_share;
@@ -97,7 +97,6 @@ const STREAK_W: f32 = 8.0;
 const STREAK_LEN: f32 = 6.0;
 const STREAK_RIPPLE: f32 = 1.6;
 const STREAK_SLOPE: f32 = 0.02;
-const WIND: vec3<f32> = vec3<f32>(0.48, 0.36, -0.8);   // the lanes' direction over the planet
 // Clouds low in a reflection: their sunlit sides, of the sun's light on the
 // ground; the reflection where the horizons hide the sky: the banks' shade.
 const CLOUD_SIDES: f32 = 0.55;
