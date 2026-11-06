@@ -13,8 +13,11 @@
 //                                  sides full down to the elbows
 //   belly line                     rising 7 cm from the girth to the flank
 //   haunches                       0.25 m across, full down to the stifle
-//   trunk, point of shoulder to    1.06 m, 1.1x the withers height; brisket
-//     point of buttock             to buttock 1.29 m
+//   trunk, point of shoulder to    1.06 m, 1.1x the withers height; the
+//     point of buttock             brisket 0.12 m before the point of
+//                                  shoulder, brisket to buttock 1.2 m
+//   trunk volume                   about 85 l, the whole body about 0.1 m3:
+//                                  the 75 to 85 kg of a deer this tall
 //   neck                           0.30 m deep where it leaves the chest,
 //                                  0.17 m at mid neck, 0.13 m at the throat
 //   head                           0.29 m, ears 0.15 m, tail 0.2 m
@@ -47,8 +50,8 @@ function trunkWeights(skel) {
         const sx = Math.abs(p[0]), t = p[0] >= 0 ? 'L' : 'R';
         const q = [sx, p[1], p[2]];
         let ws = sstep(0.02, 0.08, sx) * (1 - sstep(0.05, 0.12, segDist(q, ...scap)));
-        let wh = sstep(0.04, 0.09, sx) * (1 - sstep(0.05, 0.11, segDist(q, ...hum)));
-        let wf = sstep(0.03, 0.08, sx) * (1 - sstep(0.07, 0.16, segDist(q, ...fem)));
+        let wh = sstep(0.03, 0.09, sx) * (1 - sstep(0.02, 0.15, segDist(q, ...hum)));
+        let wf = sstep(0.02, 0.08, sx) * (1 - sstep(0.04, 0.20, segDist(q, ...fem)));
         let limb = ws + wh + wf;
         if (limb > 1) { ws /= limb; wh /= limb; wf /= limb; limb = 1; }
         const spine = 1 - limb;
@@ -76,22 +79,22 @@ function trunkShape(th, u, s) {
 // A trunk key ring from its z, the back's and the belly's heights and its half width.
 const ring = (z, top, bottom, hw, s, name) => ({ c: [0, (top + bottom) / 2, z], r: [hw, (top - bottom) / 2], s, name });
 
-function trunk(S, skel) {
+function trunk(S, field) {
     S.loft([
-        ring(-0.655, 0.855, 0.705, 0.030, [2.0, 2.0, 0.2]),
-        ring(-0.630, 0.885, 0.640, 0.080, [2.2, 2.2, 0.35]),
-        ring(-0.570, 0.925, 0.600, 0.125, [2.3, 2.6, 0.35], 'rump'),
+        ring(-0.640, 0.845, 0.680, 0.030, [2.0, 2.0, 0.2]),
+        ring(-0.615, 0.890, 0.635, 0.082, [2.2, 2.2, 0.35]),
+        ring(-0.555, 0.930, 0.598, 0.126, [2.3, 2.6, 0.35], 'rump'),
         ring(-0.450, 0.968, 0.572, 0.138, [2.2, 3.8, 0.3], 'hip'),
-        ring(-0.310, 0.966, 0.622, 0.124, [2.2, 3.0, 0.3], 'flank'),
+        ring(-0.310, 0.966, 0.612, 0.126, [2.2, 3.4, 0.3], 'flank'),
         ring(-0.180, 0.956, 0.600, 0.118, [2.2, 2.2, 0.3], 'waist'),
         ring(-0.020, 0.956, 0.566, 0.126, [2.2, 2.2, 0.35], 'ribs'),
         ring(0.160, 0.958, 0.556, 0.120, [2.2, 2.2, 0.42], 'girth'),
         ring(0.300, 0.982, 0.556, 0.142, [2.1, 3.5, 0.55], 'shoulder'),
-        ring(0.420, 0.955, 0.585, 0.130, [2.1, 3.2, 0.5]),
-        ring(0.500, 0.920, 0.640, 0.095, [2.0, 2.6, 0.4]),
-        ring(0.550, 0.870, 0.700, 0.052, [2.0, 2.2, 0.3]),
-        ring(0.572, 0.810, 0.745, 0.020, [2.0, 2.0, 0.3]),
-    ], { weights: trunkWeights(skel), segs: 40, steps: 4, hint: [0, 1, 0], name: 'trunk',
+        ring(0.420, 0.955, 0.568, 0.130, [2.1, 3.5, 0.5]),
+        ring(0.485, 0.925, 0.630, 0.100, [2.0, 2.8, 0.4]),
+        ring(0.525, 0.875, 0.690, 0.058, [2.0, 2.2, 0.3]),
+        ring(0.545, 0.815, 0.740, 0.022, [2.0, 2.0, 0.3]),
+    ], { weights: field, segs: 40, steps: 4, hint: [0, 1, 0], name: 'trunk',
          shape: trunkShape, color: trunkColor });
 }
 
@@ -99,9 +102,9 @@ function trunk(S, skel) {
 // brisket and the withers, tapering to the throat under the skull.
 function neck(S) {
     S.loft([
-        { c: [0, 0.80, 0.42], r: [0.10, 0.17] },
-        { c: [0, 0.90, 0.50], r: [0.092, 0.15], name: 'neckbase' },
-        { c: [0, 1.00, 0.57], r: [0.072, 0.112] },
+        { c: [0, 0.80, 0.40], r: [0.10, 0.18] },
+        { c: [0, 0.91, 0.48], r: [0.092, 0.165], name: 'neckbase' },
+        { c: [0, 1.00, 0.555], r: [0.074, 0.12] },
         { c: [0, 1.10, 0.625], r: [0.058, 0.088], name: 'neckmid' },
         { c: [0, 1.19, 0.67], r: [0.052, 0.074] },
         { c: [0, 1.265, 0.705], r: [0.048, 0.066] },
@@ -125,9 +128,9 @@ function head(S) {
         S.blob([0.046 * s, 1.30, 0.80], [0.012, 0.012, 0.014], { bones: ['head'], color: NOSE, segs: 10, rows: 6 });
         S.loft([
             { c: [0.045 * s, 1.325, 0.75], r: [0.022, 0.009] },
-            { c: [0.08 * s, 1.355, 0.738], r: [0.036, 0.011] },
-            { c: [0.12 * s, 1.39, 0.725], r: [0.032, 0.009] },
-            { c: [0.155 * s, 1.42, 0.715], r: [0.008, 0.004] },
+            { c: [0.08 * s, 1.355, 0.738], r: [0.040, 0.012] },
+            { c: [0.12 * s, 1.39, 0.725], r: [0.040, 0.010] },
+            { c: [0.158 * s, 1.425, 0.714], r: [0.010, 0.004] },
         ], { bones: [s > 0 ? 'earL' : 'earR'], segs: 12, hint: [0, 0, 1], color: earColor });
     }
 }
@@ -144,10 +147,11 @@ function tail(S) {
 
 export function body(skel) {
     const S = new Sculpt(skel);
-    trunk(S, skel);
+    const field = trunkWeights(skel);
+    trunk(S, field);
     neck(S);
     head(S);
     tail(S);
-    for (const s of [1, -1]) { frontLeg(S, s); hindLeg(S, s); }
+    for (const s of [1, -1]) { frontLeg(S, s, field); hindLeg(S, s, field); }
     return S.build();
 }

@@ -29,8 +29,8 @@ export default {
     // tolerance] in metres.
     form: {
         // The legs' tops stay under the trunk's skin: the fore leg above the
-        // elbow, the hind leg above the stifle.
-        inside: { trunk: { foreL: 0.60, hindL: 0.62 } },
+        // elbow, the hind leg above the stifle fold.
+        inside: { trunk: { foreL: 0.61, hindL: 0.64 } },
         reference: {
             'shoulder.top': [0.975, 0.015],
             'girth.depth': [0.41, 0.02],
@@ -39,7 +39,7 @@ export default {
             'waist.bottom': [0.60, 0.02],
             'shoulder.width': [0.28, 0.02],
             'rump.width': [0.25, 0.02],
-            'trunk.length': [1.29, 0.03],
+            'trunk.length': [1.20, 0.03],
             'neckbase.width': [0.18, 0.02],
             'neckmid.width': [0.115, 0.015],
             'forearm.width': [0.064, 0.008],
