@@ -113,19 +113,24 @@ function neck(S) {
          color: neckColor, caps: [false, false] });
 }
 
-// Head: cranium to muzzle, widest across the eyes; eyes, ears.
+// Head: 0.29 m from poll to nose. The skull is 0.11 m across the orbits and
+// the cheeks, and 0.13 m deep from the crown to the angle of the jaw, which
+// hangs below the eyes; from there the face is a wedge, deeper than it is
+// wide (the muzzle 5 cm across and 6.5 cm deep), with a straight top line
+// from the forehead to the nose. Eyes 3 cm across, set on the side of the
+// skull where it is widest; ears (0.15 m, broad) above them.
 function head(S) {
     S.loft([
         { c: [0, 1.31, 0.695], r: [0.045, 0.045] },
-        { c: [0, 1.315, 0.735], r: [0.062, 0.063] },
-        { c: [0, 1.30, 0.785], r: [0.06, 0.058] },
-        { c: [0, 1.272, 0.845], r: [0.045, 0.05] },
-        { c: [0, 1.242, 0.905], r: [0.034, 0.042] },
-        { c: [0, 1.212, 0.955], r: [0.028, 0.034] },
-        { c: [0, 1.197, 0.988], r: [0.02, 0.024] },
+        { c: [0, 1.305, 0.735], r: [0.060, 0.072] },
+        { c: [0, 1.29, 0.785], r: [0.056, 0.068] },
+        { c: [0, 1.27, 0.835], r: [0.040, 0.056] },
+        { c: [0, 1.243, 0.895], r: [0.030, 0.044] },
+        { c: [0, 1.215, 0.950], r: [0.025, 0.035] },
+        { c: [0, 1.199, 0.986], r: [0.019, 0.025] },
     ], { bones: ['head'], segs: 20, hint: [0, 1, 0], name: 'head', color: headColor });
     for (const s of [1, -1]) {
-        S.blob([0.046 * s, 1.30, 0.80], [0.012, 0.012, 0.014], { bones: ['head'], color: NOSE, segs: 10, rows: 6 });
+        S.blob([0.050 * s, 1.315, 0.79], [0.012, 0.015, 0.016], { bones: ['head'], color: NOSE, segs: 10, rows: 6 });
         S.loft([
             { c: [0.045 * s, 1.325, 0.75], r: [0.022, 0.009] },
             { c: [0.08 * s, 1.355, 0.738], r: [0.040, 0.012] },
