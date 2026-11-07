@@ -141,7 +141,8 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
     if (was_moving) { moving = moving || speed > 0.03 || abs(err) > 0.04; }
     if (lie > 0.001) { moving = false; }
     let veff = max(speed, 0.6 * abs(omega));
-    let freq = 0.65 + 0.5 * veff;
+    // Short legs step often: a stance travels at most about 0.36 m.
+    let freq = 0.9 + 0.85 * veff;
     if (moving && !was_moving) { phase = floor(phase) + 1.0 + DUTY; }
     if (moving) { phase += freq * dt; }
     let go = smooth01(veff / 0.4) * select_f(moving, 1.0, 0.0);
@@ -167,10 +168,11 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
         var planted = state[k + L_PLANT] > 0.5;
         var toe = ld3(state, k + L_TOE);
         var at = toe;
-        // Where a swing lands: home, ahead by half the stance's travel, and
-        // turned on by the turn the stance will make.
+        // Where a swing lands: home as it will be at landing, ahead by half
+        // the stance's travel, and turned on by the turn the stance will make.
         let stance_t = DUTY / freq;
-        let ahead = q_rot(q_y(omega * (swing_t + 0.5 * stance_t)), home - pos) + pos + fwd * (speed * (swing_t + 0.5 * stance_t));
+        let left_t = select_f(planted, swing_t, (1.0 - state[k + L_U]) * state[k + L_DUR]) + 0.5 * stance_t;
+        let ahead = q_rot(q_y(omega * left_t), home - pos) + pos + fwd * (speed * left_t);
         let target = vec3<f32>(ahead.x, height(env, ahead.x, ahead.z), ahead.z);
         if (planted) {
             if (ph < DUTY) { state[k + L_ARMED] = 1.0; }
