@@ -32,7 +32,7 @@ const MODULES = {
     'planet::ground': read('ground.bk'), 'planet::surface': read('surface.bk'), 'planet::scale': read('scale.bk'),
     'planet::landforms': read('landforms.bk'), 'planet::volcanoes': read('volcanoes.bk'),
     'planet::relief': read('relief.bk'), 'planet::craters': read('craters.bk'),
-    'planet::canyons': read('canyons.bk'), 'planet::dunes': read('dunes.bk'),
+    'planet::canyons': read('canyons.bk'), 'planet::dunes': read('dunes.bk'), 'planet::strata': read('strata.bk'),
 };
 
 function create(core) {
@@ -55,7 +55,7 @@ function create(core) {
     // The batch's texels: each its point and mean height, and what colours
     // it (three vec4s), k_detail_height to k_detail.
     const texelHeights = bro.kernel.createBuffer(PRODUCE_PER_UPDATE * TEXELS * TEXELS * 16);
-    const texelFields = bro.kernel.createBuffer(PRODUCE_PER_UPDATE * TEXELS * TEXELS * 48);
+    const texelFields = bro.kernel.createBuffer(PRODUCE_PER_UPDATE * TEXELS * TEXELS * 16 * mod.consts.FIELDS);
 
     function produce(batch, { cache, anchors, span, horizonHeights }) {
         kTile.dispatch([TILE + 2 * BORDER, TILE + 2 * BORDER, batch.count], batch.table, anchors, cache.layer('position'), span,
@@ -63,7 +63,7 @@ function create(core) {
         kHorizonHeights.dispatch([HZ_GRID, HZ_GRID, batch.count], batch.table, anchors, horizonHeights, RADIUS, 1 / TILE, SEED);
         const texels = [TEXELS, TEXELS, batch.count];
         kDetailHeight.dispatch(texels, batch.table, anchors, texelHeights, texelFields, RADIUS, BORDER, 1 / TILE, DETAIL, SEED);
-        kDetail.dispatch(texels, batch.table, texelHeights, texelFields, cache.layer('detail'));
+        kDetail.dispatch(texels, batch.table, texelHeights, texelFields, cache.layer('detail'), RADIUS);
     }
 
     const groundPart = {

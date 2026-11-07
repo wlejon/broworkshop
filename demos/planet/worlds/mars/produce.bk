@@ -62,10 +62,46 @@ fn texel_st(tx: i32, ty: i32, border: f32, inv_size: f32, d: f32) -> vec2<f32> {
     return vec2<f32>(((tx as f32) + 0.5) / d - 0.5 - border, ((ty as f32) + 0.5) / d - 0.5 - border) * inv_size;
 }
 
+// What colours a texel, FIELDS vec4s of `fields` a texel from k_detail_height
+// to k_detail: the Ground's shares and the tone's patches.
+pub const FIELDS: i32 = 4;
+fn put_fields(fields: write_store<vec4<f32>, 1>, at: i32, gr: Ground, vary: f32) {
+    fields[FIELDS * at] = vec4<f32>(gr.dust, gr.sand, gr.layered, gr.fresh);
+    fields[FIELDS * at + 1] = vec4<f32>(gr.ice, gr.polar, gr.wall, vary);
+    fields[FIELDS * at + 2] = vec4<f32>(gr.floor, gr.volcanic, gr.old, gr.strat);
+    fields[FIELDS * at + 3] = vec4<f32>(gr.ild, gr.talus, 0.0, 0.0);
+}
+// The Ground at height h from a texel's fields (x), and its tone's patches (y).
+struct Fields {
+    gr: Ground,
+    vary: f32,
+}
+fn get_fields(fields: read_store<vec4<f32>, 1>, at: i32, h: f32) -> Fields {
+    let fa = fields[FIELDS * at];
+    let fb = fields[FIELDS * at + 1];
+    let fc = fields[FIELDS * at + 2];
+    let fd = fields[FIELDS * at + 3];
+    var gr: Ground;
+    gr.h = h;
+    gr.dust = fa.x;
+    gr.sand = fa.y;
+    gr.layered = fa.z;
+    gr.fresh = fa.w;
+    gr.ice = fb.x;
+    gr.polar = fb.y;
+    gr.wall = fb.z;
+    gr.floor = fc.x;
+    gr.volcanic = fc.y;
+    gr.old = fc.z;
+    gr.strat = fc.w;
+    gr.ild = fd.x;
+    gr.talus = fd.y;
+    return Fields { gr: gr, vary: fb.w };
+}
+
 // Each texel's point of the mean surface relative to the tile's centre and
-// its mean height (xyz, w) into `texels`, and what colours it (three vec4s
-// a texel: dust, sand, layered, fresh; ice, polar, wall, the tone's
-// patches; floor, volcanic, old, 0) into `fields`, for k_detail.
+// its mean height (xyz, w) into `texels`, and what colours it into
+// `fields` (put_fields), for k_detail.
 @kernel @grid(3)
 fn k_detail_height(g: grid<3>, table: read_store<vec4<i32>, 1>, anchors: read_store<vec4<i32>, 1>,
                    texels: write_store<vec4<f32>, 1>, fields: write_store<vec4<f32>, 1>, radius: f32, border: f32,
@@ -80,9 +116,7 @@ fn k_detail_height(g: grid<3>, table: read_store<vec4<i32>, 1>, anchors: read_st
     let p = tiles::sphere_vertex(rec, tiles::frame_offset(rec, st.x, st.y), radius, gr.h);
     let at = (g.z() * w + g.y()) * w + g.x();
     texels[at] = vec4<f32>(p, gr.h);
-    fields[3 * at] = vec4<f32>(gr.dust, gr.sand, gr.layered, gr.fresh);
-    fields[3 * at + 1] = vec4<f32>(gr.ice, gr.polar, gr.wall, variation(a, e, radius, octaves, seed));
-    fields[3 * at + 2] = vec4<f32>(gr.floor, gr.volcanic, gr.old, 0.0);
+    put_fields(fields, at, gr, variation(a, e, radius, octaves, seed));
 }
 
 fn texel_at(texels: read_store<vec4<f32>, 1>, z: i32, w: i32, tx: i32, ty: i32) -> vec4<f32> {
@@ -94,7 +128,7 @@ fn texel_at(texels: read_store<vec4<f32>, 1>, z: i32, w: i32, tx: i32, ty: i32) 
 // detail_words: a the sand's share, the byte the ice's).
 @kernel @grid(3)
 fn k_detail(g: grid<3>, table: read_store<vec4<i32>, 1>, texels: read_store<vec4<f32>, 1>, fields: read_store<vec4<f32>, 1>,
-            out: write_store<i32, 1>) {
+            out: write_store<i32, 1>, radius: f32) {
     let rec = tiles::record(table, g.z());
     let z = g.z();
     let w = g.width();
@@ -103,28 +137,19 @@ fn k_detail(g: grid<3>, table: read_store<vec4<i32>, 1>, texels: read_store<vec4
     let du = texel_at(texels, z, w, tx + 1, ty).xyz - texel_at(texels, z, w, tx - 1, ty).xyz;
     let dv = texel_at(texels, z, w, tx, ty + 1).xyz - texel_at(texels, z, w, tx, ty - 1).xyz;
     let here = texels[(z * w + ty) * w + tx];
-    let up = normalize(rec.dir_hi + rec.dir_lo);
+    // The texel's own up (tiles::sphere_vertex backwards: its point less
+    // the tile's is dd (radius + h) + dir h, dd the direction's offset), so
+    // a coarse tile's slopes are the ground's and not its curve's.
+    let dd = (here.xyz - rec.point - rec.dir_hi * here.w) / (radius + here.w);
+    let up = normalize(rec.dir_hi + dd);
     var n = normalize(cross(du, dv));
     if (dot(n, up) < 0.0) { n = -n; }
     let c = dot(n, up);
     let slope = sqrt(max(1.0 - c * c, 0.0)) / max(c, 1e-3);
     let at = (z * w + ty) * w + tx;
-    let fa = fields[3 * at];
-    let fb = fields[3 * at + 1];
-    let fc = fields[3 * at + 2];
-    var gr: Ground;
-    gr.h = here.w;
-    gr.dust = fa.x;
-    gr.sand = fa.y;
-    gr.layered = fa.z;
-    gr.fresh = fa.w;
-    gr.ice = fb.x;
-    gr.polar = fb.y;
-    gr.wall = fb.z;
-    gr.floor = fc.x;
-    gr.volcanic = fc.y;
-    gr.old = fc.z;
-    let col = surface_colour(gr, slope, fb.w, slope * length(du) * 0.5);
+    let fl = get_fields(fields, at, here.w);
+    let gr = fl.gr;
+    let col = surface_colour(gr, slope, fl.vary, slope * length(du) * 0.5);
     let words = detail_words(vec4<f32>(col, gr.sand), n, gr.ice);
     let o = ((rec.slot * w + ty) * w + tx) * 2;
     out[o] = words.x;
