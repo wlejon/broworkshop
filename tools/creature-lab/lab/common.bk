@@ -23,6 +23,14 @@ pub fn smooth01(x: f32) -> f32 {
 
 pub fn fract01(x: f32) -> f32 { return x - floor(x); }
 
+// The smaller of a and b with no corner where they cross: within about k of
+// each other it falls up to k ln 2 under both (a limit made of several
+// limits, one taking over from another, moves without a jump in its speed).
+pub fn smin(a: f32, b: f32, k: f32) -> f32 {
+    let m = min(a, b);
+    return m - k * log(exp((m - a) / k) + exp((m - b) / k));
+}
+
 pub fn wrap_pi(a: f32) -> f32 { return atan2(sin(a), cos(a)); }
 
 // The shortest signed difference b - a of two phases in cycles (-0.5, 0.5].
@@ -42,6 +50,13 @@ pub fn approach(cur: f32, want: f32, rate: f32, dt: f32) -> f32 {
 // Exponential approach with rate k (1/s).
 pub fn damp(cur: f32, want: f32, k: f32, dt: f32) -> f32 {
     return want + (cur - want) * exp(-k * dt);
+}
+
+// One step of a critically damped spring of rate w (rad/s) toward t from
+// x = (value, speed): the new (value, speed).
+pub fn crit_step(x: vec2<f32>, t: f32, w: f32, dt: f32) -> vec2<f32> {
+    let v = x.y + (w * w * (t - x.x) - 2.0 * w * x.y) * dt;
+    return vec2<f32>(x.x + v * dt, v);
 }
 
 // A yaw turned toward `want` at most `rate` rad/s: (new yaw, its rate).
@@ -124,12 +139,38 @@ pub fn limb_dir(a: f32) -> vec2<f32> { return vec2<f32>(sin(a), -cos(a)); }
 // The limb angle of a (z, y) vector.
 pub fn limb_angle(d: vec2<f32>) -> f32 { return atan2(d.x, -d.y); }
 
+// x unchanged up to k, then eased toward m with no corner and no jump in
+// its curvature where the easing begins (x / sqrt(1 + x^2) leaves its line
+// with neither), so a motion running into the limit is turned, not knocked.
+pub fn soft_limit(x: f32, k: f32, m: f32) -> f32 {
+    if (x <= k) { return x; }
+    let s = m - k;
+    let t = (x - k) / s;
+    return k + s * t / sqrt(1.0 + t * t);
+}
+
 // Two segments of lengths a and b from the origin to d in the (z, y)
 // plane: their limb angles. bend > 0 puts the joint ahead of the line to d
 // (a stifle, a carpus held forward), bend < 0 behind it (an elbow, a hock).
-// A target out of reach is brought into reach along its line.
+// A target out of reach is put at full reach along its line.
 pub fn two_bone(a: f32, b: f32, d: vec2<f32>, bend: f32) -> vec2<f32> {
-    let r = clamp(length(d), abs(a - b) + 1e-4, a + b - 1e-4);
+    return two_bone_at(a, b, d, bend, clamp(length(d), abs(a - b) + 1e-4, a + b - 1e-4));
+}
+
+// two_bone with a target past `soft` of full reach drawn in along its line
+// on a soft curve: the joint's angle runs away as a chain nears straight
+// (its rate grows without bound), so a leg reaching full extension would
+// snap straight in a step; eased, it straightens with no corner and stops a
+// few millimetres short. Where the easing should begin is the creature's: a
+// leg that works near straight wants it late, one that often reaches full
+// extension at speed wants it early.
+pub fn two_bone_soft(a: f32, b: f32, d: vec2<f32>, bend: f32, soft: f32) -> vec2<f32> {
+    let m = a + b;
+    return two_bone_at(a, b, d, bend, max(soft_limit(length(d), soft * m, 0.9995 * m), abs(a - b) + 1e-4));
+}
+
+// The two segments' angles with the target d put at distance r along its line.
+fn two_bone_at(a: f32, b: f32, d: vec2<f32>, bend: f32, r: f32) -> vec2<f32> {
     let ad = limb_angle(d);
     let c = clamp((a * a + r * r - b * b) / (2.0 * a * r), -1.0, 1.0);
     let g = acos(c);

@@ -28,6 +28,10 @@ import creature::spine::*;
 import creature::secondary::*;
 from creature::ground import height;
 
+// Share of a leg's full reach where its IK eases the reach in (common
+// two_bone): early, a trotting hexa's legs often reaching straight at speed.
+@knob const SOFT_REACH: f32 = 0.9;
+
 const D_SPEED: i32 = 5;
 const D_OMEGA: i32 = 6;
 const D_PHASE: i32 = 7;
@@ -465,7 +469,7 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
         let par_pitch = atan2(fw.y, length(vec2<f32>(fw.x, fw.z)));
         let af = rest_angle(b0 + 2) - par_pitch + 0.7 * swing[l];
         let ankle = vec2<f32>(d.z, py) - rest_len(b0 + 2) * limb_dir(af);
-        let sol = two_bone(rest_len(b0), rest_len(b0 + 1), ankle, 1.0);
+        let sol = two_bone_soft(rest_len(b0), rest_len(b0 + 1), ankle, 1.0, SOFT_REACH);
         let qr = q_mul(qp, q_z(rho));
         var prev: f32 = 0.0;
         for (var i: i32 = 0; i < 3; i += 1) {
