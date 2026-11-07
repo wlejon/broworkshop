@@ -1,0 +1,197 @@
+// Mars's canyons: Valles Marineris, its chasmata cut up to 7 km into the
+// Tharsis plateau east of the volcanoes, their walls layered rock stepped
+// into benches and risers, ribbed with spurs and gullies; its interior
+// layered deposits standing as mesas on the floors of Candor and Melas;
+// Noctis Labyrinthus, the maze of troughs at its head; and the chaos at
+// its mouth and on to Chryse, plateaus broken into mesas and knobs.
+//
+// In two parts: the field (canyon_field), broad shapes of the direction
+// alone, which ground.bk reads at its broad lattice's corners as it does
+// the other landforms; and the cut it makes in the detailed ground
+// (canyons).
+module planet::canyons;
+from planet::noise import simplex_f32;
+from planet::scale import place, angle, RADIUS;
+
+pub struct Canyon {
+    h: f32,        // the ground, cut
+    layered: f32,  // the share on a canyon's or mesa's layered walls
+    floor: f32,    // on a canyon's or chaos's floor
+}
+
+// The canyons' broad shapes at a direction.
+pub struct CanyonField {
+    z: f32,        // the chasmata's walls' height (m over the datum), the lowest at the point
+    run: f32,      // how far up its wall that is from its floor (m)
+    z_rel: f32,    // Noctis's troughs' walls, m over the ground they cut
+    run_rel: f32,  // and how far up from their floors
+    ild: f32,      // the interior layered deposits' rise, 0 to 1
+    chaos: f32,    // in a field of chaos, 0 to 1
+    mesa: f32,     // on one of its mesas, 0 to 1
+}
+pub fn no_canyon() -> CanyonField {
+    return CanyonField { z: 1.0e9, run: 1.0e9, z_rel: 1.0e9, run_rel: 1.0e9, ild: 0.0, chaos: 0.0, mesa: 0.0 };
+}
+pub fn mix_canyon(a: CanyonField, b: CanyonField, t: f32) -> CanyonField {
+    return CanyonField { z: mix(a.z, b.z, t), run: mix(a.run, b.run, t), z_rel: mix(a.z_rel, b.z_rel, t),
+                         run_rel: mix(a.run_rel, b.run_rel, t), ild: mix(a.ild, b.ild, t),
+                         chaos: mix(a.chaos, b.chaos, t), mesa: mix(a.mesa, b.mesa, t) };
+}
+
+// Benches and risers: a wall's height z stepped every `bed` metres, half of
+// each step a level bench and half a riser twice the wall's slope.
+fn stepped(z: f32, bed: f32) -> f32 {
+    let q = z / bed;
+    let f = q - floor(q);
+    return bed * (floor(q) + smoothstep(0.5, 1.0, f));
+}
+// The smaller of a and b, eased over k metres.
+fn smin(a: f32, b: f32, k: f32) -> f32 {
+    // Apart by k or more, the lower as it is: mixed, a far one (no_canyon's
+    // 1e9) would round the other to its own f32 step, 64 m.
+    if (b - a >= k) { return a; }
+    if (a - b >= k) { return b; }
+    let h = clamp(0.5 + 0.5 * (b - a) / k, 0.0, 1.0);
+    return mix(b, a, h) - k * h * (1.0 - h);
+}
+
+// A chasma along the great-circle arc a to b, half `w` metres wide at its
+// floor's edge in its middle and narrowing to a third of that toward its
+// ends, which round off. The distance (m) from the point to its floor's
+// edge, past which the wall rises.
+fn chasma(up: vec3<f32>, a: vec3<f32>, b: vec3<f32>, w: f32) -> f32 {
+    let n = normalize(cross(a, b));
+    let across = dot(up, n);
+    let onto = normalize(up - n * across);
+    let len = angle(a, b);
+    let ta = angle(a, onto);
+    let tb = angle(b, onto);
+    // Along the arc, 0 at a to 1 at b; past an end, its distance from it.
+    let u = clamp(ta / len, 0.0, 1.0);
+    let past = max(ta - len, tb - len);
+    let taper = 0.35 + 0.65 * smoothstep(0.0, 0.3, u) * smoothstep(1.0, 0.7, u);
+    let side = abs(across) * RADIUS;
+    let beyond = max(past, 0.0) * RADIUS;
+    return sqrt(side * side + beyond * beyond) - w * taper;
+}
+
+// The walls rise some 22 degrees from their floor's edge.
+const WALL_SLOPE: f32 = 0.4;
+
+pub fn canyon_field(up: vec3<f32>, seed: i32) -> CanyonField {
+    var c = no_canyon();
+    // Far from the canyons, nothing.
+    if (angle(up, place(-8.0, -72.0)) > 0.62) { return c; }
+    let p = up * (RADIUS / 14000.0);
+    // Spurs and gullies: the walls' edge wanders by kilometres along them,
+    // and by hundreds of metres in gullies between spurs.
+    let spur = 5500.0 * simplex_f32(p, seed + 500) + 2500.0 * simplex_f32(p * 2.7, seed + 501)
+             + 900.0 * simplex_f32(p * 7.3, seed + 502);
+    // The chasmata: Ius, Tithonium, Melas, Candor, Ophir, Coprates, Eos,
+    // Ganges, each a floor's depth in metres over the datum.
+    var d = chasma(up, place(-7.0, -96.0), place(-8.5, -80.0), 22000.0) + spur;
+    var fl = -3600.0;
+    var w = fl + WALL_SLOPE * max(d, 0.0);
+    if (w < c.z) { c.z = w; c.run = w - fl; }
+    d = chasma(up, place(-4.6, -92.0), place(-5.0, -81.5), 7000.0) + 0.6 * spur;
+    fl = -1800.0;
+    w = fl + WALL_SLOPE * max(d, 0.0);
+    if (w < c.z) { c.z = w; c.run = w - fl; }
+    d = chasma(up, place(-10.0, -79.0), place(-10.5, -70.0), 50000.0) + spur;
+    fl = -3800.0;
+    w = fl + WALL_SLOPE * max(d, 0.0);
+    if (w < c.z) { c.z = w; c.run = w - fl; }
+    d = chasma(up, place(-6.5, -78.0), place(-6.5, -69.0), 40000.0) + spur;
+    fl = -3000.0;
+    w = fl + WALL_SLOPE * max(d, 0.0);
+    if (w < c.z) { c.z = w; c.run = w - fl; }
+    d = chasma(up, place(-4.0, -74.0), place(-4.0, -68.0), 25000.0) + spur;
+    fl = -2500.0;
+    w = fl + WALL_SLOPE * max(d, 0.0);
+    if (w < c.z) { c.z = w; c.run = w - fl; }
+    d = chasma(up, place(-12.5, -69.0), place(-13.8, -56.0), 28000.0) + spur;
+    fl = -4800.0;
+    w = fl + WALL_SLOPE * max(d, 0.0);
+    if (w < c.z) { c.z = w; c.run = w - fl; }
+    d = chasma(up, place(-13.6, -56.5), place(-11.5, -43.0), 45000.0) + spur;
+    fl = -4500.0;
+    w = fl + WALL_SLOPE * max(d, 0.0);
+    if (w < c.z) { c.z = w; c.run = w - fl; }
+    d = chasma(up, place(-8.2, -52.0), place(-7.0, -46.0), 28000.0) + spur;
+    fl = -3500.0;
+    w = fl + WALL_SLOPE * max(d, 0.0);
+    if (w < c.z) { c.z = w; c.run = w - fl; }
+    // Noctis Labyrinthus: troughs 4.5 km deep where two noises cross zero,
+    // in a field 600 km across at the canyons' head.
+    let noctis = 1.0 - smoothstep(0.06, 0.11, angle(up, place(-7.0, -101.0)));
+    if (noctis > 0.0) {
+        let q = up * (RADIUS / 160000.0);
+        let n1 = abs(simplex_f32(q, seed + 510));
+        let n2 = abs(simplex_f32(q * 1.7 + vec3<f32>(3.1), seed + 511));
+        let trough = min(n1, n2 * 1.3);
+        let run = WALL_SLOPE * max((trough - 0.025) * 160000.0 * 2.2 + 0.25 * spur, 0.0);
+        c.z_rel = run - 4500.0 * noctis;
+        c.run_rel = run;
+    }
+    // The interior layered deposits: mesas of layered rock up to 4 km
+    // over Candor's and Melas's floors.
+    let ild_a = angle(up, place(-6.6, -73.5)) / 0.032;
+    let ild_b = angle(up, place(-10.0, -75.0)) / 0.022;
+    c.ild = max(1.0 - smoothstep(0.55, 1.0, ild_a + 0.25 * simplex_f32(p * 0.8, seed + 520)),
+                0.8 * (1.0 - smoothstep(0.55, 1.0, ild_b + 0.25 * simplex_f32(p * 0.8, seed + 521))));
+    // The chaos, at Aram, Hydraotes and Eos.
+    c.chaos = max(max(1.0 - smoothstep(0.6, 1.0, angle(up, place(2.6, -21.0)) / 0.045),
+                      1.0 - smoothstep(0.6, 1.0, angle(up, place(0.8, -35.0)) / 0.06)),
+                  1.0 - smoothstep(0.6, 1.0, angle(up, place(-11.0, -44.0)) / 0.06));
+    if (c.chaos > 0.0) {
+        let q = up * (RADIUS / 22000.0);
+        let m = simplex_f32(q, seed + 530) + 0.5 * simplex_f32(q * 2.3, seed + 531);
+        c.mesa = smoothstep(0.18, 0.26, m + 0.35 * (1.0 - c.chaos));
+    }
+    return c;
+}
+
+// The canyons of field f cut into the ground `h_base + detail` (the broad
+// landforms, and the relief and craters on them): the floors keep half the
+// detail.
+pub fn canyons(f: CanyonField, h_base: f32, detail: f32) -> Canyon {
+    let h_in = h_base + detail;
+    var c: Canyon;
+    c.h = h_in;
+    c.layered = 0.0;
+    c.floor = 0.0;
+    var z = f.z;
+    var run = f.run;
+    if (h_in + f.z_rel < z) {
+        z = h_in + f.z_rel;
+        run = f.run_rel;
+    }
+    // The walls' benches: a third of the way to steps, so the risers
+    // steepen the wall and the benches ease it without levelling it.
+    let cut = mix(z, stepped(z, 450.0), 0.35) + 0.5 * detail;
+    var h = smin(h_in, cut, 350.0);
+    // How far the cut takes the ground down; its floor, and its layered
+    // walls between the floor and the plateau.
+    let below = clamp((h_in - h) / 600.0, 0.0, 1.0);
+    c.floor = below * (1.0 - smoothstep(100.0, 700.0, run));
+    c.layered = below * smoothstep(100.0, 700.0, run);
+    if (f.ild > 0.0) {
+        let mound = stepped(-3000.0 + 4200.0 * f.ild, 300.0) + 0.5 * detail;
+        // (Rising from the floor over the deposit's first tenth, so its edge
+        // is a slope and not a step the height of its lowest bench.)
+        let raised = h + smoothstep(0.0, 0.12, f.ild) * max(min(mound, h_in) - h, 0.0);
+        c.layered = max(c.layered, smoothstep(h + 50.0, h + 400.0, raised));
+        h = raised;
+    }
+    // The chaos: plateaus broken into mesas and knobs, the ground between
+    // them sunk to the floor.
+    if (f.chaos > 0.0) {
+        let sunk = h_in - 2500.0 * f.chaos;
+        let broken = stepped(mix(sunk, h, f.mesa), 250.0);
+        c.layered = max(c.layered, f.chaos * (1.0 - f.mesa) * smoothstep(0.0, 0.2, f.mesa + 0.1));
+        c.floor = max(c.floor, f.chaos * (1.0 - f.mesa));
+        h -= smoothstep(0.0, 0.12, f.chaos) * max(h - broken, 0.0);
+    }
+    c.h = h;
+    return c;
+}

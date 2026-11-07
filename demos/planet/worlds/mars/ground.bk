@@ -1,0 +1,172 @@
+// Mars's ground: the height function every tile's cells and texels are
+// made of (produce.bk), and what colours it (surface.bk). In order: the
+// broad landforms (landforms.bk: the dichotomy, the rises, the basins, the
+// poles), the shield volcanoes (volcanoes.bk), the rolling relief
+// (relief.bk), the craters of every size (craters.bk), the canyons cut
+// through all of it (canyons.bk), and the dunes on the sand that gathers in
+// the low ground (dunes.bk).
+//
+// At a cell carrying `octaves` (its width cell_width(octaves)) the ground is
+// the mean over the cell: each system's share is what a cell that wide
+// holds of it, so a coarse cell is the aggregate of the fine ones. A vertex
+// is the truth at its point (the finest octaves anything draws), so it
+// never moves as tiles refine.
+module planet::ground;
+from planet::anchor import Anchor, doubled, twice, perlin_from;
+from planet::world_lattice import C;
+from planet::scale import cell_width;
+from planet::landforms import region, Region, mix_region;
+from planet::volcanoes import volcanoes, Volcano, mix_volcano;
+from planet::relief import relief, relief_tail;
+from planet::craters import C0, OCTAVES, SIZE_MAX, octave;
+from planet::canyons import canyons, canyon_field, CanyonField, mix_canyon;
+from planet::dunes import dunes, DUNE_OCTAVE;
+
+pub struct Ground {
+    h: f32,        // metres over the datum
+    old: f32,      // the surface's age (craters.bk density)
+    dust: f32,     // how dusty, 0 dark to 1 bright
+    ice: f32,      // under the polar caps' ice
+    polar: f32,    // on the polar layered deposits
+    sand: f32,     // under the dunes' sand
+    layered: f32,  // on layered rock: canyon walls, the interior mounds, chaos
+    floor: f32,    // on a canyon's or a crater's floor
+    wall: f32,     // on a crater's wall
+    fresh: f32,    // on a fresh crater's ejecta
+    volcanic: f32, // on a shield's flanks
+}
+
+// The erg about the north pole (Olympia Undae and its kin): a ring of sand
+// about the layered deposits from 77 to 83 N.
+fn erg(up: vec3<f32>) -> f32 {
+    return smoothstep(0.955, 0.972, up.y) * (1.0 - smoothstep(0.987, 0.993, up.y));
+}
+
+// ── The broad landforms ─────────────────────────────────────────────────────
+//
+// The landforms, the volcanoes and the canyons' field are functions of the
+// direction alone, read in f32, whose step is a fifth of a metre: read at
+// every point, their slopes (a few percent on the dichotomy's scarp, tens
+// on a shield's flanks and a canyon's walls) stood in steps that far apart,
+// which the texels' normals a centimetre apart drew as a grid of cracks.
+// So they are read at the corners of lattice C's cell at BROAD_OCTAVE (32 m)
+// about the point, each corner's direction from its integer cell alone
+// (every point reading a corner agrees on it), and taken trilinearly
+// between: smooth wherever the point is. Their finest shapes (a caldera's
+// walls, the chaos's mesas' edges) are hundreds of metres across, which 32
+// m corners hold. Samples BROAD_FINE metres apart and more see no steps,
+// and read them at their point.
+const BROAD_OCTAVE: i32 = 15;
+const BROAD_FINE: f32 = 8.0;
+struct Broad {
+    r: Region,
+    v: Volcano,
+    c: CanyonField,
+}
+fn broad_at(up: vec3<f32>, width: f32, seed: i32) -> Broad {
+    return Broad { r: region(up, seed), v: volcanoes(up, width, seed), c: canyon_field(up, seed) };
+}
+fn mix_broad(a: Broad, b: Broad, t: f32) -> Broad {
+    return Broad { r: mix_region(a.r, b.r, t), v: mix_volcano(a.v, b.v, t), c: mix_canyon(a.c, b.c, t) };
+}
+fn broad(a: Anchor, e: vec3<f32>, up: vec3<f32>, radius: f32, width: f32, spacing: f32, seed: i32) -> Broad {
+    if (spacing >= BROAD_FINE) { return broad_at(up, width, seed); }
+    let at = perlin_from(doubled(a.l[C], BROAD_OCTAVE), e * (radius / C0) * exp2(BROAD_OCTAVE as f32));
+    let f = at.f;
+    // The corners in turn, along x, then y, then z, each mixed into the
+    // last: two along x make a row, two rows a face, two faces the cell.
+    var row = broad_at(up, width, seed);
+    var face = row;
+    var cell = row;
+    for (var i: i32 = 0; i < 8; i += 1) {
+        let o = vec3<i32>(i & 1, (i >> 1) & 1, (i >> 2) & 1);
+        let k = at.cell + o;
+        let b = broad_at(normalize(vec3<f32>(k.x as f32, k.y as f32, k.z as f32)), width, seed);
+        if (o.x == 0) { row = b; } else { row = mix_broad(row, b, f.x); }
+        if (o.x == 1) {
+            if (o.y == 0) { face = row; } else { face = mix_broad(face, row, f.y); }
+            if (o.y == 1) {
+                if (o.z == 0) { cell = face; } else { cell = mix_broad(cell, face, f.z); }
+            }
+        }
+    }
+    return cell;
+}
+
+// The ground at offset e from the anchor, over a cell carrying `octaves`,
+// sampled `spacing` metres apart.
+pub fn ground_at(a: Anchor, e: vec3<f32>, radius: f32, octaves: f32, spacing: f32, seed: i32) -> Ground {
+    let width = cell_width(octaves);
+    let up = normalize(a.dir + e);
+    let br = broad(a, e, up, radius, width, spacing, seed);
+    let r = br.r;
+    let v = br.v;
+    var g: Ground;
+    g.old = r.old * (1.0 - 0.9 * v.flank);
+    g.dust = clamp(r.dust + 0.3 * v.flank, 0.0, 1.0);
+    g.ice = r.ice;
+    g.polar = r.polar;
+    g.volcanic = max(r.volcanic, v.flank);
+    let base = r.h + v.h;
+    // The relief: roughest on the ancient highlands, smoothest under dust
+    // and on the polar deposits.
+    let rough = mix(0.45, 1.2, g.old) * (1.0 - 0.6 * r.polar) * (1.0 - 0.3 * g.dust);
+    var h = relief(a, e, radius, octaves, rough, seed);
+
+    // The craters, octave by octave down to those a cell's width keeps
+    // nothing of (mean_share 0.04 at a quarter of the width).
+    var floors: f32 = 0.0;
+    var walls: f32 = 0.0;
+    var fresh: f32 = 0.0;
+    var lat = a.l[C];
+    var d = e * (radius / C0);
+    var size = C0;
+    for (var k: i32 = 0; k < OCTAVES; k += 1) {
+        if (SIZE_MAX * size < 0.25 * width) { break; }
+        let at = perlin_from(lat, d);
+        let c = octave(at.cell, at.f, up, radius / size, k, size, g.old, width, seed + 1000);
+        h += c.h;
+        floors = max(floors, c.floor);
+        walls = max(walls, c.wall);
+        fresh = max(fresh, c.fresh);
+        lat = twice(lat);
+        d *= 2.0;
+        size *= 0.5;
+    }
+    g.wall = clamp(walls, 0.0, 1.0);
+    g.fresh = clamp(fresh, 0.0, 1.0);
+
+    // The canyons, cut through all of it (h so far the relief and craters
+    // on the broad landforms).
+    let cy = canyons(br.c, base, h);
+    h = cy.h;
+    g.layered = cy.layered;
+    g.floor = clamp(max(floors, cy.floor), 0.0, 1.0);
+
+    // The sand: on crater and canyon floors, the great basins' floors and
+    // the polar erg; none on the ice or the shields.
+    let sand = max(max(0.6 * floors, 0.45 * cy.floor), max(0.55 * r.basin, erg(up)));
+    g.sand = clamp(sand, 0.0, 1.0) * (1.0 - r.ice) * (1.0 - 0.9 * v.flank);
+    // The dunes on it, in their periodic pattern (dunes.bk): lattice C at
+    // the dunes' period.
+    let pd = perlin_from(doubled(a.l[C], DUNE_OCTAVE), e * (radius / C0) * exp2(DUNE_OCTAVE as f32));
+    h += dunes(pd.f, up, smoothstep(0.2, 0.7, g.sand), width, seed);
+    g.h = h;
+    return g;
+}
+
+pub fn terrain(a: Anchor, e: vec3<f32>, radius: f32, octaves: f32, spacing: f32, seed: i32) -> f32 {
+    return ground_at(a, e, radius, octaves, spacing, seed).h;
+}
+
+// What octaves finer than a cell carrying `octaves` can still add to its
+// heights (core/tiles.bk k_range): the relief's tail, the craters it does
+// not resolve (a crater's depth and rim about a fifth of its diameter, the
+// widest a cell's width leaves unresolved some four widths), and the dunes;
+// all of it, `top`, on the coarsest tiles.
+pub fn range_margin(octaves: f32, top: f32) -> f32 {
+    let k = (floor(octaves) as i32) - 1;
+    if (k < 4) { return top; }
+    let width = cell_width(octaves);
+    return (relief_tail(k) + min(0.9 * width, 4000.0) + 30.0) * 1.25;
+}

@@ -1,0 +1,81 @@
+// Mars's surface colours (linear albedo), from what the ground holds at a
+// point (ground.bk Ground) and its slope: the rust of the oxidised
+// regolith, the pale butterscotch of settled dust, the dark basaltic sand
+// of the dunes and the dark regions, the grey of rock the wind scours and
+// the canyons' walls expose, the light-toned layered deposits banded by
+// their beds, fresh ejecta darker than the dust about it, and the polar
+// ice. Each varies over the plains in patches (variation) as the dust lies
+// thicker or thinner.
+module planet::surface;
+from planet::noise import simplex_grad;
+from planet::anchor import Anchor, doubled, twice, simplex_from;
+from planet::world_lattice import S;
+from planet::scale import BASE_WAVELENGTH, mean_factor;
+from planet::ground import Ground;
+
+const DUST = vec3<f32>(0.34, 0.18, 0.085);
+const RUST = vec3<f32>(0.23, 0.115, 0.055);
+const DARK = vec3<f32>(0.095, 0.072, 0.058);    // basaltic sand, the dark regions
+const ROCK = vec3<f32>(0.17, 0.135, 0.11);      // scoured and broken rock
+const LAYERED = vec3<f32>(0.40, 0.28, 0.17);    // light-toned layered deposits
+const LAYERED_DARK = vec3<f32>(0.22, 0.14, 0.085);
+const EJECTA = vec3<f32>(0.13, 0.095, 0.072);
+const ICE = vec3<f32>(0.78, 0.74, 0.69);
+const POLAR = vec3<f32>(0.42, 0.31, 0.22);      // the polar layered deposits' dusty ice
+
+// Patches of the ground's tone, -1 to 1 or so: octaves from 16 km down to
+// 500 m of noise on lattice S, each its mean over the cell.
+const VARY_FIRST: i32 = 7;
+const VARY_LAST: i32 = 12;
+pub fn variation(a: Anchor, e: vec3<f32>, radius: f32, octaves: f32, seed: i32) -> f32 {
+    var lat = doubled(a.l[S], VARY_FIRST);
+    var d = e * (radius / BASE_WAVELENGTH) * exp2(VARY_FIRST as f32);
+    var sum: f32 = 0.0;
+    var amp: f32 = 1.6;
+    for (var o: i32 = VARY_FIRST; o < VARY_LAST; o += 1) {
+        sum += simplex_grad(simplex_from(lat, d), seed + 700 + o).x * amp * mean_factor(o, octaves);
+        amp *= 0.7;
+        lat = twice(lat);
+        d *= 2.0;
+    }
+    return sum;
+}
+
+// The colour of the ground g with slope `slope` (rise over run), its tone's
+// patches `vary`, over a texel whose ground spans `span` metres of height
+// (its beds' bands average out across it).
+pub fn surface_colour(g: Ground, slope: f32, vary: f32, span: f32) -> vec3<f32> {
+    let dust = clamp(g.dust + 0.15 * vary, 0.0, 1.0);
+    var c = mix(RUST, DUST, smoothstep(0.15, 0.85, dust));
+    // The dark regions: dust swept off the basaltic ground.
+    c = mix(c, DARK * 1.25, smoothstep(0.3, 0.0, dust) * 0.7);
+    // Steep ground sheds its dust: rock, or the beds of layered rock.
+    let steep = smoothstep(0.25, 0.7, slope);
+    // The beds: three sets of them, 360, 140 and 57 m apart, so their bands
+    // come in packets of thick and thin rather than a ruled stripe, each
+    // set fading as a texel spans its beds.
+    let b0 = 0.0173 * span;
+    let b1 = 0.045 * span;
+    let b2 = 0.11 * span;
+    let wave = 0.45 * sin(g.h * 0.0173 + 1.3 + vary) * exp(-b0 * b0 / 24.0)
+             + 0.4 * sin(g.h * 0.045 + 2.0 * vary) * exp(-b1 * b1 / 24.0)
+             + 0.25 * sin(g.h * 0.11 + 0.7 - vary) * exp(-b2 * b2 / 24.0);
+    let beds = 0.5 + 0.5 * wave;
+    let layered_rock = mix(LAYERED_DARK, LAYERED, smoothstep(0.15, 0.85, beds));
+    let walls = mix(ROCK, layered_rock, g.layered);
+    // (Layered ground shows its beds where it is steep; its flat tops hold
+    // dust over a caprock.)
+    c = mix(c, walls, max(steep * (1.0 - 0.5 * g.dust), g.layered * mix(0.35, 0.9, steep)));
+    c = mix(c, ROCK, g.wall * 0.35 * (1.0 - dust));
+    // The floors of the canyons and the great craters: darker, where sand
+    // and rock fallen from the walls lie under less dust.
+    c = mix(c, mix(DARK, RUST, 0.45), 0.5 * g.floor * (1.0 - steep));
+    // Fresh ejecta: dark, the dust not yet settled on it.
+    c = mix(c, EJECTA, g.fresh * 0.3 * (1.0 - steep));
+    // The sand: dark where it moves (the dunes), dustier where it lies still.
+    c = mix(c, mix(DARK, RUST, 0.25 * dust), smoothstep(0.3, 0.8, g.sand) * 0.9);
+    // The poles.
+    c = mix(c, POLAR, g.polar * 0.6 * (1.0 - steep));
+    c = mix(c, mix(POLAR, ICE, 0.75 + 0.25 * beds), g.ice);
+    return c;
+}

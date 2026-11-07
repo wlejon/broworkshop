@@ -1,0 +1,40 @@
+// Mars's scales: the octaves a cell carries, a noise octave's mean over a
+// cell, and where a named place lies.
+module planet::scale;
+from planet::noise import NOISE_BOX;
+
+pub const RADIUS: f32 = 3389500.0;
+// Octave 0's wavelength, metres; each octave halves it.
+pub const BASE_WAVELENGTH: f32 = 2097152.0;
+
+// The octaves a cell `extent * inv_size` metres wide carries: down to a
+// wavelength of 2.5 cells (world.js octavesFor, the same).
+pub fn octaves_for(extent: f32, inv_size: f32) -> f32 {
+    return clamp(log2(BASE_WAVELENGTH / (2.5 * extent * inv_size)), 1.0, 30.0);
+}
+// The width of a cell that carries `octaves`.
+pub fn cell_width(octaves: f32) -> f32 {
+    return BASE_WAVELENGTH / (2.5 * exp2(octaves));
+}
+// Octave o's span over a cell carrying `octaves` (in its wavelengths), and
+// the share of the noise's octave its mean over the cell keeps.
+pub fn span_at(o: i32, octaves: f32) -> f32 {
+    return exp2((o as f32) - octaves) / 2.5;
+}
+pub fn mean_factor(o: i32, octaves: f32) -> f32 {
+    let s = span_at(o, octaves);
+    return exp(-NOISE_BOX * s * s);
+}
+
+// The unit direction of areographic latitude and east longitude (degrees):
+// y the north pole, longitude 0 along +z.
+pub fn place(lat: f32, lon: f32) -> vec3<f32> {
+    let a = lat * 0.017453293;
+    let b = lon * 0.017453293;
+    return vec3<f32>(cos(a) * sin(b), sin(a), cos(a) * cos(b));
+}
+// The angle (radians) between unit directions, good near zero (from the
+// chord).
+pub fn angle(a: vec3<f32>, b: vec3<f32>) -> f32 {
+    return 2.0 * asin(min(0.5 * length(a - b), 1.0));
+}

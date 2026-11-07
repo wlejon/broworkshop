@@ -1,0 +1,41 @@
+// Kernels for measuring Mars's ground on the CPU (@cpu, f64 in and out).
+from planet::ground import terrain;
+from planet::craters import shape, profile, REACH;
+from planet::anchor import anchor_at, plane_offset;
+
+// The mean of the ground carrying `octaves` over an n x n grid of points
+// about direction c, the grid's cells `size` along the frame's axes t and b
+// (direction units): each point the cell it centres, as a tile's cell is.
+@kernel @cpu @grid(1)
+fn k_cell(g: grid<1>, cx: f64, cy: f64, cz: f64, tx: f64, ty: f64, tz: f64, bx: f64, by: f64, bz: f64,
+          n: i32, size: f64, radius: f64, octaves: f64, seed: i32) -> f64 {
+    let c = vec3<f64>(cx, cy, cz);
+    let t = vec3<f64>(tx, ty, tz);
+    let b = vec3<f64>(bx, by, bz);
+    var sum: f64 = 0.0;
+    for (var j: i32 = 0; j < n; j += 1) {
+        for (var i: i32 = 0; i < n; i += 1) {
+            let s = ((i as f64) + 0.5) * size - 0.5;
+            let q = ((j as f64) + 0.5) * size - 0.5;
+            let a = anchor_at(normalize(c + t * s + b * q), radius);
+            sum += terrain(a, plane_offset(a, a.lost), radius as f32, octaves as f32, 1.0e9, seed) as f64;
+        }
+    }
+    return sum / ((n * n) as f64);
+}
+
+// A crater's volume over its reach (2 pi int h x dx, in R^2 metres) and
+// its bowl's alone (x < 1), `ch` 0 and 1: what the rim and ejecta give back.
+@kernel @cpu @grid(1)
+fn k_volume(g: grid<1>, diameter: f32, worn: f32, ch: i32) -> f64 {
+    let s = shape(diameter, worn);
+    let steps = 20000;
+    var top = REACH;
+    if (ch == 1) { top = 1.0; }
+    var sum: f64 = 0.0;
+    for (var k: i32 = 0; k < steps; k += 1) {
+        let x = ((k as f32) + 0.5) * top / (steps as f32);
+        sum += (profile(s, x).x * x) as f64;
+    }
+    return 6.283185307 * sum * (top as f64) / (steps as f64);
+}

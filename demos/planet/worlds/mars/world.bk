@@ -1,0 +1,24 @@
+// Mars's answers to the core's kernels (planet::world, imported by
+// core/tiles.bk and the core's tests): how many octaves a cell carries,
+// what finer octaves can still add to a tile's heights, the share of a
+// tile's surface error its split takes away, and the drawn surface.
+module planet::world;
+
+from planet::ground import terrain;
+from planet::anchor import Anchor;
+pub use planet::scale::{octaves_for};
+pub use planet::ground::{range_margin};
+
+// The error splitting a tile takes away, as a share of what its own split
+// shows from inside (core/tiles.bk k_split_detail): the ground is close to
+// self-similar at every level, its craters most of all.
+pub fn detail_ratio(level: i32) -> f32 {
+    return 0.5;
+}
+
+// The drawn surface at offset e from the anchor, metres about the radius,
+// at `octaves`: the ground (no sea stands over it). `data`, the world's
+// store its height reads, is unused.
+pub fn surface_height(a: Anchor, e: vec3<f32>, radius: f32, octaves: f32, seed: i32, data: read_store<f32, 1>) -> f32 {
+    return terrain(a, e, radius, octaves, 1.0e9, seed);
+}

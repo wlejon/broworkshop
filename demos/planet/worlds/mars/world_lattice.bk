@@ -1,0 +1,25 @@
+// Where Mars's lattices lie (planet::world_lattice, which the core's anchors
+// read, core/anchor.bk): the point at a direction of each, a.l[i]:
+//   S  the relief's noise, its first octave BASE_WAVELENGTH (relief.bk), simplex
+//   C  the craters' cells, octave 0's C0 wide (craters.bk), a grid; doubled
+//      to the dunes' period it is also where they lie in their pattern
+//      (dunes.bk)
+module planet::world_lattice;
+from planet::scale import BASE_WAVELENGTH;
+from planet::craters import C0;
+
+pub const LATTICES: i32 = 2;
+pub const S: i32 = 0;
+pub const C: i32 = 1;
+
+pub fn lattice_skewed(i: i32) -> bool {
+    return i == S;
+}
+pub fn lattice_point_near(i: i32, dir: vec3<f32>, radius: f32) -> vec3<f32> {
+    if (i == S) { return dir * (radius / BASE_WAVELENGTH); }
+    return dir * (radius / C0);
+}
+pub fn lattice_point(i: i32, d: vec3<f64>, radius: f64) -> vec3<f64> {
+    if (i == S) { return d * (radius / (BASE_WAVELENGTH as f64)); }
+    return d * (radius / (C0 as f64));
+}

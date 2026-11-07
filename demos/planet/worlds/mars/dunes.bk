@@ -1,0 +1,83 @@
+// Mars's dunes: fields of transverse dunes on the sand of crater floors,
+// basins, canyon floors and the polar erg, their crests across the wind,
+// each a long gentle stoss rising to a crest and a steep slip face down
+// wind.
+//
+// The dunes are periodic over DUNE_PERIOD metres (FAR_PERIOD of the ground's
+// hook): each set is a wave of integer wave vector n over the point's
+// position about the planet's centre, so its phase is exact from the
+// lattice C doubled to the period (world_lattice.bk, produce.bk) and from
+// the hook's far coordinate alike, the same on every tile. A set runs along
+// the ground where n lies along it (its weight, tangential); the sets whose
+// n lies along the local wind take the field, so the crests turn with it.
+// Each set's profile less its mean, at the share a cell's width leaves
+// (dune_share): a coarse cell holds the field's mean and none of its crests.
+module planet::dunes;
+from planet::noise import simplex_grad_f32, GRAD_TO_VALUE;
+
+pub const DUNE_PERIOD: f32 = 4096.0;   // FAR_PERIOD; lattice C doubled 8 times
+pub const DUNE_OCTAVE: i32 = 8;
+const DUNE_HEIGHT: f32 = 28.0;         // a full field's crest over its troughs, m
+const SETS: i32 = 6;
+// The sets' wave vectors: |n| about 10, a wavelength about 400 m.
+const DUNE_N: array<vec3<f32>, 6> = [
+    vec3<f32>(10.0, 1.0, 0.0), vec3<f32>(0.0, 10.0, 1.0), vec3<f32>(1.0, 0.0, 10.0),
+    vec3<f32>(6.0, -7.0, 4.0), vec3<f32>(-4.0, 6.0, 7.0), vec3<f32>(7.0, 4.0, -6.0),
+];
+const CREST: f32 = 0.78;   // where in a period the crest stands: the stoss before, the slip face after
+const PROFILE_MEAN: f32 = 0.4025;   // 0.375 CREST + 0.5 (1 - CREST)
+
+// A dune's profile over a period, 0 to 1 at its crest, t its phase along
+// the wind.
+fn profile(t: f32) -> f32 {
+    if (t < CREST) {
+        let u = t / CREST;
+        return u * u * (1.5 - 0.5 * u);
+    }
+    let u = (t - CREST) / (1.0 - CREST);
+    return 1.0 - u * u * (3.0 - 2.0 * u);
+}
+
+// The wind over the sand at up (a unit direction): a broad field turning
+// over hundreds of kilometres, on the tangent plane.
+pub fn wind_at(up: vec3<f32>, seed: i32) -> vec3<f32> {
+    let g = simplex_grad_f32(up * 3.0, seed + 600).yzw + vec3<f32>(0.3, 0.0, -0.2) / GRAD_TO_VALUE;
+    let t = g - up * dot(g, up);
+    return t / max(length(t), 1e-6);
+}
+
+// The share of a dune's relief a cell `width` metres wide keeps, for a
+// wavelength `wl`.
+fn dune_share(width: f32, wl: f32) -> f32 {
+    let r = width / wl;
+    return exp(-3.3 * r * r);
+}
+
+// The dunes' height (m) at x, the point about the planet's centre in
+// periods (modulo 1 a period is all that matters), on the ground whose up
+// is `up`, `sand` deep (0 none to 1 a full field), seen through a cell
+// `width` metres wide.
+pub fn dunes(x: vec3<f32>, up: vec3<f32>, sand: f32, width: f32, seed: i32) -> f32 {
+    if (sand <= 0.0) { return 0.0; }
+    let wind = wind_at(up, seed);
+    var sum: f32 = 0.0;
+    var weights: f32 = 0.0;
+    for (var i: i32 = 0; i < SETS; i += 1) {
+        let n = DUNE_N[i];
+        let nl = length(n);
+        let kt = n - up * dot(n, up);
+        let tl = length(kt);
+        let along = dot(kt, wind) / max(tl, 1e-6);
+        // Along the ground, and along the wind.
+        let tangential = smoothstep(0.55, 0.85, tl / nl);
+        let w = tangential * pow(0.08 + along * along, 3.0);
+        if (w <= 1e-4) { continue; }
+        var t = fract(dot(n, x));
+        if (along < 0.0) { t = 1.0 - t; }
+        let wl = DUNE_PERIOD / tl;
+        sum += w * (profile(t) - PROFILE_MEAN) * dune_share(width, wl);
+        weights += w;
+    }
+    if (weights <= 0.0) { return 0.0; }
+    return DUNE_HEIGHT * sand * sum / weights;
+}
