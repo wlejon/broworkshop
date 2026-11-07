@@ -53,7 +53,7 @@ export function createLoading(name) {
     const chipText = chip.querySelector('.what');
     document.body.appendChild(chip);
 
-    let fraction = 0;
+    let fraction = 0, created = 0;
     const show = (phase, f, label, more = '') => {
         const [a, b] = SHARE[phase];
         // The bar never goes back (a phase's own estimate can).
@@ -72,9 +72,13 @@ export function createLoading(name) {
         compiling(done, total) {
             show('compile', done / total, 'Compiling kernels', `${done} of ${total}`);
         },
-        // The world being made (its systems, its first tiles' setup).
-        creating() {
-            show('create', 0, `Making ${worldName}`);
+        // The @cpu kernels' machine code being built.
+        buildingCpu() {
+            show('compile', 1, 'Building CPU kernels');
+        },
+        // A step of making the world (its systems, its ground).
+        creating(label) {
+            show('create', ++created / 8, label);
         },
         // Each frame of the running planet: the scene and the tile cache.
         frame(scene, cache) {

@@ -19,17 +19,21 @@ const POINTS = 6 * N * N;
 const STEPS = 1024;
 
 // The network in `net` (a KernelBuffer the ground's kernels and hooks bind)
-// and its copy in `cpu`; rebuild() builds it again into both, in place, for
-// a module whose kernels changed (bro.kernel.reload).
-export function createRivers(module, radius, seed) {
+// and its copy in `cpu`, built in a background job (bro.kernel.background:
+// between the frames, which go on meanwhile); the promise settles once it
+// is done. rebuild() builds it again into both, in place and at once, for a
+// module whose kernels changed (bro.kernel.reload).
+export async function createRivers(module, radius, seed) {
     const net = bro.kernel.createBuffer(POINTS * REC * 4);
     const cpu = new Float32Array(POINTS * REC);
-    const build = () => {
+    const job = bro.kernel.background(() => buildInto(module, net, radius, seed));
+    while (!job.done) await new Promise((resolve) => requestAnimationFrame(resolve));
+    net.read(cpu);
+    const rebuild = () => {
         buildInto(module, net, radius, seed);
         net.read(cpu);
     };
-    build();
-    return { net, cpu, rebuild: build };
+    return { net, cpu, rebuild };
 }
 
 function buildInto(module, net, radius, seed) {

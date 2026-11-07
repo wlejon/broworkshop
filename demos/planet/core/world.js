@@ -44,7 +44,9 @@
 //                 kernels (its compiled kernels' modules, by the names in
 //                 `kernels`),
 //                 kAnchors (the f64 anchor kernel), tile (the cache's layout,
-//                 core/planet.js TILE_LAYOUT) }. It returns:
+//                 core/planet.js TILE_LAYOUT), step (async (label): names
+//                 the next part of the making on the loading panel and lets
+//                 the window draw a frame) }. It may be async; it returns:
 //     layers        the tile layers it adds, { name: bytes a cell }
 //     ground        its part of the ground's hook (core/ground_mesh.bk):
 //                   { layout: constants for planet::ground_layout (it must
@@ -66,8 +68,10 @@
 //     bindGround(ground, cache)
 //                   binds its layers and buffers to the ground's hook, at
 //                   each new cache
-//     attach(ground)
-//                   makes its systems, once the ground exists
+//     attach(ground, { step })
+//                   makes its systems, once the ground exists; it may be
+//                   async, and `await step(label)` before each system names
+//                   it on the loading panel and lets the window draw a frame
 //     surfaceHeight(dir)
 //                   the drawn surface's height (m over the radius) under a
 //                   unit direction, on the CPU

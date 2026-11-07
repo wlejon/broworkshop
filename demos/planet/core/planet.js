@@ -66,9 +66,19 @@ export async function startPlanet(world) {
     loading.compiling(0, names.length);
     const built = await Promise.all(names.map((n) => bro.kernel.compileAsync(sources[n].source, { file: sources[n].file, modules })
         .then((m) => { loading.compiling(++compiled, names.length); return m; })));
-    // Making the world runs on this thread: the panel says so first.
-    loading.creating();
-    await new Promise((resolve) => requestAnimationFrame(resolve));
+    // The @cpu kernels' machine code (the anchors, the world's surface
+    // height), built beside the frames: the first frame's runs then do not
+    // wait for it.
+    loading.buildingCpu();
+    await Promise.all(built.map((m) => m.cpuReady()));
+    // Making the world runs on this thread, in steps: before each the panel
+    // says what comes and the window draws a frame.
+    const step = async (label) => {
+        loading.creating(label);
+        await new Promise((resolve) => requestAnimationFrame(resolve));
+    };
+    const worldTitle = world.name[0].toUpperCase() + world.name.slice(1);
+    await step(`Making ${worldTitle}`);
     const kernels = Object.fromEntries(names.map((n, i) => [n, built[i]]));
     const core = kernels['core/tiles.bk'];
     const kHorizon = core.kernel('k_horizon');
@@ -83,7 +93,7 @@ export async function startPlanet(world) {
 
     const canvas = document.querySelector('#stage');
     const scene = canvas.getContext('scene');
-    const w = world.create({ scene, modules, kernels, kAnchors, tile: TILE_LAYOUT });
+    const w = await world.create({ scene, modules, kernels, kAnchors, tile: TILE_LAYOUT, step });
     for (const k of WORLD_PARTS) {
         if (w[k] === undefined) throw new Error(`planet: the world ${world.name}'s create() gave no ${k}`);
     }
@@ -235,6 +245,7 @@ export async function startPlanet(world) {
                             'planet::ground_core': readApp('core/ground_core.bk'), 'planet::noise': modules['planet::noise'],
                             'planet::periodic': readApp('core/periodic.bk'),
                             ...w.ground.modules };
+    await step('Laying the ground');
     let ground = null;
     ground = scene.createInstancedMesh({
         mesh: patchMesh(), color: [1, 1, 1],
@@ -243,7 +254,7 @@ export async function startPlanet(world) {
     });
     ground.cullMargin = 4 * RADIUS;   // the shader places tiles; the cache culls them
     makeCache(Number(document.querySelector('#detail').value));
-    w.attach(ground);
+    await w.attach(ground, { step });
 
     // ── Camera: doubles about the planet's center ───────────────────────────
 

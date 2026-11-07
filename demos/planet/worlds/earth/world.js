@@ -35,13 +35,14 @@ const MODULES = {
     'planet::cloud_field': read('cloud_field.bk'), 'planet::cloud_lighting': read('cloud_lighting.bk'),
 };
 
-function create(core) {
+async function create(core) {
     const { scene, modules, kAnchors } = core;
     const { TILE, BORDER, CELLS, DETAIL, TEXELS, HZ_GRID, CAPACITY, MAX_LEVEL, PRODUCE_PER_UPDATE } = core.tile;
     const compile = (f) => core.kernels[f];
 
     const mod = compile('produce.bk');
-    const rivers = createRivers(compile('riverbuild.bk'), RADIUS, SEED);
+    await core.step('Carving rivers');
+    const rivers = await createRivers(compile('riverbuild.bk'), RADIUS, SEED);
     const kTile = mod.kernel('k_tile');
     const kHeight = mod.kernel('k_height');
     const kAnchor = mod.kernel('k_anchor');
@@ -190,14 +191,16 @@ function create(core) {
     };
 
     let ground = null, clouds = null, grass = null, trees = null;
-    function attach(node) {
+    // Each system a step of the boot (a frame drawn before it).
+    async function attach(node, { step }) {
         ground = node;
         const cloudMod = compile('clouds.bk');
         const sunMod = compile('sun.bk');
-        const grassMod = compile('grass.bk');
-        grass = createGrass(scene, RADIUS, grassMod, sunMod, TRUTH, SEED, rivers.net, kAnchors, [ground]);
-        const treeMod = compile('trees.bk');
-        trees = createTrees(scene, RADIUS, treeMod, sunMod, TRUTH, SEED, rivers.net, kAnchors, [ground]);
+        await step('Growing grass');
+        grass = createGrass(scene, RADIUS, compile('grass.bk'), sunMod, TRUTH, SEED, rivers.net, kAnchors, [ground]);
+        await step('Planting trees');
+        trees = createTrees(scene, RADIUS, compile('trees.bk'), sunMod, TRUTH, SEED, rivers.net, kAnchors, [ground]);
+        await step('Gathering clouds');
         clouds = createClouds(scene, RADIUS, cloudMod, [ground], SEED,
                               { source: read('clouds_volume.bk'), modules }, MAX_HEIGHT);
     }
