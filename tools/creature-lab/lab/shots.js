@@ -7,7 +7,8 @@
 //          than CREASE degrees between the two: a fold or a kink in the skin
 //   kink   the silhouette turning by more than KINK degrees within a few
 //          pixels where it bends inward (a notch; tips that point outward,
-//          an ear's or a hoof's, are not counted)
+//          an ear's or a hoof's, are not counted, nor a notch whose two
+//          sides lie at depths OCCLUSION apart: one part in front of another)
 // Each is put to a site with the keys lab/seams.js gives (cross A x B,
 // crease <piece> over <bone>, kink <piece> over <bone>) by the nearest
 // vertex on screen at that depth, and measured as the length it draws in
@@ -23,6 +24,7 @@ export const SHOT = {
     seamMin: 8,        // degrees: a seam drawn by two pieces turning less is not seen
     kink: 50,          // degrees of turn at the silhouette within KINK_SPAN px
     kinkSpan: 5,
+    occlusion: 0.08,   // m: a notch whose sides lie farther apart in depth is one part in front of another
 };
 
 const DEG = 180 / Math.PI;
@@ -209,6 +211,10 @@ export function silhouetteKinks(D) {
         if (lu < K * 0.6 || lv < K * 0.6) continue;
         const ang = Math.acos(Math.max(-1, Math.min(1, (u[0] * v[0] + u[1] * v[1]) / (lu * lv)))) * DEG;
         const m = [Math.round((a[0] + c[0]) / 2), Math.round((a[1] + c[1]) / 2)];
+        // Where the outline's two sides lie at different depths, one part
+        // passes in front of another (a leg crossing a leg): not a notch in the skin.
+        const da = depth[a[1] * W + a[0]], dc = depth[c[1] * W + c[0]];
+        if (da && dc && Math.abs(da - dc) > SHOT.occlusion) continue;
         if (ang >= SHOT.kink && !on(m[0], m[1])) turn[i] = ang;
     }
     // One kink per notch: the sharpest within 3 spans.

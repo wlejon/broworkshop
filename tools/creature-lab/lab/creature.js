@@ -1,5 +1,5 @@
 // Loading a creature: its folder's creature.js, its skeleton resolved, its
-// rig compiled (with a variant's knobs), its body sculpted.
+// rig compiled (with a variant's knobs), its body built.
 //
 // A spec names a folder under creatures/, optionally a variant:
 //   'deer'            the deer as it is
@@ -60,7 +60,7 @@ export async function loadCreature(spec, extraKnobs = null) {
         spec, dir, variant, knobs: knobs || null, folder, name: def.name,
         label: spec + (extraKnobs && Object.keys(extraKnobs).length ? '+' + Object.entries(extraKnobs).map(([k, v]) => `${k}=${v}`).join(',') : ''), def, skel, mod, rig, body, modules,
         stateStride: mod.consts.STATE,
-        timing: { importMs: t1 - t0, compileMs: t2 - t1, sculptMs: t3 - t2 },
+        timing: { importMs: t1 - t0, compileMs: t2 - t1, bodyMs: t3 - t2 },
     };
 }
 

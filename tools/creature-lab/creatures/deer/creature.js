@@ -25,15 +25,9 @@ export default {
         gallop: { scenario: 'gallop', reference: { duty: 0.27, offsets: { LH: 0, LF: 0.46, RF: 0.57, RH: 0.1 }, tolerance: { duty: 0.07, offset: 0.06 } } },
     },
     // The body at rest against a white-tailed deer of 0.95 m (body.js has
-    // the sources): `form` checks each 'ring.field' or 'part.field' as [value,
-    // tolerance] in metres.
+    // the sources): `form` checks each 'section.field' (body.js and legs.js
+    // name the sections) as [value, tolerance] in metres.
     form: {
-        // The legs' tops stay under the trunk's skin: the fore leg above the
-        // upper arm's mass, the hind leg above the thigh's (both stand out
-        // of the trunk's lower side below that, by design: legs.js).
-        // The stifle stands out below the flank's floor (0.61 m), so the
-        // hind leg is checked above it.
-        inside: { trunk: { foreL: 0.70, hindL: 0.62 } },
         reference: {
             'shoulder.top': [0.975, 0.015],
             'girth.depth': [0.41, 0.02],
@@ -42,7 +36,6 @@ export default {
             'waist.bottom': [0.60, 0.02],
             'shoulder.width': [0.28, 0.02],
             'rump.width': [0.25, 0.02],
-            'trunk.length': [1.20, 0.03],
             'neckbase.width': [0.18, 0.02],
             'neckmid.width': [0.124, 0.012],
             'throat.width': [0.108, 0.01],

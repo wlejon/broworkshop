@@ -74,7 +74,7 @@ await test('A/B sheets: interleaved and overlaid, metrics side by side', async (
 
 test('edit -> sheet in seconds', () => {
     // Each `sheets` call above loaded the creature afresh (rig compiled, body
-    // sculpted), ran the scenario and drew four sheets and the metrics.
+    // built), ran the scenario and drew four sheets and the metrics.
     console.log(`  sheets: trot ${timings.trot} ms, startle ${timings.startle} ms`);
     check(timings.trot < 15000 && timings.startle < 15000, 'four sheets and metrics under 15 s');
 });

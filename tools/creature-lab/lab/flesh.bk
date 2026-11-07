@@ -1,0 +1,149 @@
+// The field of a body's masses (lab/flesh.js), on the GPU: sampled over the
+// meshing grid, at the mesh's vertices to put them on the surface, and per
+// vertex and mass for the skin weights and the colours.
+//
+// A primitive is 8 vec4: (kind, length, 0, 0), its start a, its axis t, its
+// side and up (a blob's frame, a span's section axes), its radii (a blob's
+// rx, ry, rz; a span's side and up radius at a and at the far end), and its
+// box lo and hi. A mass is 3 vec4: (first primitive, count, blend, joint),
+// (box lo, soft), (box hi, 0). A mass at distance d contributes
+// exp(-d / blend), faded out between FADE0 and FADE1 blends; the field is
+// -log of the contributions' sum, negative inside.
+const FADE0: f32 = 3.5;
+const FADE1: f32 = 4.6;
+
+// Distance to an ellipsoid from local q (Quilez's k0 (k0 - 1) / k1).
+fn ell_dist(q: vec3<f32>, r: vec3<f32>) -> f32 {
+    let a = q / r;
+    let k0 = length(a);
+    let k1 = length(a / r);
+    if (k1 < 1e-12) { return -min(r.x, min(r.y, r.z)); }
+    return k0 * (k0 - 1.0) / k1;
+}
+
+// A primitive's distance from p, and where along it p lies.
+fn prim_dist(prims: read_store<vec4<f32>, 1>, i: i32, p: vec3<f32>) -> vec2<f32> {
+    let b = 8 * i;
+    let head = prims[b];
+    let a = prims[b + 1].xyz;
+    let t = prims[b + 2].xyz;
+    let side = prims[b + 3].xyz;
+    let up = prims[b + 4].xyz;
+    let r = prims[b + 5];
+    let d = p - a;
+    if (head.x < 0.5) {
+        return vec2<f32>(ell_dist(vec3<f32>(dot(d, side), dot(d, up), dot(d, t)), r.xyz), 0.0);
+    }
+    let len = head.y;
+    let h = clamp(dot(d, t) / len, 0.0, 1.0);
+    let rx = r.x + (r.z - r.x) * h;
+    let ry = r.y + (r.w - r.y) * h;
+    let e = d - t * (len * h);
+    return vec2<f32>(ell_dist(vec3<f32>(dot(e, side), dot(e, up), dot(e, t)), vec3<f32>(rx, ry, min(rx, ry))), h);
+}
+
+fn smin(a: f32, b: f32, k: f32) -> f32 {
+    let h = max(k - abs(a - b), 0.0) / k;
+    return min(a, b) - h * h * k * 0.25;
+}
+
+fn outside(p: vec3<f32>, lo: vec3<f32>, hi: vec3<f32>, r: f32) -> bool {
+    return p.x < lo.x - r || p.y < lo.y - r || p.z < lo.z - r || p.x > hi.x + r || p.y > hi.y + r || p.z > hi.z + r;
+}
+
+// A mass's distance at p, its nearest primitive and where along it.
+fn mass_dist(prims: read_store<vec4<f32>, 1>, masses: read_store<vec4<f32>, 1>, m: i32, p: vec3<f32>, reach: f32) -> vec3<f32> {
+    let h0 = masses[3 * m];
+    let first = h0.x as i32;
+    let count = h0.y as i32;
+    let joint = h0.w;
+    var d = 1e9;
+    var best = -1.0;
+    var bd = 1e9;
+    var bh = 0.0;
+    for (var j: i32 = 0; j < count; j += 1) {
+        let i = first + j;
+        if (outside(p, prims[8 * i + 6].xyz, prims[8 * i + 7].xyz, reach)) { continue; }
+        let e = prim_dist(prims, i, p);
+        if (e.x < bd) { bd = e.x; best = i as f32; bh = e.y; }
+        if (d > 1e8) { d = e.x; } else if (joint > 0.0) { d = smin(d, e.x, joint); } else { d = min(d, e.x); }
+    }
+    return vec3<f32>(d, best, bh);
+}
+
+fn contribution(d: f32, blend: f32) -> f32 {
+    let x = d / blend;
+    if (x >= FADE1) { return 0.0; }
+    let c = exp(-max(x, -30.0));
+    if (x > FADE0) {
+        let s = clamp((x - FADE0) / (FADE1 - FADE0), 0.0, 1.0);
+        return c * (1.0 - s * s * (3.0 - 2.0 * s));
+    }
+    return c;
+}
+
+fn field(prims: read_store<vec4<f32>, 1>, masses: read_store<vec4<f32>, 1>, nm: i32, p: vec3<f32>) -> f32 {
+    var s = 0.0;
+    for (var m: i32 = 0; m < nm; m += 1) {
+        let blend = masses[3 * m].z;
+        let reach = FADE1 * blend;
+        if (outside(p, masses[3 * m + 1].xyz, masses[3 * m + 2].xyz, reach)) { continue; }
+        let md = mass_dist(prims, masses, m, p, reach);
+        s += contribution(md.x, blend);
+    }
+    return -log(max(s, 1e-4));
+}
+
+// The field over the grid: cell (x, y, z) at lo + cell * (x, y, z).
+@kernel @grid(3)
+fn k_field(g: grid<3>, prims: read_store<vec4<f32>, 1>, masses: read_store<vec4<f32>, 1>, nm: i32, lo: vec3<f32>, cell: f32) -> f32 {
+    let p = lo + vec3<f32>(g.x() as f32, g.y() as f32, g.z() as f32) * cell;
+    return field(prims, masses, nm, p);
+}
+
+fn gradient(prims: read_store<vec4<f32>, 1>, masses: read_store<vec4<f32>, 1>, nm: i32, p: vec3<f32>) -> vec3<f32> {
+    let h = 0.0005;
+    let gx = field(prims, masses, nm, p + vec3<f32>(h, 0.0, 0.0)) - field(prims, masses, nm, p - vec3<f32>(h, 0.0, 0.0));
+    let gy = field(prims, masses, nm, p + vec3<f32>(0.0, h, 0.0)) - field(prims, masses, nm, p - vec3<f32>(0.0, h, 0.0));
+    let gz = field(prims, masses, nm, p + vec3<f32>(0.0, 0.0, h)) - field(prims, masses, nm, p - vec3<f32>(0.0, 0.0, h));
+    return vec3<f32>(gx, gy, gz) / (2.0 * h);
+}
+
+// Each vertex moved onto the surface along the field's gradient (Newton
+// steps of at most `cell`), its normal the gradient there: out is two vec4
+// a vertex, (position, field), (normal, 0).
+@kernel @grid(1)
+fn k_project(g: grid<1>, prims: read_store<vec4<f32>, 1>, masses: read_store<vec4<f32>, 1>, nm: i32,
+             pos: read_store<f32, 1>, cell: f32, out: write_store<vec4<f32>, 1>) {
+    let v = g.x();
+    var p = vec3<f32>(pos[3 * v], pos[3 * v + 1], pos[3 * v + 2]);
+    for (var it: i32 = 0; it < 4; it += 1) {
+        let f = field(prims, masses, nm, p);
+        let gr = gradient(prims, masses, nm, p);
+        let gl = length(gr);
+        if (gl < 1e-6) { break; }
+        let step = clamp(f / gl, -cell, cell);
+        p = p - gr / gl * step;
+    }
+    let n = gradient(prims, masses, nm, p);
+    out[2 * v] = vec4<f32>(p, field(prims, masses, nm, p));
+    out[2 * v + 1] = vec4<f32>(normalize(n), 0.0);
+}
+
+// Every mass at every vertex: (distance, nearest primitive, where along it,
+// 0); the primitive is -1 where the mass does not reach.
+@kernel @grid(2)
+fn k_masses(g: grid<2>, prims: read_store<vec4<f32>, 1>, masses: read_store<vec4<f32>, 1>,
+            pos: read_store<vec4<f32>, 1>, out: write_store<vec4<f32>, 1>) {
+    let v = g.x();
+    let m = g.y();
+    let p = pos[2 * v].xyz;
+    let blend = masses[3 * m].z;
+    let reach = FADE1 * blend * max(1.0, masses[3 * m + 1].w) + 0.02;
+    var r = vec4<f32>(1e9, -1.0, 0.0, 0.0);
+    if (!outside(p, masses[3 * m + 1].xyz, masses[3 * m + 2].xyz, reach)) {
+        let md = mass_dist(prims, masses, m, p, reach);
+        r = vec4<f32>(md.x, md.y, md.z, 0.0);
+    }
+    out[m * g.width() + v] = r;
+}

@@ -1,0 +1,338 @@
+// The hexa's rig: one invocation per creature, its state in `state`, its
+// bones out to `pose` (the creature contract, lab/contract.js).
+//
+// How it moves. A tripod gait: the front and rear legs of one side and the
+// middle leg of the other lift together, the other three half a cycle
+// later, so three feet are always down. A leg in stance whose phase passes
+// the duty factor lifts, swings over the rest of its cycle on an arc and
+// lands where its home under its hip will be by mid-stance; a planted foot
+// stays where it landed. Standing, a foot strayed from home steps back.
+// The body rides the feet: its height over the ground under them, pitched
+// and rolled to their plane. The spine sways from side to side with the
+// stride and bends into a turn; the tail swings against the sway, each
+// segment a little later than the one before; the heavy head turns to the
+// gaze and to the turn, and lowers to graze, chewing. Lying down, the body
+// sinks onto folded legs. Every joint is held within its limits.
+import creature::common::*;
+import creature::contract::*;
+import creature::skeleton::*;
+from creature::ground import height;
+
+pub const STATE: i32 = 80;
+
+const D_SPEED: i32 = 5;
+const D_OMEGA: i32 = 6;
+const D_PHASE: i32 = 7;
+const D_MOVING: i32 = 8;
+const D_CLOCK: i32 = 9;
+const D_BODY_Y: i32 = 10;
+const D_LOOK: i32 = 11;
+const D_GRAZE: i32 = 12;
+const D_LIE: i32 = 13;
+const D_ALERT: i32 = 14;
+const D_LEG: i32 = 20;
+const LEG_REC: i32 = 10;
+const L_PLANT: i32 = 0;
+const L_TOE: i32 = 1;      // where the foot is (planted) or was lifted from (3)
+const L_AT: i32 = 4;       // where the foot is now, in swing (3)
+const L_U: i32 = 7;        // the swing's progress, 0..1
+const L_ARMED: i32 = 8;    // set in stance, so a leg lifts once a cycle
+const L_DUR: i32 = 9;      // the swing's length in seconds
+
+@knob const DUTY: f32 = 0.6;
+@knob const LIFT: f32 = 0.09;
+@knob const SWAY: f32 = 0.07;
+
+// Legs in the order of skeleton.js's feet: L1, R1, L2, R2, L3, R3.
+const LEG_B0: array<i32, 6> = [B_UPPERL1, B_UPPERR1, B_UPPERL2, B_UPPERR2, B_UPPERL3, B_UPPERR3];
+const LEG_PARENT: array<i32, 6> = [B_THORAX, B_THORAX, B_SPINE, B_SPINE, B_PELVIS, B_PELVIS];
+// The tripods: L1, R2, L3 together, then R1, L2, R3.
+const OFFS: array<f32, 6> = [0.0, 0.5, 0.5, 0.0, 0.0, 0.5];
+
+fn select_f(c: bool, a: f32, b: f32) -> f32 {
+    if (c) { return a; }
+    return b;
+}
+
+fn rest_angle(b: i32) -> f32 {
+    let v = TAIL[b] - HEAD[b];
+    return limb_angle(vec2<f32>(v.z, v.y));
+}
+
+fn rest_len(b: i32) -> f32 {
+    let v = TAIL[b] - HEAD[b];
+    return length(vec2<f32>(v.z, v.y));
+}
+
+fn clamp_xyz(a: vec3<f32>, b: i32) -> vec3<f32> { return clamp(a, LIM_LO[b], LIM_HI[b]); }
+
+// The creature's position is the middle of its body (z MID_Z at rest), which
+// it turns about.
+const MID_Z: f32 = 0.1;
+
+// A leg's home: under its hip, on the ground, in the world.
+fn home_of(l: i32, pos: vec3<f32>, qyaw: vec4<f32>) -> vec3<f32> {
+    let toe0 = TAIL[LEG_B0[l] + 2];
+    return pos + q_rot(qyaw, vec3<f32>(toe0.x, 0.0, toe0.z - MID_Z));
+}
+
+fn place(st: rw_store<f32, 1>, env: read_store<f32, 1>, s: i32) {
+    let p = ld3(st, s + S_POS);
+    let q = q_y(st[s + S_YAW]);
+    for (var l: i32 = 0; l < 6; l += 1) {
+        let h = home_of(l, vec3<f32>(p.x, 0.0, p.z), q);
+        let t = vec3<f32>(h.x, height(env, h.x, h.z), h.z);
+        let k = s + D_LEG + l * LEG_REC;
+        st[k + L_PLANT] = 1.0;
+        st3(st, k + L_TOE, t);
+        st3(st, k + L_AT, t);
+        st[k + L_U] = 0.0;
+        st[k + L_ARMED] = 1.0;
+    }
+    st[s + D_BODY_Y] = height(env, p.x, p.z) + HEAD[B_PELVIS].y;
+    st[s + S_PLACED] = 1.0;
+}
+
+@kernel @grid(1)
+fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state: rw_store<f32, 1>,
+         pose: write_store<vec4<f32>, 1>, tele: write_store<f32, 1>, dt: f32) {
+    let c = g.x();
+    let s = c * STATE;
+    let ii = c * INTENT;
+    if (state[s + S_PLACED] < 0.5) { place(state, env, s); }
+
+    // --- intent ---------------------------------------------------------------
+    let act = intent[ii + I_ACTION] as i32;
+    let clock = state[s + D_CLOCK] + dt;
+    state[s + D_CLOCK] = clock;
+    let graze = approach(state[s + D_GRAZE], select_f(act == ACT_GRAZE, 1.0, 0.0), 0.8, dt);
+    let lie = approach(state[s + D_LIE], select_f(act == ACT_LIE, 1.0, 0.0), 0.35, dt);
+    let alert = approach(state[s + D_ALERT], select_f(act == ACT_STARTLE || act == ACT_ALERT, 1.0, 0.0), 3.0, dt);
+    state[s + D_GRAZE] = graze;
+    state[s + D_LIE] = lie;
+    state[s + D_ALERT] = alert;
+    var vdes = vec2<f32>(intent[ii + I_VEL_X], intent[ii + I_VEL_Z]);
+    // A heavy walker: it does not run.
+    let vmax = 1.8 * (1.0 - 0.8 * graze);
+    if (length(vdes) > vmax) { vdes = normalize(vdes) * vmax; }
+    if (lie > 0.001 || act == ACT_LIE) { vdes = vec2<f32>(0.0); }
+
+    // --- heading and speed ------------------------------------------------------
+    var yaw = state[s + S_YAW];
+    var speed = state[s + D_SPEED];
+    var want = yaw;
+    let vd = length(vdes);
+    if (intent[ii + I_HEADING_MODE] > 0.5) { want = intent[ii + I_HEADING]; }
+    else if (vd > 0.05) { want = atan2(vdes.x, vdes.y); }
+    let tw = turn_toward(yaw, want, 0.9, dt);
+    yaw = tw.x;
+    let omega = mix(state[s + D_OMEGA], tw.y, 1.0 - exp(-8.0 * dt));
+    let err = wrap_pi(want - yaw);
+    speed = approach(speed, vd * clamp(cos(err), 0.2, 1.0), 1.2, dt);
+    let qyaw = q_y(yaw);
+    let fwd = q_rot(qyaw, vec3<f32>(0.0, 0.0, 1.0));
+    var pos = ld3(state, s + S_POS);
+    pos += fwd * (speed * dt);
+
+    // --- the clock -----------------------------------------------------------------
+    var phase = state[s + D_PHASE];
+    let was_moving = state[s + D_MOVING] > 0.5;
+    var moving = vd > 0.05 || speed > 0.05 || abs(err) > 0.1;
+    if (was_moving) { moving = moving || speed > 0.03 || abs(err) > 0.04; }
+    if (lie > 0.001) { moving = false; }
+    let veff = max(speed, 0.6 * abs(omega));
+    let freq = 0.65 + 0.5 * veff;
+    if (moving && !was_moving) { phase = floor(phase) + 1.0 + DUTY; }
+    if (moving) { phase += freq * dt; }
+    let go = smooth01(veff / 0.4) * select_f(moving, 1.0, 0.0);
+
+    // --- feet ------------------------------------------------------------------------
+    let swing_t = (1.0 - DUTY) / freq;
+    var ground_sum: f32 = 0.0;
+    var front_y: f32 = 0.0;
+    var rear_y: f32 = 0.0;
+    var left_y: f32 = 0.0;
+    var right_y: f32 = 0.0;
+    var feet: array<vec3<f32>, 6>;
+    var swing: array<f32, 6>;
+    var busy = false;
+    for (var l: i32 = 0; l < 6; l += 1) {
+        let k = s + D_LEG + l * LEG_REC;
+        if (state[k + L_PLANT] < 0.5) { busy = true; }
+    }
+    for (var l: i32 = 0; l < 6; l += 1) {
+        let k = s + D_LEG + l * LEG_REC;
+        let home = home_of(l, pos, qyaw);
+        let ph = fract01(phase - OFFS[l]);
+        var planted = state[k + L_PLANT] > 0.5;
+        var toe = ld3(state, k + L_TOE);
+        var at = toe;
+        // Where a swing lands: home, ahead by half the stance's travel, and
+        // turned on by the turn the stance will make.
+        let stance_t = DUTY / freq;
+        let ahead = q_rot(q_y(omega * (swing_t + 0.5 * stance_t)), home - pos) + pos + fwd * (speed * (swing_t + 0.5 * stance_t));
+        let target = vec3<f32>(ahead.x, height(env, ahead.x, ahead.z), ahead.z);
+        if (planted) {
+            if (ph < DUTY) { state[k + L_ARMED] = 1.0; }
+            let stray = length(vec2<f32>(toe.x - home.x, toe.z - home.z));
+            var lift = moving && state[k + L_ARMED] > 0.5 && ph >= DUTY;
+            var dur = clamp((1.0 - ph) / freq, 0.15, 0.8);
+            // Standing: a foot strayed from home steps back, one at a time.
+            if (!moving && !busy && stray > 0.05 && lie < 0.01) { lift = true; dur = 0.45; busy = true; }
+            if (lift) {
+                planted = false;
+                state[k + L_PLANT] = 0.0;
+                state[k + L_ARMED] = 0.0;
+                state[k + L_U] = 0.0;
+                state[k + L_DUR] = dur;
+            }
+        }
+        var u: f32 = 0.0;
+        if (!planted) {
+            u = min(state[k + L_U] + dt / max(state[k + L_DUR], 0.05), 1.0);
+            state[k + L_U] = u;
+            let e = smooth01(u);
+            at = mix(toe, target, e) + vec3<f32>(0.0, LIFT * (0.6 + 0.4 * go) * sin(PI * u), 0.0);
+            if (u >= 1.0) {
+                planted = true;
+                state[k + L_PLANT] = 1.0;
+                st3(state, k + L_TOE, target);
+                at = target;
+            }
+        }
+        st3(state, k + L_AT, at);
+        feet[l] = at;
+        swing[l] = select_f(planted, 0.0, sin(PI * u));
+        let gy = select_f(planted, at.y, height(env, at.x, at.z));
+        ground_sum += gy;
+        if (l < 2) { front_y += gy * 0.5; }
+        if (l >= 4) { rear_y += gy * 0.5; }
+        if (l % 2 == 0) { left_y += gy / 3.0; } else { right_y += gy / 3.0; }
+    }
+
+    // --- the body ----------------------------------------------------------------------
+    let span = HEAD[B_UPPERL1].z - HEAD[B_UPPERL3].z;
+    let width = 2.0 * HEAD[B_UPPERL1].x;
+    let pitch = atan2(front_y - rear_y, span);
+    let roll = atan2(left_y - right_y, width) * 0.7;
+    let bob = 0.012 * go * cos(4.0 * PI * phase);
+    let want_y = ground_sum / 6.0 + HEAD[B_PELVIS].y - 0.32 * smooth01(lie) - bob - 0.02 * graze;
+    let body_y = damp(state[s + D_BODY_Y], want_y, 10.0, dt);
+    state[s + D_BODY_Y] = body_y;
+    // The middle of the body rides at body_y over pos; the pelvis is the
+    // skeleton's root, behind it.
+    let sway = SWAY * go * sin(TAU * phase);
+    let bendt = clamp(omega * 0.25, -0.3, 0.3);
+    let qbody = q_mul(qyaw, q_mul(q_x(-pitch), q_z(-roll)));
+    var rq: array<vec4<f32>, NB>;
+    var rp: array<vec3<f32>, NB>;
+    rq[B_PELVIS] = q_mul(qbody, q_y(sway - 0.5 * bendt));
+    let back = q_rot(qbody, vec3<f32>(0.0, 0.0, HEAD[B_PELVIS].z - MID_Z));
+    rp[B_PELVIS] = vec3<f32>(pos.x, body_y, pos.z) + back;
+    let spine_a = clamp_xyz(vec3<f32>(0.0, -1.3 * sway + 0.5 * bendt, 0.0), B_SPINE);
+    rq[B_SPINE] = q_mul(rq[B_PELVIS], q_xyz(spine_a));
+    rp[B_SPINE] = rp[B_PELVIS] + q_rot(rq[B_PELVIS], HEAD[B_SPINE] - HEAD[B_PELVIS]);
+    let thorax_a = clamp_xyz(vec3<f32>(0.0, 0.6 * sway + 0.5 * bendt, 0.0), B_THORAX);
+    rq[B_THORAX] = q_mul(rq[B_SPINE], q_xyz(thorax_a));
+    rp[B_THORAX] = rp[B_SPINE] + q_rot(rq[B_SPINE], HEAD[B_THORAX] - HEAD[B_SPINE]);
+
+    // --- neck, head and jaw ----------------------------------------------------------------
+    var look = 0.0;
+    if (intent[ii + I_GAZE_W] > 0.0) {
+        let gz = vec3<f32>(intent[ii + I_GAZE_X], intent[ii + I_GAZE_Y], intent[ii + I_GAZE_Z]) - rp[B_THORAX];
+        let gl = q_rot(q_conj(rq[B_THORAX]), gz);
+        look = intent[ii + I_GAZE_W] * atan2(gl.x, gl.z);
+    }
+    look = damp(state[s + D_LOOK], look + omega * 0.5 - 0.4 * sway, 4.0, dt);
+    state[s + D_LOOK] = look;
+    let lower = 0.55 * graze - 0.25 * alert + 0.06 * lie;
+    let neck_a = clamp_xyz(vec3<f32>(lower + 0.02 * go * sin(TAU * 2.0 * phase), 0.55 * look, 0.0), B_NECK);
+    rq[B_NECK] = q_mul(rq[B_THORAX], q_xyz(neck_a));
+    rp[B_NECK] = rp[B_THORAX] + q_rot(rq[B_THORAX], HEAD[B_NECK] - HEAD[B_THORAX]);
+    let head_a = clamp_xyz(vec3<f32>(0.45 * graze - 0.15 * alert - 0.6 * (neck_a.x - lower) , 0.45 * look, 0.0), B_HEAD);
+    rq[B_HEAD] = q_mul(rq[B_NECK], q_xyz(head_a));
+    rp[B_HEAD] = rp[B_NECK] + q_rot(rq[B_NECK], HEAD[B_HEAD] - HEAD[B_NECK]);
+    let chew = graze * (0.08 + 0.08 * sin(clock * 7.0));
+    rq[B_JAW] = q_mul(rq[B_HEAD], q_x(chew + 0.05 * alert));
+    rp[B_JAW] = rp[B_HEAD] + q_rot(rq[B_HEAD], HEAD[B_JAW] - HEAD[B_HEAD]);
+
+    // --- the tail: against the sway, each segment later ---------------------------------
+    var tq = rq[B_PELVIS];
+    var tp = rp[B_PELVIS];
+    var parent = B_PELVIS;
+    for (var i: i32 = 0; i < 4; i += 1) {
+        let b = B_TAIL1 + i;
+        let fi = i as f32;
+        let swingy = -1.1 * SWAY * go * sin(TAU * phase - 0.9 * (fi + 1.0)) - 0.25 * bendt;
+        let a = clamp_xyz(vec3<f32>(-0.06 * (1.0 - lie) + 0.06 * lie, swingy, 0.0), b);
+        rp[b] = tp + q_rot(tq, HEAD[b] - HEAD[parent]);
+        tq = q_mul(tq, q_xyz(a));
+        rq[b] = tq;
+        tp = rp[b];
+        parent = b;
+    }
+
+    // --- legs ----------------------------------------------------------------------------------
+    for (var l: i32 = 0; l < 6; l += 1) {
+        let b0 = LEG_B0[l];
+        let pb = LEG_PARENT[l];
+        let qp = rq[pb];
+        let j = rp[pb] + q_rot(qp, HEAD[b0] - HEAD[pb]);
+        let d = q_rot(q_conj(qp), feet[l] - j);
+        // The plane through the foot: the leg turned out about the body's axis.
+        let rx = TAIL[b0 + 2].x - HEAD[b0].x;
+        let r2 = d.x * d.x + d.y * d.y;
+        let rho = clamp(atan2(d.x, -d.y) - atan2(rx, sqrt(max(r2 - rx * rx, 1e-6))), LIM_LO[b0].z, LIM_HI[b0].z);
+        let py = -d.x * sin(rho) + d.y * cos(rho);
+        // The foot flat in stance (level in the world), toes curled in swing.
+        let fw = q_rot(qp, vec3<f32>(0.0, 0.0, 1.0));
+        let par_pitch = atan2(fw.y, length(vec2<f32>(fw.x, fw.z)));
+        let af = rest_angle(b0 + 2) - par_pitch + 0.7 * swing[l];
+        let ankle = vec2<f32>(d.z, py) - rest_len(b0 + 2) * limb_dir(af);
+        let sol = two_bone(rest_len(b0), rest_len(b0 + 1), ankle, 1.0);
+        let qr = q_mul(qp, q_z(rho));
+        var prev: f32 = 0.0;
+        for (var i: i32 = 0; i < 3; i += 1) {
+            let b = b0 + i;
+            var ang = af;
+            if (i == 0) { ang = sol.x; }
+            if (i == 1) { ang = sol.y; }
+            let loc = clamp(-(ang - rest_angle(b)) - prev, LIM_LO[b].x, LIM_HI[b].x);
+            prev += loc;
+            rq[b] = q_mul(qr, q_x(prev));
+            if (i == 0) { rp[b] = j; } else { rp[b] = rp[b - 1] + q_rot(rq[b - 1], HEAD[b] - HEAD[b - 1]); }
+        }
+    }
+
+    // --- out -------------------------------------------------------------------------------------
+    for (var b: i32 = 0; b < NB; b += 1) { put_bone(pose, c * NB + b, rq[b], rp[b]); }
+    st3(state, s + S_POS, vec3<f32>(pos.x, body_y, pos.z));
+    state[s + S_YAW] = yaw;
+    state[s + D_SPEED] = speed;
+    state[s + D_OMEGA] = omega;
+    state[s + D_PHASE] = phase;
+    state[s + D_MOVING] = select_f(moving, 1.0, 0.0);
+
+    let t0 = c * TELE;
+    tele[t0 + T_POS] = rp[B_PELVIS].x;
+    tele[t0 + T_POS + 1] = rp[B_PELVIS].y;
+    tele[t0 + T_POS + 2] = rp[B_PELVIS].z;
+    tele[t0 + T_YAW] = yaw;
+    tele[t0 + T_SPEED] = speed;
+    tele[t0 + T_GAIT] = select_f(moving, GAIT_WALK as f32, GAIT_STAND as f32);
+    tele[t0 + T_PHASE] = fract01(phase);
+    tele[t0 + T_ACTION] = act as f32;
+    tele[t0 + T_HEIGHT] = body_y - ground_sum / 6.0;
+    tele[t0 + T_PITCH] = pitch;
+    tele[t0 + T_ROLL] = roll;
+    tele[t0 + T_FREQ] = freq * select_f(moving, 1.0, 0.0);
+    for (var l: i32 = 0; l < 6; l += 1) {
+        let k = s + D_LEG + l * LEG_REC;
+        let f0 = t0 + T_FOOT + 4 * l;
+        tele[f0] = state[k + L_PLANT];
+        let at = ld3(state, k + L_AT);
+        tele[f0 + 1] = at.x;
+        tele[f0 + 2] = at.y;
+        tele[f0 + 3] = at.z;
+    }
+}

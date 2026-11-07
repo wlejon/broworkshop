@@ -2,12 +2,15 @@
 // needed, so it judges any creature the lab loads.
 //
 //   crossings  where two separate pieces' surfaces pass through each other
-//              (lab/sculpt.js pieces: every loft and blob): the curve they
-//              cross along, its length and the angle between the two
-//              surfaces there. Two surfaces meeting at an angle draw a line
-//              however they are shaded; a real body's skin is one surface.
+//              (a body's `pieces`; a lab/flesh.js body is one piece, with
+//              detail such as hooves attached only where it never crosses):
+//              the curve they cross along, its length and the angle between
+//              the two surfaces there. Two surfaces meeting at an angle draw
+//              a line however they are shaded; a real body's skin is one
+//              surface.
 //   folds      a piece's surface passing through itself (the same test
-//              between its own triangles that share no vertex)
+//              between its own triangles that share no vertex), labelled by
+//              the masses on either side
 //   creases    edges whose dihedral angle has sharpened past its rest angle
 //              by more than CREASE degrees: the skin kinking at a joint
 //   bone pull  each vertex's distance from its main bone against rest: skin
@@ -40,7 +43,10 @@ export function seamTopology(creature) {
     // Each vertex's main bone and the label of the skin there.
     const mainBone = new Int32Array(nv);
     for (let v = 0; v < nv; v++) mainBone[v] = body.weights[v][0].index;
-    const label = (v) => `${pieces[body.piece[v]].name} over ${skel.bones[mainBone[v]].name}`;
+    // A body of masses (lab/flesh.js) names the skin by its mass, else by its bone.
+    const label = body.vertexMass
+        ? (v) => `${body.masses[body.vertexMass[v]].name} over ${skel.bones[mainBone[v]].name}`
+        : (v) => `${pieces[body.piece[v]].name} over ${skel.bones[mainBone[v]].name}`;
     // Interior edges: the two triangles each joins.
     const edgeMap = new Map();
     const ea = [], eb = [], et0 = [], et1 = [];
@@ -230,7 +236,10 @@ export function measureMesh(creature, X, P = null, o = 0) {
                         let pa = topo.pieces[topo.triPiece[t]].name, pb = topo.pieces[topo.triPiece[u]].name;
                         if (pa > pb) [pa, pb] = [pb, pa];
                         if (same) {
-                            const where = topo.label(A[0]);
+                            // The skin on both sides of the fold, when they differ.
+                            let where = topo.label(A[0]);
+                            const other = topo.label(B[0]);
+                            if (other !== where) where = where < other ? `${where} x ${other}` : `${other} x ${where}`;
                             siteAdd(sites, `fold ${where}`, 'fold', { a: pa, b: pa, where, len, angle, mid, n });
                         } else {
                             // The crossing's label is the skin of the larger piece, where the other comes through.

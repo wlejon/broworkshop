@@ -15,7 +15,7 @@
 // Three debug views (SceneGraph.setDebugView) show what lab/shots.js reads
 // off an image: `normal` (the world normal, n * 0.5 + 0.5), `depth` (the
 // distance from the eye in whole centimetres: cm / 64 in red, cm mod 64 in
-// green, each as level 4 v + 2, blue full) and `piece` (the sculpt piece a
+// green, each as level 4 v + 2, blue full) and `piece` (the body piece a
 // vertex belongs to plus one, from the optional `piece` buffer: id mod 16
 // in red and id / 16 in blue, each as level 16 v + 8, green full, so the
 // body stands apart from the grey of surfaces that do not answer). Levels

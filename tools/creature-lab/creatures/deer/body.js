@@ -1,5 +1,5 @@
-// The deer's body, sculpted in code in the rest pose: a white-tailed deer
-// of 0.95 m at the withers (skeleton.js).
+// The deer's body: a white-tailed deer of 0.95 m at the withers
+// (skeleton.js), as masses on its bones blended into one skin (lab/flesh.js).
 //
 // The proportions, from white-tailed deer, as the reasons for the shapes:
 //   withers (scapula top + skin)   0.97 m; the croup level with it
@@ -7,196 +7,116 @@
 //     floor behind the elbows)     legs under the chest are 1.35x its depth
 //   heart girth                    0.98 m: girth-weight tables give 0.94 to
 //                                  1.0 m for the 75 to 85 kg a deer this tall
-//                                  weighs (0.84 m is a 55 kg doe of 0.85 m)
+//                                  weighs
 //   chest width                    0.24 m behind the elbows, 0.28 m across
-//                                  the arms: a deep, narrow section, its
-//                                  sides full down to the elbows
+//                                  the shoulders: a deep, narrow section
 //   belly line                     rising 7 cm from the girth to the flank
-//   haunches                       0.25 m across, full down to the stifle
-//   trunk, point of shoulder to    1.06 m, 1.1x the withers height; the
-//     point of buttock             brisket 0.12 m before the point of
-//                                  shoulder, brisket to buttock 1.2 m
-//   trunk volume                   about 85 l, the whole body about 0.1 m3:
-//                                  the 75 to 85 kg of a deer this tall
+//   haunches                       0.275 m across, the hams hanging to 0.52 m
+//   trunk, brisket to buttock      1.2 m
 //   neck                           0.30 m deep where it leaves the chest,
 //                                  0.17 m at mid neck, 0.13 m at the throat;
-//                                  from the front 0.12 m across at mid neck
-//                                  and 0.11 m under the jaw, as wide as the
-//                                  cheeks, so the head does not sit on a stalk
+//                                  0.12 m across at mid neck and 0.11 m under
+//                                  the jaw, as wide as the cheeks
 //   head                           0.29 m, ears 0.15 m, tail 0.2 m
 //
-// The trunk carries the shoulders and the thighs in its own skin: a hand
-// drawn weight field gives the skin over each scapula, upper arm and thigh
-// to that bone and the rest to the spine, so the blade slides under the
-// skin and the leg swings out of the body instead of a tube ending at its
-// surface. The legs below (legs.js) start inside the trunk.
+// The trunk is a tube along the spine; the shoulder blades and the thighs
+// are masses of their own on the scapulae and femurs, laid on its sides, so
+// the skin over them goes with those bones and the blend hands it to the
+// spine. The neck, the head with its ears and eyes, the tail and the legs
+// (legs.js) blend into it. A key ring is { c, r: [side, up] }; a trunk ring
+// is written by its z, the back's and the belly's heights and half width.
 
-import { Sculpt } from "/app/lab/sculpt.js";
-import { frontLeg, hindLeg } from "./legs.js";
-import { trunkColor, neckColor, headColor, tailColor, earColor, NOSE, sstep } from "./coat.js";
+import { Flesh, SIDES } from "/app/lab/flesh.js";
+import { coat } from "./coat.js";
+import { legs, legSections } from "./legs.js";
 
-const sub = (a, b) => [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
-const dot = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
-function segDist(p, a, b) {
-    const ab = sub(b, a), t = Math.max(0, Math.min(1, dot(sub(p, a), ab) / dot(ab, ab)));
-    return Math.hypot(p[0] - a[0] - ab[0] * t, p[1] - a[1] - ab[1] * t, p[2] - a[2] - ab[2] * t);
-}
-
-// The trunk's skin weights at rest point p. Each side's scapula, humerus
-// and femur take the skin within a few centimetres of them, fading over
-// 6 to 9 cm; the midline (back, chest floor, belly) stays on the spine,
-// which hands from pelvis to lumbar to thorax along the body.
-function trunkWeights(skel) {
-    const seg = (name) => { const b = skel.bones[skel.index(name)]; return [b.head, b.tail]; };
-    const scap = seg('scapL'), hum = seg('humerusL'), fem = seg('femurL');
-    return (p) => {
-        const sx = Math.abs(p[0]), t = p[0] >= 0 ? 'L' : 'R';
-        const q = [sx, p[1], p[2]];
-        // The blade's top slides under the withers, whose skin stays on the
-        // spine; below, the blade carries the skin over it at most 80%, fading
-        // out over 13 cm, so its outline never stands as a plate.
-        let ws = 0.8 * sstep(0.02, 0.08, sx) * sstep(0.95, 0.84, p[1]) * (1 - sstep(0.03, 0.16, segDist(q, ...scap)));
-        let wh = sstep(0.03, 0.09, sx) * (1 - sstep(0.02, 0.15, segDist(q, ...hum)));
-        let wf = sstep(0.02, 0.08, sx) * (1 - sstep(0.04, 0.14, segDist(q, ...fem)));
-        // The thigh lobes (trunkShape) below the haunch go with the femur.
-        wf = Math.max(wf, sstep(0.02, 0.09, sx) * sstep(0.88, 0.56, p[1]) * sstep(-0.70, -0.58, p[2]) * sstep(-0.18, -0.30, p[2]));
-        let limb = ws + wh + wf;
-        if (limb > 1) { ws /= limb; wh /= limb; wf /= limb; limb = 1; }
-        const spine = 1 - limb;
-        const a = sstep(-0.24, -0.04, p[2]), b = sstep(0.04, 0.22, p[2]);
-        // The brisket, under the neck's base, goes partly with the neck as
-        // the neck's own skin there does (neckWeights), so the throat runs
-        // on into the chest as the neck rises or falls.
-        const nk = 0.35 * sstep(0.40, 0.56, p[2]) * sstep(0.60, 0.76, p[1]);
-        return [
-            ['pelvis', spine * (1 - a)], ['lumbar', spine * a * (1 - b)], ['thorax', spine * b * (1 - nk)], ['neck1', spine * b * nk],
-            [`scap${t}`, ws], [`humerus${t}`, wh], [`femur${t}`, wf],
-        ];
-    };
-}
-
-// A trunk section: its upper and lower halves superellipses of exponents
-// nt and nb (2 an ellipse, 3 squarer: full sides down to the elbows and the
-// stifles, where the arm and the thigh lie on the body), narrowed toward
-// the spine by kt (the withers' blade). Over the hindquarters the lower half
-// hangs in two lobes, the thighs, `lobe` of the half height below the
-// section's floor at 0.62 of the half width out, the crotch between them
-// raised by `notch`: the section is an inverted U, and the thigh is the
-// trunk's own skin down to the stifle, one surface with the haunch.
-function trunkShape(th, u, s) {
-    const [nt, nb, kt, lobe = 0, notch = 0] = s;
-    const v = Math.sin(th), c = Math.abs(Math.cos(th));
-    const n = v > 0 ? nt : nb;
-    let f = c > 1e-4 ? Math.pow(1 - Math.pow(Math.abs(v), n), 1 / n) / c : 1;
-    if (v > 0) f *= 1 - kt * Math.pow(v, 1.6);
-    let g = 1;
-    if (v < 0) {
-        const x = c * f;   // the point's x as a share of the half width
-        g = 1 + Math.abs(v) * (lobe * Math.exp(-(((x - 0.62) / 0.3) ** 2)) - notch * Math.exp(-((x / 0.3) ** 2)));
-    }
-    return [f, g];
-}
-
-// A trunk key ring from its z, the back's and the belly's heights and its half width.
-const ring = (z, top, bottom, hw, s, name) => ({ c: [0, (top + bottom) / 2, z], r: [hw, (top - bottom) / 2], s, name });
-
-function trunk(S, field) {
-    S.loft([
-        ring(-0.640, 0.845, 0.680, 0.030, [2.0, 2.0, 0.2, 0, 0]),
-        ring(-0.615, 0.890, 0.635, 0.082, [2.2, 2.2, 0.35, 0.2, 0.0]),
-        ring(-0.555, 0.930, 0.598, 0.126, [2.3, 2.6, 0.35, 0.47, 0.25], 'rump'),
-        ring(-0.450, 0.968, 0.572, 0.138, [2.2, 2.6, 0.3, 0.5, 0.3], 'hip'),
-        ring(-0.310, 0.966, 0.612, 0.126, [2.2, 2.6, 0.3, 0.18, 0.0], 'flank'),
-        ring(-0.180, 0.956, 0.600, 0.118, [2.2, 2.2, 0.3, 0, 0], 'waist'),
-        ring(-0.020, 0.956, 0.566, 0.126, [2.2, 2.2, 0.35, 0, 0], 'ribs'),
-        ring(0.160, 0.958, 0.556, 0.120, [2.2, 2.2, 0.42, 0, 0], 'girth'),
-        ring(0.300, 0.982, 0.556, 0.142, [2.1, 2.9, 0.55, 0, 0], 'shoulder'),
-        ring(0.420, 0.955, 0.572, 0.130, [2.1, 2.6, 0.5, 0, 0]),
-        ring(0.485, 0.925, 0.640, 0.100, [2.0, 2.2, 0.4, 0, 0]),
-        ring(0.525, 0.875, 0.660, 0.064, [2.0, 2.2, 0.3, 0, 0]),
-        ring(0.555, 0.815, 0.690, 0.026, [2.0, 2.0, 0.3, 0, 0]),
-    ], { weights: field, segs: 40, steps: 4, hint: [0, 1, 0], name: 'trunk',
-         shape: trunkShape, color: trunkColor });
-}
-
-// The neck's skin weights: along neck1 from its head (s, metres) the skin
-// hands from the thorax to the neck's bones over the first 0.24 m, so a
-// neck lowered to graze or thrown up in a startle bends its base over that
-// length, the crest running on from the withers and the throat from the
-// brisket, instead of turning as one piece about the joint and standing out
-// of the trunk as a wall.
-function neckWeights(S, skel) {
-    const b = skel.bones[skel.index('neck1')];
-    const d = sub(b.tail, b.head), len = Math.hypot(...d);
-    const dir = d.map((v) => v / len);
-    return (p, c) => {
-        const t = 1 - sstep(-0.02, 0.22, dot(sub(p, b.head), dir));
-        const w = S.distanceWeights(c, ['neck1', 'neck2', 'head']).map(([n, v]) => [n, v * (1 - t)]);
-        return t > 0 ? [...w, ['thorax', t]] : w;
-    };
-}
-
-// The neck: from inside the chest, deep at its base where it meets the
-// brisket and the withers, tapering to the throat under the skull.
-function neck(S, skel) {
-    S.loft([
-        { c: [0, 0.78, 0.40], r: [0.10, 0.17] },
-        { c: [0, 0.89, 0.48], r: [0.092, 0.15], name: 'neckbase' },
-        { c: [0, 1.00, 0.555], r: [0.074, 0.12] },
-        { c: [0, 1.10, 0.625], r: [0.062, 0.088], name: 'neckmid' },
-        { c: [0, 1.19, 0.67], r: [0.057, 0.074] },
-        { c: [0, 1.265, 0.705], r: [0.054, 0.066], name: 'throat' },
-        { c: [0, 1.30, 0.72], r: [0.050, 0.058] },
-    ], { weights: neckWeights(S, skel), segs: 24, hint: [0, 0, 1], name: 'neck',
-         color: neckColor, caps: [false, false] });
-}
-
-// Head: 0.29 m from poll to nose. Seen from the front a deer's face is a
-// broad wedge, not a snout on a stalk: 0.13 m across the eyes (the orbits
-// stand out from the skull), the cheeks (the masseters over the molars)
-// still 0.10 m across below and before the eyes, narrowing to a muzzle 6 cm
-// across and 6.5 cm deep. The skull is 0.13 m deep from the crown to the
-// angle of the jaw, which hangs below the eyes, under a straight top line
-// from the forehead to the nose. Eyes 3 cm across, set where the skull is
-// widest; ears (0.16 m, broad) above them.
-function head(S) {
-    S.loft([
-        { c: [0, 1.31, 0.695], r: [0.050, 0.048] },
-        { c: [0, 1.305, 0.735], r: [0.063, 0.072] },
-        { c: [0, 1.29, 0.785], r: [0.064, 0.068], name: 'eyes' },
-        { c: [0, 1.272, 0.832], r: [0.052, 0.058], name: 'cheeks' },
-        { c: [0, 1.246, 0.890], r: [0.038, 0.046] },
-        { c: [0, 1.218, 0.946], r: [0.031, 0.036] },
-        { c: [0, 1.201, 0.984], r: [0.023, 0.026] },
-    ], { bones: ['head'], segs: 20, hint: [0, 1, 0], name: 'head', color: headColor });
-    for (const s of [1, -1]) {
-        S.blob([0.058 * s, 1.315, 0.79], [0.012, 0.015, 0.016], { bones: ['head'], color: NOSE, segs: 10, rows: 6 });
-        S.loft([
-            { c: [0.045 * s, 1.325, 0.75], r: [0.022, 0.009] },
-            { c: [0.08 * s, 1.355, 0.738], r: [0.040, 0.012] },
-            { c: [0.12 * s, 1.39, 0.725], r: [0.040, 0.010] },
-            { c: [0.158 * s, 1.425, 0.714], r: [0.010, 0.004] },
-        ], { bones: [s > 0 ? 'earL' : 'earR'], segs: 12, hint: [0, 0, 1], color: earColor });
-    }
-}
-
-// Tail: brown above, white beneath, broad and flat.
-function tail(S) {
-    S.loft([
-        { c: [0, 0.865, -0.585], r: [0.035, 0.025] },
-        { c: [0, 0.835, -0.645], r: [0.05, 0.028] },
-        { c: [0, 0.79, -0.698], r: [0.05, 0.026] },
-        { c: [0, 0.74, -0.745], r: [0.03, 0.02] },
-    ], { bones: [['pelvis', 0.6], 'tail1', 'tail2'], segs: 14, hint: [0, 1, 0], color: tailColor });
-}
+const ring = (z, top, bottom, hw) => ({ c: [0, (top + bottom) / 2, z], r: [hw, (top - bottom) / 2] });
 
 export function body(skel) {
-    const S = new Sculpt(skel);
-    const field = trunkWeights(skel);
-    trunk(S, field);
-    neck(S, skel);
-    head(S);
-    tail(S);
-    for (const s of [1, -1]) { frontLeg(S, s, field); hindLeg(S, s, field); }
-    return S.build();
+    const B = new Flesh(skel, { color: coat, triangles: 14000 });
+    B.limb('trunk', ['pelvis', 'lumbar', 'thorax'], [
+        ring(-0.625, 0.875, 0.690, 0.060),
+        ring(-0.595, 0.910, 0.645, 0.095),
+        ring(-0.540, 0.935, 0.610, 0.110),
+        ring(-0.450, 0.965, 0.600, 0.118),
+        ring(-0.310, 0.964, 0.612, 0.118),
+        ring(-0.180, 0.956, 0.600, 0.116),
+        ring(-0.020, 0.956, 0.566, 0.124),
+        ring(0.160, 0.958, 0.556, 0.118),
+        ring(0.300, 0.972, 0.560, 0.118),
+        ring(0.420, 0.950, 0.580, 0.110),
+        ring(0.490, 0.910, 0.640, 0.085),
+        ring(0.540, 0.850, 0.680, 0.050),
+    ], { blend: 0.03 });
+    for (const [s, t] of SIDES) {
+        // The shoulder blade's muscle, along the scapula, flat against the ribs.
+        B.blob(`shoulder${t}`, `scap${t}`, [0.088 * s, 0.84, 0.36], [0.04, 0.085, 0.15], { dir: [0.035 * s, -0.25, 0.14], up: [0, 0, 1], blend: 0.03 });
+        // The thigh: haunch and ham, from the croup down to the stifle and
+        // back to the buttock, hanging along the femur.
+        B.blob(`thigh${t}`, `femur${t}`, [0.072 * s, 0.71, -0.47], [0.068, 0.155, 0.19], { dir: [0, -1, 0.25], up: [0, 0, 1], blend: 0.035 });
+    }
+    B.limb('neck', ['neck1', 'neck2', 'head'], [
+        { c: [0, 0.78, 0.40], r: [0.10, 0.17], bone: 'thorax' },
+        { c: [0, 0.89, 0.48], r: [0.092, 0.15], bone: [['thorax', 0.5], ['neck1', 0.5]] },
+        { c: [0, 1.00, 0.555], r: [0.074, 0.12] },
+        { c: [0, 1.10, 0.625], r: [0.062, 0.088] },
+        { c: [0, 1.19, 0.67], r: [0.057, 0.074] },
+        { c: [0, 1.265, 0.705], r: [0.054, 0.066] },
+        { c: [0, 1.30, 0.72], r: [0.050, 0.058], bone: 'head' },
+    ], { up: [0, 0, 1], blend: 0.04 });
+    head(B);
+    B.limb('tail', ['tail1', 'tail2'], [
+        { c: [0, 0.865, -0.585], r: [0.035, 0.025], bone: [['pelvis', 0.5], ['tail1', 0.5]] },
+        { c: [0, 0.835, -0.645], r: [0.05, 0.026] },
+        { c: [0, 0.79, -0.698], r: [0.048, 0.022] },
+        { c: [0, 0.74, -0.745], r: [0.028, 0.016] },
+    ], { blend: 0.012 });
+    legs(B);
+    sections(B);
+    return B.build();
+}
+
+// Head: 0.29 m from poll to nose, a broad wedge from the front: 0.13 m
+// across the eyes, the cheeks 0.10 m below and before them, narrowing to a
+// muzzle 5 cm across and 6.5 cm deep under a straight top line. Eyes 3 cm
+// across where the skull is widest; ears (0.16 m, broad) above them.
+function head(B) {
+    B.limb('head', ['head'], [
+        { c: [0, 1.31, 0.695], r: [0.050, 0.048] },
+        { c: [0, 1.305, 0.735], r: [0.060, 0.070] },
+        { c: [0, 1.29, 0.785], r: [0.060, 0.066] },
+        { c: [0, 1.272, 0.832], r: [0.050, 0.057] },
+        { c: [0, 1.246, 0.890], r: [0.037, 0.045] },
+        { c: [0, 1.218, 0.946], r: [0.030, 0.035] },
+        { c: [0, 1.203, 0.980], r: [0.022, 0.025] },
+    ], { blend: 0.02 });
+    for (const [s, t] of SIDES) {
+        B.blob(`eye${t}`, 'head', [0.060 * s, 1.315, 0.79], [0.012, 0.015, 0.016], { blend: 0.004 });
+        B.limb(`ear${t}`, [`ear${t}`], [
+            { c: [0.045 * s, 1.33, 0.75], r: [0.020, 0.012] },
+            { c: [0.08 * s, 1.358, 0.738], r: [0.036, 0.011] },
+            { c: [0.12 * s, 1.39, 0.725], r: [0.036, 0.009] },
+            { c: [0.152 * s, 1.42, 0.715], r: [0.012, 0.007] },
+        ], { up: [0, 0, 1], blend: 0.008 });
+    }
+}
+
+// Where form measures the body: square across the trunk, the neck and the
+// head, and the legs' sections (legs.js).
+function sections(B) {
+    const across = (name, bone, at) => B.section(name, { at, normal: [0, 0, 1], bone, radius: 0.35 });
+    across('rump', 'pelvis', [0, 0.77, -0.555]);
+    across('hip', 'pelvis', [0, 0.77, -0.45]);
+    across('flank', 'lumbar', [0, 0.79, -0.31]);
+    across('waist', 'lumbar', [0, 0.78, -0.18]);
+    across('ribs', 'thorax', [0, 0.76, -0.02]);
+    across('girth', 'thorax', [0, 0.757, 0.16]);
+    across('shoulder', 'thorax', [0, 0.77, 0.30]);
+    const neck = (name, bone, at, dir) => B.section(name, { at, normal: dir, bone, radius: 0.25 });
+    neck('neckbase', 'neck1', [0, 0.89, 0.48], [0, 0.73, 0.69]);
+    neck('neckmid', 'neck2', [0, 1.10, 0.625], [0, 0.88, 0.47]);
+    neck('throat', 'neck2', [0, 1.265, 0.705], [0, 0.9, 0.43]);
+    across('eyes', 'head', [0, 1.29, 0.785]);
+    across('cheeks', 'head', [0, 1.272, 0.832]);
+    legSections(B);
 }

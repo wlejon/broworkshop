@@ -16,6 +16,7 @@ import { compareLookSets } from "/lib/kit/look.js";
 import { scanScenario } from "./finder.js";
 import { finderReport } from "./finder-out.js";
 import { naturalReport } from "./natural-out.js";
+import { herdCost } from "./herd.js";
 
 export const HELP = `creature-lab <command> <creature> [scenario ...] [options]
 
@@ -27,8 +28,8 @@ export const HELP = `creature-lab <command> <creature> [scenario ...] [options]
   metrics     <creature> [scenario ...]    JSON report per scenario, flags printed
   ab          <A> <B> [scenario ...]       the sheets of two versions interleaved / overlaid,
                                            metrics side by side (--diff: pixel diffs via look.js)
-  form        <creature> [scenario ...]    the body measured: rest girths and extents against the
-                                           creature's reference, ring areas and volumes through a cycle
+  form        <creature> [scenario ...]    the body measured: rest sections against the creature's
+                                           reference, section areas and mass volumes through a cycle
   finder      <creature> [scenario ...]    hard lines: pieces crossing, folds, creases, outline notches,
                                            scanned on the mesh and from the live view's cameras; ranks
                                            every scanned scenario and draws the worst as lit close-ups
@@ -36,7 +37,8 @@ export const HELP = `creature-lab <command> <creature> [scenario ...] [options]
   natural     <creature> [scenario ...]    motion against principles, no reference: overlap and
                                            follow-through, secondary motion, the mass's physics,
                                            smoothness, variety, head stabilisation, arcs
-  snapshot    <creature> <label>          copy creatures/<creature> to <creature>@<label> for A/B
+  herd        <creature> [scenario]        a herd's GPU cost a frame and triangles (--count 50, --frames 240)
+  snapshot    <creature> <label>         copy creatures/<creature> to <creature>@<label> for A/B
   scenarios   <creature>                   list its scenarios
 
 <creature>: a folder of creatures/ (deer), a snapshot (deer@before), a variant (deer:slip).
@@ -156,7 +158,14 @@ export async function runCommand(argv) {
     const written = [];
     const t0 = Date.now();
 
-    if (cmd === 'finder') {
+    if (cmd === 'herd') {
+        const r = herdCost(creature, { count: opt.count ? +opt.count : 50, scenario: rest[0] || 'trot', frames: opt.frames ? +opt.frames : 240 });
+        console.log(`${r.count} x ${r.creature} ${r.scenario}: ${r.herdTriangles} triangles (${r.triangles} each), GPU ms a frame mean ${r.gpu.mean}, median ${r.gpu.median}, p90 ${r.gpu.p90}; rig ${JSON.stringify(r.kernelsBy)}`);
+        console.log(`  passes ${JSON.stringify(r.passes)}`);
+        const path = `${dir}/herd-${r.scenario}-${r.count}.json`;
+        writeFile(path, json(r));
+        written.push(path);
+    } else if (cmd === 'finder') {
         const fdir = `${dir}/finder`;
         const fs = require('fs');
         const todo = opt.rank && !rest.length ? [] : scenarios;
@@ -190,9 +199,7 @@ export async function runCommand(argv) {
             runs[sc] = m;
             const span = (o) => Object.entries(o).map(([k, v]) => `${k} ${(100 * v.min).toFixed(1)}..${(100 * v.max).toFixed(1)}`).join(', ');
             console.log(`${sc}: area % ${span(m.area)}`);
-            console.log(`${sc}: volume % ${span(m.volume)}`);
-            console.log(`${sc}: protrude ${Object.entries(m.protrude).map(([k, v]) => `${k} ${(100 * v.out).toFixed(1)} cm`).join(', ')}`);
-            console.log(`${sc}: fold ${Object.entries(m.fold).map(([k, v]) => `${k} ${v.min.toFixed(2)}..${v.max.toFixed(2)}`).join(', ')}`);
+            console.log(`${sc}: volume % ${span(m.volume)}, body ${(100 * m.body.min).toFixed(1)}..${(100 * m.body.max).toFixed(1)}`);
             for (const f of m.flags) console.log(`  - ${f}`);
         }
         const path = `${dir}/form.json`;

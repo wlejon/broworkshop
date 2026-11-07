@@ -1,7 +1,8 @@
 # Creature Lab
 
-A lab for iterating on creature motion. A creature is a folder of code: a body
-sculpted in code, a skeleton, and a rig written for that species in brokernel.
+A lab for iterating on creature motion. A creature is a folder of code: a
+skeleton, a body of masses on its bones blended into one skin, and a rig
+written for that species in brokernel.
 The lab drives the rig with scripted intent and measures what it does. It
 renders sheets and JSON metrics headless from the command line, and plays runs
 back in a window.
@@ -36,9 +37,9 @@ A creature folder (`creatures/<name>/`) has these files, and
 
 | File | What |
 |------|------|
-| `creature.js` | `name`, `skeleton`, `body`, `rig: { file, kernel }`, `scale`, `cycles` (which scenario is each steady gait, with reference duty factors and footfall offsets), `form` (the body's reference measures, and which parts stay inside which), `variants` (named knob sets; the deer's broken ones are `slip`, `sink`, `overbend`, `stumble`), `scenarios` |
+| `creature.js` | `name`, `skeleton`, `body`, `rig: { file, kernel }`, `scale`, `cycles` (which scenario is each steady gait, with reference duty factors and footfall offsets), `form` (the body's reference measures), `variants` (named knob sets; the deer's broken ones are `slip`, `sink`, `overbend`, `stumble`), `scenarios` |
 | `skeleton.js` | bones (parent, head, tail, per-axis joint limits in degrees), feet, tracked points, chart joints |
-| `body.js` | the soft-skinned body, sculpted with `lab/sculpt.js` (the deer splits it into `body.js`, `legs.js` and `coat.js`) |
+| `body.js` | the body: masses on bones built with `lab/flesh.js` (the deer splits it into `body.js`, `legs.js` and `coat.js`) |
 | `rig.bk` | the species' rig. `@knob` constants can be overridden from the command line |
 | `scenarios.js` | the species' own scenarios, added to the lab's |
 
@@ -47,7 +48,46 @@ Rigs are written per species. Shared code is small helpers only:
 
 The reference creature is `deer`: a deer-sized quadruped with spine, neck,
 head, ears and tail. Its gaits are walk, trot and gallop, and its actions are
-idle, graze, startle and lie down.
+idle, graze, startle and lie down. `hexa` is an invented one with no
+reference behind it: six legs on a tripod walk, a long tail and a heavy head.
+
+## Bodies: masses blended into one skin
+
+`lab/flesh.js` builds a body from masses on the skeleton's rest pose:
+
+```js
+const B = new Flesh(skel, { color: coat, triangles: 14000 });
+B.blob('hump', 'thorax', [0, 0.80, 0.55], [0.17, 0.12, 0.26], { blend: 0.06 });
+B.limb('neck', ['thorax', 'neck'], [
+    { c: [0, 0.66, 0.78], r: [0.19, 0.20] },
+    { c: [0, 0.68, 1.06], r: [0.15, 0.17] },
+], { blend: 0.05 });
+B.section('girth', { at: [0, 0.6, 0.3], normal: [0, 0, 1], bone: 'thorax', radius: 0.4 });
+return B.build();
+```
+
+- `blob(name, bone, c, r, {dir, up, blend})`: an ellipsoid with radii
+  `[side, up, along]`, on one bone or `[[bone, w], ...]`.
+- `limb(name, bones, points, {up, blend, steps, joint})`: key points
+  `{c, r, bone?}` (r one radius or `[side, up]`) splined into a swept
+  ellipse, its section frame leaning to `up`. A point's bones are the named
+  ones nearest it unless it names its own.
+- `section(name, {at, normal, bone, radius})`: a named cut that form
+  measures, carried by one bone, or with `bone: [a, b]` bisecting two (a
+  joint).
+- `blend` is how far a mass melts into the others (m), so a neck is one
+  skin with the chest at a softness the author picks.
+
+`build()` evaluates the field on the GPU (`lab/flesh.bk`): each mass adds
+`exp(-d / blend)` and the skin is where the sum is 1. It meshes the field once
+at rest with surface nets, decimates to the triangle budget, orders the
+vertices for the vertex cache and projects them onto the surface. The skin
+weights come from the same field: each mass weighs in by
+`exp(-d / (blend * soft))`, and within a mass by its key points' bones
+along it; they are smoothed over the mesh and the top four kept. The
+colour function is called per vertex with `share(mass)`, how much of each
+mass is there. The result is one closed piece; the lab's dual-quaternion
+skin hook deforms it.
 
 ## Commands
 
@@ -70,8 +110,13 @@ $B tools/creature-lab tools/creature-lab/cli.js -- finder deer all
 $B tools/creature-lab tools/creature-lab/cli.js -- finder deer gallop --top 0
 $B tools/creature-lab tools/creature-lab/cli.js -- finder deer --rank --top 12
 $B tools/creature-lab tools/creature-lab/cli.js -- natural deer
+$B tools/creature-lab tools/creature-lab/cli.js -- herd deer trot --count 50
 $B tools/creature-lab tools/creature-lab/cli.js -- scenarios deer
 ```
+
+`herd` runs `--count` creatures (50) of one batch through a scenario under the
+live view's light and shadows, and writes the GPU frame time (mean, median,
+p90, max), its passes and the triangle count to `herd-<scenario>-<count>.json`.
 
 `finder` scans each named scenario into `finder/scan-<scenario>.json`
 (about 10 to 20 s a scenario), then ranks every scan in that folder, so
@@ -151,27 +196,24 @@ Every output is deterministic. A rerun writes the same bytes.
   ground. It is not taken from the rig's claim.
 - **Form JSON** (`lab/form.js`, the `form` command, `form.json`): the body
   measured, its skin placed on the CPU exactly as `lab/skin.bk` places it.
-  - at rest: each named ring's girth, width, depth, top and bottom, and each
-    named part's extent and volume, checked against `form.reference`
-  - through a cycle of each scenario (walk and trot by default): each named
-    ring's area and girth and each closed part's volume as a share of rest;
-    folds (the skin along each part bunching, folding through itself or
-    stretching between rings); and how far the parts named in `form.inside`
-    (a leg's top above a height) show outside the part that should cover
-    them
+  - at rest: each named section's area, girth, width, depth, top and bottom,
+    each mass's volume and the body's, checked against `form.reference`
+  - through a cycle of each scenario (walk and trot by default): each
+    section's area and girth, each mass's volume and the body's as a share of
+    rest. A mass's volume is the region its own skin encloses (the vertices
+    it is the main mass of), capped across its borders, so the masses' volumes
+    sum to the body's.
   - `flags`: one line per finding
-
-  Parts and rings are named in the body: a loft's `name`, a key ring's
-  `name`.
 - **Hard lines** (the `finder` command, `finder/`): where the body shows a
   line a single skin would not, measured without a reference, so it judges
   any creature.
-  - Every loft and blob of the sculpt is a piece (`build()` returns
-    `pieces` and each vertex's `piece`; a piece is named by its `name`, else
-    by its kind and last bone). On the skinned mesh of every 4th step
-    (`lab/seams.js`): **crossings**, the curve along which two pieces pass
-    through each other, its length and the angle between the surfaces;
-    **folds**, a piece passing through itself; **creases**, edges sharper
+  - A body is one piece or several (`build()` returns `pieces` and each
+    vertex's `piece`); a flesh body is one, and its skin is labelled by the
+    mass and bone under it (`neck over thorax`). On the skinned mesh of every
+    4th step (`lab/seams.js`): **crossings**, the curve along which two
+    pieces pass through each other, its length and the angle between the
+    surfaces; **folds**, the skin passing through itself, keyed by the
+    masses on both sides; **creases**, edges sharper
     than at rest by more than 25 degrees; and **bone pull**, the skin's
     distance from its main bone against rest. A site's score is its length
     in cm times its angle over 90 degrees, so every kind ranks against the
@@ -184,8 +226,10 @@ Every output is deterministic. A rerun writes the same bytes.
     'depth' | 'normal')`, `lab/skin.bk`). Seams are two pieces meeting at
     one depth at an angle of 8 degrees or more; creases are the normal
     jumping between neighbouring pixels by more than it turns either side;
-    kinks are inward notches of the outline. Each is measured in cm of
-    line on the body and named by the pieces and bone under it.
+    kinks are inward notches of the outline, skipped where the outline's
+    two sides lie more than 8 cm apart in depth (one part in front of
+    another, such as legs crossing in view). Each is measured in cm of line
+    on the body and named by the pieces or masses and bone under it.
   - `finder.json`: the worst moments (one per site, the view that shows it
     most), every site's worst score per scenario, and the shape without a
     reference: the pieces, the crossings and folds already there at rest,
@@ -292,21 +336,25 @@ Headless runs drive the view through `globalThis.creatureLab`.
 - `tests/test_measures.js`:
   - two crossing tubes cross along curves of the expected length and angle;
     parallel tubes draw no line; a closed tube's volume is its prism's
-  - the rest deer's crossings include the neck and every leg into the trunk;
-    the debug views decode, and the image finds the neck-into-trunk line
+  - the rest deer is one closed skin with no crossing or fold; the debug
+    views decode, and the image finds no seam
+  - a flesh blob meshes to its ellipsoid's volume and sections; two limbs on
+    two bones blend into one skin whose weights hand from one bone to the
+    other, and the masses' volumes sum to the body's
   - on a deer walk with a defect put in: a corner in a joint's speed is one
     kink, noise on a joint jitters, a body lifted along a line gains energy
     and is off free fall while one lifted on a free-fall arc is not
 
 ## Adding a creature
 
-1. Copy `creatures/deer/` to `creatures/<name>/` and add
+1. Copy `creatures/hexa/` (or `deer/`) to `creatures/<name>/` and add
    `creatures/<name>.js`.
-2. Write its skeleton with limits, then its body, then its rig against
-   `creature::contract`.
+2. Write its skeleton with limits, then its body as masses on those bones
+   (`hexa/body.js` is one page), then its rig against `creature::contract`.
 3. Name its steady gaits in `cycles` (with references if known) and its
    broken variants.
 4. Run `sheets <name> all` and `metrics <name> all`, and read the sheets.
 5. Run `finder <name> all` and `natural <name>`: both need only the
    skeleton's feet and tracks (`head` and `withers` for the head measure)
-   and the sculpt's pieces.
+   and the body's masses. Run `form <name>` for each mass's volume in
+   motion.
