@@ -13,6 +13,7 @@
 // the grey the deck scatters down. Among drawn trees, their shadows
 // (tree_crown.bk).
 module planet::world_ground;
+import scene;
 import mesh;
 import lighting;
 import custom;
@@ -443,9 +444,14 @@ pub fn ground_fragment(g: GroundFrag, s_in: mesh::Surface) -> mesh::Surface {
         };
         s.emissive += glint * (lighting::direct_light(ls) + lighting::ambient(ls) * clamp(s.sky_visibility, 0.0, 1.0));
     }
-    // (Its debug views, the water, forest, texels, octaves and ridges, are
-    // not here: the scene expands SCENE_DEBUG in a hook's own file alone,
-    // bro's scene/debug_views.cpp, and this is a module the hook imports.
-    // The water's share is a probe.)
+    // Its debug views: the water's share, the forest's, the texels' colour,
+    // the octaves' luminance and the ridges' slope (with the octaves added).
+    if (SCENE_DEBUG(water)) { s = mesh::debug(s, vec3<f32>(water)); }
+    if (SCENE_DEBUG(forest)) { s = mesh::debug(s, vec3<f32>(forest, forest, water)); }
+    if (SCENE_DEBUG(texels)) { s = mesh::debug(s, col.xyz); }
+    if (SCENE_DEBUG(octaves)) { s = mesh::debug(s, vec3<f32>(0.5 * exp(lum - 0.5 * lum_var))); }
+    if (SCENE_DEBUG(ridges)) {
+        s = mesh::debug(s, vec3<f32>(min(length(ridges), 1.0), max((o_end - a0.w) as f32, 0.0) * 0.2, 0.0));
+    }
     return s;
 }

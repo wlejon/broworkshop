@@ -17,9 +17,9 @@
 // hookup (core/views.js). The world owns its radius, ground, colour, air
 // and systems.
 import { bindControl, logMap } from "/lib/kit/params.js";
-import { createAnchors } from "/app/core/anchors.js";
+import { createAnchors, setAnchorWords } from "/app/core/anchors.js";
 import { constants, readApp, sourcePath, moduleName } from "/app/core/shaders.js";
-import { sunDirection } from "/app/core/hour.js";
+import { sunDirection, setNoon } from "/app/core/hour.js";
 import { checkWorld, WORLD_PARTS } from "/app/core/world.js";
 
 const TILE = 32;            // cells along a tile's drawn edge
@@ -62,6 +62,10 @@ export function startPlanet(world) {
     const kAnchors = core.kernel('k_anchors');
     const kSplitDetail = core.kernel('k_split_detail');
     const kTexelSpread = core.kernel('k_texel_spread');
+    // An anchor's size is the world's lattices' (core/anchor.bk).
+    setAnchorWords(core.consts.ANCHOR_WORDS);
+    // The sun's path is the world's season's.
+    setNoon(world.noon);
 
     const canvas = document.querySelector('#stage');
     const scene = canvas.getContext('scene');
@@ -92,9 +96,10 @@ export function startPlanet(world) {
         sunHour = hour;
         sun.direction = sunDirection(hour);
     }
-    // A touch under the meter: the land's colour reads richer than metered
-    // grey, as a photographer exposes a landscape.
-    scene.setExposure({ mode: 'auto', meter: 'incident', compensation: -0.6 });
+    // Under the meter by the world's compensation (stops; -0.6 unless it
+    // gives one): the land's colour reads richer than metered grey, as a
+    // photographer exposes a landscape.
+    scene.setExposure({ mode: 'auto', meter: 'incident', compensation: world.exposure ?? -0.6 });
     // The world's air about its centre, which moves with the camera (the
     // scene is camera-relative): frame() sets it.
     const atmosphere = { planetRadius: RADIUS, ...world.atmosphere, planetCenter: [0, -RADIUS, 0] };
@@ -204,8 +209,14 @@ export function startPlanet(world) {
 
     const start = world.start ?? { lat: 0.45, lon: 0.3, alt: 2.8 * RADIUS, heading: 0, pitch: -90 };
     const cam = { lat: start.lat, lon: start.lon, alt: start.alt, heading: start.heading, pitch: start.pitch };
-    // The farthest the camera goes: 3e7 m at Earth's radius.
-    const MAX_ALT = 3e7 * RADIUS / 6371000;
+    // The farthest the camera goes: the world's, else 4.7 radii.
+    const MAX_ALT = world.maxAltitude ?? 4.7 * RADIUS;
+    // The lowest ground's sphere, and how far past its horizon the camera's
+    // far plane reaches: the world's horizonReach, else as far as its
+    // highest ground can stand up from behind it. (The far plane also spans
+    // the air's froxels, so it sets their depth resolution.)
+    const FLOOR = RADIUS + world.minHeight;
+    const REACH = world.horizonReach ?? Math.sqrt((RADIUS + world.maxHeight) ** 2 - FLOOR * FLOOR);
     const FOV = 55;
     const v3 = {
         add: (a, b) => [a[0] + b[0], a[1] + b[1], a[2] + b[2]],
@@ -246,7 +257,9 @@ export function startPlanet(world) {
         const height = (canvas.clientHeight || 1080) * devicePixelRatio;
         const aspect = (canvas.clientWidth || 1920) * devicePixelRatio / height;
         const near = Math.min(1e5, Math.max(0.2, cam.alt * 0.05));
-        const horizon = Math.sqrt(Math.max(0, (f.surface + cam.alt) ** 2 - RADIUS * RADIUS)) + 2e5;
+        // The horizon over the lowest ground (radius + minHeight), and past
+        // it what the highest can stand up from behind it.
+        const horizon = Math.sqrt(Math.max(0, (f.surface + cam.alt) ** 2 - FLOOR * FLOOR)) + REACH;
         scene.setCamera({ eye: [0, 0, 0], target: f.fwd, up: f.camUp, fov: FOV, near, far: horizon + 1e5, origin: f.pos });
 
         // The cache culls to the frustum and the horizon: what it draws is seen.

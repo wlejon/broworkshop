@@ -14,6 +14,13 @@
 //   sunIntensity  the sun's lux above the air
 //   atmosphere    scene.setAtmosphere's settings, less the planet's radius
 //                 and centre (the core's)
+//   noon          optional: the direction the sun's light travels at hour
+//                 12, its tilt off the equator the season (core/hour.js)
+//   exposure      optional: the auto exposure's compensation, stops (-0.6)
+//   horizonReach  optional: metres the far plane reaches past the horizon
+//                 of the lowest ground (else as far as the highest ground
+//                 can stand up from behind it)
+//   maxAltitude   optional: the camera's highest, metres (4.7 radii)
 //   start         optional { lat, lon (radians), alt (m), heading, pitch
 //                 (degrees) }: where the camera starts
 //   views, quickViews
@@ -23,8 +30,9 @@
 //                 name, which the core's kernels import (core/tiles.bk reads
 //                 planet::world's octaves_for, range_margin, detail_ratio and
 //                 surface_height; core/anchor.bk reads planet::world_lattice's
-//                 lattice_points and lattice_points_near, where its noise
-//                 lattices lie at a direction). The core's own modules
+//                 LATTICES, lattice_skewed (simplex or grid), and
+//                 lattice_point and lattice_point_near, where each of its
+//                 lattices lies at a direction). The core's own modules
 //                 (planet::noise, planet::anchor, planet::layers) are the
 //                 world's to import.
 //   create(core)  makes the world's half of the planet. `core` is

@@ -2,7 +2,13 @@
 // lie at a point near the work, found on the CPU in f64 (core/tiles.bk
 // k_anchors), so a kernel places its points as f32 offsets from it.
 
-export const ANCHOR_WORDS = 64;   // anchor.bk ANCHOR_VEC4S * 4
+// An anchor's int32 words: anchor.bk ANCHOR_VEC4S * 4, which the world's
+// lattices size (core/tiles.bk ANCHOR_WORDS; planet.js sets it before the
+// world is made).
+export let ANCHOR_WORDS = 0;
+export function setAnchorWords(n) {
+    ANCHOR_WORDS = n;
+}
 
 // `count` anchors in a KernelBuffer (`buffer`, read by anchor.bk
 // read_anchor): set(i, base, dir) places anchor i at `base` (base
@@ -10,8 +16,10 @@ export const ANCHOR_WORDS = 64;   // anchor.bk ANCHOR_VEC4S * 4
 // finds the first n and writes them to the buffer, landing before later
 // dispatches.
 export function createAnchors(kAnchors, count, radius) {
-    const src = new Float64Array(count * 6), words = new Int32Array(count * ANCHOR_WORDS);
-    const buffer = bro.kernel.createBuffer(count * ANCHOR_WORDS * 4);
+    if (!ANCHOR_WORDS) throw new Error('anchors.js: ANCHOR_WORDS is not set (core/planet.js sets it)');
+    const words_ = ANCHOR_WORDS;
+    const src = new Float64Array(count * 6), words = new Int32Array(count * words_);
+    const buffer = bro.kernel.createBuffer(count * words_ * 4);
     return {
         buffer,
         set(i, base, dir) {
@@ -22,7 +30,7 @@ export function createAnchors(kAnchors, count, radius) {
         },
         write(n) {
             kAnchors.run([n], src, words, radius);
-            buffer.write(n === count ? words : words.subarray(0, n * ANCHOR_WORDS));
+            buffer.write(n === count ? words : words.subarray(0, n * words_));
         },
     };
 }

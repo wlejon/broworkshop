@@ -19,7 +19,7 @@ from planet::relief import BASE_WAVELENGTH, RIDGE_MEAN, RIDGE_FIRST, RIDGE_LAST,
     RIDGE_PAST, FINE_FIRST, WARP_OCTAVE, WARP_DISPLACE, ridge_amp, ridge_cell_mean, span_at, mean_factor, kept_share;
 from planet::noise import NOISE_VAR, NOISE_GRAD_VAR, NOISE_BOX, normal_cdf, SimplexAt, simplex_grad, simplex_f32,
     simplex_grad_f32, GRAD_TO_VALUE;
-from planet::world_lattice import RANGE, VARY_FIRST, STRATA_FOLD;
+from planet::world_lattice import P;
 from planet::anchor import Anchor, Lattice, PerlinAt, twice, doubled, simplex_from, perlin_from, moved, anchor_near;
 
 // Var((1 - |noise|)^2), and the variance of its gradient along one axis per
@@ -180,8 +180,8 @@ const CONTINENT_OCTAVES: i32 = 7;
 // Each octave's displacement is one noise's gradient (relief.bk
 // GRAD_TO_VALUE), a field per axis at the cost of one.
 fn continent_offset(a: Anchor, off: vec3<f32>, seed: i32) -> vec3<f32> {
-    let broad = simplex_grad(simplex_from(doubled(a.p, 1), off * 2.0), seed + 420).yzw;
-    let fine = simplex_grad(simplex_from(doubled(a.p, 3), off * 8.0), seed + 423).yzw;
+    let broad = simplex_grad(simplex_from(doubled(a.l[P], 1), off * 2.0), seed + 420).yzw;
+    let fine = simplex_grad(simplex_from(doubled(a.l[P], 3), off * 8.0), seed + 423).yzw;
     return off + (broad * 0.1 + fine * 0.025) * GRAD_TO_VALUE;
 }
 // Under them, the continents' own scale: one octave twice the base
@@ -198,7 +198,7 @@ fn masks(a: Anchor, off: vec3<f32>, radius: f32, octaves: f32, seed: i32) -> vec
     let warped = continent_offset(a, off, seed);
     let p = a.dir * (radius / BASE_WAVELENGTH) + warped;
     let big = simplex_f32(p * CONTINENT_SCALE, seed + 430) * CONTINENT_WEIGHT;
-    let continents = big + fbm_to(a.p, warped, octaves, 0, CONTINENT_OCTAVES, seed) + SEA_SHARE_BIAS;
+    let continents = big + fbm_to(a.l[P], warped, octaves, 0, CONTINENT_OCTAVES, seed) + SEA_SHARE_BIAS;
     var unresolved: f32 = 0.0;
     var amp: f32 = 1.0;
     for (var o: i32 = 0; o < CONTINENT_OCTAVES; o += 1) {
@@ -229,7 +229,7 @@ fn masks(a: Anchor, off: vec3<f32>, radius: f32, octaves: f32, seed: i32) -> vec
 // The relief's point at `off` from the anchor's p: off moved by the warp (p
 // units), from which the relief's octaves run on the p lattice.
 pub fn relief_offset(a: Anchor, off: vec3<f32>, seed: i32) -> vec3<f32> {
-    let at = simplex_from(doubled(a.p, WARP_OCTAVE), off * exp2(WARP_OCTAVE as f32));
+    let at = simplex_from(doubled(a.l[P], WARP_OCTAVE), off * exp2(WARP_OCTAVE as f32));
     let warp = vec3<f32>(simplex_grad(at, seed + 400).x, simplex_grad(at, seed + 401).x, simplex_grad(at, seed + 402).x);
     return off + warp * WARP_DISPLACE;
 }
@@ -244,7 +244,7 @@ pub fn relief_offset(a: Anchor, off: vec3<f32>, seed: i32) -> vec3<f32> {
 fn relief(a: Anchor, off: vec3<f32>, octaves: f32, seed: i32) -> vec3<f32> {
     let n = min(ceil(octaves + RIDGE_PAST) as i32, RIDGE_LAST);
     if (n <= RIDGE_FIRST) { return vec3<f32>(0.0); }
-    var lat = doubled(a.p, RIDGE_FIRST);
+    var lat = doubled(a.l[P], RIDGE_FIRST);
     var d = relief_offset(a, off, seed) * exp2(RIDGE_FIRST as f32);
     var broad: f32 = 0.0;
     var fine: f32 = 0.0;
@@ -293,8 +293,8 @@ fn terrain_parts_over(a: Anchor, e: vec3<f32>, m: vec4<f32>, radius: f32, octave
     let rs = relief_scale(a, off, m, radius, seed);
     let r = relief(a, off, octaves, seed);
     let amp = DETAIL_PLAINS + DETAIL_RANGES * uplift;
-    let broad = fbm_to(a.p, off, octaves, 4, FINE_FIRST, seed + 200);
-    let fine = fbm_to(a.p, off, octaves, FINE_FIRST, 64, seed + 200) * exp2((4 - FINE_FIRST) as f32);
+    let broad = fbm_to(a.l[P], off, octaves, 4, FINE_FIRST, seed + 200);
+    let fine = fbm_to(a.l[P], off, octaves, FINE_FIRST, 64, seed + 200) * exp2((4 - FINE_FIRST) as f32);
     return vec4<f32>(land * 1100.0 + uplift * UPLIFT + rs * r.x + broad * amp, rs * r.y + fine * amp, rs, rs * r.z);
 }
 // The ridged relief the land carries (per unit at full uplift): all in the

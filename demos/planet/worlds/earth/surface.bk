@@ -8,7 +8,7 @@ from planet::dendry import Drain, drained;
 from planet::climate import Climate, cover_at, temp_at, snow_at;
 from planet::relief import BASE_WAVELENGTH;
 from planet::noise import normal_cdf;
-from planet::world_lattice import VARY_FIRST, STRATA_FOLD;
+from planet::world_lattice import VARY_FIRST, STRATA_FOLD, V, F;
 from planet::anchor import Anchor, PerlinAt, twice, doubled, perlin_from;
 
 fn p_offset(e: vec3<f32>, radius: f32) -> vec3<f32> {
@@ -47,7 +47,7 @@ fn strata_band(level: f32, length: f32, track: f32, sd: f32, seed: i32) -> f32 {
 }
 
 pub fn strata(a: Anchor, e: vec3<f32>, radius: f32, h: f32, sd: f32, seed: i32) -> f32 {
-    let fold = perlin_at(perlin_from(a.f, e * (radius / STRATA_FOLD)), seed + 307) * STRATA_FOLD_HEIGHT;
+    let fold = perlin_at(perlin_from(a.l[F], e * (radius / STRATA_FOLD)), seed + 307) * STRATA_FOLD_HEIGHT;
     let level = h + fold;
     return STRATA_A0 * strata_band(level, STRATA_L0, 0.37, sd, seed + 311)
          + STRATA_A1 * strata_band(level, STRATA_L1, 0.61, sd, seed + 313)
@@ -149,7 +149,7 @@ fn wood_amp(o: i32) -> f32 {
     return 1.25;
 }
 pub fn woodland(a: Anchor, e: vec3<f32>, radius: f32, octaves: f32, seed: i32) -> vec2<f32> {
-    var lat = doubled(a.v, WOOD_FIRST - VARY_FIRST);
+    var lat = doubled(a.l[V], WOOD_FIRST - VARY_FIRST);
     var d = p_offset(e, radius) * exp2(WOOD_FIRST as f32);
     var s: f32 = 0.0;
     var v: f32 = 0.0;
@@ -280,7 +280,7 @@ pub fn perlin_at(at: PerlinAt, seed: i32) -> f32 {
 }
 
 pub fn variation(a: Anchor, e: vec3<f32>, radius: f32, octaves: f32, seed: i32) -> vec3<f32> {
-    var lat = a.v;
+    var lat = a.l[V];
     var d = p_offset(e, radius) * exp2(VARY_FIRST as f32);
     var lum: f32 = 0.0;
     var tint: f32 = 0.0;

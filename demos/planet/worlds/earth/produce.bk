@@ -18,6 +18,7 @@ from planet::relief import BASE_WAVELENGTH, RIDGE_FIRST, WARP_OCTAVE, WARP_DISPL
 from planet::noise import simplex_grad, SimplexAt;
 from planet::rivers import water_at, water_share, fresh_water, water_depth;
 from planet::anchor import Anchor, read_anchor, anchor_at, doubled, simplex_from, plane_offset;
+from planet::world_lattice import P;
 from planet::layers import HZ_MARGIN, HZ_DENSITY, unorm, gather_span, detail_words;
 from planet::dendry_grid import grid_reach_point, grid_holds, grid_point, grid_link, level_part, drain_parts, texel_cell,
     horizon_cell, window_point, window_link, window_part;
@@ -556,8 +557,8 @@ fn k_anchor(g: grid<1>, table: read_store<vec4<i32>, 1>, anchors: read_store<vec
     // a pixel does.
     let o_a = max((floor(oct) as i32) - 1, RIDGE_FIRST);
     let off = rec.dir_lo * (radius / BASE_WAVELENGTH);
-    let ra = simplex_from(doubled(a.p, o_a), relief_offset(a, off, seed) * exp2(o_a as f32));
-    let wa = simplex_from(doubled(a.p, WARP_OCTAVE), off * exp2(WARP_OCTAVE as f32));
+    let ra = simplex_from(doubled(a.l[P], o_a), relief_offset(a, off, seed) * exp2(o_a as f32));
+    let wa = simplex_from(doubled(a.l[P], WARP_OCTAVE), off * exp2(WARP_OCTAVE as f32));
     let k = WARP_DISPLACE * exp2(WARP_OCTAVE as f32);
     let gx = simplex_grad(wa, seed + 400).yzw * k;
     let gy = simplex_grad(wa, seed + 401).yzw * k;

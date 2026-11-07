@@ -253,6 +253,9 @@ export default {
     // The sea stands at the radius: the drawn surface is never below it.
     minHeight: 0,
     maxHeight: MAX_HEIGHT,
+    // The far plane 200 km past the sea's horizon: the ranges past it are
+    // lost in the haze, and the air's froxels keep their depth.
+    horizonReach: 2e5,
     sunIntensity: 128000,
     // A clear day's haze; the ground's average albedo lights the air from below.
     atmosphere: { turbidity: 10, groundAlbedo: [0.08, 0.1, 0.1] },

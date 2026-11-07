@@ -6,8 +6,11 @@
 // anchors, on the CPU.
 from planet::layers import HZ_MARGIN, HZ_DENSITY, unorm;
 from planet::world import octaves_for, range_margin, detail_ratio;
-from planet::anchor import anchor_of, write_anchor;
+from planet::anchor import anchor_of, write_anchor, ANCHOR_VEC4S;
 import tiles;
+
+// An anchor's int32 words (core/anchors.js sizes its buffers by them).
+pub const ANCHOR_WORDS: i32 = ANCHOR_VEC4S * 4;
 
 // ── The horizon layer ───────────────────────────────────────────────────────
 //
