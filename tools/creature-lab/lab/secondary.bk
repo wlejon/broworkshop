@@ -22,12 +22,14 @@ module creature::secondary;
 import creature::common::*;
 import creature::skeleton::*;
 import creature::pose::*;
+from creature::ground import terrain;
 
 pub const SEC_REC: i32 = 9;           // per bone: the mass point (3), its velocity (3), its last target (3)
 pub const SEC_STATE: i32 = NB * SEC_REC;
 pub const TONE: f32 = 3.5;
 pub const DAMPING: f32 = 0.4;
 const G: f32 = 9.81;
+const REST_CLEAR: f32 = 0.03; // m a resting part's joint keeps over the ground
 
 // A part's natural frequency (rad/s).
 pub fn part_omega(b: i32) -> f32 {
@@ -46,12 +48,37 @@ fn soft_limit(x: f32, lo: f32, hi: f32) -> f32 {
     return x;
 }
 
+// How far bone b's end (its head at p, turned to q) is under REST_CLEAR over
+// the ground, or under `aim` (its end where the rig aims it) when that is
+// lower, so a part the rig lays on the ground stays there; and that height.
+fn rest_floor(env: read_store<f32, 1>, p: vec3<f32>, q: vec4<f32>, b: i32, aim: vec3<f32>) -> vec2<f32> {
+    let e = p + q_rot(q, TAIL[b] - HEAD[b]);
+    let y = min(terrain(env, e.x, e.z) + REST_CLEAR, aim.y);
+    return vec2<f32>(y - e.y, y);
+}
+
+// Bone b, its head at p and turned to q, turned up about its head (keeping
+// its heading) so its end is at height y if it is lower.
+pub fn lift_to(p: vec3<f32>, q: vec4<f32>, b: i32, y: f32) -> vec4<f32> {
+    let bl = TAIL[b] - HEAD[b];
+    let ln = length(bl);
+    if (ln < 1e-4) { return q; }
+    let e = p + q_rot(q, bl);
+    if (y <= e.y) { return q; }
+    let d0 = (e - p) / ln;
+    let sy = clamp((y - p.y) / ln, -1.0, 1.0);
+    var hz = vec2<f32>(d0.x, d0.z);
+    if (length(hz) < 1e-5) { hz = vec2<f32>(0.0, 1.0); }
+    hz = normalize(hz) * sqrt(max(1.0 - sy * sy, 0.0));
+    return q_mul(q_from_to(d0, vec3<f32>(hz.x, sy, hz.y)), q);
+}
+
 // The pose with every dangling bone carried. `T` is the rig's pose (its
 // targets); hold[b] is the share of the rig's own world rotation bone b aims
 // at instead of its rotation relative to its parent (a head that holds its
 // gaze in space); `on` scales the lag (0: the rig's pose exactly). State:
 // SEC_STATE floats at `base`.
-pub fn carry(st: rw_store<f32, 1>, base: i32, T: Pose, hold: array<f32, NB>, on: f32, init: bool, dt: f32) -> Pose {
+pub fn carry(st: rw_store<f32, 1>, env: read_store<f32, 1>, base: i32, T: Pose, hold: array<f32, NB>, on: f32, init: bool, dt: f32) -> Pose {
     var A = T;
     for (var b: i32 = 0; b < NB; b += 1) {
         if (DANGLE[b] == 0) { continue; }
@@ -96,6 +123,15 @@ pub fn carry(st: rw_store<f32, 1>, base: i32, T: Pose, hold: array<f32, NB>, on:
         // The bone turned by the lag, scaled by `on`, within its joint's range.
         let dt_dir = normalize(tt - A.p[b]);
         var qa = q_mul(q_blend(q_id(), q_from_to(dt_dir, dir), on), qt);
+        // A part swung into the ground rests on it: its end is lifted about
+        // its joint (no further than its joint's range, below), and its
+        // velocity loses what drove it down.
+        let fl = rest_floor(env, A.p[b], qa, b, T.p[b] + q_rot(T.q[b], TAIL[b] - HEAD[b]));
+        if (fl.x > 0.0) {
+            qa = lift_to(A.p[b], qa, b, fl.y);
+            x = A.p[b] + q_rot(qa, sc);
+            v.y = max(v.y, vt.y);
+        }
         // A joint nearing its limit stiffens into it (eased over the last
         // part of its range), so a part swung against it slows to a stop
         // rather than hitting a wall.

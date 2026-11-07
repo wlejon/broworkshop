@@ -16,6 +16,7 @@ export default {
         walk: { scenario: 'walk' },
     },
     form: { reference: {} },
-    variants: {},
+    // `plan`: the motion layers off, the rig's plan as it draws it.
+    variants: { plan: { LAYERS: 0 } },
     scenarios: {},
 };

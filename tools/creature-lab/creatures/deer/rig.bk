@@ -933,7 +933,7 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
     var hold: array<f32, NB>;
     for (var b: i32 = 0; b < NB; b += 1) { hold[b] = 0.0; }
     hold[B_HEAD] = HEAD_SPACE * (1.0 - graze) * (1.0 - lie);
-    let A = carry(state, s + D_SEC, T, hold, LAYERS, init, dt);
+    let A = carry(state, env, s + D_SEC, T, hold, LAYERS, init, dt);
 
     // The pose's centre of mass from the root, kept for the next step.
     let coff = q_rot(q_conj(qyaw), com_of(A) - root);
