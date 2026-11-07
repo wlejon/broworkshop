@@ -37,14 +37,34 @@ A creature folder (`creatures/<name>/`) has these files, and
 
 | File | What |
 |------|------|
-| `creature.js` | `name`, `skeleton`, `body`, `rig: { file, kernel }`, `scale`, `cycles` (which scenario is each steady gait, with reference duty factors and footfall offsets), `form` (the body's reference measures), `variants` (named knob sets; the deer's broken ones are `slip`, `sink`, `overbend`, `stumble`), `scenarios` |
+| `creature.js` | `name`, `skeleton`, `body`, `rig: { file, kernel, modules }` (`modules`: the rig's own brokernel modules by name, as files in the folder), `scale`, `cycles` (which scenario is each steady gait, with reference duty factors and footfall offsets), `form` (the body's reference measures), `variants` (named knob sets; the deer's broken ones are `slip`, `sink`, `overbend`, `stumble`), `scenarios` |
 | `skeleton.js` | bones (parent, head, tail, per-axis joint limits in degrees), feet, tracked points, chart joints |
 | `body.js` | the body: masses on bones built with `lab/flesh.js` (the deer splits it into `body.js`, `legs.js` and `coat.js`) |
 | `rig.bk` | the species' rig. `@knob` constants can be overridden from the command line |
 | `scenarios.js` | the species' own scenarios, added to the lab's |
 
-Rigs are written per species. Shared code is small helpers only:
-`lab/common.bk` and `creature::ground`.
+Rigs are written per species: the gait, where the feet go, the plan of the
+body's place. What makes that plan move like a body is shared, in layers any
+skeleton gets (each reads only `creature::skeleton`, the module the lab
+writes from a skeleton: masses, the dangling chains, the legs with their
+lengths and the bone each hangs from, the spine from the root to the front
+legs' bone):
+
+| Module | What |
+|--------|------|
+| `creature::pose` (`lab/pose.bk`) | `Pose`: every bone's world rotation and head; points on bones, local rotations, the centre of mass, writing a pose out |
+| `creature::body` (`lab/body.bk`) | the centre of mass as a state of its own, moved only by what the loaded feet can push: each leg along its line from foot to swing joint, push only, more as it flexes, a little across it, within friction; free fall with no foot down. `body_step(plan, stiffness, Support)` steers it toward the rig's plan; a foot loads and unloads over 40 ms, and a gait with flight pushes harder in stance to carry its weight over the stride |
+| `creature::spine` (`lab/spine.bk`) | the back's flex, bend and twist from what the legs do: flexed by the feet's spread along the body (most in a gait whose pairs swing together), bent into a turn's curve and toward gathered feet, twisted by sideways acceleration, hollowed by the body's vertical acceleration; each a spring of the trunk's frequency |
+| `creature::secondary` (`lab/secondary.bk`) | every dangling chain (neck, head, ears, tail) carried by its momentum: the subtree's centre of mass on a spring and damper toward where the rig puts it, its frequency from the part's size, joint limits eased into; `hold` keeps part of a bone's world rotation (a head steadied in space but not pinned) |
+
+`lab/common.bk` and `creature::ground` hold the small helpers (smoothsteps
+with no jump in acceleration, quaternions, value noise). The deer's rig
+places its root where the body is (the pose moved so its centre of mass sits
+on `creature::body`'s), steps its feet from where the body is and how it
+moves, takes its trunk's angles from `creature::spine` and passes the pose
+through `creature::secondary`; its `LAYERS` knob scales all of it (0: the
+plan as the rig draws it). Telemetry's position is the plan's (the root the
+body moves about), so the body's own motion shows against it.
 
 The reference creature is `deer`: a deer-sized quadruped with spine, neck,
 head, ears and tail. Its gaits are walk, trot and gallop, and its actions are

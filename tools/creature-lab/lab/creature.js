@@ -15,13 +15,29 @@ const fs = require('fs');
 export const appPath = (p) => bro.resolvePath('/app/' + p);
 export const readApp = (p) => fs.readFileSync(appPath(p), 'utf-8');
 
-// The lab's modules every rig may import (read afresh each load).
+// The lab's modules every rig may import (read afresh each load): the
+// helpers, the ground, the contract, and the general motion layers any
+// skeleton gets (lab/pose.bk, secondary.bk, body.bk, spine.bk).
 export function labModules() {
     return {
         'creature::common': readApp('lab/common.bk'),
         'creature::ground': readApp('lab/ground.bk'),
         'creature::contract': contractModule(),
+        'creature::pose': readApp('lab/pose.bk'),
+        'creature::secondary': readApp('lab/secondary.bk'),
+        'creature::body': readApp('lab/body.bk'),
+        'creature::spine': readApp('lab/spine.bk'),
     };
+}
+
+// A rig's own modules: `rig.modules` maps a module name to a file of the
+// creature's folder (read afresh each load) or to source.
+function rigModules(def, folder) {
+    const out = {};
+    for (const [name, v] of Object.entries((def.rig && def.rig.modules) || {})) {
+        out[name] = /\.bk$/.test(v) ? readApp(`${folder}/${v}`) : v;
+    }
+    return out;
 }
 
 export function parseSpec(spec) {
@@ -49,7 +65,7 @@ export async function loadCreature(spec, extraKnobs = null) {
         if (!knobs) throw new Error(`${dir} has no variant '${variant}' (has ${Object.keys(def.variants || {}).join(', ')})`);
     }
     if (extraKnobs && Object.keys(extraKnobs).length) knobs = { ...(knobs || {}), ...extraKnobs };
-    const modules = { ...labModules(),'creature::skeleton': skel.module, ...(def.rig.modules || {}) };
+    const modules = { ...labModules(), 'creature::skeleton': skel.module, ...rigModules(def, folder) };
     const t1 = Date.now();
     const mod = bro.kernel.compile(readApp(`${folder}/${def.rig.file}`), { file: `${folder}/${def.rig.file}`, modules, knobs });
     const t2 = Date.now();

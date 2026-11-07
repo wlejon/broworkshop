@@ -1,0 +1,47 @@
+// creature::pose — a creature's pose as the motion layers pass it between
+// them: each bone's world rotation from rest and its head's world position.
+// A rig builds one, the layers (creature::secondary, creature::body) take
+// and return it whole, and `put` writes it to the pose buffer.
+module creature::pose;
+import creature::common::*;
+import creature::skeleton::*;
+
+pub struct Pose { q: array<vec4<f32>, NB>, p: array<vec3<f32>, NB> }
+
+// Bone b's head where its parent puts it.
+pub fn head_of(P: Pose, b: i32) -> vec3<f32> {
+    let pa = PARENT[b];
+    return P.p[pa] + q_rot(P.q[pa], HEAD[b] - HEAD[pa]);
+}
+
+// Rest point x of bone b, in the world.
+pub fn point_of(P: Pose, b: i32, x: vec3<f32>) -> vec3<f32> {
+    return P.p[b] + q_rot(P.q[b], x - HEAD[b]);
+}
+
+// Bone b's rotation relative to its parent's.
+pub fn local_of(P: Pose, b: i32) -> vec4<f32> {
+    return q_mul(q_conj(P.q[PARENT[b]]), P.q[b]);
+}
+
+// The centre of mass: each bone's mass at its middle (as lab/skeleton.js
+// centreOfMass measures it).
+pub fn com_of(P: Pose) -> vec3<f32> {
+    var c = vec3<f32>(0.0);
+    for (var b: i32 = 0; b < NB; b += 1) {
+        c += MASS[b] * point_of(P, b, 0.5 * (HEAD[b] + TAIL[b]));
+    }
+    return c / TOTAL_MASS;
+}
+
+// Every bone moved by d.
+pub fn moved(P: Pose, d: vec3<f32>) -> Pose {
+    var o = P;
+    for (var b: i32 = 0; b < NB; b += 1) { o.p[b] = P.p[b] + d; }
+    return o;
+}
+
+// Creature c's pose out to the pose buffer.
+pub fn put(pose: write_store<vec4<f32>, 1>, c: i32, P: Pose) {
+    for (var b: i32 = 0; b < NB; b += 1) { put_bone(pose, c * NB + b, P.q[b], P.p[b]); }
+}

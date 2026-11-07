@@ -29,11 +29,65 @@ export function resolveSkeleton(def) {
     const feet = (def.feet || []).map((f, k) => ({ ...f, index: k, boneIndex: index(f.bone) }));
     const tracks = (def.tracks || []).map((t) => ({ ...t, boneIndex: index(t.bone) }));
     const mass = bones.reduce((s, b) => s + (b.mass || 0), 0);
+    const parts = skeletonParts(bones, feet);
     return {
-        bones, feet, tracks, mass, count: bones.length, index,
+        bones, feet, tracks, mass, count: bones.length, index, parts,
         chartJoints: (def.chartJoints || []).map(index),
-        module: skeletonModule(bones, feet),
+        module: skeletonModule(bones, feet, tracks, parts),
     };
+}
+
+// What the general motion layers need of any skeleton, from its bones alone:
+//   legs      per foot, the chain above it (up through parents that carry
+//             only that chain) and its top bone, the joint the leg swings
+//             from, and the chain's length
+//   dangle    bones off the legs and off the root that carry no leg below
+//             them: neck, head, ears, tail (the parts that hang and swing)
+//   spine     the chain from the root to the bone the front-most leg hangs
+//             from (the trunk the legs hold up)
+//   subtree   per bone, the mass it carries (itself and everything below it)
+//             and where that mass's centre is from its head at rest
+function skeletonParts(bones, feet) {
+    const kids = bones.map(() => []);
+    for (const b of bones) if (b.parentIndex >= 0) kids[b.parentIndex].push(b.index);
+    const inLeg = new Set();
+    const legs = feet.map((f) => {
+        let b = f.boneIndex, len = 0;
+        const chain = [];
+        while (b >= 0) {
+            inLeg.add(b);
+            chain.push(b);
+            len += bones[b].length;
+            const p = bones[b].parentIndex;
+            if (p < 0 || kids[p].length > 1) break;
+            b = p;
+        }
+        return { foot: f.index, top: b, chain: chain.reverse(), length: len, carrier: bones[b].parentIndex };
+    });
+    const sub = bones.map(() => ({ m: 0, c: [0, 0, 0] }));
+    for (let i = bones.length - 1; i >= 0; i--) {
+        const b = bones[i], m = b.mass || 0;
+        const mid = [0, 1, 2].map((k) => (b.head[k] + b.tail[k]) / 2);
+        const s = sub[i];
+        for (let k = 0; k < 3; k++) s.c[k] += mid[k] * m;
+        s.m += m;
+        if (b.parentIndex >= 0) {
+            const p = sub[b.parentIndex];
+            for (let k = 0; k < 3; k++) p.c[k] += s.c[k];
+            p.m += s.m;
+        }
+    }
+    const subC = sub.map((s, i) => (s.m > 0 ? s.c.map((v, k) => v / s.m - bones[i].head[k]) : [0, 0, 0]));
+    const hasLeg = bones.map(() => false);
+    for (const l of legs) for (let b = l.top; b >= 0; b = bones[b].parentIndex) hasLeg[b] = true;
+    const root = bones.findIndex((b) => b.parentIndex < 0);
+    const dangle = bones.map((b) => (!inLeg.has(b.index) && b.index !== root && !hasLeg[b.index] ? 1 : 0));
+    // The spine: from the carrier of the front-most leg back to the root.
+    let front = legs[0];
+    for (const l of legs) if (bones[l.top].head[2] > bones[front.top].head[2]) front = l;
+    const spine = [];
+    for (let b = front ? front.carrier : root; b >= 0; b = bones[b].parentIndex) spine.unshift(b);
+    return { legs, dangle, spine, subMass: sub.map((s) => s.m), subC, root };
 }
 
 const f = (x) => {
@@ -43,8 +97,10 @@ const f = (x) => {
 const v3 = (a) => `vec3<f32>(${a.map(f).join(', ')})`;
 
 // The constants module every rig and the skin hook import.
-function skeletonModule(bones, feet) {
+function skeletonModule(bones, feet, tracks, parts) {
     const n = bones.length;
+    const arr = (t, xs) => `array<${t}, ${xs.length}> = [${xs.join(', ')}]`;
+    const track = (name) => { const t = tracks.find((x) => x.name === name); return t ? t.boneIndex : -1; };
     let s = 'module creature::skeleton;\n';
     s += `pub const NB: i32 = ${n};\n`;
     s += `pub const NFEET: i32 = ${feet.length};\n`;
@@ -53,6 +109,23 @@ function skeletonModule(bones, feet) {
     s += `pub const PARENT: array<i32, ${n}> = [${bones.map((b) => b.parentIndex).join(', ')}];\n`;
     s += `pub const LIM_LO: array<vec3<f32>, ${n}> = [${bones.map((b) => v3(b.lim.map((r) => r[0]))).join(', ')}];\n`;
     s += `pub const LIM_HI: array<vec3<f32>, ${n}> = [${bones.map((b) => v3(b.lim.map((r) => r[1]))).join(', ')}];\n`;
+    // The skeleton's parts (skeletonParts): masses, the dangling chains, legs.
+    s += `pub const MASS: ${arr('f32', bones.map((b) => f(b.mass || 0)))};\n`;
+    s += `pub const TOTAL_MASS: f32 = ${f(Math.max(1e-3, bones.reduce((a, b) => a + (b.mass || 0), 0)))};\n`;
+    s += `pub const ROOT: i32 = ${parts.root};\n`;
+    s += `pub const DANGLE: ${arr('i32', parts.dangle)};\n`;
+    s += `pub const SUB_MASS: ${arr('f32', parts.subMass.map(f))};\n`;
+    s += `pub const SUB_C: ${arr('vec3<f32>', parts.subC.map(v3))};\n`;
+    const legs = parts.legs.length ? parts.legs : [{ top: parts.root, length: 1, carrier: -1 }];
+    s += `pub const NLEGS: i32 = ${parts.legs.length};\n`;
+    s += `pub const LEG_TOP: ${arr('i32', legs.map((l) => l.top))};\n`;
+    s += `pub const LEG_LEN: ${arr('f32', legs.map((l) => f(l.length)))};\n`;
+    s += `pub const LEG_CARRIER: ${arr('i32', legs.map((l) => l.carrier))};\n`;
+    s += `pub const FOOT_BONE: ${arr('i32', (feet.length ? feet : [{ boneIndex: parts.root }]).map((ft) => ft.boneIndex))};\n`;
+    s += `pub const MEAN_LEG: f32 = ${f(legs.reduce((a, l) => a + l.length, 0) / legs.length)};\n`;
+    s += `pub const NSPINE: i32 = ${parts.spine.length};\n`;
+    s += `pub const SPINE: ${arr('i32', parts.spine.length ? parts.spine : [parts.root])};\n`;
+    s += `pub const TRACK_HEAD: i32 = ${track('head')};\n`;
     for (const b of bones) s += `pub const B_${b.name.toUpperCase()}: i32 = ${b.index};\n`;
     for (const ft of feet) s += `pub const FOOT_${ft.name.toUpperCase()}: i32 = ${ft.index};\n`;
     return s;

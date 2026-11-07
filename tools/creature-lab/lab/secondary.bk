@@ -1,0 +1,121 @@
+// creature::secondary — the parts that hang from the body carry momentum.
+//
+// Every dangling bone (DANGLE: off the legs and the root, with no leg below
+// it: a neck, a head, ears, a tail) is carried as a mass: its subtree's
+// centre of mass (SUB_C) is a point on a spring and damper toward where the
+// rig's pose puts it, so it lags its parent's moves, swings past and
+// settles. Bones are taken parents first: a child's target is its pose's
+// rotation relative to its parent applied to where the parent actually is,
+// so a lag runs down a chain and grows toward its tip.
+//
+// The spring is a part's own: its natural frequency is TONE times a
+// pendulum's of the subtree's length r (the distance from the joint to the
+// subtree's centre), w = TONE sqrt(g / r), so its stiffness is the part's
+// mass times w^2, and a heavy long neck swings slower than an ear. DAMPING is
+// the damping ratio of every joint: below 1, a part overshoots and rings
+// down. Nothing in it is a species' number.
+//
+// The damping acts on the motion relative to the target (a joint damps its
+// own bending), inertia on the motion in the world: a part held up by tone
+// floats up when the body falls freely, and lags a body that accelerates.
+module creature::secondary;
+import creature::common::*;
+import creature::skeleton::*;
+import creature::pose::*;
+
+pub const SEC_REC: i32 = 9;           // per bone: the mass point (3), its velocity (3), its last target (3)
+pub const SEC_STATE: i32 = NB * SEC_REC;
+pub const TONE: f32 = 3.5;
+pub const DAMPING: f32 = 0.4;
+const G: f32 = 9.81;
+
+// A part's natural frequency (rad/s).
+pub fn part_omega(b: i32) -> f32 {
+    return TONE * sqrt(G / max(length(SUB_C[b]), 0.02));
+}
+
+fn ld(st: rw_store<f32, 1>, i: i32) -> vec3<f32> { return vec3<f32>(st[i], st[i + 1], st[i + 2]); }
+fn sv(st: rw_store<f32, 1>, i: i32, v: vec3<f32>) { st[i] = v.x; st[i + 1] = v.y; st[i + 2] = v.z; }
+
+// x held within [lo, hi], eased over the last 15% of the range (at most
+// 0.08 rad) at either end with no corner.
+fn soft_limit(x: f32, lo: f32, hi: f32) -> f32 {
+    let e = max(min(0.08, 0.15 * (hi - lo)), 1e-4);
+    if (x > hi - e) { return hi - e * exp(-(x - (hi - e)) / e); }
+    if (x < lo + e) { return lo + e * exp(((lo + e) - x) / -e); }
+    return x;
+}
+
+// The pose with every dangling bone carried. `T` is the rig's pose (its
+// targets); hold[b] is the share of the rig's own world rotation bone b aims
+// at instead of its rotation relative to its parent (a head that holds its
+// gaze in space); `on` scales the lag (0: the rig's pose exactly). State:
+// SEC_STATE floats at `base`.
+pub fn carry(st: rw_store<f32, 1>, base: i32, T: Pose, hold: array<f32, NB>, on: f32, init: bool, dt: f32) -> Pose {
+    var A = T;
+    for (var b: i32 = 0; b < NB; b += 1) {
+        if (DANGLE[b] == 0) { continue; }
+        let pa = PARENT[b];
+        let k = base + b * SEC_REC;
+        A.p[b] = head_of(A, b);
+        var qt = q_mul(A.q[pa], local_of(T, b));
+        if (hold[b] > 0.0) { qt = q_blend(qt, T.q[b], hold[b]); }
+        let sc = SUB_C[b];
+        let r = length(sc);
+        let tt = A.p[b] + q_rot(qt, sc);
+        if (init || r < 1e-3) {
+            sv(st, k, tt);
+            sv(st, k + 3, vec3<f32>(0.0));
+            sv(st, k + 6, tt);
+            A.q[b] = qt;
+            continue;
+        }
+        let w = part_omega(b);
+        let t0 = ld(st, k + 6);
+        let vt = (tt - t0) / max(dt, 1e-5);
+        var x = ld(st, k);
+        var v = ld(st, k + 3);
+        // Substeps keep the integration stable for a stiff small part.
+        let n = clamp(ceil(w * dt / 0.4), 1.0, 8.0);
+        let h = dt / n;
+        for (var i: i32 = 0; i < 8; i += 1) {
+            if (f32(i) >= n) { break; }
+            let tgt = mix(t0, tt, (f32(i) + 1.0) / n);
+            let a = w * w * (tgt - x) + 2.0 * DAMPING * w * (vt - v);
+            v += a * h;
+            x += v * h;
+        }
+        // The point stays at its distance from the joint.
+        let d = x - A.p[b];
+        let dl = length(d);
+        var dir = normalize(tt - A.p[b]);
+        if (dl > 1e-5) { dir = d / dl; }
+        x = A.p[b] + dir * r;
+        let nrm = dir;
+        v -= nrm * dot(v - vt, nrm);
+        // The bone turned by the lag, scaled by `on`, within its joint's range.
+        let dt_dir = normalize(tt - A.p[b]);
+        var qa = q_mul(q_blend(q_id(), q_from_to(dt_dir, dir), on), qt);
+        // A joint nearing its limit stiffens into it (eased over the last
+        // part of its range), so a part swung against it slows to a stop
+        // rather than hitting a wall.
+        let loc = q_to_xyz(q_mul(q_conj(A.q[pa]), qa));
+        let lc = vec3<f32>(soft_limit(loc.x, LIM_LO[b].x, LIM_HI[b].x), soft_limit(loc.y, LIM_LO[b].y, LIM_HI[b].y),
+                           soft_limit(loc.z, LIM_LO[b].z, LIM_HI[b].z));
+        let over = abs(lc - loc);
+        if (max(over.x, max(over.y, over.z)) > 1e-5) {
+            qa = q_mul(A.q[pa], q_xyz(lc));
+            let x2 = A.p[b] + q_rot(qa, sc);
+            // The velocity loses what drove the part past where it is held.
+            let dx = x2 - x;
+            let dl2 = length(dx);
+            if (dl2 > 1e-6) { let nd = dx / dl2; v -= nd * min(dot(v - vt, nd), 0.0); }
+            x = x2;
+        }
+        A.q[b] = qa;
+        sv(st, k, x);
+        sv(st, k + 3, v);
+        sv(st, k + 6, tt);
+    }
+    return A;
+}

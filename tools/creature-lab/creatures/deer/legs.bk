@@ -1,0 +1,166 @@
+// deer::legs — the deer's leg solutions and the shapes of a swing.
+//
+// Legs are solved analytically in their plane: the hind leg as a pantograph
+// (femur and cannon kept at their rest angle to each other, the reciprocal
+// apparatus that ties stifle and hock), the fore leg with the scapula
+// swinging with the leg and the carpus folding by a given amount.
+module deer::legs;
+import creature::common::*;
+import creature::skeleton::*;
+
+// Legs in the contract's foot order: LH, LF, RF, RH.
+pub const LEG_HIND: array<i32, 4> = [1, 0, 0, 1];
+pub const LEG_SIDE: array<f32, 4> = [1.0, 1.0, -1.0, -1.0];
+pub const LEG_B0: array<i32, 4> = [B_FEMURL, B_SCAPL, B_SCAPR, B_FEMURR];
+pub const LEG_NB: array<i32, 4> = [4, 5, 5, 4];
+
+// Gaits: when each leg touches down in the cycle.
+pub const OFF_WALK: array<f32, 4> = [0.0, 0.25, 0.75, 0.5];     // lateral sequence
+pub const OFF_TROT: array<f32, 4> = [0.0, 0.5, 0.0, 0.5];       // diagonal pairs
+pub const OFF_GALLOP: array<f32, 4> = [0.0, 0.46, 0.57, 0.1];   // transverse, right lead
+
+// Lying (sternal): each leg joint's flexion, by bone, from scapula / femur down.
+// The fore legs fold under the chest: the forearm runs forward and down from
+// the elbow to the carpus on the ground, the cannon folded back flat under it
+// (the carpus shut to 163 degrees), the hoof's sole turned up behind.
+pub const FOLD_FRONT: array<f32, 5> = [-0.19, 0.77, -1.88, 2.85, 0.5];
+pub const FOLD_HIND: array<f32, 4> = [-0.76, 1.37, -2.06, 0.03];
+
+pub fn rest_angle(b: i32) -> f32 {
+    let v = TAIL[b] - HEAD[b];
+    return limb_angle(vec2<f32>(v.z, v.y));
+}
+
+pub fn rest_len(b: i32) -> f32 {
+    let v = TAIL[b] - HEAD[b];
+    return length(vec2<f32>(v.z, v.y));
+}
+
+pub fn clamp_xyz(a: vec3<f32>, b: i32) -> vec3<f32> { return clamp(a, LIM_LO[b], LIM_HI[b]); }
+
+// Leg l's touchdown phase, the gaits' blended by weight (around the circle).
+pub fn off_mix(a: array<f32, 4>, b: array<f32, 4>, c: array<f32, 4>, w: vec3<f32>, l: i32) -> f32 {
+    return a[l] + w.y * phase_diff(a[l], b[l]) + w.z * phase_diff(a[l], c[l]);
+}
+
+// --- the shape of a swing -------------------------------------------------------
+//
+// Every part of a swing starts and ends at rest: a hoof leaves the ground
+// and meets it again with no speed, its lift and the joints' folding rising
+// from nothing and falling back to nothing, so lift-off and touchdown are no
+// corner in any joint's speed. The swing's clock runs fast at its ends
+// (three and a half and one and a half times its mean pace) so the hoof
+// clears the ground early and lands late, as a pushed-off leg does.
+pub fn swing_time(u: f32) -> f32 {
+    let x = clamp(u, 0.0, 1.0);
+    return x + 2.5 * x * (1.0 - x) * (1.0 - x) - 0.5 * x * x * (1.0 - x);
+}
+
+// 0 at both ends with no slope, 1 at the middle of the warped swing.
+pub fn swing_bump(u: f32) -> f32 {
+    let s = sin(PI * swing_time(u));
+    return s * s;
+}
+
+// --- the planar leg solutions ---------------------------------------------------
+
+pub struct Leg { rho: f32, a0: f32, a1: f32, a2: f32, a3: f32, a4: f32 }
+
+// The abduction that puts the leg's plane through d (parent-local, from
+// the leg's root) and d in that plane as (z, y). Past the joint's limits
+// the plane stops at them, and the hoof is put in it at d's height (a hoof
+// the leg cannot reach sideways stays as near under it as the leg allows,
+// rather than the leg's length spent below it).
+pub fn leg_plane(b0: i32, toe: i32, d: vec3<f32>) -> vec3<f32> {
+    let rx = TAIL[toe].x - HEAD[b0].x;
+    let r2 = d.x * d.x + d.y * d.y;
+    let rho0 = atan2(d.x, -d.y) - atan2(rx, sqrt(max(r2 - rx * rx, 1e-6)));
+    let rho = clamp(rho0, LIM_LO[b0].z, LIM_HI[b0].z);
+    var y = -d.x * sin(rho) + d.y * cos(rho);
+    if (rho != rho0) { y = (d.y - rx * sin(rho)) / max(cos(rho), 0.2); }
+    return vec3<f32>(rho, d.z, y);
+}
+
+// A hind leg from its femur head to toe d with the hoof at limb angle ah.
+pub fn solve_hind(b0: i32, d: vec3<f32>, ah: f32) -> Leg {
+    var o: Leg;
+    let pl = leg_plane(b0, b0 + 3, d);
+    o.rho = pl.x;
+    let lf = rest_len(b0);
+    let lt = rest_len(b0 + 1);
+    let lm = rest_len(b0 + 2);
+    let lh = rest_len(b0 + 3);
+    let fet = vec2<f32>(pl.y, pl.z) - lh * limb_dir(ah);
+    let c = rest_angle(b0 + 2) - rest_angle(b0);
+    let v0 = lf * limb_dir(0.0) + lm * limb_dir(c);
+    let s = two_bone(length(v0), lt, fet, 1.0);
+    o.a0 = s.x - limb_angle(v0);
+    o.a1 = s.y;
+    o.a2 = o.a0 + c;
+    o.a3 = ah;
+    o.a4 = 0.0;
+    return o;
+}
+
+// A fore leg from its scapula's top to toe d: hoof at ah, carpus folded by
+// k, the scapula taking `follow` of the leg's swing.
+pub fn solve_front(b0: i32, d: vec3<f32>, ah: f32, k: f32, follow: f32) -> Leg {
+    var o: Leg;
+    let pl = leg_plane(b0, b0 + 4, d);
+    o.rho = pl.x;
+    let ls = rest_len(b0);
+    let lu = rest_len(b0 + 1);
+    let lr = rest_len(b0 + 2);
+    let lc = rest_len(b0 + 3);
+    let lh = rest_len(b0 + 4);
+    let fet = vec2<f32>(pl.y, pl.z) - lh * limb_dir(ah);
+    let rf = TAIL[b0 + 3] - HEAD[b0];
+    let line0 = limb_angle(vec2<f32>(rf.z, rf.y));
+    o.a0 = rest_angle(b0) + follow * (limb_angle(fet) - line0);
+    let sh = ls * limb_dir(o.a0);
+    let c0 = rest_angle(b0 + 3) - rest_angle(b0 + 2);
+    let w0 = lr * limb_dir(0.0) + lc * limb_dir(c0 - k);
+    let s = two_bone(lu, length(w0), fet - sh, -1.0);
+    o.a1 = s.x;
+    o.a2 = s.y - limb_angle(w0);
+    o.a3 = o.a2 + c0 - k;
+    o.a4 = ah;
+    return o;
+}
+
+pub fn leg_angle(o: Leg, k: i32) -> f32 {
+    if (k == 0) { return o.a0; }
+    if (k == 1) { return o.a1; }
+    if (k == 2) { return o.a2; }
+    if (k == 3) { return o.a3; }
+    return o.a4;
+}
+
+// The muzzle's height with the neck flexed by t of its grazing reach.
+pub fn muzzle_y(qt: vec4<f32>, pt: vec3<f32>, n1: vec3<f32>, n2: vec3<f32>, qh: vec4<f32>) -> f32 {
+    let p1 = pt + q_rot(qt, HEAD[B_NECK1] - HEAD[B_THORAX]);
+    let q1 = q_mul(qt, q_xyz(clamp_xyz(n1, B_NECK1)));
+    let p2 = p1 + q_rot(q1, HEAD[B_NECK2] - HEAD[B_NECK1]);
+    let q2 = q_mul(q1, q_xyz(clamp_xyz(n2, B_NECK2)));
+    let ph = p2 + q_rot(q2, HEAD[B_HEAD] - HEAD[B_NECK2]);
+    return (ph + q_rot(qh, TAIL[B_HEAD] - HEAD[B_HEAD])).y;
+}
+
+pub fn select_f(c: bool, a: f32, b: f32) -> f32 {
+    if (c) { return a; }
+    return b;
+}
+
+pub fn select_v3(c: bool, a: vec3<f32>, b: vec3<f32>) -> vec3<f32> {
+    if (c) { return a; }
+    return b;
+}
+
+// A length kept under `m` without a corner: unchanged up to 99% of it, then
+// eased toward it.
+pub fn soft_cap(x: f32, m: f32) -> f32 {
+    let k = 0.99 * m;
+    if (x <= k) { return x; }
+    let s = m - k;
+    return k + s * (1.0 - exp(-(x - k) / s));
+}

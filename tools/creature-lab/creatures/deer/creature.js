@@ -15,7 +15,7 @@ export default {
     name: 'deer',
     skeleton: { bones, feet, tracks, chartJoints },
     body,
-    rig: { file: 'rig.bk', kernel: 'k_rig' },
+    rig: { file: 'rig.bk', kernel: 'k_rig', modules: { 'deer::legs': 'legs.bk' } },
     scale: { height: 0.95, length: 1.6 },
     // Reference footfalls (Hildebrand): duty factor and each foot's
     // touchdown after the left hind's, as a share of the stride.

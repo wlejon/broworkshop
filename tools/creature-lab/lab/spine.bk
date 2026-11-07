@@ -1,0 +1,105 @@
+// creature::spine — the trunk bends with what the legs do.
+//
+// The spine (SPINE: the root to the bone the front-most legs hang from)
+// takes three bends, each spread evenly over its joints, the root tilted
+// back by half so the girdles keep the rig's line between them:
+//   flex    the legs' spread along the body: fore feet drawn back and hind
+//           feet brought forward (gathered under the body) arch the back,
+//           fore feet reaching ahead and hind feet driving behind hollow it.
+//           A gait whose fore and hind pairs swing together (a gallop, a
+//           bound) flexes most; one whose pairs swing apart (a walk, a trot)
+//           hardly at all.
+//   bend    sideways: toward the side whose feet are gathered, and along the
+//           path's curve in a turn (the body follows half the arc it runs
+//           on), within MAX_BEND.
+//   twist   the forequarters banked into a turn more than the hindquarters.
+// Each is a spring of the trunk's own frequency (a pendulum's of half the
+// spine, toned as creature::secondary's parts), so the back lags what the
+// legs ask of it; the flex also takes the body's vertical acceleration (the
+// belly's weight hollows the back as the legs push up and arches it in the
+// air).
+module creature::spine;
+import creature::common::*;
+import creature::skeleton::*;
+
+pub const SPINE_STATE: i32 = 6;
+const G: f32 = 9.81;
+pub const K_SAG: f32 = 0.3;      // rad of flex per spine length the feet's spread moves
+pub const K_LAT: f32 = 0.15;     // the same sideways
+pub const K_CURVE: f32 = 0.5;    // share of the path's curve over its length the back takes
+pub const MAX_BEND: f32 = 0.3;   // rad the back bends sideways at most (the hooves are placed for a body near straight)
+pub const K_TWIST: f32 = 0.12;   // rad of twist per g of sideways acceleration
+pub const SAG_PER_G: f32 = 0.04; // rad the back hollows per g of the body's upward acceleration
+pub const SPINE_TONE: f32 = 3.5;
+pub const SPINE_DAMPING: f32 = 0.6;
+
+pub struct Bend { flex: f32, bend: f32, twist: f32 }
+
+// The spine's length along the body at rest.
+pub fn spine_len() -> f32 {
+    return max(TAIL[SPINE[NSPINE - 1]].z - HEAD[SPINE[0]].z, 0.1);
+}
+
+fn pivots_mid() -> f32 {
+    var m: f32 = 0.0;
+    for (var i: i32 = 0; i < NLEGS; i += 1) { m += HEAD[LEG_TOP[i]].z; }
+    return m / max(f32(NLEGS), 1.0);
+}
+
+// What the legs ask of the spine. `rel[i]`: foot i from its leg's top joint,
+// in the trunk's frame (x left, z forward), as now; the rest pose's offset is
+// taken off here. `curv` the path's curvature (1/m, + to the left), `lat` the
+// sideways acceleration (m/s^2, + to the left), `amount` 0..1 (lying: 0).
+pub fn spine_want(rel: array<vec3<f32>, NFEET>, curv: f32, lat: f32, amount: f32) -> Bend {
+    let zm = pivots_mid();
+    var wsum: f32 = 0.0;
+    for (var i: i32 = 0; i < NLEGS; i += 1) { wsum += abs(HEAD[LEG_TOP[i]].z - zm); }
+    var spread: f32 = 0.0;
+    var side: f32 = 0.0;
+    for (var i: i32 = 0; i < NLEGS; i += 1) {
+        let top = LEG_TOP[i];
+        let rest = TAIL[FOOT_BONE[i]] - HEAD[top];
+        let dz = rel[i].z - rest.z;
+        let w = 2.0 * (HEAD[top].z - zm) / max(wsum, 1e-4);
+        spread += w * dz;
+        side += w * dz * sign(HEAD[top].x);
+    }
+    let L = spine_len();
+    var o: Bend;
+    o.flex = -K_SAG * spread / L * amount;
+    o.bend = clamp(-K_LAT * side / L + K_CURVE * curv * L, -MAX_BEND, MAX_BEND) * amount;
+    // Banking into a turn: the side toward the turn goes down (z < 0 lowers the left).
+    o.twist = -K_TWIST * lat / G * amount;
+    return o;
+}
+
+fn ld(st: rw_store<f32, 1>, i: i32) -> vec3<f32> { return vec3<f32>(st[i], st[i + 1], st[i + 2]); }
+fn sv(st: rw_store<f32, 1>, i: i32, v: vec3<f32>) { st[i] = v.x; st[i + 1] = v.y; st[i + 2] = v.z; }
+
+// One step of the spine toward `want`, with the body's vertical
+// acceleration `ay`. State: SPINE_STATE floats at `base`.
+pub fn spine_step(st: rw_store<f32, 1>, base: i32, want: Bend, ay: f32, init: bool, dt: f32) -> Bend {
+    let wv = vec3<f32>(want.flex, want.bend, want.twist);
+    var x = ld(st, base);
+    var v = ld(st, base + 3);
+    if (init) { x = wv; v = vec3<f32>(0.0); }
+    let w = SPINE_TONE * sqrt(G / (0.5 * spine_len()));
+    var a = w * w * (wv - x) - 2.0 * SPINE_DAMPING * w * v;
+    a.x -= SAG_PER_G * w * w * ay / G;
+    v += a * dt;
+    x += v * dt;
+    sv(st, base, x);
+    sv(st, base + 3, v);
+    var o: Bend;
+    o.flex = x.x; o.bend = x.y; o.twist = x.z;
+    return o;
+}
+
+// The bend's angles (x flex, y bend, z twist) at spine bone i (0 the root:
+// tilted back by half).
+pub fn spine_angles(B: Bend, i: i32) -> vec3<f32> {
+    let t = vec3<f32>(B.flex, B.bend, B.twist);
+    if (NSPINE < 2) { return vec3<f32>(0.0); }
+    if (i == 0) { return -0.5 * t; }
+    return t / f32(NSPINE - 1);
+}

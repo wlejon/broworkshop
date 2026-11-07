@@ -1,0 +1,147 @@
+// creature::body — a body whose motion its feet can explain.
+//
+// The centre of mass is a state of its own (position and velocity), moved
+// only by what the feet on the ground can do: with no foot loaded it falls
+// freely; on the ground each loaded leg pushes along its line from the foot
+// to the joint it swings from (a leg ahead of that joint brakes, one behind
+// drives), never pulls, and pushes less as it straightens (a straight leg
+// bears a body weight, a flexed one up to LEG_PUSH), with a little of the
+// hip's torque across the leg, all within friction. The rig asks for a place (its plan: the gait's heights over the
+// ground, its path) and the body steers toward it with the feet's forces:
+// a spring of the legs' stiffness (relative leg stiffness K_REL, as running
+// animals' legs measure, over the mean leg length) where the plan is
+// feasible, and only as far as the feet allow where it is not.
+//
+// A foot's load comes and goes over T_LOAD after it lands and before it
+// lifts, so a touchdown is a loading and a lift-off an unloading, not a jump
+// in what the body can do. Over a stride the pushes must carry the body's
+// weight: the body keeps the share of time its feet are loaded (over about a
+// stride, T_SHARE) and, while loaded, pushes that much more than its weight
+// on top of the steering (a gait with flight pushes harder in stance). The rig places the body's bones about the
+// centre this returns (the pose moved by the gap between it and the plan's).
+module creature::body;
+import creature::common::*;
+import creature::skeleton::*;
+
+pub const BODY_STATE: i32 = 13;
+pub const T_SHARE: f32 = 0.5;    // s over which the share of loaded time is kept
+const G: f32 = 9.81;
+pub const K_REL: f32 = 12.0;     // leg stiffness, in body weights per leg length of compression
+pub const H_RATIO: f32 = 0.5;    // the steering's horizontal frequency over its vertical
+pub const LEG_PUSH: f32 = 2.5;   // body weights one loaded leg can push at most
+pub const MU: f32 = 0.75;        // friction the feet use, at most
+pub const MU_T: f32 = 0.35;      // the push across a leg (hip torque), as a share of its load
+pub const T_LOAD: f32 = 0.04;    // s to load a foot after touchdown, and to unload it before lift-off
+
+// One foot for the body: where it is, the joint its leg swings from, the
+// leg's reach, s since it landed and s until it lifts (large when not
+// lifting), and whether it is down (0 or 1).
+pub struct Foot { at: vec3<f32>, pivot: vec3<f32>, reach: f32, since: f32, left: f32, down: f32 }
+pub struct Support { f: array<Foot, NFEET> }
+// The body's centre, velocity and acceleration, the plan's velocity, and
+// the feet's total load.
+pub struct Body { com: vec3<f32>, vel: vec3<f32>, acc: vec3<f32>, tvel: vec3<f32>, load: f32 }
+
+// The body's vertical steering frequency (rad/s): the legs' spring.
+pub fn body_omega(stiff: f32) -> f32 { return sqrt(stiff * K_REL * G / max(MEAN_LEG, 0.05)); }
+
+pub fn load_of(f: Foot) -> f32 {
+    return f.down * smooth01(f.since / T_LOAD) * smooth01(f.left / T_LOAD);
+}
+
+// The push a leg with load l can give (m/s^2 of the body): a straight leg
+// still bears a body weight (bone on bone), a flexed one up to LEG_PUSH.
+fn leg_cap(f: Foot, l: f32) -> f32 {
+    let ext = length(f.pivot - f.at) / max(f.reach, 0.05);
+    return l * G * (1.0 + (LEG_PUSH - 1.0) * smooth01((1.0 - ext) / 0.1));
+}
+
+// Put the body's state where the rig had to put it (a body held within its
+// legs' reach).
+pub fn body_set(st: rw_store<f32, 1>, base: i32, com: vec3<f32>, vel: vec3<f32>) {
+    sv(st, base, com);
+    sv(st, base + 3, vel);
+}
+
+fn ld(st: rw_store<f32, 1>, i: i32) -> vec3<f32> { return vec3<f32>(st[i], st[i + 1], st[i + 2]); }
+fn sv(st: rw_store<f32, 1>, i: i32, v: vec3<f32>) { st[i] = v.x; st[i + 1] = v.y; st[i + 2] = v.z; }
+
+fn clamp_len(v: vec2<f32>, m: f32) -> vec2<f32> {
+    let l = length(v);
+    if (l > m && l > 1e-6) { return v * (m / l); }
+    return v;
+}
+
+// One step of the centre of mass toward `target` (the plan's centre), the
+// legs `stiff` times K_REL (a walk's legs are near rigid struts the body
+// vaults over, a run's are springs: 1). State: BODY_STATE floats at `base`
+// (centre, velocity, the last target, the loaded share).
+pub fn body_step(st: rw_store<f32, 1>, base: i32, target: vec3<f32>, stiff: f32, S: Support, init: bool, dt: f32) -> Body {
+    var o: Body;
+    if (init) {
+        sv(st, base, target);
+        sv(st, base + 3, vec3<f32>(0.0));
+        sv(st, base + 6, target);
+        st[base + 9] = 1.0;
+        o.com = target; o.vel = vec3<f32>(0.0); o.acc = vec3<f32>(0.0); o.tvel = vec3<f32>(0.0); o.load = 1.0;
+        return o;
+    }
+    var com = ld(st, base);
+    var vel = ld(st, base + 3);
+    let tprev = ld(st, base + 6);
+    let vt = (target - tprev) / max(dt, 1e-5);
+    let wv = body_omega(stiff);
+    let wh = H_RATIO * body_omega(1.0);
+    let e = target - com;
+    let ev = vt - vel;
+    let want = vec3<f32>(wh * wh * e.x + 2.0 * wh * ev.x, wv * wv * e.y + 2.0 * wv * ev.y, wh * wh * e.z + 2.0 * wh * ev.z);
+    // What the loaded feet can do.
+    var cap: f32 = 0.0;
+    var wsum: f32 = 0.0;
+    var load: f32 = 0.0;
+    for (var i: i32 = 0; i < NFEET; i += 1) {
+        let f = S.f[i];
+        let l = load_of(f);
+        if (l <= 0.0) { continue; }
+        let c = leg_cap(f, l);
+        cap += c;
+        wsum += c;
+        load += l;
+    }
+    let held = min(load, 1.0);
+    let share = mix(held, st[base + 9], exp(-dt / T_SHARE));
+    st[base + 9] = share;
+    var a = vec3<f32>(0.0, -G, 0.0);
+    if (cap > 1e-4) {
+        let owed = G * (1.0 / max(share, 0.2) - 1.0) * held;
+        let fz = clamp(want.y + G + owed, 0.0, cap);
+        // Each leg's share of the push, along its line.
+        var hax = vec2<f32>(0.0);
+        for (var i: i32 = 0; i < NFEET; i += 1) {
+            let f = S.f[i];
+            let l = load_of(f);
+            if (l <= 0.0) { continue; }
+            let c = leg_cap(f, l);
+            let u = f.pivot - f.at;
+            let uy = max(u.y, 0.25 * length(u));
+            let fi = fz * (c / wsum) / max(uy, 1e-4);
+            hax += fi * vec2<f32>(u.x, u.z);
+        }
+        let want_h = vec2<f32>(want.x, want.z);
+        var h = hax + clamp_len(want_h - hax, MU_T * fz);
+        h = clamp_len(h, MU * fz);
+        a = vec3<f32>(h.x, fz - G, h.y);
+    }
+    vel += a * dt;
+    com += vel * dt;
+    // A body that strays far from its plan is brought back to it (only a
+    // plan the feet could never follow gets this far).
+    let gap = com - target;
+    let gl = length(gap);
+    if (gl > 0.25) { com = target + gap * (0.25 / gl); }
+    sv(st, base, com);
+    sv(st, base + 3, vel);
+    sv(st, base + 6, target);
+    o.com = com; o.vel = vel; o.acc = a; o.tvel = vt; o.load = load;
+    return o;
+}

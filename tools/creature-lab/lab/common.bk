@@ -13,10 +13,12 @@ pub const TAU: f32 = 6.28318531;
 
 pub fn clamp01(x: f32) -> f32 { return clamp(x, 0.0, 1.0); }
 
-// Hermite smoothstep of x in [0, 1].
+// The quintic smoothstep of x in [0, 1]: no slope and no curvature at
+// either end, so a motion eased by it starts and stops with no jump in its
+// acceleration (a cubic's would leave one: a kink in a joint's velocity).
 pub fn smooth01(x: f32) -> f32 {
     let t = clamp(x, 0.0, 1.0);
-    return t * t * (3.0 - 2.0 * t);
+    return t * t * t * (t * (6.0 * t - 15.0) + 10.0);
 }
 
 pub fn fract01(x: f32) -> f32 { return x - floor(x); }
@@ -80,6 +82,27 @@ pub fn q_xyz(a: vec3<f32>) -> vec4<f32> {
 pub fn q_rot(q: vec4<f32>, v: vec3<f32>) -> vec3<f32> {
     let t = 2.0 * cross(q.xyz, v);
     return v + q.w * t + cross(q.xyz, t);
+}
+
+pub fn q_norm(q: vec4<f32>) -> vec4<f32> { return q / max(length(q), 1e-8); }
+
+// From a toward b by t, along the shorter way (normalised lerp: for the
+// small turns a layer blends, as good as a slerp and cheaper).
+pub fn q_blend(a: vec4<f32>, b: vec4<f32>, t: f32) -> vec4<f32> {
+    var bb = b;
+    if (dot(a, b) < 0.0) { bb = -b; }
+    return q_norm(mix(a, bb, t));
+}
+
+// The shortest rotation taking unit vector a onto unit vector b.
+pub fn q_from_to(a: vec3<f32>, b: vec3<f32>) -> vec4<f32> {
+    let c = dot(a, b);
+    if (c < -0.9999) {
+        var ax = cross(a, vec3<f32>(1.0, 0.0, 0.0));
+        if (dot(ax, ax) < 1e-6) { ax = cross(a, vec3<f32>(0.0, 1.0, 0.0)); }
+        return vec4<f32>(normalize(ax), 0.0);
+    }
+    return q_norm(vec4<f32>(cross(a, b), 1.0 + c));
 }
 
 // The angles of q as R = Rx(x) Ry(y) Rz(z).
@@ -154,6 +177,15 @@ pub fn put_bone(pose: write_store<vec4<f32>, 1>, k: i32, q: vec4<f32>, p: vec3<f
     pose[3 * k] = vec4<f32>(1.0 - 2.0 * (y * y + z * z), 2.0 * (x * y - w * z), 2.0 * (x * z + w * y), p.x);
     pose[3 * k + 1] = vec4<f32>(2.0 * (x * y + w * z), 1.0 - 2.0 * (x * x + z * z), 2.0 * (y * z - w * x), p.y);
     pose[3 * k + 2] = vec4<f32>(2.0 * (x * z - w * y), 2.0 * (y * z + w * x), 1.0 - 2.0 * (x * x + y * y), p.z);
+}
+
+// Smooth value noise in [-1, 1] over t (one knot a unit), from the seed and
+// channel: knots from hash01, joined by smoothstep, so it has no corner.
+pub fn noise1(t: f32, seed: f32, ch: f32) -> f32 {
+    let k = floor(t);
+    let a = hash01(k * 7.13 + seed * 13.7 + ch * 101.3);
+    let b = hash01((k + 1.0) * 7.13 + seed * 13.7 + ch * 101.3);
+    return 2.0 * mix(a, b, smooth01(t - k)) - 1.0;
 }
 
 // A small deterministic hash in [0, 1), without sin: a GPU's sin of a large

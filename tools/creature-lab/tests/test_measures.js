@@ -199,12 +199,18 @@ function turnBone(P, o, b, th) {
 }
 
 await test('natural: a corner in a joint\'s speed is a kink', () => {
-    const tail = deer.skel.bones.find((b) => b.name === 'tail2').index;
-    const t0 = 6, k0 = Math.round(t0 / walk.dt);
-    const spikesAt = (rec) => smoothness(rec).joints.find((j) => j.bone === 'tail2')?.spikes ?? [];
-    const before = spikesAt(walk).filter((s) => Math.abs(s.t - t0) < 0.05).length;
-    // From t0 the tail turns at 4 rad/s: its speed jumps by 230 deg/s in a step.
-    const rec = tampered(walk, (P, k, o) => { if (k > k0) turnBone(P, o, tail, (k - k0) * walk.dt * 4); });
+    // The walk's calmest joint (least acceleration off its neighbours').
+    const name = [...smoothness(walk).joints].sort((a, b) => a.medAcc - b.medAcc)[0].bone;
+    const bone = deer.skel.bones.find((b) => b.name === name).index;
+    const spikesAt = (rec) => smoothness(rec).joints.find((j) => j.bone === name)?.spikes ?? [];
+    // A moment that joint is smooth around (the first after 6 s).
+    const own = spikesAt(walk);
+    let t0 = 6;
+    while (t0 < 8 && own.some((s) => Math.abs(s.t - t0) < 0.08)) t0 = Math.round((t0 + 0.01) * 100) / 100;
+    const k0 = Math.round(t0 / walk.dt);
+    const before = own.filter((s) => Math.abs(s.t - t0) < 0.05).length;
+    // From t0 the bone turns at 4 rad/s: its speed jumps by 230 deg/s in a step.
+    const rec = tampered(walk, (P, k, o) => { if (k > k0) turnBone(P, o, bone, (k - k0) * walk.dt * 4); });
     const after = spikesAt(rec).filter((s) => Math.abs(s.t - t0) < 0.05).length;
     eq(before, 0, 'no kink there before');
     eq(after, 1, 'one kink at the corner');
