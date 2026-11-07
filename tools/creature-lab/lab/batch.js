@@ -17,7 +17,7 @@ export class Batch {
         const nb = creature.skel.count;
         this.intent = new Float32Array(count * INTENT);
         this.intentBuf = bro.kernel.createBuffer(this.intent.byteLength);
-        this.env = new Float32Array(8);
+        this.env = new Float32Array(16);
         this.envBuf = bro.kernel.createBuffer(this.env);
         this.stateBuf = bro.kernel.createBuffer(count * creature.stateStride * 4);
         this.poseBuf = bro.kernel.createBuffer(count * nb * ROWS * 4);

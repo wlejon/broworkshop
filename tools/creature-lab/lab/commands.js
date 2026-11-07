@@ -10,6 +10,7 @@ import { analyze } from "./analyze.js";
 import { turnaroundSheet } from "./turnaround.js";
 import { chartsSheet } from "./charts.js";
 import { trajectorySheet } from "./trajectory.js";
+import { filmSheet } from "./film.js";
 import { rangeSheet } from "./range.js";
 import { restForm, formInMotion } from "./form.js";
 import { compareLookSets } from "/lib/kit/look.js";
@@ -25,6 +26,10 @@ export const HELP = `creature-lab <command> <creature> [scenario ...] [options]
   trajectory  <creature> [scenario ...]    feet, hips, withers, head, tail tip: side, front, top
   range       <creature> [scenario ...]    each joint at min / rest / max, the run's use of it
   charts      <creature> [scenario ...]    footfalls (Hildebrand), joint angles, body height and pitch
+  film        <creature> [scenario ...]    a filmstrip, the head/withers/hips/tail-tip paths over a side
+                                           view, slit-scans through head, withers and tail tip
+                                           (--from <s> --to <s>: the window, 1.5 s mid-run by default;
+                                           --frames <n>)
   metrics     <creature> [scenario ...]    JSON report per scenario, flags printed
   ab          <A> <B> [scenario ...]       the sheets of two versions interleaved / overlaid,
                                            metrics side by side (--diff: pixel diffs via look.js)
@@ -49,7 +54,7 @@ options: --out <dir>  --rows <n>  --seed <n>  --knob NAME=v[,NAME=v] (rig @knob 
 
 export const MOTION = ['walk', 'trot', 'gallop'];
 export const ACTIONS = ['idle', 'graze', 'startle', 'lie-down'];
-export const KINDS = ['turnaround', 'trajectory', 'range', 'charts'];
+export const KINDS = ['turnaround', 'trajectory', 'range', 'charts', 'film'];
 // The natural command's default: the steady gaits, a stop and a turn.
 export const NATURAL = ['walk', 'trot', 'gallop', 'start-stop', 'gaits', 'trot-turn', 'startle'];
 
@@ -107,6 +112,10 @@ export function sheet(kind, recs, path, opt = {}) {
         });
     }
     if (kind === 'trajectory') return trajectorySheet(recs, { path });
+    if (kind === 'film') {
+        return filmSheet(recs[0], { path, from: opt.from !== undefined ? +opt.from : null, to: opt.to !== undefined ? +opt.to : null,
+            frames: opt.frames ? +opt.frames : 14 });
+    }
     if (kind === 'charts') return chartsSheet(recs, { path });
     if (kind === 'range') return rangeSheet(recs[0], analyzeRun(recs[0]), { path });
     throw new Error(`no sheet '${kind}'`);

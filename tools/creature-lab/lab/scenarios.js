@@ -89,8 +89,17 @@ export function scenariosFor(creature) {
     return { ...SCENARIOS, ...((creature && creature.def.scenarios) || {}) };
 }
 
+// The ground record lab/ground.bk reads (16 floats). `g.log`, a round log
+// lying on the ground: { at: [x, z] its middle, yaw (deg) its long axis,
+// height (m, its diameter), length (m) }.
 export function groundEnv(g = {}) {
-    return new Float32Array([(g.slope || 0) * DEG, (g.uphill || 0) * DEG, g.rough || 0, g.wavelength || 1.5, g.seed || 1, g.base || 0, 0, 0]);
+    const e = new Float32Array(16);
+    e.set([(g.slope || 0) * DEG, (g.uphill || 0) * DEG, g.rough || 0, g.wavelength || 1.5, g.seed || 1, g.base || 0, 0, 0]);
+    if (g.log) {
+        const at = g.log.at || [0, 0];
+        e.set([g.log.height || 1, at[0], at[1], (g.log.yaw || 0) * DEG, g.log.length || 4], 8);
+    }
+    return e;
 }
 
 // The intent at every step of a scenario: Float32Array(steps * INTENT).

@@ -122,6 +122,7 @@ $B tools/creature-lab tools/creature-lab/cli.js -- form deer walk trot
 $B tools/creature-lab tools/creature-lab/cli.js -- trajectory deer walk
 $B tools/creature-lab tools/creature-lab/cli.js -- range deer trot
 $B tools/creature-lab tools/creature-lab/cli.js -- charts deer gaits
+$B tools/creature-lab tools/creature-lab/cli.js -- film deer gallop --from 3 --to 4.5
 $B tools/creature-lab tools/creature-lab/cli.js -- metrics deer all
 $B tools/creature-lab tools/creature-lab/cli.js -- snapshot deer before
 $B tools/creature-lab tools/creature-lab/cli.js -- ab deer@before deer walk --diff
@@ -202,6 +203,16 @@ Every output is deterministic. A rerun writes the same bytes.
   - joint angles over the phase, with limit bands
   - hip, withers and head height, pitch, roll and speed
   - steady scenarios are plotted over the phase; other scenarios over time
+- **Film** (`lab/film.js`): motion as the eye judges it, over a window of
+  the run (`--from`, `--to`; 1.5 s mid-run by default).
+  - a filmstrip of `--frames` (14) side views a fixed time apart
+  - a side view along the run's first heading: the creature drawn at five
+    moments where it really was, the head, withers, hips and tail-tip paths
+    over it with a dot every 0.1 s, the terrain and any log on it
+  - slit-scans through the head, withers and tail tip: a vertical slit
+    through the point in the creature's frame, one column a step, the bones
+    crossing it drawn by height, so a bob or a swish reads as a wave and a
+    jerk as a step in it
 - **Metrics JSON** (`lab/analyze.js`):
   - foot slip while planted
   - ground penetration of soles and joints
@@ -305,7 +316,11 @@ A scenario has these parts:
 
 - `about`
 - `duration`
-- `ground`: slope, uphill direction, rough amplitude, wavelength and seed
+- `ground`: slope, uphill direction, rough amplitude, wavelength and seed,
+  and a `log` lying on it (`{ at: [x, z], yaw, height, length }`: round, its
+  height its diameter). Feet find the log in `height`; `terrain` is the
+  ground without it, and `obstacle_ahead` the distance along a direction to
+  where a path crosses it.
 - `start`
 - `track`: keys of speed, heading, turn, face, action, param and gaze, each
   holding from its time on

@@ -6,7 +6,7 @@
 
 import { drawBatch } from "./batch.js";
 import { ROWS } from "./skeleton.js";
-import { groundHeights } from "./run.js";
+import { groundHeights, terrainHeights } from "./run.js";
 import { relativePose, rootOf, toRelative } from "./cycle.js";
 
 const DEG = Math.PI / 180;
@@ -121,10 +121,11 @@ export function groundCells(cells, { len = 2.4, wide = 1.0, z0 = 0.1, step = 0.1
     return new Mesh({ positions: new Float32Array(pos), normals: new Float32Array(nrm), colors: new Float32Array(col), indices: new Uint32Array(idx) });
 }
 
-// The ground height under a step's root.
+// The terrain's height under a step's root (an obstacle under it, a log
+// being leapt, is not the ground the creature is drawn on).
 export function groundUnder(rec, k) {
     const r = rootOf(rec, k);
-    return groundHeights(rec.env, new Float32Array([r.x, r.z]))[0];
+    return terrainHeights(rec.env, new Float32Array([r.x, r.z]))[0];
 }
 
 export { toRelative };

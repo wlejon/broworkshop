@@ -7,6 +7,11 @@
 //   [0] slope angle (rad)        [1] uphill direction (yaw, rad: +Z is 0, +X is pi/2)
 //   [2] roughness amplitude (m)  [3] roughness wavelength (m)
 //   [4] seed                     [5] base height (m)
+//   [6], [7] unused
+//   [8] a log's height (m; 0: no log)   [9], [10] its middle (x, z)
+//   [11] its long axis (yaw, rad)       [12] its length (m)
+// The log is round (its height its diameter) and lies on the ground; it is
+// part of the height a foot finds.
 module creature::ground;
 
 const TAU: f32 = 6.28318531;
@@ -21,7 +26,8 @@ fn rnd(n: f32) -> f32 {
     return p - floor(p);
 }
 
-pub fn height(env: read_store<f32, 1>, x: f32, z: f32) -> f32 {
+// The terrain without the log (what a body rides over; feet find `height`).
+pub fn terrain(env: read_store<f32, 1>, x: f32, z: f32) -> f32 {
     let up = vec2<f32>(sin(env[1]), cos(env[1]));
     var h: f32 = env[5] + tan(env[0]) * (up.x * x + up.y * z);
     let amp = env[2];
@@ -43,6 +49,45 @@ pub fn height(env: read_store<f32, 1>, x: f32, z: f32) -> f32 {
         h += amp * r / norm * 1.6;
     }
     return h;
+}
+
+// Where (x, z) is across and along the log: (distance from its axis, along
+// its axis from its middle).
+fn log_local(env: read_store<f32, 1>, x: f32, z: f32) -> vec2<f32> {
+    let ax = vec2<f32>(sin(env[11]), cos(env[11]));
+    let d = vec2<f32>(x - env[9], z - env[10]);
+    return vec2<f32>(d.x * ax.y - d.y * ax.x, dot(d, ax));
+}
+
+pub fn height(env: read_store<f32, 1>, x: f32, z: f32) -> f32 {
+    var h = terrain(env, x, z);
+    let lh = env[8];
+    if (lh > 0.0) {
+        let r = 0.5 * lh;
+        let q = log_local(env, x, z);
+        if (abs(q.x) < r && abs(q.y) < 0.5 * env[12]) {
+            h = max(h, terrain(env, env[9], env[10]) + r + sqrt(r * r - q.x * q.x));
+        }
+    }
+    return h;
+}
+
+// An obstacle ahead of (x, z) along the unit direction `dir` (x, z): the
+// distance to where the path crosses the log's axis and the log's height,
+// or (1e4, 0) when the path does not meet one ahead.
+pub fn obstacle_ahead(env: read_store<f32, 1>, x: f32, z: f32, dir: vec2<f32>) -> vec2<f32> {
+    let lh = env[8];
+    if (lh <= 0.0) { return vec2<f32>(1e4, 0.0); }
+    let ax = vec2<f32>(sin(env[11]), cos(env[11]));
+    let nrm = vec2<f32>(ax.y, -ax.x);
+    let q = log_local(env, x, z);
+    let rate = dot(dir, nrm);
+    if (abs(rate) < 1e-3) { return vec2<f32>(1e4, 0.0); }
+    let t = -q.x / rate;
+    if (t < -0.5 * lh) { return vec2<f32>(1e4, 0.0); }
+    let along = q.y + t * dot(dir, ax);
+    if (abs(along) > 0.5 * env[12]) { return vec2<f32>(1e4, 0.0); }
+    return vec2<f32>(t, lh);
 }
 
 // The ground's unit normal, by central differences.

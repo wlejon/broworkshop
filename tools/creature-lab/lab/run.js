@@ -37,6 +37,23 @@ export function groundHeights(env, xz) {
     return out;
 }
 
+// The terrain's heights without the obstacles on it (what a body rides over).
+export function terrainHeights(env, xz) {
+    const e = Float32Array.from(env);
+    e[8] = 0;
+    return groundHeights(e, xz);
+}
+
+// The obstacles in a ground record, as boxes in the world: a log's two
+// ends (x0, z0) and (x1, z1) on the terrain at y0, and its height h.
+export function obstaclesOf(env) {
+    if (!env || env.length < 13 || !(env[8] > 0)) return [];
+    const h = env[8], ax = [Math.sin(env[11]), Math.cos(env[11])], half = env[12] / 2;
+    const y0 = terrainHeights(env, new Float32Array([env[9], env[10]]))[0];
+    return [{ kind: 'log', h, y0, x: env[9], z: env[10], yaw: env[11], length: env[12],
+        x0: env[9] - ax[0] * half, z0: env[10] - ax[1] * half, x1: env[9] + ax[0] * half, z1: env[10] + ax[1] * half }];
+}
+
 export function scenarioOf(creature, name) {
     const all = scenariosFor(creature);
     const sc = all[name];
