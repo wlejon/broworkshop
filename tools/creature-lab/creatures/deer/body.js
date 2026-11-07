@@ -55,9 +55,13 @@ export function body(skel) {
         // back to the buttock, hanging along the femur.
         B.blob(`thigh${t}`, `femur${t}`, [0.072 * s, 0.71, -0.47], [0.068, 0.155, 0.19], { dir: [0, -1, 0.25], up: [0, 0, 1], blend: 0.035 });
     }
+    // The neck's base is neck1's from where it leaves the chest: the skin in
+    // front of and above its joint (low in the thoracic inlet, skeleton.js)
+    // goes down with it to graze, folding into the brisket. Left to the
+    // thorax, that skin stood up as a peak under the lowered neck.
     B.limb('neck', ['neck1', 'neck2', 'head'], [
-        { c: [0, 0.78, 0.40], r: [0.10, 0.17], bone: 'thorax' },
-        { c: [0, 0.89, 0.48], r: [0.092, 0.15], bone: [['thorax', 0.5], ['neck1', 0.5]] },
+        { c: [0, 0.78, 0.40], r: [0.10, 0.17], bone: [['thorax', 0.5], ['neck1', 0.5]] },
+        { c: [0, 0.89, 0.48], r: [0.092, 0.15], bone: 'neck1' },
         { c: [0, 1.00, 0.555], r: [0.074, 0.12] },
         { c: [0, 1.10, 0.625], r: [0.062, 0.088] },
         { c: [0, 1.19, 0.67], r: [0.057, 0.074] },

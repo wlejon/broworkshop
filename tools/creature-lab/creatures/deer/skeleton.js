@@ -54,7 +54,12 @@ export const bones = [
       limits: { x: [-14, 14], y: [-12, 12], z: [-8, 8] }, mass: 9 },
     { name: 'thorax', parent: 'lumbar', head: [0, 0.92, 0.12], tail: [0, 0.96, 0.44],
       limits: { x: [-14, 14], y: [-12, 12], z: [-8, 8] }, mass: 15 },
-    { name: 'neck1', parent: 'thorax', head: [0, 0.84, 0.46], tail: [0, 1.05, 0.64],
+    // The neck turns low in the thoracic inlet, near its underside: lowered
+    // to graze (some 80 degrees) the skin of the bend's inside, as far from
+    // the joint as it is below it, sweeps an arc about it, so a joint at
+    // mid-depth swung the throat up into the chest (a notch under the
+    // neck); low, the throat folds into the brisket.
+    { name: 'neck1', parent: 'thorax', head: [0, 0.71, 0.44], tail: [0, 1.05, 0.64],
       limits: { x: [-45, 80], y: [-35, 35], z: [-12, 12] }, mass: 2.5 },
     { name: 'neck2', parent: 'neck1', head: [0, 1.05, 0.64], tail: [0, 1.28, 0.73],
       limits: { x: [-45, 65], y: [-40, 40], z: [-12, 12] }, mass: 2.0 },
