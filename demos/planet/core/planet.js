@@ -21,6 +21,7 @@ import { createAnchors, setAnchorWords } from "/app/core/anchors.js";
 import { constants, readApp, sourcePath, moduleName } from "/app/core/shaders.js";
 import { sunDirection, setNoon } from "/app/core/hour.js";
 import { checkWorld, WORLD_PARTS } from "/app/core/world.js";
+import { createLoading } from "/app/core/loading.js";
 
 const TILE = 32;            // cells along a tile's drawn edge
 const BORDER = 2;           // cells beyond it: the skirts' bottoms, and the detail layer's gradients at the edge
@@ -60,7 +61,14 @@ export async function startPlanet(world) {
     const modules = { ...CORE_MODULES, ...world.modules };
     const sources = { 'core/tiles.bk': { source: readApp('core/tiles.bk'), file: 'core/tiles.bk' }, ...world.kernels };
     const names = Object.keys(sources);
-    const built = await Promise.all(names.map((n) => bro.kernel.compileAsync(sources[n].source, { file: sources[n].file, modules })));
+    const loading = createLoading(world.name);
+    let compiled = 0;
+    loading.compiling(0, names.length);
+    const built = await Promise.all(names.map((n) => bro.kernel.compileAsync(sources[n].source, { file: sources[n].file, modules })
+        .then((m) => { loading.compiling(++compiled, names.length); return m; })));
+    // Making the world runs on this thread: the panel says so first.
+    loading.creating();
+    await new Promise((resolve) => requestAnimationFrame(resolve));
     const kernels = Object.fromEntries(names.map((n, i) => [n, built[i]]));
     const core = kernels['core/tiles.bk'];
     const kHorizon = core.kernel('k_horizon');
@@ -281,6 +289,7 @@ export async function startPlanet(world) {
     const lastStats = { selected: 0, visible: 0 };
     let lastView = null;
     let lastPaint = -1e9, framesSincePaint = 0;
+    let lastPending = -1;
 
     function frame() {
         const f = cameraFrame();
@@ -321,6 +330,10 @@ export async function startPlanet(world) {
         scene.setAtmosphere(atmosphere);
         lastStats.selected = cache.wanted;
         lastStats.visible = n;
+        // The tiles still wanted are the scene's pending work too (its
+        // pendingWork(), perf.settle), and the loading indicators show it.
+        if (cache.pending !== lastPending) scene.setPendingWork('ground tiles', lastPending = cache.pending);
+        loading.frame(scene, cache);
         // Text changes cost the page a layout and raster: a few times a second,
         // or every 60 frames where the frame clock barely moves (headless frames
         // run as fast as they render). (performance.now() is the frame clock: it
@@ -456,7 +469,7 @@ export async function startPlanet(world) {
     // groundModules: the ground hook's modules by name, as given to it (an
     // A/B's set B names what it replaces: perf.compareShaders).
     globalThis.planet = Object.defineProperties({ cam, setHour, ground, groundModules, makeCache, groundHeight, frame, reload,
-                                                  world, kAnchors }, {
+                                                  world, kAnchors, loading }, {
         cache: { get: () => cache, enumerable: true },
         stats: { get: () => lastStats, enumerable: true },
         lastView: { get: () => lastView, enumerable: true },

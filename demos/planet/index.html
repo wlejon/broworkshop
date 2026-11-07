@@ -9,6 +9,32 @@
         .k-hud { width: 300px; }
         .help { color: #888; font-size: 11px; line-height: 1.5; }
         #stats { font-family: monospace; font-size: 11px; color: #9cf; white-space: pre; }
+        /* core/loading.js: the boot panel over the stage, the corner chip after. */
+        #loading {
+            position: fixed; left: 50%; top: 50%; transform: translate(-50%, -50%);
+            width: 360px; padding: 20px 24px; border-radius: 10px;
+            background: rgba(12, 14, 18, 0.88); border: 1px solid var(--k-border);
+            display: flex; flex-direction: column; gap: 8px;
+            opacity: 1; transition: opacity 0.5s ease;
+        }
+        #loading.done { opacity: 0; }
+        #loading .title { font-size: 18px; color: var(--k-text); letter-spacing: 0.04em; }
+        #loading .step { font-size: 13px; color: var(--k-value); }
+        #loading .k-progress { flex: none; height: 6px; }
+        #loading .k-progress > div { transition: width 0.25s ease; background: #6fa8dc; }
+        #loading .detail { font-size: 11px; color: var(--k-dim); min-height: 14px; }
+        #busy {
+            position: fixed; right: 16px; bottom: 16px; padding: 6px 12px 6px 10px;
+            border-radius: 14px; background: rgba(12, 14, 18, 0.8); border: 1px solid var(--k-border);
+            display: flex; align-items: center; gap: 8px; font-size: 11px; color: var(--k-muted);
+        }
+        #busy[hidden] { display: none; }
+        #busy .spin {
+            width: 10px; height: 10px; border-radius: 50%;
+            border: 2px solid var(--k-border-hi); border-top-color: #6fa8dc;
+            animation: busy-spin 0.8s linear infinite;
+        }
+        @keyframes busy-spin { to { transform: rotate(360deg); } }
     </style>
 </head>
 <body>
