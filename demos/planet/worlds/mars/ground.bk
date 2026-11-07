@@ -19,10 +19,13 @@ from planet::noise import simplex_f32;
 from planet::landforms import region, Region, mix_region;
 from planet::volcanoes import volcanoes, Volcano, mix_volcano;
 from planet::relief import relief, relief_tail;
+from planet::valleys import valleys;
 from planet::craters import C0, OCTAVES, SIZE_MAX, octave;
 from planet::canyons import canyons, canyon_field, CanyonField, mix_canyon;
+from planet::outflow import outflow, Outflow, mix_outflow;
 from planet::dunes import dunes, dune_field, DUNE_OCTAVE;
 from planet::frost import frost, frost_left;
+from planet::rocks import rocks, rockiness;
 
 pub struct Ground {
     h: f32,        // metres over the datum
@@ -40,6 +43,7 @@ pub struct Ground {
     ild: f32,      // on the interior layered deposits
     talus: f32,    // on a canyon wall's foot, under the rock fallen from above
     frost: f32,    // under the season's frost (frost.bk)
+    rock: f32,     // under a rock (rocks.bk)
 }
 
 // The beds lie near level, warped by tens of metres over tens of
@@ -75,12 +79,14 @@ struct Broad {
     r: Region,
     v: Volcano,
     c: CanyonField,
+    o: Outflow,
 }
 fn broad_at(up: vec3<f32>, width: f32, seed: i32) -> Broad {
-    return Broad { r: region(up, seed), v: volcanoes(up, width, seed), c: canyon_field(up, seed) };
+    return Broad { r: region(up, seed), v: volcanoes(up, width, seed), c: canyon_field(up, seed), o: outflow(up, seed) };
 }
 fn mix_broad(a: Broad, b: Broad, t: f32) -> Broad {
-    return Broad { r: mix_region(a.r, b.r, t), v: mix_volcano(a.v, b.v, t), c: mix_canyon(a.c, b.c, t) };
+    return Broad { r: mix_region(a.r, b.r, t), v: mix_volcano(a.v, b.v, t), c: mix_canyon(a.c, b.c, t),
+                   o: mix_outflow(a.o, b.o, t) };
 }
 fn broad(a: Anchor, e: vec3<f32>, up: vec3<f32>, radius: f32, width: f32, spacing: f32, seed: i32) -> Broad {
     if (spacing >= BROAD_FINE) { return broad_at(up, width, seed); }
@@ -123,11 +129,15 @@ pub fn ground_at(a: Anchor, e: vec3<f32>, radius: f32, octaves: f32, spacing: f3
     g.ice = r.ice;
     g.polar = r.polar;
     g.volcanic = max(r.volcanic, v.flank);
-    let base = r.h + v.h;
+    // (The outflow channels scoured the landforms before the canyons cut.)
+    let base = r.h + v.h + br.o.cut;
     // The relief: roughest on the ancient highlands, smoothest under dust
     // and on the polar deposits.
     let rough = mix(0.45, 1.2, g.old) * (1.0 - 0.6 * r.polar) * (1.0 - 0.3 * g.dust);
-    var h = relief(a, e, radius, octaves, rough, seed);
+    let rel = relief(a, e, radius, octaves, rough, seed);
+    var h = rel.x;
+    // The valley networks, down the relief's slopes on the old ground.
+    h += valleys(a, e, up, radius, rel.yzw, g.old, width, seed);
 
     // The craters, octave by octave down to those a cell's width keeps
     // nothing of (mean_share 0.04 at a quarter of the width).
@@ -160,7 +170,7 @@ pub fn ground_at(a: Anchor, e: vec3<f32>, radius: f32, octaves: f32, spacing: f3
     g.layered = cy.layered;
     g.ild = cy.ild;
     g.talus = cy.talus;
-    g.floor = clamp(max(floors, cy.floor), 0.0, 1.0);
+    g.floor = clamp(max(max(floors, cy.floor), 0.6 * br.o.floor), 0.0, 1.0);
 
     // The sand: on crater and canyon floors, the great basins' floors and
     // the polar erg; none on the ice or the shields.
@@ -178,6 +188,10 @@ pub fn ground_at(a: Anchor, e: vec3<f32>, radius: f32, octaves: f32, spacing: f3
     }
     // The season's frost, off the dark sand first and over the caps' ice.
     g.frost = frost_left(frost(up, seed), g.sand) * (1.0 - g.ice);
+    // The rocks strewn over it all.
+    let rk = rocks(a, e, up, radius, rockiness(g.fresh, g.talus, g.old, g.dust, g.sand, g.ice), width, seed);
+    h += rk.h;
+    g.rock = rk.cover;
     g.h = h;
     return g;
 }

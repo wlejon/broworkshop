@@ -33,7 +33,8 @@ const MODULES = {
     'planet::landforms': read('landforms.bk'), 'planet::volcanoes': read('volcanoes.bk'),
     'planet::relief': read('relief.bk'), 'planet::craters': read('craters.bk'),
     'planet::canyons': read('canyons.bk'), 'planet::dunes': read('dunes.bk'), 'planet::strata': read('strata.bk'),
-    'planet::frost': read('frost.bk'),
+    'planet::frost': read('frost.bk'), 'planet::rocks': read('rocks.bk'),
+    'planet::valleys': read('valleys.bk'), 'planet::outflow': read('outflow.bk'),
 };
 
 function create(core) {
@@ -102,11 +103,13 @@ export default {
     // A thin CO2 air (Rayleigh some 3.5% of Earth's, its scale height 11 km)
     // carrying fine dust well mixed to the same height (an optical depth of
     // 0.25 at the datum, a clear season's), which scatters the red and
-    // absorbs the blue: a butterscotch sky by day, its light reddened.
+    // absorbs the blue: a butterscotch sky by day, its light reddened. Its
+    // grains, some a micron and a half across, forward-scatter the blue
+    // into a narrower lobe than the red, so a low sun stands in a blue glow.
     atmosphere: {
         rayleigh: [0.20e-6, 0.47e-6, 1.16e-6], rayleighScaleHeight: 11100,
         mieScattering: [2.2e-5, 2.0e-5, 1.67e-5], mieAbsorption: [0.06e-5, 0.27e-5, 0.65e-5],
-        mieG: 0.7, mieScaleHeight: 11100,
+        mieG: [0.66, 0.75, 0.88], mieScaleHeight: 11100,
         ozone: [0, 0, 0], thickness: 120000,
         groundAlbedo: [0.25, 0.14, 0.07], sunAngularRadius: 0.003076,
     },

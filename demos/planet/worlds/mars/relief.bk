@@ -19,6 +19,7 @@ const RELIEF_FALL: f32 = 0.58;
 // Octaves past a cell's own carry on until their mean is nothing (as
 // Earth's: a cell 2.3 wavelengths wide).
 const RELIEF_PAST: f32 = 2.5;
+const SLOPE_LAST: i32 = 7;   // 16 km
 
 // Octave o's amplitude, metres, at a roughness of 1.
 pub fn relief_amp(o: i32) -> f32 {
@@ -30,20 +31,25 @@ pub fn relief_tail(o: i32) -> f32 {
 }
 
 // The relief at offset e from the anchor, over a cell carrying `octaves`,
-// `rough` times the spectrum.
-pub fn relief(a: Anchor, e: vec3<f32>, radius: f32, octaves: f32, rough: f32, seed: i32) -> f32 {
+// `rough` times the spectrum: its height (x) and the gradient of its
+// octaves to SLOPE_LAST (yzw, metres a metre, in the planet's frame): the
+// lie of the land, tens of kilometres across, that water runs down.
+pub fn relief(a: Anchor, e: vec3<f32>, radius: f32, octaves: f32, rough: f32, seed: i32) -> vec4<f32> {
     let past = octaves + RELIEF_PAST;
     let n = min(ceil(past) as i32, RELIEF_LAST);
     var lat = doubled(a.l[S], RELIEF_FIRST);
     var d = e * (radius / BASE_WAVELENGTH) * exp2(RELIEF_FIRST as f32);
-    var sum: f32 = 0.0;
+    var per_m = exp2(RELIEF_FIRST as f32) / BASE_WAVELENGTH;
+    var sum = vec4<f32>(0.0);
     var amp = RELIEF_AMP * rough;
     for (var o: i32 = RELIEF_FIRST; o < n; o += 1) {
         let w = clamp(past - (o as f32), 0.0, 1.0) * mean_factor(o, octaves);
-        sum += simplex_grad(simplex_from(lat, d), seed + 200 + o).x * amp * w;
+        let g = simplex_grad(simplex_from(lat, d), seed + 200 + o);
+        sum += vec4<f32>(g.x, select(o <= SLOPE_LAST, g.yzw * per_m, vec3<f32>(0.0))) * (amp * w);
         amp *= RELIEF_FALL;
         lat = twice(lat);
         d *= 2.0;
+        per_m *= 2.0;
     }
     return sum;
 }

@@ -25,6 +25,7 @@ const WALL_DARK = vec3<f32>(0.10, 0.08, 0.065);  // the plateau's dark lava and 
 const WALL_LIGHT = vec3<f32>(0.30, 0.215, 0.145);
 const TALUS = vec3<f32>(0.20, 0.135, 0.085);     // rock fallen from the walls, dusted
 const EJECTA = vec3<f32>(0.13, 0.095, 0.072);
+const BOULDER = vec3<f32>(0.12, 0.10, 0.085);    // basalt blocks
 const ICE = vec3<f32>(0.84, 0.82, 0.80);
 const FROST = vec3<f32>(0.66, 0.61, 0.57);       // carbon dioxide frost, dusted
 const POLAR = vec3<f32>(0.42, 0.31, 0.22);      // the polar layered deposits' dusty ice
@@ -80,7 +81,9 @@ pub fn surface_colour(g: Ground, slope: f32, vary: f32, span: f32) -> vec3<f32> 
     // than the beds it came from, streaked down its gullies' fans.
     let apron = mix(face, mix(TALUS, DUST, 0.35 + 0.15 * vary), g.talus * (1.0 - 0.6 * cliff));
     let walls = mix(ROCK, apron, g.layered);
-    c = mix(c, walls, max(steep * (1.0 - 0.5 * g.dust), g.layered * mix(0.3, 1.0, steep)));
+    // (Thick dust mantles even steep ground: Olympus's scarp, the shields'
+    // flanks.)
+    c = mix(c, walls, max(steep * (1.0 - 0.8 * g.dust), g.layered * mix(0.3, 1.0, steep)));
     c = mix(c, ROCK, g.wall * 0.35 * (1.0 - dust));
     // The floors of the canyons and the great craters: darker, where sand
     // and rock fallen from the walls lie under less dust.
@@ -92,6 +95,8 @@ pub fn surface_colour(g: Ground, slope: f32, vary: f32, span: f32) -> vec3<f32> 
     // The sand over them all: dark where it moves (the dunes), dustier where
     // it lies still.
     c = mix(c, mix(DARK, RUST, 0.25 * dust), smoothstep(0.3, 0.8, g.sand) * 0.9);
+    // The rocks: dark basalt, their tops dusted as the ground about them.
+    c = mix(c, mix(BOULDER, DUST, 0.3 * dust), g.rock);
     // The season's frost, thinner and dustier in patches.
     c = mix(c, FROST, g.frost * clamp(0.85 + 0.25 * vary, 0.0, 1.0));
     // The caps' ice, its beds faint through it.

@@ -1,6 +1,6 @@
 // Mars's view ladder (core/views.js runs it): the globe over Tharsis and
-// the canyons, Valles Marineris, Olympus Mons, the cratered highlands, a
-// canyon's wall from its floor, the dunes of Hellas's floor and of the
+// the canyons, Valles Marineris, Olympus Mons, the cratered highlands, the
+// outflow channels into Chryse, a canyon's wall from its floor, the dunes of Hellas's floor and of the
 // polar erg, the north cap, and a rover's views of the ground, from orbit
 // to eye height, most in the afternoon, when the sun's slant shows the
 // relief. Coordinates: `lat`, `lon` in radians; `alt` in metres above the
@@ -12,6 +12,7 @@ const SITES = {
     valles: { lat: -14.5 * D, lon: -78 * D, heading: 60 },
     olympus: { lat: 9 * D, lon: -134 * D, heading: 0 },
     highlands: { lat: -15 * D, lon: 45 * D, heading: 20 },
+    chryse: { lat: 2 * D, lon: -36 * D, heading: 0 },
     melas: { lat: -9.6 * D, lon: -74 * D, heading: 0 },
     hellas: { lat: -42.4 * D, lon: 70.5 * D, heading: 30 },
     erg: { lat: 80.5 * D, lon: 160 * D, heading: 0 },
@@ -27,6 +28,7 @@ export const MARS_VIEWS = [
     { name: 'valles', description: 'Valles Marineris from 300 km', ...at('valles', { alt: 3e5, pitch: -30, hour: 'noon+3' }), crops: WIDE },
     { name: 'olympus', description: 'Olympus Mons from 400 km, south of it', ...at('olympus', { alt: 4e5, pitch: -30, hour: 'noon+3.5' }), crops: WIDE },
     { name: 'highlands', description: 'the cratered highlands of Terra Sabaea from 40 km', ...at('highlands', { alt: 4e4, pitch: -50, hour: 'noon+3' }), crops: WIDE },
+    { name: 'outflow', description: 'the outflow channels running north from the chaos into Chryse, from 250 km', ...at('chryse', { alt: 2.5e5, pitch: -40, hour: 'noon+3' }), crops: WIDE },
     { name: 'canyon-wall', description: "Melas Chasma's north wall from 800 m over its floor", ...at('melas', { alt: 800, pitch: -6, hour: 'noon+2' }), crops: LOW },
     { name: 'hellas-dunes', description: "dunes on Hellas's floor from 1.5 km", ...at('hellas', { alt: 1500, pitch: -30, hour: 'noon+3' }), crops: LOW },
     { name: 'erg', description: 'the north polar erg from 2 km', ...at('erg', { alt: 2000, pitch: -25, hour: 'noon+3' }), crops: LOW },
