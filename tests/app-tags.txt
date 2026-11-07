@@ -22,6 +22,9 @@
 #              for a test that itself reaches outside the app, e.g. writes
 #              tests/out under the repo root. Not a stand-in for declaring
 #              what the app needs at run time.
+#   args=ARGS  the app's own arguments (comma-separated), passed after the
+#              script: what the app boots as (a planet world's tests run on
+#              that world).
 
 # --- ML labs: every one loads weights --------------------------------------
 demos/cluster-diar-lab  ml
@@ -85,3 +88,6 @@ tools/procwatch/tests/test_smoke.js         grant=files
 tools/synth/tests/test_synth_ui.js          grant=files
 # reads back the <a download> file bro saved in ~/Downloads
 demos/range-selection-lab/tests/test_tools.js grant=files
+
+# --- a planet world's tests boot that world ----------------------------------
+demos/planet/worlds/mars/tests/*            args=--world=mars

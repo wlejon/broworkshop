@@ -191,6 +191,12 @@ grants_for() {   # grants_for <tags> -> declared[,cap...]
     for w in $1; do case "$w" in grant=*) g="$g,${w#grant=}" ;; esac; done
     echo "$g"
 }
+# The app's own arguments for a run (`args=a[,b]`), after the script: a
+# planet world's tests boot that world (args=--world=mars).
+args_for() {   # args_for <tags> -> words, one per line
+    local w
+    for w in $1; do case "$w" in args=*) echo "${w#args=}" | tr ',' '\n' ;; esac; done
+}
 
 # --- discovery --------------------------------------------------------------
 APPS=()
@@ -318,7 +324,9 @@ for t in "${TARGETS[@]}"; do
     if [ "$kind" = smoke ]; then
         run_timeout KILL "$to" "$HEADLESS" --grant "$grant" "$app" -e "$(smoke_expr "$app")" > "$log" 2>&1
     else
-        run_timeout KILL "$to" "$HEADLESS" --grant "$grant" "$app" "$script" > "$log" 2>&1
+        extra=()
+        while read -r a; do [ -n "$a" ] && extra+=("$a"); done < <(args_for "$tags")
+        run_timeout KILL "$to" "$HEADLESS" --grant "$grant" "$app" "$script" ${extra[@]+"${extra[@]}"} > "$log" 2>&1
     fi
     rc=$?
     secs=$(( $(date +%s) - start ))
