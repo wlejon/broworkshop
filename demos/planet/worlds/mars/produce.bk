@@ -69,7 +69,7 @@ fn put_fields(fields: write_store<vec4<f32>, 1>, at: i32, gr: Ground, vary: f32)
     fields[FIELDS * at] = vec4<f32>(gr.dust, gr.sand, gr.layered, gr.fresh);
     fields[FIELDS * at + 1] = vec4<f32>(gr.ice, gr.polar, gr.wall, vary);
     fields[FIELDS * at + 2] = vec4<f32>(gr.floor, gr.volcanic, gr.old, gr.strat);
-    fields[FIELDS * at + 3] = vec4<f32>(gr.ild, gr.talus, 0.0, 0.0);
+    fields[FIELDS * at + 3] = vec4<f32>(gr.ild, gr.talus, gr.frost, 0.0);
 }
 // The Ground at height h from a texel's fields (x), and its tone's patches (y).
 struct Fields {
@@ -96,6 +96,7 @@ fn get_fields(fields: read_store<vec4<f32>, 1>, at: i32, h: f32) -> Fields {
     gr.strat = fc.w;
     gr.ild = fd.x;
     gr.talus = fd.y;
+    gr.frost = fd.z;
     return Fields { gr: gr, vary: fb.w };
 }
 

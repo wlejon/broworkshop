@@ -103,6 +103,31 @@ export function startPlanet(world) {
     // The world's air about its centre, which moves with the camera (the
     // scene is camera-relative): frame() sets it.
     const atmosphere = { planetRadius: RADIUS, ...world.atmosphere, planetCenter: [0, -RADIUS, 0] };
+    // The air's floor is the datum, or the ground under the camera where
+    // that lies below it (a world whose minHeight is under its datum): the
+    // engine's air lifts an eye under its floor onto it, and draws its
+    // ground for every ray below the floor's horizon, which over low ground
+    // with no lower ground about it was a band of ground colour between the
+    // terrain's horizon and the datum's. Lowered, the air keeps its density
+    // at every height (each medium's coefficients at the new floor are the
+    // datum's times exp(-floor / scale height)).
+    const air = world.atmosphere ?? {};
+    let airFloor = 0;
+    function lowerAir(floor) {
+        if (floor === airFloor) return;
+        airFloor = floor;
+        const scale = (v, h) => {
+            const s = Math.exp(-floor / h);
+            return Array.isArray(v) ? v.map((x) => x * s) : v * s;
+        };
+        const ray = air.rayleighScaleHeight ?? 8000, mie = air.mieScaleHeight ?? 1200;
+        atmosphere.planetRadius = RADIUS + floor;
+        atmosphere.thickness = (air.thickness ?? 100000) - floor;
+        if (air.rayleigh !== undefined) atmosphere.rayleigh = scale(air.rayleigh, ray);
+        if (air.mieScattering !== undefined) atmosphere.mieScattering = scale(air.mieScattering, mie);
+        if (air.mieAbsorption !== undefined) atmosphere.mieAbsorption = scale(air.mieAbsorption, mie);
+        if (typeof air.mie === 'number') atmosphere.mie = scale(air.mie, mie);
+    }
 
     // ── The tile cache ──────────────────────────────────────────────────────
 
@@ -285,6 +310,8 @@ export function startPlanet(world) {
         // The world's systems, about the same camera.
         w.update({ pos: f.pos, alt: cam.alt, surface: f.surface, toSun, camHi, camLo, fwd: f.fwd, cone, view: lastView });
         for (let k = 0; k < 3; k++) atmosphere.planetCenter[k] = -f.pos[k];
+        // (In 50 m steps, so the air's tables are not remade every frame.)
+        lowerAir(Math.round(Math.max(world.minHeight, Math.min(0, f.surface - RADIUS)) / 50) * 50);
         scene.setAtmosphere(atmosphere);
         lastStats.selected = cache.wanted;
         lastStats.visible = n;

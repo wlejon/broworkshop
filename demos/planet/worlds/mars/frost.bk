@@ -1,0 +1,28 @@
+// Mars's seasonal frost: the carbon dioxide frozen out of the air over each
+// pole's winter, which in the world's season (late northern spring, the
+// sun 20 degrees north: world.js noon) still lies over the north down to
+// some 72 N and has begun to settle over the south past 65 S. Its edge
+// is ragged, retreating unevenly over hundreds of kilometres and patchy
+// over tens; and it leaves dark ground first (the dunes' basaltic sand
+// warms and sheds it while the bright ground about it stays frosted), so
+// in the erg the dunes stand dark on white.
+module planet::frost;
+from planet::noise import simplex_f32;
+
+const NORTH_EDGE: f32 = 0.951;   // sin(72 degrees)
+const SOUTH_EDGE: f32 = -0.906;  // sin(-65 degrees)
+
+// The frost's cover at up (a unit direction), 0 none to 1 whole, before
+// the ground under it sheds any.
+pub fn frost(up: vec3<f32>, seed: i32) -> f32 {
+    let ragged = 0.03 * simplex_f32(up * 9.0, seed + 90) + 0.012 * simplex_f32(up * 37.0, seed + 91);
+    let north = smoothstep(NORTH_EDGE - 0.02, NORTH_EDGE + 0.025, up.y + ragged);
+    let south = smoothstep(-SOUTH_EDGE - 0.02, -SOUTH_EDGE + 0.04, -up.y + ragged);
+    return max(north, 0.85 * south);
+}
+
+// What of the frost `cover` remains on ground `sand` deep in dark sand
+// (ground.bk Ground.sand): the dunes shed it first.
+pub fn frost_left(cover: f32, sand: f32) -> f32 {
+    return cover * (1.0 - 0.85 * smoothstep(0.35, 0.75, sand));
+}

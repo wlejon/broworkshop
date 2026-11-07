@@ -21,7 +21,8 @@ from planet::volcanoes import volcanoes, Volcano, mix_volcano;
 from planet::relief import relief, relief_tail;
 from planet::craters import C0, OCTAVES, SIZE_MAX, octave;
 from planet::canyons import canyons, canyon_field, CanyonField, mix_canyon;
-from planet::dunes import dunes, DUNE_OCTAVE;
+from planet::dunes import dunes, dune_field, DUNE_OCTAVE;
+from planet::frost import frost, frost_left;
 
 pub struct Ground {
     h: f32,        // metres over the datum
@@ -38,6 +39,7 @@ pub struct Ground {
     strat: f32,    // the beds' warp: the rock at height h is the beds' at h + strat (strata.bk)
     ild: f32,      // on the interior layered deposits
     talus: f32,    // on a canyon wall's foot, under the rock fallen from above
+    frost: f32,    // under the season's frost (frost.bk)
 }
 
 // The beds lie near level, warped by tens of metres over tens of
@@ -113,7 +115,10 @@ pub fn ground_at(a: Anchor, e: vec3<f32>, radius: f32, octaves: f32, spacing: f3
     let r = br.r;
     let v = br.v;
     var g: Ground;
-    g.old = r.old * (1.0 - 0.9 * v.flank);
+    // The basins' floors and the erg are young: sand and sediment laid over
+    // the craters they had, the small ones buried.
+    let laid = max(r.basin, erg(up));
+    g.old = r.old * (1.0 - 0.9 * v.flank) * (1.0 - 0.5 * laid);
     g.dust = clamp(r.dust + 0.3 * v.flank, 0.0, 1.0);
     g.ice = r.ice;
     g.polar = r.polar;
@@ -135,7 +140,7 @@ pub fn ground_at(a: Anchor, e: vec3<f32>, radius: f32, octaves: f32, spacing: f3
     for (var k: i32 = 0; k < OCTAVES; k += 1) {
         if (SIZE_MAX * size < 0.25 * width) { break; }
         let at = perlin_from(lat, d);
-        let c = octave(at.cell, at.f, up, radius / size, k, size, g.old, width, seed + 1000);
+        let c = octave(at.cell, at.f, up, radius / size, k, size, g.old, 0.9 * laid, width, seed + 1000);
         h += c.h;
         floors = max(floors, c.floor);
         walls = max(walls, c.wall);
@@ -164,7 +169,15 @@ pub fn ground_at(a: Anchor, e: vec3<f32>, radius: f32, octaves: f32, spacing: f3
     // The dunes on it, in their periodic pattern (dunes.bk): lattice C at
     // the dunes' period.
     let pd = perlin_from(doubled(a.l[C], DUNE_OCTAVE), e * (radius / C0) * exp2(DUNE_OCTAVE as f32));
-    h += dunes(pd.f, up, smoothstep(0.2, 0.7, g.sand), width, seed);
+    let deep = smoothstep(0.2, 0.7, g.sand);
+    if (deep > 0.0) {
+        let dn = dunes(pd.f, up, deep, dune_field(a, e, radius, seed), width, seed);
+        h += dn.x;
+        // The dunes' moving sand dark, the ground between them dustier.
+        g.sand = max(g.sand * 0.7, deep * dn.y);
+    }
+    // The season's frost, off the dark sand first and over the caps' ice.
+    g.frost = frost_left(frost(up, seed), g.sand) * (1.0 - g.ice);
     g.h = h;
     return g;
 }

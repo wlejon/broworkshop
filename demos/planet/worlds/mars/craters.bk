@@ -147,11 +147,13 @@ pub fn no_craters() -> Craters {
 // Octave k's craters at the point `f` in lattice cell `cell` (f in [0, 1)
 // a cell, cells `size` metres), on the sphere whose up is `up`, a radius of
 // `rad_cells` cells from the centre, its surface `old` (density), seen
-// through a cell `width` metres wide (0: the point). Their heights add.
+// through a cell `width` metres wide (0: the point), `buried` (0 to 1) the
+// share of the small ones (under some 4 km) lost under sand and sediment
+// laid over them. Their heights add.
 pub fn octave(cell: vec3<i32>, f: vec3<f32>, up: vec3<f32>, rad_cells: f32, k: i32, size: f32, old: f32,
-              width: f32, seed: i32) -> Craters {
+              buried: f32, width: f32, seed: i32) -> Craters {
     var out = no_craters();
-    let p = density(k, old);
+    let p = density(k, old) * (1.0 - buried * smoothstep(7.0, 10.0, k as f32));
     let reach = 0.5;
     // A neighbour cell can hold a crater touching the point only if it lies
     // within `reach` across the surface (0.71 of a cell in all) and the

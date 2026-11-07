@@ -3,8 +3,8 @@
 // regolith, the pale butterscotch of settled dust, the dark basaltic sand
 // of the dunes and the dark regions, the grey of rock the wind scours and
 // the canyons' walls expose, the light-toned layered deposits banded by
-// their beds, fresh ejecta darker than the dust about it, and the polar
-// ice. Each varies over the plains in patches (variation) as the dust lies
+// their beds, fresh ejecta darker than the dust about it, the season's
+// frost and the polar ice. Each varies over the plains in patches (variation) as the dust lies
 // thicker or thinner.
 module planet::surface;
 from planet::noise import simplex_grad;
@@ -25,7 +25,8 @@ const WALL_DARK = vec3<f32>(0.10, 0.08, 0.065);  // the plateau's dark lava and 
 const WALL_LIGHT = vec3<f32>(0.30, 0.215, 0.145);
 const TALUS = vec3<f32>(0.20, 0.135, 0.085);     // rock fallen from the walls, dusted
 const EJECTA = vec3<f32>(0.13, 0.095, 0.072);
-const ICE = vec3<f32>(0.78, 0.74, 0.69);
+const ICE = vec3<f32>(0.84, 0.82, 0.80);
+const FROST = vec3<f32>(0.66, 0.61, 0.57);       // carbon dioxide frost, dusted
 const POLAR = vec3<f32>(0.42, 0.31, 0.22);      // the polar layered deposits' dusty ice
 
 // Patches of the ground's tone, -1 to 1 or so: octaves from 16 km down to
@@ -86,11 +87,15 @@ pub fn surface_colour(g: Ground, slope: f32, vary: f32, span: f32) -> vec3<f32> 
     c = mix(c, mix(DARK, RUST, 0.35), 0.7 * g.floor * (1.0 - steep));
     // Fresh ejecta: dark, the dust not yet settled on it.
     c = mix(c, EJECTA, g.fresh * 0.3 * (1.0 - steep));
-    // The sand: dark where it moves (the dunes), dustier where it lies still.
-    c = mix(c, mix(DARK, RUST, 0.25 * dust), smoothstep(0.3, 0.8, g.sand) * 0.9);
-    // The poles.
+    // The poles' layered deposits.
     c = mix(c, POLAR, g.polar * 0.6 * (1.0 - steep));
+    // The sand over them all: dark where it moves (the dunes), dustier where
+    // it lies still.
+    c = mix(c, mix(DARK, RUST, 0.25 * dust), smoothstep(0.3, 0.8, g.sand) * 0.9);
+    // The season's frost, thinner and dustier in patches.
+    c = mix(c, FROST, g.frost * clamp(0.85 + 0.25 * vary, 0.0, 1.0));
+    // The caps' ice, its beds faint through it.
     let polar_bed = bed_tone(z, 40.0, span, 75);
-    c = mix(c, mix(POLAR, ICE, 0.75 + 0.25 * polar_bed.x), g.ice);
+    c = mix(c, mix(POLAR, ICE, 0.88 + 0.12 * polar_bed.x), g.ice);
     return c;
 }

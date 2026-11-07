@@ -33,6 +33,7 @@ const MODULES = {
     'planet::landforms': read('landforms.bk'), 'planet::volcanoes': read('volcanoes.bk'),
     'planet::relief': read('relief.bk'), 'planet::craters': read('craters.bk'),
     'planet::canyons': read('canyons.bk'), 'planet::dunes': read('dunes.bk'), 'planet::strata': read('strata.bk'),
+    'planet::frost': read('frost.bk'),
 };
 
 function create(core) {
@@ -100,17 +101,17 @@ export default {
     sunIntensity: 55000,
     // A thin CO2 air (Rayleigh some 3.5% of Earth's, its scale height 11 km)
     // carrying fine dust well mixed to the same height (an optical depth of
-    // 0.4), which scatters the red and absorbs the blue: a butterscotch sky
-    // by day, its light reddened.
+    // 0.25 at the datum, a clear season's), which scatters the red and
+    // absorbs the blue: a butterscotch sky by day, its light reddened.
     atmosphere: {
         rayleigh: [0.20e-6, 0.47e-6, 1.16e-6], rayleighScaleHeight: 11100,
-        mieScattering: [3.5e-5, 3.17e-5, 2.65e-5], mieAbsorption: [0.1e-5, 0.43e-5, 1.03e-5],
+        mieScattering: [2.2e-5, 2.0e-5, 1.67e-5], mieAbsorption: [0.06e-5, 0.27e-5, 0.65e-5],
         mieG: 0.7, mieScaleHeight: 11100,
         ozone: [0, 0, 0], thickness: 120000,
         groundAlbedo: [0.25, 0.14, 0.07], sunAngularRadius: 0.003076,
     },
-    // Northern spring: the sun 11.5 degrees north of the equator at noon.
-    noon: [-0.55, -0.2, -0.81],
+    // Late northern spring: the sun 20 degrees north of the equator at noon.
+    noon: [-0.527, -0.342, -0.777],
     start: { lat: -0.087, lon: -1.48, alt: 9.5e6, heading: 0, pitch: -90 },
     views: MARS_VIEWS,
     quickViews: MARS_QUICK_VIEWS,
