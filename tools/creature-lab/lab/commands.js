@@ -13,6 +13,9 @@ import { trajectorySheet } from "./trajectory.js";
 import { rangeSheet } from "./range.js";
 import { restForm, formInMotion } from "./form.js";
 import { compareLookSets } from "/lib/kit/look.js";
+import { scanScenario } from "./finder.js";
+import { finderReport } from "./finder-out.js";
+import { naturalReport } from "./natural-out.js";
 
 export const HELP = `creature-lab <command> <creature> [scenario ...] [options]
 
@@ -26,6 +29,13 @@ export const HELP = `creature-lab <command> <creature> [scenario ...] [options]
                                            metrics side by side (--diff: pixel diffs via look.js)
   form        <creature> [scenario ...]    the body measured: rest girths and extents against the
                                            creature's reference, ring areas and volumes through a cycle
+  finder      <creature> [scenario ...]    hard lines: pieces crossing, folds, creases, outline notches,
+                                           scanned on the mesh and from the live view's cameras; ranks
+                                           every scanned scenario and draws the worst as lit close-ups
+                                           (--rank: rank what is scanned, --top <n>, --every <steps>)
+  natural     <creature> [scenario ...]    motion against principles, no reference: overlap and
+                                           follow-through, secondary motion, the mass's physics,
+                                           smoothness, variety, head stabilisation, arcs
   snapshot    <creature> <label>          copy creatures/<creature> to <creature>@<label> for A/B
   scenarios   <creature>                   list its scenarios
 
@@ -38,6 +48,8 @@ options: --out <dir>  --rows <n>  --seed <n>  --knob NAME=v[,NAME=v] (rig @knob 
 export const MOTION = ['walk', 'trot', 'gallop'];
 export const ACTIONS = ['idle', 'graze', 'startle', 'lie-down'];
 export const KINDS = ['turnaround', 'trajectory', 'range', 'charts'];
+// The natural command's default: the steady gaits, a stop and a turn.
+export const NATURAL = ['walk', 'trot', 'gallop', 'start-stop', 'gaits', 'trot-turn', 'startle'];
 
 export function parseArgs(argv) {
     const pos = [], opt = {};
@@ -144,7 +156,31 @@ export async function runCommand(argv) {
     const written = [];
     const t0 = Date.now();
 
-    if (cmd === 'form') {
+    if (cmd === 'finder') {
+        const fdir = `${dir}/finder`;
+        const fs = require('fs');
+        const todo = opt.rank && !rest.length ? [] : scenarios;
+        for (const sc of todo) {
+            const s = scanScenario(creature, sc, { seed, every: opt.every ? +opt.every : undefined });
+            const path = `${fdir}/scan-${sc}.json`;
+            writeFile(path, JSON.stringify(s) + '\n');
+            written.push(path);
+            const top = new Map();
+            for (const l of s.looks) for (const v of Object.values(l.views)) for (const x of v.sites) top.set(x.key, Math.max(top.get(x.key) || 0, x.score));
+            console.log(`${sc}: ${s.frames.length} frames on the mesh, ${s.looks.length} looked at (${s.ms.total} ms); worst seen: ` +
+                [...top].sort((a, b) => b[1] - a[1]).slice(0, 4).map(([k, v]) => `${k} ${v}`).join(', '));
+        }
+        const scans = fs.existsSync(fdir) ? fs.readdirSync(fdir).filter((f) => /^scan-.*\.json$/.test(f)).sort()
+            .map((f) => JSON.parse(fs.readFileSync(`${fdir}/${f}`, 'utf-8'))) : [];
+        if (!scans.length) throw new Error(`finder: nothing scanned in ${fdir}`);
+        const r = finderReport(creature, scans, fdir, { top: opt.top !== undefined ? +opt.top : 10 });
+        for (const m of r.worst) console.log(`  #${m.rank} ${m.score}  ${m.key}  (${m.scenario} t ${m.t} s, ${m.view}) -> ${m.image}`);
+        written.push(`${fdir}/finder.json`, r.index, ...r.worst.map((m) => m.image), ...r.charts);
+    } else if (cmd === 'natural') {
+        const r = naturalReport(creature, rest.length ? scenarios : NATURAL, `${dir}/natural`, { seed });
+        for (const line of r.lines) console.log(line);
+        written.push(...r.written);
+    } else if (cmd === 'form') {
         const { X, form } = restForm(creature);
         console.log(`rest: ${form.flags.length ? form.flags.length + ' off the reference' : 'on the reference'}`);
         for (const f of form.flags) console.log(`  - ${f}`);

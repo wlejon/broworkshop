@@ -66,8 +66,20 @@ $B tools/creature-lab tools/creature-lab/cli.js -- metrics deer all
 $B tools/creature-lab tools/creature-lab/cli.js -- snapshot deer before
 $B tools/creature-lab tools/creature-lab/cli.js -- ab deer@before deer walk --diff
 $B tools/creature-lab tools/creature-lab/cli.js -- metrics deer trot --knob HEAD_HOLD=0.5
+$B tools/creature-lab tools/creature-lab/cli.js -- finder deer all
+$B tools/creature-lab tools/creature-lab/cli.js -- finder deer gallop --top 0
+$B tools/creature-lab tools/creature-lab/cli.js -- finder deer --rank --top 12
+$B tools/creature-lab tools/creature-lab/cli.js -- natural deer
 $B tools/creature-lab tools/creature-lab/cli.js -- scenarios deer
 ```
+
+`finder` scans each named scenario into `finder/scan-<scenario>.json`
+(about 10 to 20 s a scenario), then ranks every scan in that folder, so
+scenarios can be scanned a few at a time and ranked together. `--rank` with
+no scenario only ranks; `--top <n>` draws that many close-ups (`0` scans
+without drawing); `--every <steps>` sets how often the mesh is measured (4).
+`natural` runs walk, trot, gallop, start-stop, gaits, trot-turn and startle
+by default; the steady gaits run for 20 s so there are cycles to compare.
 
 **Naming creatures and scenarios**
 
@@ -151,6 +163,68 @@ Every output is deterministic. A rerun writes the same bytes.
 
   Parts and rings are named in the body: a loft's `name`, a key ring's
   `name`.
+- **Hard lines** (the `finder` command, `finder/`): where the body shows a
+  line a single skin would not, measured without a reference, so it judges
+  any creature.
+  - Every loft and blob of the sculpt is a piece (`build()` returns
+    `pieces` and each vertex's `piece`; a piece is named by its `name`, else
+    by its kind and last bone). On the skinned mesh of every 4th step
+    (`lab/seams.js`): **crossings**, the curve along which two pieces pass
+    through each other, its length and the angle between the surfaces;
+    **folds**, a piece passing through itself; **creases**, edges sharper
+    than at rest by more than 25 degrees; and **bone pull**, the skin's
+    distance from its main bone against rest. A site's score is its length
+    in cm times its angle over 90 degrees, so every kind ranks against the
+    others. Closed pieces' volumes are followed as a share of rest.
+  - On the image (`lab/shots.js`, `lab/lit.js`): the frames where the mesh
+    is worst, and 8 spread through the run, are drawn lit as the live view
+    lights them (its sun, ambient and shadows) from four cameras round the
+    body. The skin hook's debug views give each pixel its piece, its
+    distance from the eye in cm and its normal (`setDebugView('piece' |
+    'depth' | 'normal')`, `lab/skin.bk`). Seams are two pieces meeting at
+    one depth at an angle of 8 degrees or more; creases are the normal
+    jumping between neighbouring pixels by more than it turns either side;
+    kinks are inward notches of the outline. Each is measured in cm of
+    line on the body and named by the pieces and bone under it.
+  - `finder.json`: the worst moments (one per site, the view that shows it
+    most), every site's worst score per scenario, and the shape without a
+    reference: the pieces, the crossings and folds already there at rest,
+    closed pieces' volume range per scenario, and the worst bone pull.
+  - `worst-NN.png`: a moment as a large lit close-up from the direction that
+    shows the line best, the same with the measured line marked, and the
+    scan view with the site ringed, headed by its measured length, angle,
+    score, scenario and time. `worst.png` is their index;
+    `<scenario>-seams.png` charts the mesh's score through the run with the
+    image's scores on it.
+- **Naturalness** (the `natural` command, `natural/`, `lab/natural.js`):
+  motion judged against principles rather than a reference. Each measure has
+  a threshold (`NATURAL`) and a flag line when it fails.
+  - **Overlap and follow-through**: per bone, the lag of its swing behind its
+    parent's over the mean steady cycle (circular cross-correlation). A
+    bone off the legs moving with its parent at no lag is `locked`.
+  - **Secondary motion**: at each change the intent asks for (a start, a
+    stop, a new speed, a turn, an action), each free bone's angle over the
+    next 1.2 s: its excursion, how far it swings past where it settles,
+    reversals and settling time; `rigid`, `follows` or `momentum`. Also the
+    share of skin on one bone alone.
+  - **The mass's physics**: the centre of mass's acceleration. In flight
+    (no foot down) it must be free fall; with feet down it must not be
+    pulled down faster than gravity nor pushed sideways past friction
+    (mu 1); no flight may gain energy.
+  - **Smoothness**: each joint's angular acceleration against its
+    neighbours two steps off; a spike is a corner in the joint's speed.
+    Kinks a second, per joint and overall, with jerk.
+  - **Variety**: each steady cycle's deviation from the mean cycle, split
+    into slow change (variety: `repeats` under 1% of the range, `wanders`
+    over 12%) and step-to-step noise (`jitters` over 1.5%).
+  - **Head stabilisation**: the head's pitch and yaw against the withers'
+    (0.5 s high-pass): `rides` with the trunk, or `frozen` (under half a
+    degree while the trunk pitches more than 2).
+  - **Arcs**: the swing feet and tracked points over the last cycle in the
+    creature's frame: corners, reversals (going back along a line) and the
+    straight share of the path.
+  - `<scenario>-natural.json` and `<scenario>-natural.png` (a chart per
+    measure and the flags), and `natural.json` with every scenario's flags.
 
 ## Scenarios
 
@@ -197,7 +271,7 @@ Headless runs drive the view through `globalThis.creatureLab`.
 
 ## Tests
 
-`scripts/validate.sh tools/creature-lab` runs the smoke test and three tests:
+`scripts/validate.sh tools/creature-lab` runs the smoke test and four tests:
 
 - `tests/test_oracle.js`:
   - the deer's walk and trot are clean
@@ -215,6 +289,14 @@ Headless runs drive the view through `globalThis.creatureLab`.
   loop (`runFrames`) on a HiDPI display draws an A/B turnaround with a body
   in every cell of its first A and B rows. It writes screenshots to
   `tests/out/shots/`.
+- `tests/test_measures.js`:
+  - two crossing tubes cross along curves of the expected length and angle;
+    parallel tubes draw no line; a closed tube's volume is its prism's
+  - the rest deer's crossings include the neck and every leg into the trunk;
+    the debug views decode, and the image finds the neck-into-trunk line
+  - on a deer walk with a defect put in: a corner in a joint's speed is one
+    kink, noise on a joint jitters, a body lifted along a line gains energy
+    and is off free fall while one lifted on a free-fall arc is not
 
 ## Adding a creature
 
@@ -225,3 +307,6 @@ Headless runs drive the view through `globalThis.creatureLab`.
 3. Name its steady gaits in `cycles` (with references if known) and its
    broken variants.
 4. Run `sheets <name> all` and `metrics <name> all`, and read the sheets.
+5. Run `finder <name> all` and `natural <name>`: both need only the
+   skeleton's feet and tracks (`head` and `withers` for the head measure)
+   and the sculpt's pieces.

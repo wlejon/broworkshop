@@ -75,6 +75,10 @@ export function drawBatch(scene, creature, poseBuf, count, opts = {}) {
     node.cullMargin = 1e5;   // the hook places every vertex
     if (!creature.skinBuf) creature.skinBuf = bro.kernel.createBuffer(creature.body.skin);
     node.setShaderBuffer('skin', creature.skinBuf);
+    if (creature.body.piece) {
+        if (!creature.pieceBuf) creature.pieceBuf = bro.kernel.createBuffer(creature.body.piece);
+        node.setShaderBuffer('piece', creature.pieceBuf);
+    }
     node.setShaderBuffer('pose', poseBuf);
     let rows = opts.rows;
     if (!rows) {

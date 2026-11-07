@@ -56,6 +56,17 @@ export class Sculpt {
         this.pos = []; this.nrm = []; this.col = []; this.idx = []; this.wts = [];
         this.parts = [];
         this.rings = [];
+        this.pieces = [];
+    }
+
+    // Every loft and blob, named or not, as a piece: its vertices and
+    // triangles, for the lab's seam finder (lab/seams.js), which looks for
+    // where separate pieces' surfaces cross.
+    piece(kind, opts, base, start) {
+        const bones = (opts.bones || []).map((b) => (Array.isArray(b) ? b[0] : b));
+        const name = opts.name || `${kind} ${bones.length ? bones[bones.length - 1] : this.pieces.length}`;
+        const taken = this.pieces.filter((p) => p.name === name || p.name.startsWith(name + ' #')).length;
+        this.pieces.push({ name: taken ? `${name} #${taken + 1}` : name, kind, base, count: this.pos.length / 3 - base, start, end: this.idx.length });
     }
 
     candidates(bones) {
@@ -149,6 +160,7 @@ export class Sculpt {
             const k = vi - base;
             return k < n * segs ? Math.floor(k / segs) / (n - 1) : (k === n * segs ? 0 : 1);
         });
+        this.piece('loft', opts, base, start);
         // A named part, and its named rings (a key ring's `name`), for the
         // lab's measures of the body in motion (lab/form.js).
         if (opts.name) {
@@ -178,6 +190,7 @@ export class Sculpt {
             this.idx.push(a, a + segs, b, b, a + segs, b + segs);
         }
         this.part(base, start, opts.color, () => 0);
+        this.piece('blob', opts, base, start);
     }
 
     vertex(p, w) {
@@ -212,6 +225,9 @@ export class Sculpt {
 
     build() {
         const nv = this.pos.length / 3;
+        // Each vertex's piece (the skin hook's `piece` debug view draws it).
+        const piece = new Float32Array(nv);
+        this.pieces.forEach((p, i) => piece.fill(i, p.base, p.base + p.count));
         const skin = new Float32Array(nv * 8);
         for (let v = 0; v < nv; v++) {
             const w = this.wts[v];
@@ -227,7 +243,8 @@ export class Sculpt {
         return {
             mesh, skin, vertices: nv, triangles: this.idx.length / 3,
             positions: new Float32Array(this.pos), indices: new Uint32Array(this.idx), weights: this.wts,
-            parts: this.parts, rings: this.rings,
+            parts: this.parts, rings: this.rings, pieces: this.pieces, piece,
+            normals: new Float32Array(this.nrm),
         };
     }
 }
