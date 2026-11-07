@@ -101,6 +101,7 @@ const SETTLE_T: f32 = 0.34;
 @knob const LIE_WITHERS: f32 = 0.53;   // m the withers rest over the ground, lying
 @knob const REACH_HIND: f32 = 0.835;   // m from the femur head to the toe the hind leg can hold
 @knob const SCAP_FOLLOW: f32 = 0.6;  // of the leg's swing the scapula takes
+@knob const NOD: f32 = 0.0;          // rad the neck dips per loaded fore hoof in a walk
 @knob const VARY: f32 = 1.0;         // share of the individual's wander in speed and heading (0: none)
 @knob const LAYERS: f32 = 1.0;       // the motion layers' share (0: the rig's plan as it is)
 const BREAKOVER: f32 = 0.55;     // rad the hoof rolls onto its toe before lift
@@ -808,7 +809,7 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
     // withers' bob against their slow means (HEAD_HOLD), and the head holds
     // part of its gaze in space (HEAD_SPACE, through creature::secondary),
     // so the head rides steadier than the trunk without being pinned.
-    let pitch_t = pitch + bend.flex * 0.5;
+    let pitch_t = pitch - bend.flex * 0.5;
     var pitch_s = state[s + D_PITCH_S];
     var fy_s = state[s + D_FY_S];
     let fy_a = fy + shift.y;
@@ -820,7 +821,7 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
     let carry_n = (1.0 - graze) * (1.0 - lie) * HEAD_HOLD;
     let steady = carry_n * ((pitch_t - pitch_s) + (fy_a - fy_s) / NECK_LEVER);
     let n_up = alert * (1.0 - graze);
-    let n1_base = gw.x * 0.18 + gw.y * 0.12 + gw.z * 0.38 + 0.05 * nod * gw.x - 0.42 * n_up - 0.15 * lie + steady;
+    let n1_base = gw.x * 0.18 + gw.y * 0.12 + gw.z * 0.38 + NOD * nod * gw.x - 0.42 * n_up - 0.15 * lie + steady;
     let n2_base = gw.x * 0.05 + gw.y * 0.0 + gw.z * 0.12 - 0.22 * n_up;
     let hp_world = mix(gw.x * 0.12 + gw.y * 0.06 + gw.z * 0.2 - 0.15 * n_up + gpitch_s, 1.15, graze);
     let qh = q_mul(q_y(yaw + gyaw_s), q_x(hp_world));

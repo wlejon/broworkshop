@@ -11,9 +11,14 @@
 // The spring is a part's own: its natural frequency is TONE times a
 // pendulum's of the subtree's length r (the distance from the joint to the
 // subtree's centre), w = TONE sqrt(g / r), so its stiffness is the part's
-// mass times w^2, and a heavy long neck swings slower than an ear. DAMPING is
-// the damping ratio of every joint: below 1, a part overshoots and rings
-// down. Nothing in it is a species' number.
+// mass times w^2, and a heavy long neck swings slower than an ear. Nothing in
+// it is a species' number.
+//
+// The damping ratio goes with the part's share of the body's mass: a heavy
+// part (a neck carrying a head) is held by muscle and comes near critical
+// (HEAVY_DAMPING), so a gait's rhythm does not ring it up into a whip; a
+// light one (an ear, a slender tail) keeps LIGHT_DAMPING and swings past
+// where it settles. HEAVY_SHARE is the share at which a part counts as heavy.
 //
 // The damping acts on the motion relative to the target (a joint damps its
 // own bending), inertia on the motion in the world: a part held up by tone
@@ -26,14 +31,21 @@ from creature::ground import terrain;
 
 pub const SEC_REC: i32 = 9;           // per bone: the mass point (3), its velocity (3), its last target (3)
 pub const SEC_STATE: i32 = NB * SEC_REC;
-pub const TONE: f32 = 3.5;
-pub const DAMPING: f32 = 0.4;
+@knob pub const TONE: f32 = 3.5;
+@knob pub const LIGHT_DAMPING: f32 = 0.4;
+@knob pub const HEAVY_DAMPING: f32 = 1.0;
+pub const HEAVY_SHARE: f32 = 0.05;
 const G: f32 = 9.81;
 const REST_CLEAR: f32 = 0.03; // m a resting part's joint keeps over the ground
 
 // A part's natural frequency (rad/s).
 pub fn part_omega(b: i32) -> f32 {
     return TONE * sqrt(G / max(length(SUB_C[b]), 0.02));
+}
+
+// A part's damping ratio, from its share of the body's mass.
+pub fn part_damping(b: i32) -> f32 {
+    return mix(LIGHT_DAMPING, HEAVY_DAMPING, smooth01(SUB_MASS[b] / (TOTAL_MASS * HEAVY_SHARE)));
 }
 
 fn ld(st: rw_store<f32, 1>, i: i32) -> vec3<f32> { return vec3<f32>(st[i], st[i + 1], st[i + 2]); }
@@ -98,6 +110,7 @@ pub fn carry(st: rw_store<f32, 1>, env: read_store<f32, 1>, base: i32, T: Pose, 
             continue;
         }
         let w = part_omega(b);
+        let zeta = part_damping(b);
         let t0 = ld(st, k + 6);
         let vt = (tt - t0) / max(dt, 1e-5);
         var x = ld(st, k);
@@ -108,7 +121,7 @@ pub fn carry(st: rw_store<f32, 1>, env: read_store<f32, 1>, base: i32, T: Pose, 
         for (var i: i32 = 0; i < 8; i += 1) {
             if (f32(i) >= n) { break; }
             let tgt = mix(t0, tt, (f32(i) + 1.0) / n);
-            let a = w * w * (tgt - x) + 2.0 * DAMPING * w * (vt - v);
+            let a = w * w * (tgt - x) + 2.0 * zeta * w * (vt - v);
             v += a * h;
             x += v * h;
         }
