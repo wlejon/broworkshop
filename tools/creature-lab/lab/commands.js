@@ -12,6 +12,7 @@ import { chartsSheet } from "./charts.js";
 import { trajectorySheet } from "./trajectory.js";
 import { filmSheet } from "./film.js";
 import { rangeSheet } from "./range.js";
+import { kinematicsSheet, spacingSheet } from "./kinematics.js";
 import { restForm, formInMotion } from "./form.js";
 import { compareLookSets } from "/lib/kit/look.js";
 import { scanScenario } from "./finder.js";
@@ -30,6 +31,10 @@ export const HELP = `creature-lab <command> <creature> [scenario ...] [options]
                                            view, slit-scans through head, withers and tail tip
                                            (--from <s> --to <s>: the window, 1.5 s mid-run by default;
                                            --frames <n>)
+  kinematics  <creature> [scenario ...]    per leg, each bone's flexion, velocity and acceleration over
+                                           the cycle with contact, lift-off and touchdown; corners in red
+  spacing     <creature> [scenario ...]    toes, leg joints and tracked points at 30 fps (--fps): paths
+                                           with a dot a frame and each frame's step; skips in red
   metrics     <creature> [scenario ...]    JSON report per scenario, flags printed
   ab          <A> <B> [scenario ...]       the sheets of two versions interleaved / overlaid,
                                            metrics side by side (--diff: pixel diffs via look.js)
@@ -54,7 +59,7 @@ options: --out <dir>  --rows <n>  --seed <n>  --knob NAME=v[,NAME=v] (rig @knob 
 
 export const MOTION = ['walk', 'trot', 'gallop'];
 export const ACTIONS = ['idle', 'graze', 'startle', 'lie-down'];
-export const KINDS = ['turnaround', 'trajectory', 'range', 'charts', 'film'];
+export const KINDS = ['turnaround', 'trajectory', 'range', 'charts', 'film', 'kinematics', 'spacing'];
 // The natural command's default: the steady gaits, a stop and a turn.
 export const NATURAL = ['walk', 'trot', 'gallop', 'start-stop', 'gaits', 'trot-turn', 'startle'];
 
@@ -117,6 +122,8 @@ export function sheet(kind, recs, path, opt = {}) {
             frames: opt.frames ? +opt.frames : 14 });
     }
     if (kind === 'charts') return chartsSheet(recs, { path });
+    if (kind === 'kinematics') return kinematicsSheet(recs[0], { path });
+    if (kind === 'spacing') return spacingSheet(recs[0], { path, fps: opt.fps ? +opt.fps : 30 });
     if (kind === 'range') return rangeSheet(recs[0], analyzeRun(recs[0]), { path });
     throw new Error(`no sheet '${kind}'`);
 }
@@ -231,6 +238,12 @@ export async function runCommand(argv) {
                 const s = sheet(kind, [rec], `${dir}/${sc}-${kind}.png`, opt);
                 written.push(s.path);
                 report(sc, s);
+                if (s.json) {
+                    const jp = `${dir}/${sc}-${kind}.json`;
+                    writeFile(jp, json({ creature: creature.label, scenario: sc, ...s.json }));
+                    written.push(jp);
+                    for (const p of (s.json.byPlace || []).slice(0, 8)) console.log(`  - ${p.place}: ${p.count}`);
+                }
             }
         }
     } else if (cmd === 'ab') {

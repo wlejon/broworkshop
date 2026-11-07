@@ -128,6 +128,8 @@ $B tools/creature-lab tools/creature-lab/cli.js -- trajectory deer walk
 $B tools/creature-lab tools/creature-lab/cli.js -- range deer trot
 $B tools/creature-lab tools/creature-lab/cli.js -- charts deer gaits
 $B tools/creature-lab tools/creature-lab/cli.js -- film deer gallop --from 3 --to 4.5
+$B tools/creature-lab tools/creature-lab/cli.js -- kinematics deer walk
+$B tools/creature-lab tools/creature-lab/cli.js -- spacing deer walk --fps 24
 $B tools/creature-lab tools/creature-lab/cli.js -- metrics deer all
 $B tools/creature-lab tools/creature-lab/cli.js -- snapshot deer before
 $B tools/creature-lab tools/creature-lab/cli.js -- ab deer@before deer walk --diff
@@ -218,6 +220,26 @@ Every output is deterministic. A rerun writes the same bytes.
     through the point in the creature's frame, one column a step, the bones
     crossing it drawn by height, so a bob or a swish reads as a wave and a
     jerk as a step in it
+- **Kinematics** (`lab/kinematics.js`): where in a stride the motion jumps.
+  - per leg, each bone's flexion, angular velocity and angular acceleration
+    over the steady cycle (each cycle thin, the mean bold), the leg's measured
+    contact across the top, lift-off (solid) and touchdown (dashed) through
+    every row
+  - the trunk's and the hanging chains' bones the same way, then the tracked
+    points' height and fore-aft place in the creature's frame (a jolt to the
+    whole trunk shows there)
+  - the corners natural.js's smoothness test finds are red ticks;
+    `<scenario>-kinematics.json` lists each with its phase and the nearest
+    event of its leg, and the CLI prints the commonest places
+- **Spacing** (`lab/kinematics.js`): the animator's spacing chart, points
+  sampled at `--fps` (30) over the last steady cycle, so the gap between dots
+  is the speed.
+  - each toe (in the creature's frame and the world's), each leg's middle
+    joint, and the tracked points, along their side-view path, with each
+    frame's step in cm under it
+  - a skip (a frame's step twice the one beside it, over 0.6 cm and a quarter
+    of the point's fastest step: a start or stop with no ease, or a jump) is
+    red; `<scenario>-spacing.json` lists them
 - **Metrics JSON** (`lab/analyze.js`):
   - foot slip while planted
   - ground penetration of soles and joints
