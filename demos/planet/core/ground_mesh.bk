@@ -150,7 +150,29 @@ pub fn vertex(v_in: mesh::Vertex) -> mesh::Vertex {
     let slot = ids.x;
     let cx = i + BORDER;
     let cy = j + BORDER;
-    let c0 = pos_at(slot, cx, cy);
+    var c0 = pos_at(slot, cx, cy);
+    // An edge meeting a coarser tile (the draw list's coarser levels, 4 bits
+    // an edge: x = 0, x = TILE, y = 0, y = TILE) lies on that tile's edge:
+    // a vertex between its every 2^k-th, the coarser tile's own vertices,
+    // on the line between them, so the two meet without a crack.
+    let coarser = tiles[inst * 4 + 1].z;
+    var k: i32 = 0;
+    var along = j;
+    var across = vec2<i32>(0, 1);
+    if (i == 0) { k = coarser & 15; }
+    else if (i == TILE) { k = (coarser >> 4) & 15; }
+    else if (j == 0) { k = (coarser >> 8) & 15; along = i; across = vec2<i32>(1, 0); }
+    else if (j == TILE) { k = (coarser >> 12) & 15; along = i; across = vec2<i32>(1, 0); }
+    // (A corner on two edges is on the coarser grid of both.)
+    if (k > 0) {
+        let step = min(1 << k, TILE);
+        let lo = (along / step) * step;
+        if (lo != along) {
+            let a = pos_at(slot, cx + across.x * (lo - along), cy + across.y * (lo - along));
+            let b = pos_at(slot, cx + across.x * (lo + step - along), cy + across.y * (lo + step - along));
+            c0 = mix(a, b, (along - lo) as f32 / (step as f32));
+        }
+    }
     var c_xyz = c0.xyz;
     let c_w = c0.w;
     // The vertex in the detail layer's texels (core/layers.bk): texel t is

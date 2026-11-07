@@ -34,7 +34,8 @@
 //                 lattice_point and lattice_point_near, where each of its
 //                 lattices lies at a direction). The core's own modules
 //                 (planet::noise, planet::anchor, planet::layers) are the
-//                 world's to import.
+//                 world's to import, and its ground hook's planet::periodic
+//                 (periodic noise at the hook's periodic coordinates).
 //   create(core)  makes the world's half of the planet. `core` is
 //                 { scene, modules (the core's and the world's, by name),
 //                 kAnchors (the f64 anchor kernel), tile (the cache's layout,

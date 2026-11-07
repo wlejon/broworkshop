@@ -1,0 +1,60 @@
+// Periodic Perlin noise for a world's shading of the ground: its lattice
+// repeats every `cells` cells (a power of two), so read at the hook's
+// periodic coordinates (core/ground_mesh.bk: the point modulo DETAIL_PERIOD
+// or FAR_PERIOD, over a wavelength dividing the period) it is the same noise
+// on every tile, with no seam where the coordinates wrap.
+module planet::periodic;
+
+// One of the 12 cube-edge gradients at lattice point c, the lattice
+// periodic over cells (a power of two).
+fn lattice_gradient(c: vec3<i32>, cells: i32, seed: i32) -> vec3<f32> {
+    let m = c & vec3<i32>(cells - 1);
+    let px = m.x as u32;
+    let py = m.y as u32;
+    let pz = m.z as u32;
+    var h = (px * 0x8da6b343u ^ py * 0xd8163841u ^ pz * 0xcb1ab31fu ^ (seed as u32)) * 0x27d4eb2du;
+    h = h ^ (h >> 15u);
+    let e = h % 12u;
+    let s1 = (e & 1u) != 0u ? -1.0 : 1.0;
+    let s2 = (e & 2u) != 0u ? -1.0 : 1.0;
+    let axis = e >> 2u;
+    return axis == 0u ? vec3<f32>(0.0, s1, s2) : (axis == 1u ? vec3<f32>(s1, 0.0, s2) : vec3<f32>(s1, s2, 0.0));
+}
+
+// Perlin noise at x (lattice units) and its gradient: x value, yzw gradient.
+pub fn perlin_grad(x: vec3<f32>, cells: i32, seed: i32) -> vec4<f32> {
+    let fl = floor(x);
+    let i = vec3<i32>(fl.x as i32, fl.y as i32, fl.z as i32);
+    let f = fract(x);
+    let u = f * f * f * (f * (f * 6.0 - 15.0) + 10.0);
+    let du = 30.0 * f * f * (f * (f - 2.0) + 1.0);
+    let ga = lattice_gradient(i, cells, seed);
+    let gb = lattice_gradient(i + vec3<i32>(1, 0, 0), cells, seed);
+    let gc = lattice_gradient(i + vec3<i32>(0, 1, 0), cells, seed);
+    let gd = lattice_gradient(i + vec3<i32>(1, 1, 0), cells, seed);
+    let ge = lattice_gradient(i + vec3<i32>(0, 0, 1), cells, seed);
+    let gf = lattice_gradient(i + vec3<i32>(1, 0, 1), cells, seed);
+    let gg = lattice_gradient(i + vec3<i32>(0, 1, 1), cells, seed);
+    let gh = lattice_gradient(i + vec3<i32>(1, 1, 1), cells, seed);
+    let va = dot(ga, f);
+    let vb = dot(gb, f - vec3<f32>(1.0, 0.0, 0.0));
+    let vc = dot(gc, f - vec3<f32>(0.0, 1.0, 0.0));
+    let vd = dot(gd, f - vec3<f32>(1.0, 1.0, 0.0));
+    let ve = dot(ge, f - vec3<f32>(0.0, 0.0, 1.0));
+    let vf = dot(gf, f - vec3<f32>(1.0, 0.0, 1.0));
+    let vg = dot(gg, f - vec3<f32>(0.0, 1.0, 1.0));
+    let vh = dot(gh, f - vec3<f32>(1.0, 1.0, 1.0));
+    let k1 = vb - va;
+    let k2 = vc - va;
+    let k3 = ve - va;
+    let k4 = va - vb - vc + vd;
+    let k5 = va - vc - ve + vg;
+    let k6 = va - vb - ve + vf;
+    let k7 = -va + vb + vc - vd + ve - vf - vg + vh;
+    let value = va + u.x * k1 + u.y * k2 + u.z * k3 + u.x * u.y * k4 + u.y * u.z * k5 + u.z * u.x * k6 + u.x * u.y * u.z * k7;
+    let grad = ga + u.x * (gb - ga) + u.y * (gc - ga) + u.z * (ge - ga)
+             + u.x * u.y * (ga - gb - gc + gd) + u.y * u.z * (ga - gc - ge + gg) + u.z * u.x * (ga - gb - ge + gf)
+             + u.x * u.y * u.z * (-ga + gb + gc - gd + ge - gf - gg + gh)
+             + du * (vec3<f32>(k1, k2, k3) + u.yzx * vec3<f32>(k4, k5, k6) + u.zxy * vec3<f32>(k6, k4, k5) + u.yzx * u.zxy * k7);
+    return vec4<f32>(value, grad);
+}

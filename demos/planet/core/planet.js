@@ -194,6 +194,7 @@ export function startPlanet(world) {
 
     const groundModules = { tiles: bro.tiles.module, 'planet::ground_layout': GROUND_LAYOUT, 'planet::ground_params': GROUND_PARAMS,
                             'planet::ground_core': readApp('core/ground_core.bk'), 'planet::noise': modules['planet::noise'],
+                            'planet::periodic': readApp('core/periodic.bk'),
                             ...w.ground.modules };
     let ground = null;
     ground = scene.createInstancedMesh({

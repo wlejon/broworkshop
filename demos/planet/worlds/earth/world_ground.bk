@@ -27,7 +27,8 @@ from planet::relief import BASE_WAVELENGTH, RIDGE_LAST, RIDGE_PAST, FINE_FIRST, 
 from planet::noise import simplex_grad, simplex_past, simplex_twice, SimplexAt;
 from planet::tree_crown import tree_shadow, TreePlace;
 from planet::grass_floor import grass_floor, GrassPlace;
-from planet::ground_detail import FLOOR_LAST, FLOOR_RELIEF, perlin_grad, cliff_rock, floor_noise, SeaResult, sea_slope;
+from planet::ground_detail import FLOOR_LAST, FLOOR_RELIEF, cliff_rock, floor_noise, SeaResult, sea_slope;
+from planet::periodic import perlin_grad;
 
 @binding(4, 2) var cloud_ground: texture2d_array<vec4<f32>>;
 @binding(4, 19) var cloud_lookup: read_buffer<vec4<i32>>;

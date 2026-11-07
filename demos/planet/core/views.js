@@ -46,8 +46,9 @@ function arg(name) {
 // The active world's views (its `views` and `quickViews`, worlds/<name>/):
 // each { name, description, lat, lon (radians), alt (metres above the
 // surface), pitch, heading (degrees), hour, crops }, `hour` a number, 'noon'
-// (the sun highest over the site) or 'low' (8 degrees up after noon, the
-// camera turned to face it, for glints).
+// (the sun highest over the site), 'noon+h' (h hours after that; 'noon-h'
+// before) or 'low' (8 degrees up after noon, the camera turned to face it,
+// for glints).
 const worldViews = () => globalThis.planet.world.views;
 const quickViewNames = () => globalThis.planet.world.quickViews;
 
@@ -59,8 +60,11 @@ const frameAt = (lat, lon) => {
     return { up, east, north };
 };
 const dot = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
-// The hour of 'noon' or 'low' over a site.
+// The hour of 'noon', 'noon+h' (h hours after it, or before for 'noon-h')
+// or 'low' over a site.
 function siteHour(lat, lon, which) {
+    const after = /^noon([+-]\d+(?:\.\d+)?)$/.exec(which);
+    if (after) return (siteHour(lat, lon, 'noon') + Number(after[1]) + 24) % 24;
     const up = frameAt(lat, lon).up;
     const el = [];
     for (let h = 0; h < 24; h += 0.02) el.push([h, dot(toSun(h), up)]);
