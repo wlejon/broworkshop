@@ -1,0 +1,273 @@
+// creature::leap — a leap: the last stride's push, a ballistic flight, a
+// landing.
+//
+// A leap is planned from its take-off (tau = 0, the last hind foot leaving
+// the ground). The flight's time is what the rise it must make takes under
+// gravity (over an obstacle: the hips clear its top by CLEAR leg lengths; a
+// bound with nothing to clear: BOUND_RISE), so the take-off's vertical
+// speed and the arc follow from it, and the take-off is where the arc's top
+// comes over the obstacle (the body's middle over its axis).
+//
+// The leap is the gait's own last stride: the rig runs its clock at
+// `leap_stride` times its rate over the strides before (an animal
+// lengthening or shortening its strides to meet its take-off spot) so the
+// hind feet's last stance ends at the take-off, and holds the hind feet down
+// until then, that stance held at least PUSH_T (the clock slower through
+// it). The hips follow quintic Hermites (height, speed and acceleration
+// joined at both ends): from the crouch's start (tcr, as long before the
+// hind feet land as its fall takes) down to the bounce (`push_start`: as
+// low as the push needs, no lower than the legs fold) at the first hind
+// foot's landing (tau = tc), then up to the take-off height at the take-off
+// speed with gravity's acceleration, the hind legs extending through the
+// push. The push and the landing are all-out efforts (`leap_effort`), and
+// the whole leap a deliberate move the body begins as the plan asks
+// (`leap_follow`; both creature::body Support). In the air the rig follows
+// the body itself (creature::body falls freely with no foot loaded); from
+// the fore feet's touchdown the hips are brought back to standing. The
+// trunk pitches up through the push, turns nose-down at a steady rate in
+// the air (its spin from the push), and levels after the landing.
+//
+// The feet (`leap_leg`): the fore feet are in the air at the take-off (in a
+// gallop they leave before the hind feet land) or leave just before it, the
+// hind feet push off together, a little apart; both pairs come down when
+// they can reach the ground (the rig finds the moment from the arc), fore
+// first. Times are in units of the legs' pendulum time sqrt(MEAN_LEG / g).
+module creature::leap;
+import creature::common::*;
+import creature::skeleton::*;
+
+pub const LEAP_STATE: i32 = 19;
+// [0] on (0/1)        [1] tau (s from take-off)   [2] the flight's time
+// [3] take-off vertical speed                       [4] the hips' take-off height (absolute)
+// [5] the hips' height at the crouch's start        [6] its speed then
+// [7] the hips' standing height over the terrain    [8] the terrain under the hips at the start
+// [9] s since the last leap ended                   [10] the fore feet's touchdown (tau)
+// [11] the hind feet's touchdown (tau)              [12] the legs handed back to the gait (0/1)
+// [13] the obstacle's height (0: a bound)           [14] the trunk's pitch rate in the air
+// [15] the hind feet's last landing (tau)           [16] the clock's rate before it
+// [17] the clock's rate from it to the take-off     [18] the crouch's start (tau)
+const G: f32 = 9.81;
+pub const CLEAR: f32 = 0.6;      // leg lengths the hips pass over an obstacle's top
+pub const PUSH_ASK: f32 = 1.0;     // the take-off speed asked over what the rise needs
+pub const EFFORT: f32 = 1.3;       // the take-off's push over a gait's (an all-out effort)
+pub const BOUND_RISE: f32 = 0.42;  // leg lengths the hips rise in a bound with nothing to clear
+pub const PITCH_UP: f32 = 0.22;    // rad the trunk is nose-up at take-off
+pub const PITCH_DOWN: f32 = 0.16;  // rad it is nose-down at the fore touchdown
+pub const STRIDE_MIN: f32 = 0.8;   // the clock's rate a run-up may take, at least
+pub const STRIDE_MAX: f32 = 1.25;  //   and at most
+pub const DEPTH: f32 = 0.22;       // leg lengths below the take-off height the hips go at most (the legs' fold)
+pub const FALL: f32 = 0.5;        // the hips' fall into the bounce, as a share of a free fall's speed
+pub const PUSH_T: f32 = 0.5;       // leg times the hind feet's last stance lasts, at least
+pub const UNLOAD_T: f32 = 0.01;    // s before the take-off the push ends (the hind feet unloading)
+
+// The legs' pendulum time (s).
+pub fn leg_time() -> f32 { return sqrt(max(MEAN_LEG, 0.05) / G); }
+fn absorb_t() -> f32 { return 1.1 * leg_time(); }
+
+pub struct Leap { on: bool, tau: f32, tf: f32, vy: f32, h_take: f32, h0: f32, v0: f32, h_stand: f32,
+                  ground: f32, since: f32, fl: f32, hl: f32, legs_back: bool, obst: f32, spin: f32,
+                  tc: f32, rate: f32, prate: f32, tcr: f32 }
+
+pub fn leap_load(st: rw_store<f32, 1>, b: i32) -> Leap {
+    var o: Leap;
+    o.on = st[b] > 0.5; o.tau = st[b + 1]; o.tf = st[b + 2]; o.vy = st[b + 3]; o.h_take = st[b + 4];
+    o.h0 = st[b + 5]; o.v0 = st[b + 6]; o.h_stand = st[b + 7]; o.ground = st[b + 8]; o.since = st[b + 9];
+    o.fl = st[b + 10]; o.hl = st[b + 11]; o.legs_back = st[b + 12] > 0.5; o.obst = st[b + 13]; o.spin = st[b + 14];
+    o.tc = st[b + 15]; o.rate = st[b + 16]; o.prate = st[b + 17]; o.tcr = st[b + 18];
+    return o;
+}
+
+pub fn leap_store(st: rw_store<f32, 1>, b: i32, o: Leap) {
+    st[b] = 0.0;
+    if (o.on) { st[b] = 1.0; }
+    st[b + 1] = o.tau; st[b + 2] = o.tf; st[b + 3] = o.vy; st[b + 4] = o.h_take;
+    st[b + 5] = o.h0; st[b + 6] = o.v0; st[b + 7] = o.h_stand; st[b + 8] = o.ground; st[b + 9] = o.since;
+    st[b + 10] = o.fl; st[b + 11] = o.hl;
+    st[b + 12] = 0.0;
+    if (o.legs_back) { st[b + 12] = 1.0; }
+    st[b + 13] = o.obst; st[b + 14] = o.spin; st[b + 15] = o.tc; st[b + 16] = o.rate; st[b + 17] = o.prate; st[b + 18] = o.tcr;
+}
+
+// The hind feet's last stance is a bounce: from their landing (tc) to
+// UNLOAD_T before the take-off they stop the hips' fall and turn it into the
+// take-off speed at a steady acceleration. The hips come to it falling as
+// they would from the crouch's start (a share FALL of a free fall's speed),
+// and from as high as that bounce needs: (height, speed) at tc.
+pub fn push_time(o: Leap) -> f32 { return max(-o.tc - UNLOAD_T, 0.06); }
+pub fn push_start(o: Leap) -> vec2<f32> {
+    let T = push_time(o);
+    let top = flight_hip(o, -UNLOAD_T);
+    let v1 = o.vy + G * UNLOAD_T;
+    var vf: f32 = -1.0;
+    var hc: f32 = top;
+    for (var i: i32 = 0; i < 3; i += 1) {
+        hc = max(top - 0.5 * (vf + v1) * T, o.h_take - DEPTH * MEAN_LEG);
+        vf = -FALL * sqrt(2.0 * G * max(o.h0 - hc, 0.0));
+    }
+    return vec2<f32>(hc, vf);
+}
+// The crouch: from its start (tcr) down to the bounce, about as long as the
+// fall would take.
+fn crouch_time(o: Leap) -> f32 {
+    let s = push_start(o);
+    return clamp(2.0 * max(o.h0 - s.x, 0.0) / max(-s.y, 0.3), 0.1, 0.8);
+}
+
+// The flight's time for a rise of the hips (m) from take-off to the top.
+pub fn flight_time(rise: f32) -> f32 { return 2.0 * sqrt(2.0 * max(rise, 0.02) / G); }
+
+// The rise a leap must make: over an obstacle of height `obst` (m, on
+// terrain `ground`; 0: a bound) from a take-off height `h_take`.
+pub fn leap_rise(obst: f32, ground: f32, h_take: f32) -> f32 {
+    if (obst <= 0.0) { return BOUND_RISE * MEAN_LEG; }
+    return max(ground + obst + CLEAR * MEAN_LEG - h_take, BOUND_RISE * MEAN_LEG);
+}
+
+// How far before an obstacle's axis the hips take off, going at `speed`,
+// for the arc's top to be over it with the body's middle (`mid` m ahead of
+// the hips).
+pub fn leap_lead(tf: f32, speed: f32, mid: f32) -> f32 { return 0.5 * speed * tf + mid; }
+
+// The run-up's clock: `c` cycles until the clock's take-off beat, the
+// take-off `dist` m ahead at `speed`, the clock at `freq`: the rate (within
+// STRIDE_MIN..STRIDE_MAX) that brings the beat to the spot after a whole
+// number of further strides, and the cycles until it then: (rate, cycles),
+// or rate 0 if none does.
+pub fn leap_stride(c: f32, dist: f32, speed: f32, freq: f32) -> vec2<f32> {
+    let strides = dist * freq / max(speed, 0.1);
+    let n = max(floor(strides - c + 0.5), 0.0);
+    let rate = (c + n) / max(strides, 1e-3);
+    if (rate < STRIDE_MIN || rate > STRIDE_MAX) { return vec2<f32>(0.0, c); }
+    return vec2<f32>(rate, c + n);
+}
+
+// A leap begun now, `c` of the clock's cycles before its take-off beat, the
+// hind feet's last stance the last `dc` of them, the clock at `freq` times
+// `rate`. The stance is held for at least PUSH_T (a gallop's is too short to
+// push a body up a metre): the clock runs slower through it (prate).
+pub fn leap_begin(o: Leap, obst: f32, ground: f32, h_stand: f32, h_take: f32, h_now: f32, v_now: f32,
+                  c: f32, dc: f32, freq: f32, rate: f32) -> Leap {
+    var r = o;
+    r.on = true;
+    let tp = max(dc / (freq * rate), PUSH_T * leg_time());
+    r.rate = rate;
+    r.prate = dc / (freq * tp);
+    let before = max(c - dc, 0.0) / (freq * rate);
+    r.tau = -(before + min(c, dc) / (freq * r.prate));
+    r.tc = -min(c, dc) / (freq * r.prate);
+    r.obst = obst;
+    r.ground = ground;
+    r.h_stand = h_stand;
+    r.h_take = h_take;
+    let rise = leap_rise(obst, ground, h_take);
+    r.tf = flight_time(rise);
+    // The push asks for a little more than the rise needs (the body may
+    // fall a little short of it).
+    r.vy = PUSH_ASK * sqrt(2.0 * G * rise);
+    r.h0 = h_now;
+    r.v0 = v_now;
+    // The crouch begins as long before the hind feet land as its fall takes
+    // (in the stride before when it is deep).
+    r.tcr = max(r.tc - crouch_time(r), r.tau);
+    r.legs_back = false;
+    r.spin = -(PITCH_UP + PITCH_DOWN) / max(r.tf, 0.1);
+    r.fl = r.tf - 0.2 * leg_time();
+    r.hl = r.tf + 0.22 * leg_time();
+    return r;
+}
+
+// The flight from the take-off as the push left the body: the hips at `h`
+// rising at `vy`, no faster than the push asked (the steering's overshoot
+// is taken back, the push ending as it was asked) and no slower than 0.5
+// m/s.
+pub fn leap_takeoff(o: Leap, h: f32, vy: f32) -> Leap {
+    var r = o;
+    r.vy = clamp(vy, 0.5, o.vy);
+    r.tf = (r.vy + sqrt(max(r.vy * r.vy + 2.0 * G * (h - o.h_take), 0.0))) / G;
+    r.h_take = h;
+    return r;
+}
+
+// Quintic Hermite from (p0, v0, a0) to (p1, v1, a1) over T at t: (p, v).
+pub fn hermite5(p0: f32, v0: f32, a0: f32, p1: f32, v1: f32, a1: f32, T: f32, t: f32) -> vec2<f32> {
+    let s = clamp(t / max(T, 1e-4), 0.0, 1.0);
+    let s2 = s * s;
+    let s3 = s2 * s;
+    let s4 = s3 * s;
+    let s5 = s4 * s;
+    let h0 = 1.0 - 10.0 * s3 + 15.0 * s4 - 6.0 * s5;
+    let h1 = s - 6.0 * s3 + 8.0 * s4 - 3.0 * s5;
+    let h2 = 0.5 * s2 - 1.5 * s3 + 1.5 * s4 - 0.5 * s5;
+    let h3 = 0.5 * s3 - s4 + 0.5 * s5;
+    let h4 = -4.0 * s3 + 7.0 * s4 - 3.0 * s5;
+    let h5 = 10.0 * s3 - 15.0 * s4 + 6.0 * s5;
+    let d0 = -30.0 * s2 + 60.0 * s3 - 30.0 * s4;
+    let d1 = 1.0 - 18.0 * s2 + 32.0 * s3 - 15.0 * s4;
+    let d2 = s - 4.5 * s2 + 6.0 * s3 - 2.5 * s4;
+    let d3 = 1.5 * s2 - 4.0 * s3 + 2.5 * s4;
+    let d4 = -12.0 * s2 + 28.0 * s3 - 15.0 * s4;
+    let d5 = 30.0 * s2 - 60.0 * s3 + 30.0 * s4;
+    let TT = T * T;
+    let p = h0 * p0 + h1 * v0 * T + h2 * a0 * TT + h3 * a1 * TT + h4 * v1 * T + h5 * p1;
+    let v = (d0 * p0 + d1 * v0 * T + d2 * a0 * TT + d3 * a1 * TT + d4 * v1 * T + d5 * p1) / max(T, 1e-4);
+    return vec2<f32>(p, v);
+}
+
+// The feet's flight: (lift, land) in .z, .w (.x, .y unused); `side` 0 or 1.
+// A fore foot still down leaves just before the take-off.
+pub fn leap_leg(o: Leap, hind: bool, side: f32) -> vec4<f32> {
+    let tl = leg_time();
+    if (hind) { return vec4<f32>(0.0, 0.0, 0.03 * side * tl, o.hl + 0.08 * side * tl); }
+    return vec4<f32>(0.0, 0.0, o.tc + 0.04 * side * tl, o.fl + 0.16 * side * tl);
+}
+
+// The hips' height and the trunk's pitch on the flight's arc at tau = t.
+pub fn flight_hip(o: Leap, t: f32) -> f32 { return o.h_take + o.vy * t - 0.5 * G * t * t; }
+pub fn flight_pitch(o: Leap, t: f32) -> f32 { return PITCH_UP + o.spin * t; }
+
+// The legs' effort (creature::body Support): all-out, EFFORT, from the hind
+// feet's last landing to the take-off and from the fore feet's touchdown
+// through the landing's absorb; a gait's otherwise.
+pub fn leap_effort(o: Leap) -> f32 {
+    if (o.on && o.tau >= o.tc - 0.05 && o.tau < 0.05) { return EFFORT; }
+    if (o.on && o.tau >= fore_down(o) - 0.05) { return EFFORT; }
+    return 1.0;
+}
+// The body's lead on the plan (creature::body Support): a leap, from the
+// run-up's paced strides to the landing's end, is a deliberate move.
+pub fn leap_follow(o: Leap) -> f32 {
+    if (o.on) { return 1.0; }
+    return 0.0;
+}
+
+// When the fore feet touch down and when the legs go back to the gait.
+pub fn fore_down(o: Leap) -> f32 { return leap_leg(o, false, 0.0).w; }
+pub fn legs_done(o: Leap) -> f32 { return leap_leg(o, true, 1.0).w + 0.05 * leg_time(); }
+pub fn leap_end(o: Leap) -> f32 { return max(fore_down(o) + absorb_t(), legs_done(o)); }
+
+// The hips' planned height and its speed at the leap's tau: the push from
+// the crouch's start, the arc, and from the fore touchdown the return to
+// standing over `land_ground` (the terrain under the hips now).
+pub fn leap_hip(o: Leap, land_ground: f32) -> vec2<f32> {
+    if (o.tau < 0.0) {
+        // The crouch down to the stroke's bottom, then the push up it.
+        // The push ends UNLOAD_T before the take-off: the hind feet unload
+        // over it (creature::body T_LOAD), the hips already on the arc.
+        let tu = UNLOAD_T;
+        if (o.tau >= -tu) { return vec2<f32>(flight_hip(o, o.tau), o.vy - G * o.tau); }
+        let s = push_start(o);
+        if (o.tau < o.tc) { return hermite5(o.h0, o.v0, 0.0, s.x, s.y, 0.0, o.tc - o.tcr, o.tau - o.tcr); }
+        return hermite5(s.x, s.y, 0.0, flight_hip(o, -tu), o.vy + G * tu, -G, push_time(o), o.tau - o.tc);
+    }
+    let fd = fore_down(o);
+    if (o.tau < fd) { return vec2<f32>(flight_hip(o, o.tau), o.vy - G * o.tau); }
+    return hermite5(flight_hip(o, fd), o.vy - G * fd, -G, land_ground + o.h_stand, 0.0, 0.0, absorb_t(), o.tau - fd);
+}
+
+// The trunk's planned pitch (rad, nose up) and its rate at tau.
+pub fn leap_pitch(o: Leap) -> vec2<f32> {
+    if (o.tau < 0.0) { return hermite5(0.0, 0.0, 0.0, PITCH_UP, o.spin, 0.0, -o.tcr, o.tau - o.tcr); }
+    let fd = fore_down(o);
+    if (o.tau < fd) { return vec2<f32>(flight_pitch(o, o.tau), o.spin); }
+    return hermite5(flight_pitch(o, fd), o.spin, 0.0, 0.0, 0.0, 0.0, absorb_t(), o.tau - fd);
+}

@@ -14,8 +14,8 @@ module `creature::contract`.
 
 - **Intent in** (`INTENT` floats a creature): wanted velocity, a heading or a
   face-the-way-it-moves flag, a gaze point and its weight, an action (`move`,
-  `graze`, `startle`, `lie`, `alert`) with its amount, and the individual's
-  seed.
+  `graze`, `startle`, `lie`, `alert`, `bound`: go by leaps, as an escape)
+  with its amount, and the individual's seed.
 - **Ground**: the `env` record. A rig asks `creature::ground`'s `height` and
   `normal` for the ground under it (`lab/ground.bk`): planes, slopes, and
   rough ground from a hash that agrees between GPU and CPU.
@@ -23,8 +23,8 @@ module `creature::contract`.
   contract's: position, yaw, and whether it has been placed.
 - **Pose out**: bones x 3 `vec4` per creature, written to the pose buffer.
 - **Telemetry out** (`TELE` floats): position, yaw, speed, gait, phase,
-  action, body height, pitch, roll, stride frequency, and per foot whether it
-  is planted and where.
+  action, body height, pitch, roll, stride frequency, the time into a leap,
+  and per foot whether it is planted and where.
 
 One rig dispatch (`@kernel @grid(1) k_rig`) steps every creature of a batch
 once. Skinning is an instanced mesh's brokernel vertex hook (`lab/skin.bk`)
@@ -53,7 +53,8 @@ legs' bone):
 | Module | What |
 |--------|------|
 | `creature::pose` (`lab/pose.bk`) | `Pose`: every bone's world rotation and head; points on bones, local rotations, the centre of mass, writing a pose out |
-| `creature::body` (`lab/body.bk`) | the centre of mass as a state of its own, moved only by what the loaded feet can push: each leg along its line from foot to swing joint, push only, more as it flexes, a little across it, within friction; free fall with no foot down. `body_step(plan, stiffness, Support)` steers it toward the rig's plan; a foot loads and unloads over 40 ms, and a gait with flight pushes harder in stance to carry its weight over the stride |
+| `creature::body` (`lab/body.bk`) | the centre of mass as a state of its own, moved only by what the loaded feet can push: each leg along its line from foot to swing joint, push only, more as it flexes, a little across it, within friction; free fall with no foot down. `body_step(plan, stiffness, Support)` steers it toward the rig's plan; a foot loads and unloads over 40 ms, and a gait with flight pushes harder in stance to carry its weight over the stride. `Support.effort` above 1 is an all-out push (each leg pushes that much more, nearly to full reach); `Support.lead` feeds the plan's vertical acceleration forward, for a deliberate move whose push begins when it is asked rather than when the body has fallen behind |
+| `creature::leap` (`lab/leap.bk`) | a leap from a gait: the run-up's strides paced so the hind feet's last stance ends at the take-off spot, a crouch onto the hind legs and an all-out push held long enough to lift the body, a ballistic flight whose height clears an obstacle (or a bound's rise with none), the trunk pitching nose-up to nose-down, and a landing absorbed fore first. `leap_begin`, `leap_hip` and `leap_pitch` give the plan, `leap_leg` each foot's lift and touchdown, `leap_effort` and `leap_follow` the body's Support; times scale with the legs' pendulum time |
 | `creature::spine` (`lab/spine.bk`) | the back's flex, bend and twist from what the legs do: flexed by the feet's spread along the body (most in a gait whose pairs swing together), bent into a turn's curve and toward gathered feet, twisted by sideways acceleration, hollowed by the body's vertical acceleration; each a spring of the trunk's frequency |
 | `creature::secondary` (`lab/secondary.bk`) | every dangling chain (neck, head, ears, tail) carried by its momentum: the subtree's centre of mass on a spring and damper toward where the rig puts it, its frequency from the part's size, joint limits eased into; `hold` keeps part of a bone's world rotation (a head steadied in space but not pinned) |
 
@@ -68,7 +69,8 @@ body moves about), so the body's own motion shows against it.
 
 The reference creature is `deer`: a deer-sized quadruped with spine, neck,
 head, ears and tail. Its gaits are walk, trot and gallop, and its actions are
-idle, graze, startle and lie down. `hexa` is an invented one with no
+idle, graze, startle, lie down and bound; from a gallop it leaps a log in its
+path (`creature::leap`). `hexa` is an invented one with no
 reference behind it: six legs on a tripod walk, a long tail and a heavy head.
 
 ## Bodies: masses blended into one skin
@@ -326,7 +328,9 @@ A scenario has these parts:
   holding from its time on
 
 A creature's `scenarios.js` adds its own, such as the deer's
-`browse-and-flee`.
+`browse-and-flee`, `leap` (a run-up at 5 m/s, a leap over a 1 m log, the
+run-out) and `startle-bound` (grazing, startled, escaping in bounds, then
+galloping on).
 
 ## Live view
 

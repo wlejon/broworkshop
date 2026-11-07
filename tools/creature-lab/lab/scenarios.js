@@ -7,7 +7,7 @@
 //   heading   degrees (0 is +Z, 90 is +X)
 //   turn      degrees a second the heading turns, from the key on
 //   face      degrees: hold this facing (turning in place), or null to face the way it moves
-//   action    'move' | 'graze' | 'startle' | 'lie' | 'alert'
+//   action    'move' | 'graze' | 'startle' | 'lie' | 'alert' | 'bound'
 //   param     the action's amount
 //   gaze      [x, y, z] to look at, or null
 // ground: { slope (deg), uphill (deg), rough (m), wavelength (m), seed }.

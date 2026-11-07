@@ -96,9 +96,10 @@ export function filmSheet(rec, { path, from = null, to = null, frames = 14, titl
     const gpts = [];
     for (let k = k0; k <= k1; k += 2) { const r = rootOf(rec, k); gpts.push(sp(WF.at([r.x, groundUnder(rec, k), r.z]))); }
     poly(g, gpts, DIM, 1.5);
+    // A log is seen end on, as it lies across the path: a circle.
     for (const ob of obstaclesOf(rec.env)) {
-        const a = sp(WF.at([ob.x0, ob.y0, ob.z0])), b = sp(WF.at([ob.x1, ob.y0 + ob.h, ob.z1]));
-        rect(g, Math.min(a[0], b[0]), Math.min(a[1], b[1]), Math.abs(b[0] - a[0]) || 3, Math.abs(b[1] - a[1]), 'rgba(122,90,60,0.55)', '#5a4030');
+        const c = sp(WF.at([ob.x, ob.y0 + ob.h / 2, ob.z]));
+        dot(g, c[0], c[1], (ob.h / 2) * kp, 'rgba(122,90,60,0.45)', '#5a4030');
     }
     skel.tracks.forEach((t, i) => {
         const col = TRACK_COLORS[t.name] || SERIES[i % SERIES.length];

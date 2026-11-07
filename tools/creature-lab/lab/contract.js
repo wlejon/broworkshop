@@ -29,8 +29,9 @@ export const I = {
     SEED: 10,                    // the individual's seed
 };
 
-export const ACTION = { MOVE: 0, GRAZE: 1, STARTLE: 2, LIE: 3, ALERT: 4 };
-export const ACTION_NAMES = ['move', 'graze', 'startle', 'lie', 'alert'];
+// BOUND: go by leaps (every stride a leap, as an escape), not by a gait.
+export const ACTION = { MOVE: 0, GRAZE: 1, STARTLE: 2, LIE: 3, ALERT: 4, BOUND: 5 };
+export const ACTION_NAMES = ['move', 'graze', 'startle', 'lie', 'alert', 'bound'];
 
 export const STATE_HEADER = { POS: 0, YAW: 3, PLACED: 4 };
 
@@ -44,6 +45,7 @@ export const T = {
     HEIGHT: 8,        // the body's height over the ground under it
     PITCH: 9, ROLL: 10,
     FREQ: 11,         // strides a second
+    LEAP: 12,         // in a leap: s from its take-off plus 10 (0: not leaping)
     FOOT: 16,         // per foot k at FOOT + 4k: planted (0/1), then where (x, y, z)
 };
 
