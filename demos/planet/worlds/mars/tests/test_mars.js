@@ -3,9 +3,12 @@
 // to nothing in it), and a coarse cell holds the mean of the cells three
 // octaves finer covering it (refine, never replace).
 //   Run: scripts/validate.sh demos/planet/worlds/mars/tests/test_mars.js
-import { check, frames, test, done, tier } from "/lib/kit/test.js";
+import { check, frames, test, done, tier, waitFor } from "/lib/kit/test.js";
 import { readApp } from "/app/core/shaders.js";
 import { applyPlanetView, settlePlanetView } from "/app/core/views.js";
+
+// The planet starts once its kernels have compiled (core/planet.js startPlanet).
+waitFor(() => globalThis.planet, 'the planet to start', 120000);
 
 const RADIUS = 3389500, SEED = 11, BASE_WAVELENGTH = 2097152;
 const modules = { 'planet::anchor': readApp('core/anchor.bk'), 'planet::layers': readApp('core/layers.bk'),

@@ -1,6 +1,9 @@
 // Planet — boots, fills its tile cache, and refines as the camera descends.
 //   Run: scripts/validate.sh demos/planet
-import { check, frames, test, done } from "/lib/kit/test.js";
+import { check, frames, test, done, waitFor } from "/lib/kit/test.js";
+
+// The planet starts once its kernels have compiled (core/planet.js startPlanet).
+waitFor(() => globalThis.planet, 'the planet to start', 120000);
 
 // Production spends the gap 360 fps frames leave (about a millisecond), so
 // a jump from orbit to 3 km takes a few hundred frames to refine. A level's

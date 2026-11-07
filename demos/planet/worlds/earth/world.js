@@ -38,7 +38,7 @@ const MODULES = {
 function create(core) {
     const { scene, modules, kAnchors } = core;
     const { TILE, BORDER, CELLS, DETAIL, TEXELS, HZ_GRID, CAPACITY, MAX_LEVEL, PRODUCE_PER_UPDATE } = core.tile;
-    const compile = (f) => bro.kernel.compile(read(f), { file: DIR + f, modules });
+    const compile = (f) => core.kernels[f];
 
     const mod = compile('produce.bk');
     const rivers = createRivers(compile('riverbuild.bk'), RADIUS, SEED);
@@ -263,5 +263,7 @@ export default {
     views: EARTH_VIEWS,
     quickViews: EARTH_QUICK_VIEWS,
     modules: MODULES,
+    kernels: Object.fromEntries(['produce.bk', 'riverbuild.bk', 'clouds.bk', 'sun.bk', 'grass.bk', 'trees.bk']
+        .map((f) => [f, { source: read(f), file: DIR + f }])),
     create,
 };

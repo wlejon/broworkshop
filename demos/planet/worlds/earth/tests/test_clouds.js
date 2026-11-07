@@ -5,9 +5,12 @@
 // logistic over its unresolved variance). And the ground's light cache
 // holds, where a tile is drawn, what the light is at that point.
 //   Run: scripts/validate.sh demos/planet
-import { check, frames, test, done, tier } from "/lib/kit/test.js";
+import { check, frames, test, done, tier, waitFor } from "/lib/kit/test.js";
 import { GROUND_LIGHT, CLOUD_DETAIL_VAR } from "/app/worlds/earth/clouds.js";
 import { readApp as readAppPath, sourcePath } from "/app/core/shaders.js";
+
+// The planet starts once its kernels have compiled (core/planet.js startPlanet).
+waitFor(() => globalThis.planet, 'the planet to start', 120000);
 
 const fs = require('fs');
 // A file by its path from the app's folder, or a .bk file's name alone (the

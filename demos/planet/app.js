@@ -15,4 +15,4 @@ const name = arg ? String(arg).slice('--world='.length) : 'earth';
 // The world's modules resolve from its folder (planet::<name>, shaders.js).
 setWorld(name);
 const { default: world } = await import(`/app/worlds/${name}.js`);
-startPlanet(world);
+await startPlanet(world);

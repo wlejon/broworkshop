@@ -6,8 +6,11 @@
 // cover it. The bias (a systematic shift) must be near zero; the spread is
 // the detail the finer cells add, zero-mean, and must stay small.
 //   Run: scripts/validate.sh demos/planet/worlds/earth/tests/test_refine.js
-import { check, test, done, tier } from "/lib/kit/test.js";
+import { check, test, done, tier, waitFor } from "/lib/kit/test.js";
 import { readApp as readAppPath, sourcePath } from "/app/core/shaders.js";
+
+// The planet starts once its kernels have compiled (core/planet.js startPlanet).
+waitFor(() => globalThis.planet, 'the planet to start', 120000);
 
 const fs = require('fs');
 // A file by its path from the app's folder, or a .bk file's name alone (the

@@ -52,11 +52,17 @@ function groundParams(fields) {
 }
 
 // Start the planet of `world` (core/world.js) on the page's #stage canvas.
-export function startPlanet(world) {
+// The core's kernels and the world's compile together, each on a thread of
+// its own (bro.kernel.compileAsync), before the world is made.
+export async function startPlanet(world) {
     checkWorld(world);
     const RADIUS = world.radius;
     const modules = { ...CORE_MODULES, ...world.modules };
-    const core = bro.kernel.compile(readApp('core/tiles.bk'), { file: 'core/tiles.bk', modules });
+    const sources = { 'core/tiles.bk': { source: readApp('core/tiles.bk'), file: 'core/tiles.bk' }, ...world.kernels };
+    const names = Object.keys(sources);
+    const built = await Promise.all(names.map((n) => bro.kernel.compileAsync(sources[n].source, { file: sources[n].file, modules })));
+    const kernels = Object.fromEntries(names.map((n, i) => [n, built[i]]));
+    const core = kernels['core/tiles.bk'];
     const kHorizon = core.kernel('k_horizon');
     const kRange = core.kernel('k_range');
     const kAnchors = core.kernel('k_anchors');
@@ -69,7 +75,7 @@ export function startPlanet(world) {
 
     const canvas = document.querySelector('#stage');
     const scene = canvas.getContext('scene');
-    const w = world.create({ scene, modules, kAnchors, tile: TILE_LAYOUT });
+    const w = world.create({ scene, modules, kernels, kAnchors, tile: TILE_LAYOUT });
     for (const k of WORLD_PARTS) {
         if (w[k] === undefined) throw new Error(`planet: the world ${world.name}'s create() gave no ${k}`);
     }

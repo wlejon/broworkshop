@@ -36,8 +36,13 @@
 //                 (planet::noise, planet::anchor, planet::layers) are the
 //                 world's to import, and its ground hook's planet::periodic
 //                 (periodic noise at the hook's periodic coordinates).
+//   kernels       { 'produce.bk': { source, file }, ... }: the files of its
+//                 kernels, which the core compiles together with its own
+//                 (bro.kernel.compileAsync, in parallel) before create
 //   create(core)  makes the world's half of the planet. `core` is
 //                 { scene, modules (the core's and the world's, by name),
+//                 kernels (its compiled kernels' modules, by the names in
+//                 `kernels`),
 //                 kAnchors (the f64 anchor kernel), tile (the cache's layout,
 //                 core/planet.js TILE_LAYOUT) }. It returns:
 //     layers        the tile layers it adds, { name: bytes a cell }
@@ -78,7 +83,7 @@
 //                   on globalThis.planet (Earth's clouds, grass, trees,
 //                   rivers)
 
-const REQUIRED = ['name', 'radius', 'minHeight', 'maxHeight', 'sunIntensity', 'atmosphere', 'views', 'quickViews', 'modules', 'create'];
+const REQUIRED = ['name', 'radius', 'minHeight', 'maxHeight', 'sunIntensity', 'atmosphere', 'views', 'quickViews', 'modules', 'kernels', 'create'];
 
 export function checkWorld(world) {
     for (const k of REQUIRED) {

@@ -40,7 +40,7 @@ const MODULES = {
 function create(core) {
     const { modules } = core;
     const { TILE, BORDER, DETAIL, TEXELS, HZ_GRID, MAX_LEVEL, PRODUCE_PER_UPDATE } = core.tile;
-    const compile = (f) => bro.kernel.compile(read(f), { file: DIR + f, modules });
+    const compile = (f) => core.kernels[f];
 
     const mod = compile('produce.bk');
     const kTile = mod.kernel('k_tile');
@@ -119,5 +119,6 @@ export default {
     views: MARS_VIEWS,
     quickViews: MARS_QUICK_VIEWS,
     modules: MODULES,
+    kernels: { 'produce.bk': { source: read('produce.bk'), file: DIR + 'produce.bk' } },
     create,
 };
