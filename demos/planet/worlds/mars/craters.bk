@@ -1,7 +1,6 @@
 // Mars's crater system: impact craters at every scale, from basins hundreds
-// of kilometres wide down to metre pits, the same craters whether the
-// ground's tiles hold them in their cells and texels (produce.bk) or the
-// ground's shader adds them per pixel (world_ground.bk).
+// of kilometres wide down to metre pits, the same craters in every tile's
+// cells and texels (produce.bk), however coarse.
 //
 // Octave k is a 3D grid of cells C0 / 2^k wide about the planet's centre
 // (world_lattice.bk's lattice C, doubled k times: exact at every scale).
@@ -16,9 +15,10 @@
 //
 // Each crater's profile is zero-mean over its reach: what the bowl takes
 // out stands in its rim and ejecta (profile_rim), so craters too small for
-// a cell average to nothing in it, and a cell holds the mean of the craters
-// it does resolve by the share of each its width leaves (mean_share). A
-// coarse cell is the aggregate of the fine ones, never a different ground.
+// a cell average to nothing in it, and a cell holds each crater's profile
+// as its box sees it (seen: the profile blurred by the cell's width, which
+// fills the bowl from the rim and spreads the rim). A coarse cell is the
+// aggregate of the fine ones, never a different ground.
 module planet::craters;
 
 pub const C0: f32 = 1048576.0;   // octave 0's cell, metres (lattice C's)
@@ -120,28 +120,65 @@ pub fn profile(s: Shape, x: f32) -> vec2<f32> {
 }
 // The share of a crater a cell `width` metres wide holds about its centre:
 // the profile seen through the cell's box, about a Gaussian of its
-// variance, over the crater's own (a bump of R / 2).
+// variance, over the crater's own (a bump of R / 2). It weighs the shares
+// that colour the ground.
 pub fn mean_share(diameter: f32, width: f32) -> f32 {
     let r = width / diameter;
     return 1.0 / (1.0 + 1.33 * r * r);
 }
 
+// I0(z) e^-z, the scaled modified Bessel function of order zero
+// (Abramowitz and Stegun 9.8.1 and 9.8.2).
+fn i0e(z: f32) -> f32 {
+    if (z < 3.75) {
+        let t = z * z / 14.0625;
+        let i0 = 1.0 + t * (3.5156229 + t * (3.0899424 + t * (1.2067492 + t * (0.2659732 + t * (0.0360768 + t * 0.0045813)))));
+        return i0 * exp(-z);
+    }
+    let u = 3.75 / z;
+    let p = 0.39894228 + u * (0.01328592 + u * (0.00225319 + u * (-0.00157565 + u * (0.00916281
+            + u * (-0.02057706 + u * (0.02635537 + u * (-0.01647633 + u * 0.00392377)))))));
+    return p / sqrt(z);
+}
+// A cell's box blurs a crater about a Gaussian of the box's variance:
+// sigma (radii) is width / sqrt(12) over the radius. Under this the profile
+// is taken as it is.
+const SHARP: f32 = 0.02;
+const SEEN_STEPS: i32 = 16;
+// The profile at x seen through a Gaussian `sigma` radii wide: about the
+// circle of radius x, the ring at r weighs exp(-(x - r)^2 / 2 sigma^2)
+// I0e(x r / sigma^2) r, summed over the rings within 3 sigma.
+pub fn seen(s: Shape, x: f32, sigma: f32) -> f32 {
+    if (sigma < SHARP) { return profile(s, x).x; }
+    let lo = max(x - 3.0 * sigma, 0.0);
+    let hi = x + 3.0 * sigma;
+    let dr = (hi - lo) / (SEEN_STEPS as f32);
+    let inv = 1.0 / (sigma * sigma);
+    var sum: f32 = 0.0;
+    var weight: f32 = 0.0;
+    for (var i: i32 = 0; i < SEEN_STEPS; i += 1) {
+        let r = lo + ((i as f32) + 0.5) * dr;
+        let w = exp(-0.5 * (x - r) * (x - r) * inv) * i0e(x * r * inv) * r;
+        if (r < REACH) { sum += profile(s, r).x * w; }
+        weight += w;
+    }
+    return sum / max(weight, 1e-20);
+}
+
 // ── The craters about a point ───────────────────────────────────────────────
 
-// What the craters of one octave make at a point: the height (m), its
-// gradient across the surface (m/m, along the lattice's axes, tangent to
-// the sphere), and the shares that colour the ground: under a crater's
-// floor (sand gathers there in craters a few kilometres and wider), on its
-// walls, and over a fresh crater's ejecta.
+// What the craters of one octave make at a point: the height (m), and the
+// shares that colour the ground: under a crater's floor (sand gathers there
+// in craters a few kilometres and wider), on its walls, and over a fresh
+// crater's ejecta.
 pub struct Craters {
     h: f32,
-    grad: vec3<f32>,
     floor: f32,
     wall: f32,
     fresh: f32,
 }
 pub fn no_craters() -> Craters {
-    return Craters { h: 0.0, grad: vec3<f32>(0.0), floor: 0.0, wall: 0.0, fresh: 0.0 };
+    return Craters { h: 0.0, floor: 0.0, wall: 0.0, fresh: 0.0 };
 }
 
 // Octave k's craters at the point `f` in lattice cell `cell` (f in [0, 1)
@@ -187,16 +224,14 @@ pub fn octave(cell: vec3<i32>, f: vec3<f32>, up: vec3<f32>, rad_cells: f32, k: i
                 let diameter = SIZE_MAX * size * exp2(-1.3 * hs.y);
                 let radius = 0.5 * diameter / size;   // in cells
                 let x = sqrt(s2) / radius;
-                if (x >= REACH) { continue; }
+                // The box's blur, in radii.
+                let sigma = 0.57735 * width / diameter;
+                if (x >= REACH + 3.0 * sigma) { continue; }
                 let worn = wear(hs.z, old);
                 let sh = shape(diameter, worn);
                 let m = mean_share(diameter, width);
-                let pr = profile(sh, x) * m;
-                out.h += pr.x;
-                // d h / d (metres) away from the centre: -dt / |dt|.
-                if (s2 > 1e-12) {
-                    out.grad -= dt * (pr.y / (radius * size * sqrt(s2)));
-                }
+                out.h += seen(sh, x, sigma);
+                if (x >= REACH) { continue; }
                 let inner = 1.0 - smoothstep(max(sh.f, 0.35), 0.95, x);
                 out.floor += inner * smoothstep(1500.0, 5000.0, diameter) * (1.0 - 0.6 * worn) * m;
                 out.wall += smoothstep(max(sh.f, 0.3), 0.95, x) * (1.0 - smoothstep(1.0, 1.15, x)) * (1.0 - worn) * m;

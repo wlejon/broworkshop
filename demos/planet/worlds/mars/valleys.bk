@@ -13,10 +13,11 @@
 // floors: the networks branch (after Johansen's erosion filter, 2023).
 // Only where the ground slopes and only on old ground.
 //
-// The waves are zero-mean, and a cell too coarse to see an octave holds
-// none of it (share), so a coarse cell is the aggregate of its valleys.
+// A cell holds of each octave what its box keeps of a wave that long
+// (valley_share), down the same lines whatever it keeps, so a coarse cell
+// is the aggregate of its valleys.
 module planet::valleys;
-from planet::anchor import Anchor, doubled, twice, perlin_from;
+from planet::anchor import Anchor, PerlinAt, doubled, twice, perlin_from;
 from planet::world_lattice import C;
 from planet::craters import C0;
 
@@ -44,10 +45,31 @@ fn site(c: vec3<i32>, k: i32, seed: i32) -> vec3<f32> {
 }
 
 // The share of an octave's valleys `cell` metres apart a cell `width`
-// metres wide keeps.
+// metres wide keeps: a wave of wavelength `cell` seen through a Gaussian of
+// the box's variance (width^2 / 12), exp(-pi^2 r^2 / 6).
 fn valley_share(width: f32, cell: f32) -> f32 {
     let r = width / cell;
-    return exp(-6.0 * r * r);
+    return exp(-1.6449341 * r * r);
+}
+
+// Octave k's wave at the point `at` (its cell and the point in it), its
+// crests along `across`: its height (x, -1 to 1) and slope along across
+// (y, a radian of phase): the mean of the waves through the 3 x 3 x 3
+// cells' points, each weighted by its distance to the point.
+fn wave(at: PerlinAt, across: vec3<f32>, k: i32, seed: i32) -> vec2<f32> {
+    var sum = vec2<f32>(0.0);
+    var weight: f32 = 0.0;
+    for (var i: i32 = 0; i < 27; i += 1) {
+        let o = vec3<i32>(i % 3 - 1, (i / 3) % 3 - 1, i / 9 - 1);
+        let pp = at.f - (vec3<f32>(o.x as f32, o.y as f32, o.z as f32) + site(at.cell + o, k, seed + 1700));
+        // (Weighted by the whole distance, so a point leaving the 3 x 3 x 3
+        // cells as the point moves weighs next to nothing.)
+        let w = exp(-4.0 * dot(pp, pp));
+        let ph = TAU * dot(pp, across);
+        sum += vec2<f32>(cos(ph), -sin(ph)) * w;
+        weight += w;
+    }
+    return sum / max(weight, 1e-6);
 }
 
 // The valleys' height (m) at offset e from the anchor on the ground whose up
@@ -67,30 +89,17 @@ pub fn valleys(a: Anchor, e: vec3<f32>, up: vec3<f32>, radius: f32, grad: vec3<f
         let share = valley_share(width, cell);
         if (share < 0.01) { break; }
         let slope = length(g);
-        let amp = 0.5 * VALLEY_DEPTH[k - VALLEY_FIRST] * strength * share * smoothstep(0.002, 0.012, slope);
-        if (amp > 0.01) {
+        // (The slopes the finer octaves run down are the whole valleys',
+        // whatever the cell keeps of them, so every cell lays its gullies
+        // along the same lines.)
+        let amp = 0.5 * VALLEY_DEPTH[k - VALLEY_FIRST] * strength * smoothstep(0.002, 0.012, slope);
+        if (amp * share > 0.01) {
             // Across the fall line: the waves' crests run down it.
             let across = cross(up, g / slope);
-            let at = perlin_from(lat, d);
-            var wave: f32 = 0.0;
-            var dwave: f32 = 0.0;
-            var weight: f32 = 0.0;
-            for (var i: i32 = 0; i < 27; i += 1) {
-                let o = vec3<i32>(i % 3 - 1, (i / 3) % 3 - 1, i / 9 - 1);
-                let pp = at.f - (vec3<f32>(o.x as f32, o.y as f32, o.z as f32) + site(at.cell + o, k, seed + 1700));
-                // (Weighted by the whole distance, so a point leaving the
-                // 3 x 3 x 3 cells as the point moves weighs next to nothing.)
-                let w = exp(-4.0 * dot(pp, pp));
-                let ph = TAU * dot(pp, across);
-                wave += cos(ph) * w;
-                dwave -= sin(ph) * w;
-                weight += w;
-            }
-            wave /= max(weight, 1e-6);
-            dwave /= max(weight, 1e-6);
-            sum += amp * wave;
+            let wv = wave(perlin_from(lat, d), across, k, seed);
+            sum += amp * share * wv.x;
             // The next octave runs down this one's valley sides.
-            g += across * (amp * dwave * TAU / cell);
+            g += across * (amp * wv.y * TAU / cell);
         }
         lat = twice(lat);
         d *= 2.0;

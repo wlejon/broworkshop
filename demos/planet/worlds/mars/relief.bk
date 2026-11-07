@@ -4,13 +4,14 @@
 // octave, so the slopes steepen toward the small scales: the rubble and
 // rough lava of a rover's view), and how rough the ground is scales it:
 // the ancient highlands most, the dusty plains and the polar deposits least.
-// Each octave's share is its mean over the cell (scale.bk mean_factor), so
-// a coarse cell holds the mean of the fine ones.
+// Each octave's share is its mean over the cell (scale.bk mean_factor),
+// those about the cell's width read at the cell's four quarters, each its
+// own mean, so a coarse cell holds the mean of the fine ones.
 module planet::relief;
 from planet::noise import simplex_grad;
 from planet::anchor import Anchor, doubled, twice, simplex_from;
 from planet::world_lattice import S;
-from planet::scale import BASE_WAVELENGTH, mean_factor;
+from planet::scale import BASE_WAVELENGTH, mean_factor, cell_width;
 
 pub const RELIEF_FIRST: i32 = 3;
 pub const RELIEF_LAST: i32 = 22;
@@ -20,6 +21,9 @@ const RELIEF_FALL: f32 = 0.58;
 // Earth's: a cell 2.3 wavelengths wide).
 const RELIEF_PAST: f32 = 2.5;
 const SLOPE_LAST: i32 = 7;   // 16 km
+// An octave whose mean over the cell keeps more than this of it is read at
+// the point; the rest, at the cell's quarters.
+const SAMPLED: f32 = 0.9;
 
 // Octave o's amplitude, metres, at a roughness of 1.
 pub fn relief_amp(o: i32) -> f32 {
@@ -36,16 +40,33 @@ pub fn relief_tail(o: i32) -> f32 {
 // lie of the land, tens of kilometres across, that water runs down.
 pub fn relief(a: Anchor, e: vec3<f32>, radius: f32, octaves: f32, rough: f32, seed: i32) -> vec4<f32> {
     let past = octaves + RELIEF_PAST;
-    let n = min(ceil(past) as i32, RELIEF_LAST);
+    let n = min(ceil(past + 1.0) as i32, RELIEF_LAST);
     var lat = doubled(a.l[S], RELIEF_FIRST);
     var d = e * (radius / BASE_WAVELENGTH) * exp2(RELIEF_FIRST as f32);
     var per_m = exp2(RELIEF_FIRST as f32) / BASE_WAVELENGTH;
+    // The cell's quarters' centres, metres from the point across the ground.
+    let up = normalize(a.dir + e);
+    let t1 = normalize(cross(up, select(abs(up.y) < 0.9, vec3<f32>(0.0, 1.0, 0.0), vec3<f32>(1.0, 0.0, 0.0))));
+    let t2 = cross(up, t1);
+    let quarter = 0.25 * cell_width(octaves);
     var sum = vec4<f32>(0.0);
     var amp = RELIEF_AMP * rough;
     for (var o: i32 = RELIEF_FIRST; o < n; o += 1) {
-        let w = clamp(past - (o as f32), 0.0, 1.0) * mean_factor(o, octaves);
-        let g = simplex_grad(simplex_from(lat, d), seed + 200 + o);
-        sum += vec4<f32>(g.x, select(o <= SLOPE_LAST, g.yzw * per_m, vec3<f32>(0.0))) * (amp * w);
+        let id = seed + 200 + o;
+        var g = vec4<f32>(0.0);
+        if (mean_factor(o, octaves) > SAMPLED) {
+            // Waves much wider than the cell: their mean is the point's.
+            g = simplex_grad(simplex_from(lat, d), id) * (clamp(past - (o as f32), 0.0, 1.0) * mean_factor(o, octaves));
+        } else {
+            // Waves about the cell's width: the mean of its quarters', each
+            // its own mean, as four cells one octave finer hold them.
+            let w = clamp(past + 1.0 - (o as f32), 0.0, 1.0) * mean_factor(o, octaves + 1.0) * 0.25;
+            for (var q: i32 = 0; q < 4; q += 1) {
+                let s = vec2<f32>(select((q & 1) == 0, -1.0, 1.0), select((q & 2) == 0, -1.0, 1.0)) * quarter;
+                g += simplex_grad(simplex_from(lat, d + (t1 * s.x + t2 * s.y) * per_m), id) * w;
+            }
+        }
+        sum += vec4<f32>(g.x, select(o <= SLOPE_LAST, g.yzw * per_m, vec3<f32>(0.0))) * amp;
         amp *= RELIEF_FALL;
         lat = twice(lat);
         d *= 2.0;

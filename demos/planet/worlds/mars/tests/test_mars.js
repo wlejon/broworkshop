@@ -67,8 +67,8 @@ for (const coarse of [3.5, 6.5, 9.5, 12.5]) {
         }
         const rms = Math.sqrt(sq);
         console.log(`octaves ${coarse} -> ${coarse + 3}: bias ${bias.toFixed(1)} m, rms ${rms.toFixed(1)} m, the cell's relief ${spread.toFixed(1)} m`);
-        check(Math.abs(bias) < 0.1 * spread + 2, `no systematic shift: bias ${bias.toFixed(1)} m against ${spread.toFixed(1)} m of relief`);
-        check(rms < 0.5 * spread + 5, `the coarse cell holds its fine cells' mean: rms ${rms.toFixed(1)} m against ${spread.toFixed(1)} m`);
+        check(Math.abs(bias) < 0.05 * spread + 1, `no systematic shift: bias ${bias.toFixed(1)} m against ${spread.toFixed(1)} m of relief`);
+        check(rms < 0.35 * spread + 1, `the coarse cell holds its fine cells' mean: rms ${rms.toFixed(1)} m against ${spread.toFixed(1)} m`);
     });
 }
 
