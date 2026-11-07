@@ -316,10 +316,8 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
     if (lp.on) {
         lp.tau += dt;
         if (lp.tau >= lp.tcr && lp.tau - dt < lp.tcr) { lp.h0 = state[s + D_HY]; lp.v0 = state[s + D_HV]; }
-        // At take-off the flight is the body's own: its arc from where the
-        // push has put the hips and how fast they rise (creature::leap
-        // leap_takeoff). The feet come down when they can reach the ground
-        // from that arc.
+        // At take-off the flight is the body's own (creature::leap
+        // leap_takeoff); the feet come down when they reach the ground.
         let at_tc = lp.tau >= lp.tc && lp.tau - dt < lp.tc;
         let at_off = lp.tau >= 0.0 && lp.tau - dt < 0.0;
         if (at_off) {
@@ -532,7 +530,11 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
             st3(state, k + L_TO, target);
             u = u + dt / tt;
             let lifted = ld3(state, k + L_FROM);
-            let landed = u >= 1.0;
+            let top = leg_top(l, bpos, qyaw, state[s + D_HY_O], state[s + D_FY_O]);
+            let rmax = select_f(hind, REACH_HIND, REACH_FORE);
+            // A leap's hoof lands once it reaches the ground from the falling body.
+            var landed = u >= 1.0;
+            if (landed && leap_step && length(target - top - vec3<f32>(0.0, state[s + D_LAG + 1] * LAYERS, 0.0)) > rmax) { landed = false; u = 0.999; }
             u = min(u, 1.0);
             let e = smooth01(u);
             var hgt = lift_h.y;
@@ -543,7 +545,6 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
             if (leap_step) {
                 // In the air the leg folds up under the body: over the middle
                 // of the flight's swing the hoof is drawn toward its girdle.
-                let top = leg_top(l, bpos, qyaw, state[s + D_HY_O], state[s + D_FY_O]);
                 let tuck = top + q_rot(qyaw, vec3<f32>(0.0, -select_f(hind, TUCK_HIND * REACH_HIND, TUCK_FORE * REACH_FORE), select_f(hind, 0.08, -0.04)));
                 toe = mix(toe, tuck, smooth01(u / 0.3) * (1.0 - smooth01((u - 0.55) / 0.4)));
             }
@@ -552,8 +553,6 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
             // can hold hangs back over its mark instead of being dragged
             // through the ground by a stretched leg, eased in so it has
             // no corner, and lands where it is held.
-            let top = leg_top(l, bpos, qyaw, state[s + D_HY_O], state[s + D_FY_O]);
-            let rmax = select_f(hind, REACH_HIND, REACH_FORE);
             let dy = top.y - toe.y;
             let hmax = sqrt(max(rmax * rmax - dy * dy, 0.0));
             let hv2 = vec2<f32>(toe.x - top.x, toe.z - top.z);
