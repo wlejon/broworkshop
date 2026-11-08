@@ -215,6 +215,13 @@ pub fn muzzle_y(qt: vec4<f32>, pt: vec3<f32>, n1: vec3<f32>, n2: vec3<f32>, qh: 
     return (ph + q_rot(qh, TAIL[B_HEAD] - HEAD[B_HEAD])).y;
 }
 
+// A planted hoof's place in its stance on the clock (ph, the leg's phase;
+// a hoof down just before its beat is at the start of its stance, not past
+// its end), and how far it has rolled onto its toe by then: over the
+// stance's last 0.12 of the cycle.
+pub fn stance_phase(ph: f32, duty: f32) -> f32 { return select_f(ph > duty + 0.5 * (1.0 - duty), ph - 1.0, ph); }
+pub fn toe_roll(ph: f32, duty: f32) -> f32 { return smooth01((stance_phase(ph, duty) - (duty - 0.12)) / 0.12); }
+
 pub fn select_f(c: bool, a: f32, b: f32) -> f32 {
     if (c) { return a; }
     return b;

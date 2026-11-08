@@ -77,7 +77,7 @@ const L_U: i32 = 10;
 const L_T: i32 = 11;
 const L_ARMED: i32 = 12;
 const L_KIND: i32 = 13;       // 0 a gait step, 1 a settling step, 2..3 a flight swing begun in the air (2 + its fold)
-const L_SINCE: i32 = 14;      // s since it landed
+const L_SINCE: i32 = 14;      // s since it landed; in a swing, the roll onto its toe it lifted with
 const L_LEAP: i32 = 15;       // its steps in a leap: 1 the gather step's swing, 2 down, 3 the flight, 4 down
 const D_COFF: i32 = 104;     // the pose's centre of mass from the root, in the yaw frame: slow mean (3),
 const D_COFF1: i32 = 107;     //   last step's (3)
@@ -458,8 +458,10 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
                 kind = 0.0;
             } else if (moving && (stray > REACH_TRIG || over)) {
                 // Out of reach early: step now, but land on the clock's beat so
-                // the leg falls back into the gait instead of keeping the lead.
-                lift = true;
+                // the leg falls back into the gait instead of keeping the lead
+                // (in a gait a stride's step, lifted and folded like one; in a
+                // leap's gather, crouched too low to fold, a short shuffle).
+                lift = true; kind = select_f(in_leap, 1.0, 0.0);
                 lift_t = clamp((1.0 - ph) / max(cfreq, 0.1), min(0.2, 0.5 * (1.0 - duty) / max(cfreq, 0.1)), 0.5);
             } else if (!moving && !any_swing && worst == l) {
                 lift = true;
@@ -472,6 +474,8 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
                 state[k + L_U] = 0.0;
                 state[k + L_T] = lift_t;
                 state[k + L_KIND] = kind;
+                // The roll onto its toe it lifts with (a leap's push ends fully rolled).
+                state[k + L_SINCE] = select_f(in_leap && hind, 1.0, select_f(moving, toe_roll(ph, duty), 0.0));
             }
         }
         var u: f32 = 0.0;
@@ -560,9 +564,7 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
         if (in_leap && hind && lp.tau >= lp.tc - 0.02) {
             if (planted && state[k + L_LEAP] < 2.5) { lt = max(leap_leg(lp, hind, side01).z - lp.tau, 0.0); }
         } else if (planted && moving) {
-            var sp = ph;
-            if (ph > duty + 0.5 * (1.0 - duty)) { sp = ph - 1.0; }
-            if (state[k + L_ARMED] > 0.5) { lt = max(duty - sp, 0.0) / max(cfreq, 0.1); }
+            if (state[k + L_ARMED] > 0.5) { lt = max(duty - stance_phase(ph, duty), 0.0) / max(cfreq, 0.1); }
             else { lt = (1.0 + duty - ph) / max(cfreq, 0.1); }
         }
         left_t[l] = lt;
@@ -891,15 +893,12 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
         let slope = atan2(-dot(n, vec3<f32>(fw.x, 0.0, fw.z)), n.y);
         let par_pitch = atan2(fw.y, length(vec2<f32>(fw.x, fw.z)));
         var ah = rest_angle(b0 + nb - 1) + slope - par_pitch;
-        // The stance's place on the clock: a hoof down just before its beat
-        // (ph near 1) is at the start of its stance, not past its end.
-        var sp = ph;
-        if (ph > duty + 0.5 * (1.0 - duty)) { sp = ph - 1.0; }
         if (planted && in_leap && hind && lp.tau >= lp.tc - 0.02) { ah -= BREAKOVER * (1.0 - smooth01(left_t[l] / (0.35 * leg_time()))); }
-        else if (planted && moving) { ah -= BREAKOVER * smooth01((sp - (duty - 0.12)) / 0.12); }
+        else if (planted && moving) { ah -= BREAKOVER * toe_roll(ph, duty); }
         if (!planted) {
-            // The toe-off roll carries into the lift, then the hoof folds.
-            if (state[k + L_KIND] < 0.5) { ah -= BREAKOVER * (1.0 - smooth01(u / 0.3)); }
+            // The toe-off roll the hoof lifted with carries into the lift,
+            // then the hoof folds.
+            if (state[k + L_KIND] < 0.5) { ah -= BREAKOVER * state[k + L_SINCE] * (1.0 - smooth01(u / 0.3)); }
             ah -= hoof_flex * swing_fold(state, k);
         }
         var o: Leg;
