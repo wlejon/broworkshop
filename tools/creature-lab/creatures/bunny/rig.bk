@@ -96,13 +96,15 @@ const CAP_FADE: f32 = 0.06;      // m a coming or going foot's reach limit is sl
 const CAP_SOFT: f32 = 0.003;     // m over which one reach limit hands over to another
 @knob const SWING_FOLD_F: f32 = 0.6;   // of its reach a swinging fore foot stays from its girdle at least
 @knob const SWING_FOLD_H: f32 = 0.45;  //   and a hind foot (sitting, 0.57)
-@knob const LEG_BAND: f32 = 0.15;     // rad a leg's joint eases into the ends of its range over
+@knob const LEG_BAND: f32 = 0.15;    // rad a leg's joint eases into the ends of its range over
 const SWING_FOLD_BAND: f32 = 0.015;  // m over which that floor eases in
-const HOP_ARC: f32 = 0.034;     // m the hips lift over a hop's hind swing
+@knob const HOP_ARC: f32 = 0.045;     // m the hips vault over a hop's hind swing
+@knob const HOP_LAND_H: f32 = 0.02;  // m a hopping hind foot lands ahead of its home, beside the fore prints
 const HIP_RUN: f32 = 0.145;      // m the hips ride at in the bound (sitting: 0.115)
 const SCAP_RUN: f32 = 0.155;     //   and the withers
 const HOME_BACK_H: f32 = 0.055;  // m a running hind foot's home comes back under the hip
 const HOME_BACK_F: f32 = 0.045;  //   and a fore foot's under the shoulder
+@knob const HOME_HOP_F: f32 = 0.04; // m a hopping fore foot's home comes back from where it sits
 @knob const TRAVEL_H: f32 = 0.18;  // m a running foot travels in its stance at most, hind
 @knob const TRAVEL_F: f32 = 0.13;  //   and fore, bounding
 @knob const TRAVEL_F_HOP: f32 = 0.10; //   and hopping: a fore leg stood under its shoulder, which
@@ -110,6 +112,8 @@ const HOME_BACK_F: f32 = 0.045;  //   and a fore foot's under the shoulder
 @knob const TRUNK_SWING: f32 = 0.03;   // m the trunk stretches and gathers by about its rest
 @knob const SURGE_MAX: f32 = 0.7;      // of the pace a girdle surges by at most
 @knob const FLEX_RUN: f32 = 0.1;       // rad the back is arched by, bounding (its mean)
+@knob const FLEX_SIT: f32 = 0.4;       // rad the back is rounded by, sitting and hopping (its mean)
+@knob const HIP_DROP: f32 = 0.01;      // m the hips sit lower than the rest pose's, sitting and hopping
 @knob const FLEX_SWING: f32 = 0.5;     // rad it flexes by per TRUNK_SWING of the girdles' spacing
 @knob const FLEX_SWING_HOP: f32 = 0.3; //   and hopping (its surges larger against its stride)
 @knob const FLIGHT: f32 = 1.0;         // share of the bound's free fall the body takes
@@ -138,18 +142,19 @@ const SCUT_ZETA: f32 = 0.3;
 // A foot's home under its girdle, from the root, as the gait (bw) carries it.
 // Bounding, the hind feet come down wide, outside the fore feet (the thighs
 // sweeping forward outside the flanks, not into them).
-fn home_of(l: i32, bw: f32) -> vec3<f32> {
+fn home_of(l: i32, bw: f32, mv: f32) -> vec3<f32> {
     let t = TAIL[LEG_B0[l] + LEG_NB[l] - 1] - HEAD[B_PELVIS];
     let hind = LEG_HIND[l] == 1;
     let wide = select_f(hind, bw * HIND_WIDE * sign(t.x), 0.0);
-    return vec3<f32>(t.x + wide, 0.0, t.z - bw * select_f(hind, HOME_BACK_H, HOME_BACK_F));
+    let back = select_f(hind, bw * HOME_BACK_H, bw * HOME_BACK_F + (1.0 - bw) * mv * HOME_HOP_F);
+    return vec3<f32>(t.x + wide, 0.0, t.z - back);
 }
 
 fn place(st: rw_store<f32, 1>, env: read_store<f32, 1>, s: i32) {
     let p = ld3(st, s + S_POS);
     let q = q_y(st[s + S_YAW]);
     for (var l: i32 = 0; l < 4; l += 1) {
-        let w = q_rot(q, home_of(l, 0.0)) + vec3<f32>(p.x, 0.0, p.z);
+        let w = q_rot(q, home_of(l, 0.0, 0.0)) + vec3<f32>(p.x, 0.0, p.z);
         let t = vec3<f32>(w.x, height(env, w.x, w.z), w.z);
         let k = s + D_LEG + l * LEG_REC;
         st[k + L_PLANT] = 1.0;
@@ -293,7 +298,7 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
         let k = s + D_LEG + l * LEG_REC;
         if (state[k + L_PLANT] < 0.5) { any_swing = true; }
         else {
-            let home = select_v3(LEG_HIND[l] == 1, ho, fo) + q_rot(qyaw, home_of(l, bw));
+            let home = select_v3(LEG_HIND[l] == 1, ho, fo) + q_rot(qyaw, home_of(l, bw, mv));
             let t = ld3(state, k + L_TOE);
             let e = length(vec2<f32>(t.x - home.x, t.z - home.z));
             if (e > worst_e) { worst_e = e; worst = l; }
@@ -310,7 +315,7 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
         let hind = LEG_HIND[l] == 1;
         let duty = select_f(hind, duty_h, duty_f);
         let og = select_v3(hind, ho, fo);
-        let home_off = home_of(l, bw);
+        let home_off = home_of(l, bw, mv);
         let home = og + q_rot(qyaw, home_off);
         let ph = fract01(phase - offs[l]);
         var planted = state[k + L_PLANT] > 0.5;
@@ -379,7 +384,8 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
                 let lead = (1.0 - u) * tt + 0.5 * stance_t;
                 let yl = yaw + omega * lead;
                 let ahead = girdle_surge(p + lead * freq, mh, sa, len, hind);
-                target = pos + vel * lead + fwd * ahead + (fwd - vec3<f32>(sin(yl), 0.0, cos(yl))) * tz + q_rot(q_y(yl), home_off);
+                let land = select_f(hind, HOP_LAND_H * hw, 0.0);
+                target = pos + vel * lead + fwd * (ahead + land) + (fwd - vec3<f32>(sin(yl), 0.0, cos(yl))) * tz + q_rot(q_y(yl), home_off);
             }
             if (!held) { target.y = height(env, target.x, target.z); }
             st3(state, k + L_TO, target);
@@ -504,7 +510,7 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
     let half_f = 0.5 * speed * duty_f / max(freq, 0.1);
     let run_h = min(HIP_RUN, sqrt(max(0.9 * REACH_HIND * REACH_HIND - half_h * half_h, 0.0)) + HEAD[B_PELVIS].y - leg_pivot(0).y);
     let run_f = min(SCAP_RUN, sqrt(max(0.9 * REACH_FORE * REACH_FORE - half_f * half_f, 0.0)) + HEAD[B_SCAPL].y - leg_pivot(1).y);
-    let hy_plan = mix(smin(hind_ground + run_h, cap_h, CAP_SOFT), smin(hind_ground + HEAD[B_PELVIS].y + bob_h, cap_h, CAP_SOFT), hw);
+    let hy_plan = mix(smin(hind_ground + run_h, cap_h, CAP_SOFT), smin(hind_ground + HEAD[B_PELVIS].y - HIP_DROP, cap_h, CAP_SOFT), hw);
     let fy_plan = mix(smin(fore_ground + run_f, cap_f, CAP_SOFT), smin(fore_ground + HEAD[B_SCAPL].y, cap_f, CAP_SOFT), hw);
     var hy_t = mix(hy_plan + crouch + breath, hip_g + LIE_HIP, lie_h);
     hy_t = mix(hy_t, hind_ground + REAR_HIP, rear_s);
@@ -518,8 +524,9 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
     let f_s = min(offs[1], offs[2]);
     let f_e = max(offs[1], offs[2]) + duty_f;
     let fl = FLIGHT * bw * mv * flight(fract01(phase - offs[0]), 1.0 / max(freq, 0.1), he, f_s, f_e);
-    let hy = hs.x + fl;
-    var fy = fs.x + fl;
+    // The hop's vault rides on top, as the bound's flights do: through the
+    // height's spring it would peak late, as the hind feet come down.
+    let hy = hs.x + fl + bob_h;    var fy = fs.x + fl;
     let ch_t = min(cap_h, hind_ground + HEAD[B_PELVIS].y + CAP_FADE);
     let cf_t = min(cap_f, fore_ground + HEAD[B_SCAPL].y + CAP_FADE);
     var chs = crit_step(vec2<f32>(state[s + D_CAP_H], state[s + D_CAP_HV]), ch_t, wh, dt);
@@ -543,7 +550,7 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
     // girdles' spacing; sitting up the arch lets out. Its line from the
     // hips to the withers.
     let run = bw * mv;
-    let flex = flex_of((df - dh) + REAR_STRETCH * rear_s, mix(0.0, FLEX_RUN, run), TRUNK_SWING, mix(FLEX_SWING_HOP, FLEX_SWING, bw));
+    let flex = flex_of((df - dh) + REAR_STRETCH * rear_s, mix(FLEX_SIT * (1.0 - lie) * (1.0 - rear_s), FLEX_RUN, run), TRUNK_SWING, mix(FLEX_SWING_HOP, FLEX_SWING, bw));
     // (`pitch` is from the rest posture; the chord's own line at rest rises.)
     let c0 = chord(0.0);
     let dl = vec2<f32>(cos(pitch + atan2(c0.y, c0.x)), sin(pitch + atan2(c0.y, c0.x)));

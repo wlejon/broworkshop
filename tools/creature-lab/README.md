@@ -121,8 +121,15 @@ and the scut is sprung the same way. Its feet swing on `swing_arc` paths,
 folded toward their girdle only as far as clears the ground by the swing's
 lift; the fore stride is shorter hopping (0.10 m) than bounding (0.13 m),
 since the hop's fore leg stands under its shoulder and the longer stride
-would carry it to full stretch. At rest it sits on its flat hind feet
-(`solve_hind_flat`). Alert, it sits up on its haunches with its fore paws held
+would carry it to full stretch, and the hopping fore foot's home comes back
+from where it sits (`HOME_HOP_F`) so the paw lands near under the shoulder,
+not reaching. The hop's hips vault over the hind swing (`HOP_ARC`, added
+after the height's spring, so the vault peaks with the swing rather than as
+the feet come down), and the hind feet land a little ahead of their home,
+beside the fore prints (`HOP_LAND_H`). Sitting and hopping it is hunched: the
+back rounded (`FLEX_SIT`, the trunk's flex about which bounding stretches it
+long) and the hips carried low (`HIP_DROP`). At rest it sits on its flat
+hind feet (`solve_hind_flat`). Alert, it sits up on its haunches with its fore paws held
 against its chest; lying, it loafs with its ears laid back. Grazing, it chews,
 its nose twitches, its ears turn each on its own, and its scut flicks up as it
 runs. A swinging foot is kept no nearer its girdle than the leg folds within

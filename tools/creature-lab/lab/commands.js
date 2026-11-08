@@ -93,7 +93,8 @@ export function parseArgs(argv) {
             const key = a.slice(2);
             const next = argv[i + 1];
             if (next === undefined || next.startsWith('--')) opt[key] = true;
-            else { opt[key] = next; i++; }
+            // --knob may be given more than once: its overrides add up.
+            else { opt[key] = key === 'knob' && typeof opt.knob === 'string' ? `${opt.knob},${next}` : next; i++; }
         } else pos.push(a);
     }
     return { pos, opt };
