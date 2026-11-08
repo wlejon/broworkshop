@@ -271,9 +271,7 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
     // The path asks only for what the feet can do: speed changes within the
     // push they can give across their legs (creature::body MU_T).
     let dv_max = 0.8 * MU_T * 9.81;
-    if (leaping) { }
-    else if (vt > speed) { speed = approach(speed, vt, min(1.6 + 0.6 * speed, dv_max), dt); }
-    else { speed = approach(speed, vt, min(3.5, dv_max), dt); }
+    if (!leaping) { speed = approach(speed, vt, min(select_f(vt > speed, 1.6 + 0.6 * speed, 3.5), dv_max), dt); }
     let fwd = vec3<f32>(sin(yaw), 0.0, cos(yaw));
     let left = vec3<f32>(cos(yaw), 0.0, -sin(yaw));
     var pos = ld3(state, s + S_POS);
@@ -674,10 +672,8 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
     // In a leap the hips follow its plan and the trunk its pitch, blended in
     // over its first moments and out over its last (the springs above run on
     // under it, so the gait's plan is there to hand back to).
-    let hy_sp = hy;
-    let hv_sp = hv;
-    let fy_sp = fy;
-    let fv_sp = fv;
+    let hy_sp = hy; let hv_sp = hv;
+    let fy_sp = fy; let fv_sp = fv;
     if (lp.on) {
         let hl = leap_hip(lp, hip_t);
         let pl = leap_pitch(lp);
@@ -759,6 +755,13 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
             }
             shift = shift * lo;
         }
+    }
+    // Nor lower than they fold (a leap's gather): held over it, eased in, its fall stopped.
+    let pl4 = vec4<f32>(sup.f[0].down, sup.f[1].down, sup.f[2].down, sup.f[3].down);
+    let up = -smin(0.0, -fold_lift(toes, pl4, plan, qyaw, hy, fy, shift, REACH_HIND, REACH_FORE), CAP_SOFT) * (1.0 - smooth01(lie * 3.0));
+    if (up > 1e-4) {
+        shift.y += up;
+        body_set(state, s + D_BODY, plan + coff_p + shift, vec3<f32>(bd.vel.x, max(bd.vel.y, hv), bd.vel.z));
     }
     let root = plan + shift;
     st3(state, s + D_LAG, shift);

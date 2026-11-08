@@ -100,6 +100,26 @@ pub fn fold_bump(u: f32) -> f32 { return bump(u, FOLD_RISE, FOLD_FALL); }
 // two_bone): late, the deer's legs working near straight.
 @knob pub const SOFT_REACH: f32 = 0.97;
 
+// Share of a leg's reach it folds to at the most: a hind leg's hock and
+// stifle shut at their limits hold the hoof about 0.47 of its reach from the
+// femur's head.
+const FOLD_MIN: f32 = 0.52;
+
+// How far the body (its girdles at hy and fy over `plan`, moved by `shift`)
+// must rise for every hoof `down` to be no nearer the joint its leg swings
+// from than the leg folds (negative: by how much all are clear of it).
+pub fn fold_lift(toes: array<vec3<f32>, 4>, down: vec4<f32>, plan: vec3<f32>, qyaw: vec4<f32>, hy: f32, fy: f32,
+                 shift: vec3<f32>, reach_h: f32, reach_f: f32) -> f32 {
+    var need: f32 = -1e3;
+    for (var l: i32 = 0; l < 4; l += 1) {
+        if (down[l] < 0.5) { continue; }
+        let d = toes[l] - leg_top(l, plan, qyaw, hy, fy) - shift;
+        let m = FOLD_MIN * select_f(LEG_HIND[l] == 1, reach_h, reach_f);
+        need = max(need, d.y + sqrt(max(m * m - d.x * d.x - d.z * d.z, 0.0)));
+    }
+    return need;
+}
+
 pub struct Leg { rho: f32, a0: f32, a1: f32, a2: f32, a3: f32, a4: f32 }
 
 // The abduction that puts the leg's plane through d (parent-local, from
