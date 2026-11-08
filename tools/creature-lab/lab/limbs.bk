@@ -1,0 +1,150 @@
+// creature::limbs — legs solved in their plane, for any skeleton whose legs
+// are chains of bones that each lie in one plane (x constant at rest below
+// the girdle), and the shapes a step is made of. A species' own legs module
+// names its legs (their first bones, which are hind) and calls these.
+//
+// Angles are limb angles in the leg's plane (common limb_dir: 0 straight
+// down, positive swinging the tail forward), from the rest pose's bones.
+module creature::limbs;
+import creature::common::*;
+import creature::skeleton::*;
+
+pub fn select_f(c: bool, a: f32, b: f32) -> f32 {
+    if (c) { return a; }
+    return b;
+}
+
+pub fn select_v3(c: bool, a: vec3<f32>, b: vec3<f32>) -> vec3<f32> {
+    if (c) { return a; }
+    return b;
+}
+
+pub fn rest_angle(b: i32) -> f32 {
+    let v = TAIL[b] - HEAD[b];
+    return limb_angle(vec2<f32>(v.z, v.y));
+}
+
+pub fn rest_len(b: i32) -> f32 {
+    let v = TAIL[b] - HEAD[b];
+    return length(vec2<f32>(v.z, v.y));
+}
+
+pub fn clamp_xyz(a: vec3<f32>, b: i32) -> vec3<f32> { return clamp(a, LIM_LO[b], LIM_HI[b]); }
+
+// A rise from 0 to 1 over [0, rise], held, and a fall back to 0 over
+// [fall, 1], each with no slope at its ends: a swing's lift or its joints'
+// folding, so lift-off and touchdown are no corner in any joint's speed.
+pub fn bump(u: f32, rise: f32, fall: f32) -> f32 {
+    return smooth01(u / rise) * (1.0 - smooth01((u - fall) / (1.0 - fall)));
+}
+
+// A length kept under `m` without a corner: unchanged up to (1 - band) of
+// it, then eased toward it.
+pub fn soft_cap(x: f32, m: f32, band: f32) -> f32 {
+    return soft_limit(x, (1.0 - band) * m, m);
+}
+
+// A planted foot's place in its stance on the clock (ph, the leg's phase;
+// a foot down just before its beat is at the start of its stance, not past
+// its end), and how far it has rolled onto its toe by then: over the
+// stance's last 0.12 of the cycle.
+pub fn stance_phase(ph: f32, duty: f32) -> f32 { return select_f(ph > duty + 0.5 * (1.0 - duty), ph - 1.0, ph); }
+pub fn toe_roll(ph: f32, duty: f32) -> f32 { return smooth01((stance_phase(ph, duty) - (duty - 0.12)) / 0.12); }
+
+// How far (on the ground, at most `lean_max`) the body leans from `com`
+// over the feet that carry it: each foot (hold: down 0/1, s since it
+// landed, s until it lifts) is taken into its share over LEAN_T after it
+// lands and out over LEAN_T before it lifts, so the weight comes off a foot
+// before it steps; every foot down keeps a little of it.
+const LEAN_T: f32 = 0.25;
+pub fn lean_over(toes: array<vec3<f32>, NFEET>, hold: array<vec3<f32>, NFEET>, com: vec3<f32>, lean_max: f32) -> vec3<f32> {
+    var cw = vec4<f32>(0.0);
+    for (var l: i32 = 0; l < NFEET; l += 1) {
+        let w = hold[l].x * (0.1 + smooth01(hold[l].y / LEAN_T) * smooth01(hold[l].z / LEAN_T));
+        cw += vec4<f32>(toes[l] * w, w);
+    }
+    if (cw.w < 0.15) { return vec3<f32>(0.0); }
+    let d = (cw.xyz / cw.w - com) * vec3<f32>(1.0, 0.0, 1.0);
+    let dl = length(d);
+    if (dl < 1e-4) { return d; }
+    return d * (soft_cap(dl, lean_max, 0.5) / dl);
+}
+
+// --- the planar leg solutions ---------------------------------------------------
+
+pub struct Leg { rho: f32, a0: f32, a1: f32, a2: f32, a3: f32, a4: f32 }
+
+pub fn leg_angle(o: Leg, k: i32) -> f32 {
+    if (k == 0) { return o.a0; }
+    if (k == 1) { return o.a1; }
+    if (k == 2) { return o.a2; }
+    if (k == 3) { return o.a3; }
+    return o.a4;
+}
+
+// The abduction that puts the leg's plane through d (parent-local, from
+// the leg's root b0) and d in that plane as (z, y). Past the joint's limits
+// the plane stops at them, and the foot is put in it at d's height (a foot
+// the leg cannot reach sideways stays as near under it as the leg allows,
+// rather than the leg's length spent below it).
+pub fn leg_plane(b0: i32, toe: i32, d: vec3<f32>) -> vec3<f32> {
+    let rx = TAIL[toe].x - HEAD[b0].x;
+    let r2 = d.x * d.x + d.y * d.y;
+    let rho0 = atan2(d.x, -d.y) - atan2(rx, sqrt(max(r2 - rx * rx, 1e-6)));
+    let rho = clamp(rho0, LIM_LO[b0].z, LIM_HI[b0].z);
+    var y = -d.x * sin(rho) + d.y * cos(rho);
+    if (rho != rho0) { y = (d.y - rx * sin(rho)) / max(cos(rho), 0.2); }
+    return vec3<f32>(rho, d.z, y);
+}
+
+// A four-bone hind leg (thigh, shank, the long foot, the toe) from its
+// thigh's head b0 to toe d with the toe at limb angle ah, as a pantograph:
+// the thigh and the foot kept at their rest angle to each other (the
+// reciprocal apparatus that ties stifle and hock), the shank between them.
+// `soft`: the share of the reach where the reach eases in (common two_bone_soft).
+pub fn solve_hind(b0: i32, d: vec3<f32>, ah: f32, soft: f32) -> Leg {
+    var o: Leg;
+    let pl = leg_plane(b0, b0 + 3, d);
+    o.rho = pl.x;
+    let lf = rest_len(b0);
+    let lt = rest_len(b0 + 1);
+    let lm = rest_len(b0 + 2);
+    let lh = rest_len(b0 + 3);
+    let fet = vec2<f32>(pl.y, pl.z) - lh * limb_dir(ah);
+    let c = rest_angle(b0 + 2) - rest_angle(b0);
+    let v0 = lf * limb_dir(0.0) + lm * limb_dir(c);
+    let s = two_bone_soft(length(v0), lt, fet, 1.0, soft);
+    o.a0 = s.x - limb_angle(v0);
+    o.a1 = s.y;
+    o.a2 = o.a0 + c;
+    o.a3 = ah;
+    o.a4 = 0.0;
+    return o;
+}
+
+// A five-bone fore leg (blade, upper arm, forearm, the hand, the toe) from
+// the blade's top b0 to toe d: the toe at ah, the wrist folded by k, the
+// blade taking `follow` of the leg's swing.
+pub fn solve_front(b0: i32, d: vec3<f32>, ah: f32, k: f32, follow: f32, soft: f32) -> Leg {
+    var o: Leg;
+    let pl = leg_plane(b0, b0 + 4, d);
+    o.rho = pl.x;
+    let ls = rest_len(b0);
+    let lu = rest_len(b0 + 1);
+    let lr = rest_len(b0 + 2);
+    let lc = rest_len(b0 + 3);
+    let lh = rest_len(b0 + 4);
+    let fet = vec2<f32>(pl.y, pl.z) - lh * limb_dir(ah);
+    let rf = TAIL[b0 + 3] - HEAD[b0];
+    let line0 = limb_angle(vec2<f32>(rf.z, rf.y));
+    o.a0 = rest_angle(b0) + follow * (limb_angle(fet) - line0);
+    let sh = ls * limb_dir(o.a0);
+    let c0 = rest_angle(b0 + 3) - rest_angle(b0 + 2);
+    let w0 = lr * limb_dir(0.0) + lc * limb_dir(c0 - k);
+    let s = two_bone_soft(lu, length(w0), fet - sh, -1.0, soft);
+    o.a1 = s.x;
+    o.a2 = s.y - limb_angle(w0);
+    o.a3 = o.a2 + c0 - k;
+    o.a4 = ah;
+    return o;
+}

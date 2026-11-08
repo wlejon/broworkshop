@@ -59,6 +59,13 @@ legs' bone):
 | `creature::spine` (`lab/spine.bk`) | the back's flex, bend and twist from what the legs do: flexed by the feet's spread along the body (most in a gait whose pairs swing together), bent into a turn's curve and toward gathered feet, twisted by sideways acceleration, hollowed by the body's vertical acceleration; each a spring of the trunk's frequency |
 | `creature::secondary` (`lab/secondary.bk`) | every dangling chain (neck, head, ears, tail) carried by its momentum: the subtree's centre of mass on a spring and damper toward where the rig puts it, its frequency from the part's size and its damping from its share of the body's mass (a heavy neck near critical, so a gait's rhythm never rings it into a whip; an ear or a slender tail light, so it swings past and settles), joint limits eased into, and a part swung into the ground resting on it (a part the rig lays there stays there); `hold` keeps part of a bone's world rotation (a head steadied in space but not pinned). `carry` takes the `env`, for the ground |
 
+`creature::limbs` (`lab/limbs.bk`) is the library a species' legs module
+calls: a leg solved in its plane (the abduction that puts the plane through
+the foot, then a four-bone hind leg as a pantograph and a five-bone fore leg
+whose blade follows the swing), the eased bump a swing's lift and folding
+are made of, a soft cap on a length, a planted foot's roll onto its toe, and
+the lean over the feet that carry the body.
+
 `lab/common.bk` and `creature::ground` hold the small helpers (smoothsteps
 with no jump in acceleration, quaternions, value noise). The deer's rig
 places its root where the body is (the pose moved so its centre of mass sits

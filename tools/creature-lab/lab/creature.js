@@ -28,6 +28,7 @@ export function labModules() {
         'creature::body': readApp('lab/body.bk'),
         'creature::spine': readApp('lab/spine.bk'),
         'creature::leap': readApp('lab/leap.bk'),
+        'creature::limbs': readApp('lab/limbs.bk'),
     };
 }
 

@@ -26,6 +26,7 @@ import creature::secondary::*;
 import creature::body::*;
 import creature::spine::*;
 import creature::leap::*;
+import creature::limbs::*;
 import deer::legs::*;
 from creature::ground import height, normal, terrain, obstacle_ahead;
 
@@ -697,7 +698,7 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
         hold4[l] = vec3<f32>(state[k + L_PLANT], state[k + L_SINCE], left_t[l]);
     }
     let still = select_f(moving && !init, 1.0, 0.0) * (1.0 - smooth01(speed / 0.25)) * (1.0 - lie);
-    let plan = vec3<f32>(pos.x, hy, pos.z) + sway_v + lean_over(toes, hold4, pos + q_rot(qyaw, ld3(state, s + D_COFF))) * still;
+    let plan = vec3<f32>(pos.x, hy, pos.z) + sway_v + lean_over(toes, hold4, pos + q_rot(qyaw, ld3(state, s + D_COFF)), LEAN_MAX) * still;
     let roll_g = mv * (gw.x + 0.6 * gw.y) * 0.014 * sin(TAU * (phase - 0.1)) * (1.0 - lie);
 
     // --- the body: its centre of mass as the feet move it (creature::body) ------------------
@@ -905,11 +906,11 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
             ah -= hoof_flex * swing_fold(state, k);
         }
         var o: Leg;
-        if (hind) { o = solve_hind(b0, d, ah); }
+        if (hind) { o = solve_hind(b0, d, ah, SOFT_REACH); }
         else {
             var kf: f32 = 0.0;
             if (!planted) { kf = carpus * swing_fold(state, k); }
-            o = solve_front(b0, d, ah, kf, SCAP_FOLLOW);
+            o = solve_front(b0, d, ah, kf, SCAP_FOLLOW, SOFT_REACH);
         }
         // Rotations from the limb angles, each joint held within its limits.
         var lie_l = select_f(hind, lie_h, lie_f);
