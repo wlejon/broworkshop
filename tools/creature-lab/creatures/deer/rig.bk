@@ -455,8 +455,7 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
             // last step: a long stance up a slope) steps too, rather than the
             // leg hanging short of it.
             let top = leg_top(l, bpos, qyaw, state[s + D_HY_O], state[s + D_FY_O]);
-            let over = length(toe - top) > select_f(hind, REACH_HIND, REACH_FORE);
-            let lev = leap_leg(lp, hind, side01);
+            let over = length(toe - top) > select_f(hind, REACH_HIND, REACH_FORE);            let lev = leap_leg(lp, hind, side01);
             if (in_leap && ((hind && lp.tau >= lp.tc - 0.02) || lp.tau >= lev.z)) {
                 // In a leap the hind feet stay down from their last landing
                 // until the take-off, and
@@ -472,7 +471,7 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
                 // Out of reach early: step now, but land on the clock's beat so
                 // the leg falls back into the gait instead of keeping the lead.
                 lift = true;
-                lift_t = clamp((1.0 - ph) / max(cfreq, 0.1), 0.2, 0.5);
+                lift_t = clamp((1.0 - ph) / max(cfreq, 0.1), min(0.2, 0.5 * (1.0 - duty) / max(cfreq, 0.1)), 0.5);
             } else if (!moving && !any_swing && worst == l) {
                 lift = true;
             }
@@ -499,9 +498,9 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
                 target = bpos + fwd * (speed * (t_ref - lp.tau)) + q_rot(qyaw, home_off);
             } else if (moving) {
                 // Half the coming stance ahead: a hind foot's last stance
-                // before a leap lasts from tc to the take-off.
+                // before a leap (the swing landing at tc) lasts to the take-off.
                 var stance_t = duty / max(cfreq, 0.1);
-                if (in_leap && hind && lp.tau < lp.tc) { stance_t = -lp.tc; }
+                if (in_leap && hind && lp.tau < lp.tc && lp.tau + (1.0 - u) * tt > lp.tc - 0.05) { stance_t = -lp.tc; }
                 let lead = (1.0 - u) * tt + 0.5 * stance_t;
                 let yl = yaw + omega * lead;
                 target = bpos + vel * lead + (fwd - vec3<f32>(sin(yl), 0.0, cos(yl))) * tz + q_rot(q_y(yl), home_off);
@@ -976,8 +975,7 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
     tele[t0 + T_PITCH] = pitch;
     tele[t0 + T_ROLL] = roll + roll_g;
     tele[t0 + T_FREQ] = freq * select_f(moving, 1.0, 0.0);
-    tele[t0 + T_LEAP] = select_f(lp.on, lp.tau + 10.0, 0.0);
-    for (var l: i32 = 0; l < 4; l += 1) {
+    tele[t0 + T_LEAP] = select_f(lp.on, lp.tau + 10.0, 0.0);    for (var l: i32 = 0; l < 4; l += 1) {
         let k = s + D_LEG + l * LEG_REC;
         let f0 = t0 + T_FOOT + 4 * l;
         var pl = state[k + L_PLANT];
