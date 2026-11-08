@@ -56,7 +56,8 @@ const D_PREV_ACT: i32 = 23;
 const D_GAZE_YAW: i32 = 24;
 const D_GAZE_PITCH: i32 = 25;
 const D_GRAZE_T: i32 = 26;
-const D_PITCH_S: i32 = 28;    // the body's pitch and withers height, slowly smoothed
+const D_GUARD: i32 = 27;      // the share of the body's lag the reach guard lets through
+const D_PITCH_S: i32 = 28;   // the body's pitch and withers height, slowly smoothed
 const D_FY_S: i32 = 29;       //   (what the neck holds the head against)
 const D_LAG: i32 = 30;        // the body's centre against the plan's, last step (3)
 const D_LAGV: i32 = 33;       //   and its velocity against the path's (3)
@@ -114,7 +115,8 @@ const CAP_FADE: f32 = 0.25;      // m a coming or going hoof's reach limit is sl
 const CAP_SOFT: f32 = 0.01;      // m over which one reach limit hands over to another
 const TUCK_HIND: f32 = 0.4;      // of its reach a leg folds to in a leap's flight
 const TUCK_FORE: f32 = 0.3;
-const LAND_LEAD: f32 = 0.05;     // leg times from a leap's touchdown to the hoof's mid-stance
+const GUARD_RATE: f32 = 20.0;   // /s the reach guard's hold eases at
+const LAND_LEAD: f32 = 0.05;    // leg times from a leap's touchdown to the hoof's mid-stance
 
 // The first moment (a leap's tau) past the flight's top at which leg l's
 // landing mark is within its reach from where its girdle will be, the body
@@ -124,7 +126,7 @@ fn reach_time(env: read_store<f32, 1>, lp: Leap, l: i32, pos: vec3<f32>, fwd: ve
     let hind = LEG_HIND[l] == 1;
     // (With a margin: the hips ride a little off the centre of mass's arc
     // as the legs reach down for the ground.)
-    let r = 0.9 * select_f(hind, REACH_HIND, REACH_FORE);
+    let r = 0.97 * select_f(hind, REACH_HIND, REACH_FORE);
     let toe0 = TAIL[LEG_B0[l] + LEG_NB[l] - 1] - HEAD[B_PELVIS];
     let home_off = vec3<f32>(toe0.x, 0.0, toe0.z);
     for (var i: i32 = 0; i < 60; i += 1) {
@@ -290,7 +292,7 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
             lp = leap_takeoff(lp, state[s + D_BODY + 1] - state[s + D_COFF1 + 1], state[s + D_BODY + 4]);
             state[s + D_BODY + 4] = lp.vy;
             lp.fl = reach_time(env, lp, 1, pos, fwd, speed, q_y(yaw));
-            lp.hl = max(reach_time(env, lp, 0, pos, fwd, speed, q_y(yaw)), lp.fl + 0.1 * leg_time());
+            lp.hl = max(reach_time(env, lp, 0, pos, fwd, speed, q_y(yaw)), lp.fl + 0.25 * leg_time());
         }
         // From the hind feet's landing the fore feet in the air are in the
         // leap's flight (they fold up through the push); at take-off every
@@ -441,7 +443,8 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
             // last step: a long stance up a slope) steps too, rather than the
             // leg hanging short of it.
             let top = leg_top(l, bpos, qyaw, state[s + D_HY_O], state[s + D_FY_O]);
-            let over = length(toe - top) > select_f(hind, REACH_HIND, REACH_FORE);            let lev = leap_leg(lp, hind, side01);
+            let over = length(toe - top) > select_f(hind, REACH_HIND, REACH_FORE);
+            let lev = leap_leg(lp, hind, side01);
             if (in_leap && ((hind && lp.tau >= lp.tc - 0.02) || lp.tau >= lev.z)) {
                 // In a leap the hind feet stay down from their last landing
                 // until the take-off (or, in its last moments, their legs
@@ -519,6 +522,13 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
             // can hold hangs back over its mark instead of being dragged
             // through the ground by a stretched leg, eased in so it has
             // no corner, and lands where it is held.
+            // In the flight the leg reaches toward its landing (its hoof held
+            // on the line to it), rather than hanging under its girdle.
+            if (leap_step) {
+                let rv = toe - top;
+                let rl = length(rv);
+                if (rl > 1e-4) { toe = top + rv * (soft_cap(rl, rmax, 0.01) / rl); }
+            }
             let dy = top.y - toe.y;
             let hmax = sqrt(max(rmax * rmax - dy * dy, 0.0));
             let hv2 = vec2<f32>(toe.x - top.x, toe.z - top.z);
@@ -731,19 +741,22 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
     // would have to stretch past their length to follow is held where they
     // still reach (only as far as the plan's own place allows).
     let pl4 = vec4<f32>(sup.f[0].down, sup.f[1].down, sup.f[2].down, sup.f[3].down);
+    // The share let through moves at most GUARD_RATE a second, so a guard
+    // that starts or stops holding eases in and out over a few steps.
+    var guard: f32 = 1.0;
     let over1 = reach_over(toes, pl4, plan, qyaw, hy, fy, shift, REACH_HIND, REACH_FORE);
-    if (over1 > 0.0) {
-        let over0 = max(reach_over(toes, pl4, plan, qyaw, hy, fy, vec3<f32>(0.0), REACH_HIND, REACH_FORE), 0.0);
-        if (over1 > over0) {
-            var lo: f32 = 0.0;
-            var hi: f32 = 1.0;
-            for (var it: i32 = 0; it < 6; it += 1) {
-                let m = 0.5 * (lo + hi);
-                if (reach_over(toes, pl4, plan, qyaw, hy, fy, shift * m, REACH_HIND, REACH_FORE) > over0) { hi = m; } else { lo = m; }
-            }
-            shift = shift * lo;
+    let over0 = max(reach_over(toes, pl4, plan, qyaw, hy, fy, vec3<f32>(0.0), REACH_HIND, REACH_FORE), 0.0);
+    if (over1 > 0.0 && over1 > over0) {
+        var hi: f32 = 1.0;
+        guard = 0.0;
+        for (var it: i32 = 0; it < 6; it += 1) {
+            let m = 0.5 * (guard + hi);
+            if (reach_over(toes, pl4, plan, qyaw, hy, fy, shift * m, REACH_HIND, REACH_FORE) > over0) { hi = m; } else { guard = m; }
         }
     }
+    if (!init) { guard = clamp(guard, state[s + D_GUARD] - GUARD_RATE * dt, state[s + D_GUARD] + GUARD_RATE * dt); }
+    state[s + D_GUARD] = guard;
+    shift = shift * guard;
     // Nor lower than they fold (a leap's gather): held over it, eased in, its fall stopped.
     let up = -smin(0.0, -fold_lift(toes, pl4, plan, qyaw, hy, fy, shift, REACH_HIND, REACH_FORE), CAP_SOFT) * (1.0 - smooth01(lie * 3.0));
     if (up > 1e-4) {
@@ -978,13 +991,8 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
         tele[f0] = pl;
         var at = toes[l];
         if (state[k + L_PLANT] < 0.5) { at = ld3(state, k + L_TO); }
-        tele[f0 + 1] = at.x;
-        tele[f0 + 2] = at.y;
-        tele[f0 + 3] = at.z;
+        tele[f0 + 1] = at.x; tele[f0 + 2] = at.y; tele[f0 + 3] = at.z;
     }
 }
 
-fn select_v(c: bool, a: vec3<f32>, b: vec3<f32>) -> vec3<f32> {
-    if (c) { return a; }
-    return b;
-}
+fn select_v(c: bool, a: vec3<f32>, b: vec3<f32>) -> vec3<f32> { if (c) { return a; } return b; }

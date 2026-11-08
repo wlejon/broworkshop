@@ -31,8 +31,8 @@
 // The feet (`leap_leg`): the fore feet are in the air at the take-off (in a
 // gallop they leave before the hind feet land) or leave just before it, the
 // hind feet push off together, a little apart; both pairs come down when
-// they can reach the ground (the rig finds the moment from the arc), fore
-// first. Times are in units of the legs' pendulum time sqrt(MEAN_LEG / g).
+// they can reach the ground (the rig finds the moment from the arc), the
+// fore first, the trunk nose-down by PITCH_DOWN, and the hind a beat later. Times are in units of the legs' pendulum time sqrt(MEAN_LEG / g).
 module creature::leap;
 import creature::common::*;
 import creature::skeleton::*;
@@ -53,7 +53,7 @@ pub const PUSH_ASK: f32 = 1.0;     // the take-off speed asked over what the ris
 pub const EFFORT: f32 = 1.6;     // the take-off's push over a gait's (an all-out effort)
 pub const BOUND_RISE: f32 = 0.42;  // leg lengths the hips rise in a bound with nothing to clear
 pub const PITCH_UP: f32 = 0.22;    // rad the trunk is nose-up at take-off
-pub const PITCH_DOWN: f32 = 0.16;  // rad it is nose-down at the fore touchdown
+pub const PITCH_DOWN: f32 = 0.28; // rad it is nose-down at the fore touchdown
 pub const STRIDE_MIN: f32 = 0.8;   // the clock's rate a run-up may take, at least
 pub const STRIDE_MAX: f32 = 1.25;  //   and at most
 pub const DEPTH: f32 = 0.22;       // leg lengths below the take-off height the hips go at most (the legs' fold)
