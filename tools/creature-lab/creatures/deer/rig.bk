@@ -857,7 +857,7 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
         let side = 1.0 - 2.0 * (e as f32);
         let fl = fract01(clock * 0.21 + seed * 0.37 + 0.5 * (e as f32));
         var flick: f32 = 0.0;
-        if (fl < 0.035) { flick = sin(PI * fl / 0.035); }
+        if (fl < 0.035) { let f2 = sin(PI * fl / 0.035); flick = f2 * f2 * f2 * f2; }
         let a = vec3<f32>(-0.5 * alert + 0.25 * lie, side * (0.4 * gyaw_s - 0.35 * alert) + side * 0.7 * flick, side * (0.35 * alert - 0.15 * lie));
         T.q[b] = q_mul(T.q[B_HEAD], q_xyz(clamp_xyz(a, b)));
         T.p[b] = head_of(T, b);
