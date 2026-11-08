@@ -673,11 +673,13 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
     // under it, so the gait's plan is there to hand back to).
     let hy_sp = hy; let hv_sp = hv;
     let fy_sp = fy; let fv_sp = fv;
+    var leap_w: f32 = 0.0;
     if (lp.on) {
         let hl = leap_hip(lp, hip_t);
         let pl = leap_pitch(lp);
         let tb = 0.3 * leg_time();
         let w = smooth01((lp.tau - lp.tcr) / tb) * (1.0 - smooth01((lp.tau - (leap_end(lp) - tb)) / tb));
+        leap_w = w;
         let cp = cos(pl.x);
         let fl = hl.x - HEAD[B_PELVIS].y + HEAD[B_SCAPL].y + WITHERS_Z * tan(pl.x);
         hy = mix(hy, hl.x, w);
@@ -806,14 +808,15 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
     // Head carriage: the neck takes up part of the body's pitch and the
     // withers' bob against their slow means (HEAD_HOLD), and the head holds
     // part of its gaze in space (HEAD_SPACE, through creature::secondary),
-    // so the head rides steadier than the trunk without being pinned.
+    // so the head rides steadier than the trunk without being pinned. A
+    // leap's arc it rides with the trunk (the means follow it closely).
     let pitch_t = pitch - bend.flex * 0.5;
     var pitch_s = state[s + D_PITCH_S];
     var fy_s = state[s + D_FY_S];
     let fy_a = fy + shift.y;
     if (init) { pitch_s = pitch_t; fy_s = fy_a; }
-    pitch_s = damp(pitch_s, pitch_t, 2.5, dt);
-    fy_s = damp(fy_s, fy_a, 2.5, dt);
+    pitch_s = damp(pitch_s, pitch_t, mix(2.5, 25.0, leap_w), dt);
+    fy_s = damp(fy_s, fy_a, mix(2.5, 25.0, leap_w), dt);
     state[s + D_PITCH_S] = pitch_s;
     state[s + D_FY_S] = fy_s;
     let carry_n = (1.0 - graze) * (1.0 - lie) * HEAD_HOLD;
