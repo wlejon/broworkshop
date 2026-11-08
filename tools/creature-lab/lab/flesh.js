@@ -101,11 +101,13 @@ function mixWeights(a, b, s) {
 
 export class Flesh {
     // opts: cell (m, the meshing grid, 0.005), triangles (the budget,
-    // 14000), soft (the weights' blend over the shape's, 1.6),
+    // 14000), simplifyError (how far decimating to the budget may move the
+    // surface, a share of the body's size, 1e-3: a coarser level of detail
+    // allows more), soft (the weights' blend over the shape's, 1.6),
     // smoothWeights (passes, 2), color.
     constructor(skel, opts = {}) {
         this.skel = skel;
-        this.opts = { cell: 0.005, triangles: 14000, soft: 1.6, smoothWeights: 2, ...opts };
+        this.opts = { cell: 0.005, triangles: 14000, simplifyError: 1e-3, soft: 1.6, smoothWeights: 2, ...opts };
         this.masses = [];
         this.sections = [];
     }
@@ -222,7 +224,7 @@ export class Flesh {
         const t1 = Date.now();
         const raw = Mesh.surfaceNets(S, dim[0], dim[1], dim[2], 0);
         const rawTris = raw.indices.length / 3;
-        if (rawTris > this.opts.triangles) raw.simplifyToTriangleCount(this.opts.triangles, 1e-3);
+        if (rawTris > this.opts.triangles) raw.simplifyToTriangleCount(this.opts.triangles, this.opts.simplifyError);
         // Triangles in vertex-cache order and vertices in first-use order:
         // the skin hook blends four bones a vertex, so each one shaded again
         // costs (twice the herd's shadow pass in the order decimation leaves).

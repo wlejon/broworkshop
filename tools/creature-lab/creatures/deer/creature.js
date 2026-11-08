@@ -1,8 +1,8 @@
 // The deer: the lab's reference quadruped. A creature folder's
 // creature.js exports this shape (lab/creature.js loads it):
 //
-//   name, skeleton { bones, feet, tracks, chartJoints }, body(skel),
-//   rig { file, kernel, modules? }, cycles (gaits the sheets cut a cycle
+//   name, skeleton { bones, feet, tracks, chartJoints }, body(skel, detail?)
+//   (detail: { cell, triangles } for a coarser level), rig { file, kernel, modules? }, cycles (gaits the sheets cut a cycle
 //   of, and reference values to compare against), variants (knob sets:
 //   the deliberately broken rigs among them), scenarios (its own, added to
 //   the lab's).

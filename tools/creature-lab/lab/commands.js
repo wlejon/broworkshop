@@ -51,7 +51,7 @@ export const HELP = `creature-lab <command> <creature> [scenario ...] [options]
   herd        <creature> [scenario]        a herd's GPU cost a frame and triangles (--count 50, --frames 240)
   flock       <creature> [behaviour]       a flock on the GPU brain (graze travel mill flee): GPU cost,
                                            what the group does, a screenshot (--count 200, --frames 240,
-                                           --warm <steps>, --shadows off)
+                                           --warm <steps>, --shadows off, --view field|ground)
   snapshot    <creature> <label>        copy creatures/<creature> to <creature>@<label> for A/B
   scenarios   <creature>                   list its scenarios
 
@@ -188,10 +188,12 @@ export async function runCommand(argv) {
     } else if (cmd === 'flock') {
         const behaviour = rest[0] || 'graze', count = opt.count ? +opt.count : 200;
         const shadows = opt.shadows !== 'off';
-        const base = `${dir}/flock-${behaviour}-${count}${shadows ? '' : '-noshadow'}`;
-        const r = flockCost(creature, { count, behaviour, shadows, frames: opt.frames ? +opt.frames : 240,
+        const view = opt.view === 'ground' ? 'ground' : 'field';
+        const cull = opt.cull !== 'off';
+        const base = `${dir}/flock-${behaviour}-${count}${shadows ? '' : '-noshadow'}${view === 'ground' ? '-ground' : ''}${cull ? '' : '-nocull'}`;
+        const r = flockCost(creature, { count, behaviour, shadows, view, cull, frames: opt.frames ? +opt.frames : 240,
             warm: opt.warm ? +opt.warm : 600, shot: base + '.png' });
-        console.log(`${r.count} x ${r.creature} ${r.behaviour} (field ${r.field} m, shadows ${r.shadows ? 'on' : 'off'}): ${r.triangles} triangles, GPU ms a frame mean ${r.gpu.mean}, median ${r.gpu.median}, p90 ${r.gpu.p90}; kernels ${JSON.stringify(r.kernelsBy)}`);
+        console.log(`${r.count} x ${r.creature} ${r.behaviour} (${r.view} view, field ${r.field} m, shadows ${r.shadows ? 'on' : 'off'}): levels drew ${r.levels.drawn.join(' / ')} (${r.levels.triangles.join(' / ')} triangles each), ${r.triangles} triangles, GPU ms a frame mean ${r.gpu.mean}, median ${r.gpu.median}, p90 ${r.gpu.p90}; kernels ${JSON.stringify(r.kernelsBy)}`);
         console.log(`  passes ${JSON.stringify(r.passes)}`);
         console.log(`  group ${JSON.stringify(r.group)}`);
         writeFile(base + '.json', json(r));

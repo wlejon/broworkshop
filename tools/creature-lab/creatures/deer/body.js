@@ -32,8 +32,10 @@ import { legs, legSections } from "./legs.js";
 
 const ring = (z, top, bottom, hw) => ({ c: [0, (top + bottom) / 2, z], r: [hw, (top - bottom) / 2] });
 
-export function body(skel) {
-    const B = new Flesh(skel, { color: coat, triangles: 14000 });
+// `detail` overrides the meshing (Flesh's cell, triangles, simplifyError) for a coarser
+// level of detail of the same body.
+export function body(skel, detail = {}) {
+    const B = new Flesh(skel, { color: coat, triangles: 14000, ...detail });
     B.limb('trunk', ['pelvis', 'lumbar', 'thorax'], [
         ring(-0.625, 0.875, 0.690, 0.060),
         ring(-0.595, 0.910, 0.645, 0.095),

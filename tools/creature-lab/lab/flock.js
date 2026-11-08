@@ -1,14 +1,17 @@
 // A flock: a batch whose intents come from lab/flock.bk, the group's brain
 // on the GPU, so a step is four dispatches (the neighbour grid cleared and
-// filled, the brain, then the rig) and no work a creature on the CPU. The group lives on a round field (center,
-// radius) sized to its count; the brain keeps it there, so a camera can
-// frame the field without reading anything back.
+// filled, the brain, then the rig) and no work a creature on the CPU. The
+// group lives on a round field (center, radius) sized to its count; the
+// brain keeps it there, so a camera can frame the field without reading
+// anything back. Given a scene it draws as a crowd (lab/crowd.js: levels of
+// detail chosen on the GPU), updated by draw(view) before each frame renders.
 //
 // Behaviours: graze, travel (round the field after a goal that circles it),
 // mill (circling the middle), flee (graze until a threat crosses the field;
 // the alarm spreads and the group bolts).
 
 import { Batch } from "./batch.js";
+import { Crowd } from "./crowd.js";
 import { labModules, readApp } from "./creature.js";
 
 export const BEHAVIOURS = ['graze', 'travel', 'mill', 'flee'];
@@ -38,7 +41,12 @@ export class Flock {
         this.space = opts.space ?? 2.2;
         this.radius = fieldRadius(count, this.space);
         this.center = [0, 0];
-        this.batch = new Batch(creature, count, opts);
+        // Drawn as a crowd (lab/crowd.js), not by the batch's own mesh.
+        this.batch = new Batch(creature, count);
+        // The field, and the run past its edge a fleeing creature may make
+        // before the brain turns it back (twice the radius), with room.
+        const B = this.radius * 2 + 30;
+        this.crowd = opts.scene ? new Crowd(opts.scene, creature, count, { ...opts, bounds: [[-B, -2, -B], [B, 4, B]] }) : null;
         this.batch.dirty = false;        // the brain writes the intents
         this.mind = [bro.kernel.createBuffer(count * b.MIND * 4), bro.kernel.createBuffer(count * b.MIND * 4)];
         for (const m of this.mind) m.write(new Float32Array(count * b.MIND));
@@ -126,10 +134,17 @@ export class Flock {
         this.time += dt;
     }
 
+    // Before a frame renders: the crowd's levels for this view
+    // ({ position, target, fov }) and viewport (height px, aspect).
+    draw(view, heightPx, aspect) {
+        if (this.crowd) this.crowd.update(this.batch.poseBuf, this.batch.teleBuf, view, heightPx, aspect);
+    }
+
     readTele(out) { return this.batch.readTele(out); }
     readMind(out) { return this.mind[0].read(out || new Float32Array(this.count * this.b.MIND)); }
 
     destroy() {
+        if (this.crowd) this.crowd.destroy();
         this.batch.destroy();
         for (const m of this.mind) m.destroy();
         for (const buf of [this.paramsBuf, this.headBuf, this.nextBuf]) buf.destroy();

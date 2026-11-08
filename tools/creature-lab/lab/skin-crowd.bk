@@ -1,0 +1,52 @@
+// The crowd's skinning hook (lab/crowd.js): instance k of a level's node is
+// creature order[k] of its draw list (creature::crowd's ranking), whose
+// bones come as dual quaternions from k_dq (`dq`: two vec4 a bone). Each
+// vertex blends its up to four bones (`skin`, as lab/skin.bk) the same way
+// lab/skin.bk does, without turning matrices into quaternions first.
+module hook;
+import mesh;
+import scene;
+from creature::skeleton import NB;
+
+@binding(4, 14) var dq: read_buffer<vec4<f32>>;
+@binding(4, 15) var skin: read_buffer<vec4<f32>>;
+@binding(4, 16) var order: read_buffer<i32>;
+
+fn rotate(q: vec4<f32>, v: vec3<f32>) -> vec3<f32> {
+    let u = cross(q.xyz, v) * 2.0;
+    return v + q.w * u + cross(q.xyz, u);
+}
+
+pub fn fragment(v: mesh::Vertex, s: mesh::Surface) -> mesh::Surface {
+    return s;
+}
+
+pub fn vertex(v_in: mesh::Vertex) -> mesh::Vertex {
+    var v = v_in;
+    let k = v.vertex_index;
+    let wt = skin[2 * k];
+    let ix = skin[2 * k + 1];
+    let base = order[v.instance_index] * NB;
+    var qr = vec4<f32>(0.0);
+    var qd = vec4<f32>(0.0);
+    var q0 = vec4<f32>(0.0);
+    for (var j: i32 = 0; j < 4; j += 1) {
+        let w = wt[j];
+        if (w > 0.0) {
+            let r = 2 * (base + (ix[j] as i32));
+            let q = dq[r];
+            if (j == 0) { q0 = q; }
+            var s = w;
+            if (dot(q, q0) < 0.0) { s = -w; }
+            qr += s * q;
+            qd += s * dq[r + 1];
+        }
+    }
+    let n = length(qr);
+    let rq = qr / n;
+    let dd = qd / n;
+    let tr = rq.w * dd.xyz - dd.w * rq.xyz + cross(rq.xyz, dd.xyz);
+    v.pos = rotate(rq, v.pos) + tr;
+    v.normal = normalize(rotate(rq, v.normal));
+    return v;
+}

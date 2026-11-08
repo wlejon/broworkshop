@@ -9,7 +9,8 @@
 // does not depend on the order the creatures run in). Neighbours within
 // SEE metres are weighed: kept off from within the group's spacing
 // (separation), matched in heading (alignment) and drawn toward
-// (cohesion); a creature past the field's edge turns back in.
+// (cohesion); a creature past the field's edge (one in flight, past twice
+// the field's radius) turns back in.
 //
 // Behaviours (P_MODE):
 //   0 graze   a loose herd: each grazes a while, then walks a few metres
@@ -256,9 +257,10 @@ fn k_flock(g: grid<1>, tele: read_store<f32, 1>, mind: read_store<f32, 1>, mind_
         if (alarm > 0.5) { v *= mix(0.75, 1.0, smooth01((ahead - 0.8) / 1.0)); }
         else { v *= mix(0.2, 1.0, smooth01((ahead - 1.1) / 1.5)); }
     }
-    // The field's edge: past it, back in.
-    let out = length(p - center) - radius;
-    if (out > 0.0 && alarm <= 0.5) {
+    // The field's edge: past it, back in (in flight, past twice it: a
+    // crowd's drawing counts on the group staying within that).
+    let out = length(p - center) - sel(alarm > 0.5, 2.0 * radius, radius);
+    if (out > 0.0) {
         let back = normalize(center - p);
         v = cap2(v + back * walk * smooth01(out / 3.0) * 2.0, max(length(v), walk));
         grazing = sel(out > 1.0, 0.0, grazing);

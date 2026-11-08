@@ -151,7 +151,8 @@ async function setFlock(count = +$('flockCount').value, behaviour = $('flockDoes
 
 vp.onFrame((dt) => {
     if (S.disposed) return;
-    if (S.flock) { if (S.playing) S.flock.frame(dt); return; }
+    // Paused, the flock still picks its levels for where the camera is.
+    if (S.flock) { S.flock.frame(S.playing ? dt : 0); return; }
     if (!S.runs.length || !S.playing) return;
     let t = S.t + dt * S.speed;
     if (t > (S.steps - 1) * S.dt) t = 0;

@@ -19,8 +19,10 @@ function coat(p, n, share) {
     return mix(c, DARK, share('eyeL') + share('eyeR'));
 }
 
-export function body(skel) {
-    const B = new Flesh(skel, { color: coat, triangles: 16000 });
+// `detail` overrides the meshing (Flesh's cell, triangles, simplifyError) for a coarser
+// level of detail of the same body.
+export function body(skel, detail = {}) {
+    const B = new Flesh(skel, { color: coat, triangles: 16000, ...detail });
     B.limb('barrel', ['pelvis', 'spine', 'thorax'], [
         { c: [0, 0.62, -0.68], r: [0.16, 0.14] },
         { c: [0, 0.61, -0.45], r: [0.26, 0.20] },

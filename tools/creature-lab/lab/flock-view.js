@@ -5,6 +5,7 @@
 // crossing (flee). The camera is the page's orbit camera, framed on the
 // field when the flock is made.
 
+import { Camera } from "/lib/kit/viewport3d.js";
 import { Flock } from "./flock.js";
 import { groundEnv } from "./scenarios.js";
 
@@ -50,6 +51,8 @@ export class FlockView {
     frame(dt) {
         this.acc = Math.min(this.acc + dt * this.speed, MAX_STEPS * STEP);
         while (this.acc >= STEP) { this.flock.step(STEP); this.acc -= STEP; this.steps++; }
+        const c = this.vp.canvas, h = c.clientHeight || 720;
+        this.flock.draw(Camera.orbitViewOpts(this.vp.cam), h, (c.clientWidth || 1280) / h);
         const th = this.flock.threat;
         this.marker.visible = !!th;
         if (th) this.marker.position = [th.x, 1.2, th.z];

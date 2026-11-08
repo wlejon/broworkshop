@@ -148,11 +148,15 @@ live view's light and shadows, and writes the GPU frame time (mean, median,
 p90, max), its passes and the triangle count to `herd-<scenario>-<count>.json`.
 
 `flock` runs `--count` creatures (200) under the flock brain doing one
-behaviour (graze, travel, mill, flee; `--warm` steps first, 600). It writes
-`flock-<behaviour>-<count>.json` and a screenshot. The JSON holds:
+behaviour (graze, travel, mill, flee; `--warm` steps first, 600), seen from
+above the field (`--view field`) or from a standing eye among them
+(`--view ground`); `--cull off` draws every creature into every view, for
+comparison. It writes `flock-<behaviour>-<count>.json` and a
+screenshot. The JSON holds:
 
 - the GPU frame time, its passes, and each kernel's ms (the brain, the grid,
   the rig);
+- how many the crowd drew at each level of detail, and the triangles drawn;
 - what the group is doing: gaits, median and top speed, how many are off the
   field, the nearest-neighbour spacing, and how many have a neighbour within
   80 cm.
@@ -180,7 +184,22 @@ round field sized to its count. Its behaviours:
 - **mill**: they circle the field's middle.
 - **flee**: they graze until a threat crosses. One within 9 m of it, or near
   an alarmed neighbour, startles, then bounds and gallops away (within 70° of
-  the way it faces). The alarm fades once the threat is far.
+  the way it faces). The alarm fades once the threat is far. A fleeing
+  creature may run past the field's edge, to twice its radius, before the
+  brain turns it back.
+
+A flock in a scene draws as a crowd (`lab/crowd.js`, `lab/crowd.bk`): the
+creature's body meshed three times (full; about 2400 triangles; about 500),
+each an instanced node skinned by `lab/skin-crowd.bk`. Each frame a kernel
+turns the poses into dual quaternions, and another puts every creature in
+view on a level's list by its height on screen (full above 240 px, the middle
+level above 70 px). The lists' lengths are the nodes' instance counts
+(`setInstanceCountBuffer`), so nothing is read back. The full and middle
+levels hold at most 150 and 1500; the rest step down, as does a creature out
+of view (it still casts). The same kernel writes each listed creature's
+sphere: the engine draws into the camera and into each shadow view only the
+creatures it holds (`setInstanceCullSpheres`). The nodes' cull box
+(`setCullBounds`) is the field and the run past it.
 
 `finder` scans each named scenario into `finder/scan-<scenario>.json`
 (about 10 to 20 s a scenario), then ranks every scan in that folder, so

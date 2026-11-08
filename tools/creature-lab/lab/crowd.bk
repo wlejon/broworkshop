@@ -1,0 +1,102 @@
+// creature::crowd — what drawing a crowd needs each frame, on the GPU:
+//
+// k_dq: every creature's bones as dual quaternions (real, dual: two vec4 a
+// bone), from the pose rows the rig wrote, so the crowd's skin hook
+// (lab/skin-crowd.bk) only blends them, a vertex at a time, in every pass,
+// rather than turning matrices into quaternions there.
+//
+// k_lod: each creature takes the level its size on screen asks for (near
+// closer than R_NEAR_D, mid closer than R_MID_D, else far; far when it is
+// outside the view's cone, with a margin, and more than a few metres from
+// the eye: it still casts) and appends itself to that level's list, with
+// its sphere (centre R_CY above it, radius R_RAD), counts[level] the list's
+// length so far (k_lod_clear zeroes them). A level holds at most its cap
+// (R_CAPS: its node's instance rows, which the engine clamps the count to);
+// one past it goes to the next level. counts[] is each level node's
+// instance count (SceneNode.setInstanceCountBuffer) and the spheres its
+// instances' (setInstanceCullSpheres: the engine draws into each view,
+// camera and shadow alike, only those it holds), so nothing is read back.
+module creature::crowd;
+import creature::contract::*;
+from creature::skeleton import NB, HEAD;
+
+pub const LEVELS: i32 = 3;
+pub const R_EYE: i32 = 0;        // (x, y, z) the camera
+pub const R_FWD: i32 = 3;        // (x, y, z) its view direction, unit
+pub const R_COS: i32 = 6;        // cos of the half angle the view reaches (with margin)
+pub const R_NEAR_D: i32 = 7;     // m within which a creature draws full
+pub const R_MID_D: i32 = 8;      // m within which it draws at the middle level
+pub const R_CAPS: i32 = 9;       // (near, mid, far) the most each level draws
+pub const R_CY: i32 = 12;        // m its sphere's centre stands above it
+pub const R_RAD: i32 = 13;       // m its sphere's radius
+pub const LOD_PARAMS: i32 = 14;
+
+fn quat_of(r0: vec4<f32>, r1: vec4<f32>, r2: vec4<f32>) -> vec4<f32> {
+    let tr = r0.x + r1.y + r2.z;
+    if (tr > 0.0) {
+        let s = sqrt(tr + 1.0) * 2.0;
+        return vec4<f32>((r2.y - r1.z) / s, (r0.z - r2.x) / s, (r1.x - r0.y) / s, 0.25 * s);
+    }
+    if (r0.x > r1.y && r0.x > r2.z) {
+        let s = sqrt(1.0 + r0.x - r1.y - r2.z) * 2.0;
+        return vec4<f32>(0.25 * s, (r0.y + r1.x) / s, (r0.z + r2.x) / s, (r2.y - r1.z) / s);
+    }
+    if (r1.y > r2.z) {
+        let s = sqrt(1.0 + r1.y - r0.x - r2.z) * 2.0;
+        return vec4<f32>((r0.y + r1.x) / s, 0.25 * s, (r1.z + r2.y) / s, (r0.z - r2.x) / s);
+    }
+    let s = sqrt(1.0 + r2.z - r0.x - r1.y) * 2.0;
+    return vec4<f32>((r0.z + r2.x) / s, (r1.z + r2.y) / s, 0.25 * s, (r1.x - r0.y) / s);
+}
+
+fn rotate(q: vec4<f32>, v: vec3<f32>) -> vec3<f32> {
+    let u = cross(q.xyz, v) * 2.0;
+    return v + q.w * u + cross(q.xyz, u);
+}
+
+// Bone b of creature c: x' = R (x - head) + p as (q, q * (t, 0)) with
+// t = p - R head (the dual part times 2, as lab/skin.bk blends it).
+@kernel @grid(1)
+fn k_dq(g: grid<1>, pose: read_store<vec4<f32>, 1>, dq: write_store<vec4<f32>, 1>) {
+    let k = g.x();
+    let b = k - (k / NB) * NB;
+    let r0 = pose[3 * k];
+    let r1 = pose[3 * k + 1];
+    let r2 = pose[3 * k + 2];
+    let q = quat_of(r0, r1, r2);
+    let t = vec3<f32>(r0.w, r1.w, r2.w) - rotate(q, HEAD[b]);
+    dq[2 * k] = q;
+    dq[2 * k + 1] = vec4<f32>(t * q.w + cross(t, q.xyz), -dot(t, q.xyz));
+}
+
+@kernel @grid(1)
+fn k_lod_clear(g: grid<1>, counts: rw_store<i32, 1>) {
+    counts[g.x()] = 0;
+}
+
+@kernel @grid(1)
+fn k_lod(g: grid<1>, tele: read_store<f32, 1>, params: read_store<f32, 1>, counts: rw_store<i32, 1>,
+         near: write_store<i32, 1>, mid: write_store<i32, 1>, far: write_store<i32, 1>,
+         s_near: write_store<vec4<f32>, 1>, s_mid: write_store<vec4<f32>, 1>, s_far: write_store<vec4<f32>, 1>) {
+    let i = g.x();
+    let at = vec3<f32>(tele[i * TELE + T_POS], tele[i * TELE + T_POS + 1], tele[i * TELE + T_POS + 2]);
+    let p = at + vec3<f32>(0.0, 0.6, 0.0);
+    let eye = vec3<f32>(params[R_EYE], params[R_EYE + 1], params[R_EYE + 2]);
+    let fwd = vec3<f32>(params[R_FWD], params[R_FWD + 1], params[R_FWD + 2]);
+    let d = length(p - eye);
+    var level: i32 = 2;
+    if (d < params[R_MID_D]) { level = 1; }
+    if (d < params[R_NEAR_D]) { level = 0; }
+    if (d > 3.0 && dot(p - eye, fwd) < params[R_COS] * d) { level = 2; }
+    let sphere = vec4<f32>(at + vec3<f32>(0.0, params[R_CY], 0.0), params[R_RAD]);
+    while (level < LEVELS) {
+        let slot = counts.atomic_add(level, 1);
+        if (slot < (params[R_CAPS + level] as i32)) {
+            if (level == 0) { near[slot] = i; s_near[slot] = sphere; }
+            else if (level == 1) { mid[slot] = i; s_mid[slot] = sphere; }
+            else { far[slot] = i; s_far[slot] = sphere; }
+            return;
+        }
+        level += 1;
+    }
+}
