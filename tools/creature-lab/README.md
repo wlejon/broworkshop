@@ -323,7 +323,9 @@ text under the creature's folder; `score`, `sweep` and `kinks` run what
   kinks, the share of ground time pushed past friction and pulled down
   faster than gravity, the share of flight off free fall, the corners the
   swing feet and tracked points turn, and the joints that jitter; then the
-  metrics' flags in full.
+  metrics' flags in full. `--vs <creature>` (a `snapshot` taken before an
+  edit) puts its row above the creature's, a table a scenario
+  (`score-vs-<it>.txt`).
 - `sweep --sweep NAME=a,b,c` (`sweep-NAME.txt`): the score of the rig as it
   is and with each value, a table a scenario. Other `--knob` overrides apply
   to every row.

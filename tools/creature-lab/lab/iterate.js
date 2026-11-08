@@ -82,6 +82,12 @@ export async function sweepTable(spec, sweep, scenarios, analyzeRun, { knobs = n
     if (values.some((v) => !Number.isFinite(v))) throw new Error(`--sweep: '${list}' is not numbers`);
     const runs = [{ label: 'rig', creature: await loadCreature(spec, knobs) }];
     for (const v of values) runs.push({ label: `${name}=${v}`, creature: await loadCreature(spec, { ...(knobs || {}), [name]: v }) });
+    return { name, values, ...compareTable(runs, scenarios, analyzeRun, { seed }) };
+}
+
+// score for several creatures (versions: a snapshot and the rig, or knob
+// values), a table a scenario with a row each.
+export function compareTable(runs, scenarios, analyzeRun, { seed = 1 } = {}) {
     const w = Math.max(...runs.map((r) => r.label.length)) + 2;
     const lines = [], out = {};
     for (const sc of scenarios) {
@@ -93,7 +99,7 @@ export async function sweepTable(spec, sweep, scenarios, analyzeRun, { knobs = n
             lines.push(scoreLine(r.label, w, s));
         }
     }
-    return { name, values, scores: out, lines };
+    return { scores: out, lines };
 }
 
 // --- kinks ----------------------------------------------------------------------------

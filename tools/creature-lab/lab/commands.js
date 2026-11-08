@@ -21,7 +21,7 @@ import { finderReport } from "./finder-out.js";
 import { naturalReport, naturalRun } from "./natural-out.js";
 import { herdCost } from "./herd.js";
 import { flockCost } from "./flock-cost.js";
-import { scoreTable, sweepTable, kinkReport, traceText } from "./iterate.js";
+import { scoreTable, sweepTable, compareTable, kinkReport, traceText } from "./iterate.js";
 
 export const HELP = `creature-lab <command> <creature> [scenario ...] [options]
 
@@ -57,6 +57,7 @@ export const HELP = `creature-lab <command> <creature> [scenario ...] [options]
   score       <creature> [scenario ...]    one line a scenario, fast: metrics flags, natural flags, kinks a
                                            second and where most fall, the root's kinks, pushed past friction,
                                            pulled down, off free fall, swing-foot corners, jittering joints
+                                           (--vs <creature>: a snapshot's rows above these, a table a scenario)
   sweep       <creature> [scenario ...]    score for each value of a knob, one table a scenario
                                            (--sweep NAME=a,b,c; the rig's own value first)
   kinks       <creature> [scenario ...]    where the kinks are: by foot event, the bones in each, the root
@@ -242,7 +243,11 @@ export async function runCommand(argv) {
     } else if (cmd === 'score' || cmd === 'sweep' || cmd === 'kinks' || cmd === 'trace') {
         const scs = rest.length ? scenarios : NATURAL;
         let lines = [], file;
-        if (cmd === 'score') {
+        if (cmd === 'score' && opt.vs) {
+            const vs = await loadCreature(String(opt.vs), knobs);
+            ({ lines } = compareTable([{ label: vs.label, creature: vs }, { label: creature.label, creature }], scs, analyzeRun, { seed }));
+            file = `${dir}/score-vs-${safe(vs.label)}.txt`;
+        } else if (cmd === 'score') {
             ({ lines } = scoreTable(creature, scs, analyzeRun, { seed }));
             file = `${dir}/score.txt`;
         } else if (cmd === 'sweep') {
