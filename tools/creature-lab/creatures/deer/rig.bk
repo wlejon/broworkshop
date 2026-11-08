@@ -458,9 +458,9 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
             let over = length(toe - top) > select_f(hind, REACH_HIND, REACH_FORE);            let lev = leap_leg(lp, hind, side01);
             if (in_leap && ((hind && lp.tau >= lp.tc - 0.02) || lp.tau >= lev.z)) {
                 // In a leap the hind feet stay down from their last landing
-                // until the take-off, and
-                // every foot still down leaves for the flight at its time.
-                if (state[k + L_LEAP] < 2.5 && lp.tau >= lev.z) {
+                // until the take-off (or, in its last moments, their legs
+                // straight), and every foot still down leaves for the flight at its time.
+                if (state[k + L_LEAP] < 2.5 && (lp.tau >= lev.z || (hind && over && lp.tau > -0.05))) {
                     lift = true; lift_t = lev.w - lp.tau; kind = 0.0; state[k + L_LEAP] = 3.0;
                 }
             } else if (moving && state[k + L_ARMED] > 0.5 && ph >= duty) {
