@@ -1,7 +1,8 @@
 // A flock's cost and how it behaves: `count` creatures driven by the GPU
 // brain (lab/flock.js) on their field and drawn as a crowd (lab/crowd.js),
 // seen whole from above and to the side (view 'field') or from a person's
-// eye at the herd's edge ('ground'), lit as the live view lights them. The report
+// eye at the herd's edge ('ground') or close by one of them ('close'), lit
+// as the live view lights them. The report
 // has how many each level drew and the triangles that makes.
 // perf.measure gives the scene's
 // GPU ms a frame, its passes and the kernels' ms; the telemetry read at the
@@ -30,6 +31,8 @@ export function flockCost(creature, { count = 200, behaviour = 'graze', frames =
     // 'field': the whole field from above and to the side; 'ground': a
     // person's eye at the herd's edge (where mill's ring runs), looking
     // across the field.
+    // 'close': 2.5 m from one creature at its head's height, three quarters
+    // to its front, once the flock has warmed (its full level and face).
     const cam = view === 'ground'
         ? { fov: 50, near: 0.1, far: R * 8, position: [R * 0.1, 1.6, -R * 0.6], target: [0, 0.8, 0], up: [0, 1, 0] }
         : { fov: 50, near: 0.1, far: R * 8, position: [R * 0.9, R * 0.75, -R * 1.25], target: [0, 0, 0], up: [0, 1, 0] };
@@ -37,6 +40,12 @@ export function flockCost(creature, { count = 200, behaviour = 'graze', frames =
     const dt = 1 / 60;
     const step = () => { flock.step(dt / 2); flock.step(dt / 2); flock.draw(cam, H, W / H); };
     for (let i = 0; i < warm; i++) step();
+    if (view === 'close') {
+        const t = flock.readTele(), x = t[T.POS], z = t[T.POS + 2], yaw = t[T.YAW] + 0.8;
+        cam.position = [x + Math.sin(yaw) * 2.5, 1.3, z + Math.cos(yaw) * 2.5];
+        cam.target = [x + Math.sin(yaw - 0.8) * 0.5, 1.1, z + Math.cos(yaw - 0.8) * 0.5];
+        scene.setCamera(cam);
+    }
     advanceTime(16);
     perf.settle({ maxFrames: 200 });
     const m = perf.measure({ frames, warm: 0, step, stepMs: 16 });

@@ -31,6 +31,13 @@ export function labModules() {
     };
 }
 
+// The modules a skin hook (lab/skin.bk, skin-crowd.bk) imports: the
+// creature's skeleton and its face, or (face false: a coarse level, where
+// a face is under a pixel) none.
+export function skinModules(creature, face = true) {
+    return { 'creature::skeleton': creature.skel.module, 'creature::face': face ? creature.face : readApp('lab/face.bk') };
+}
+
 // A rig's own modules: `rig.modules` maps a module name to a file of the
 // creature's folder (read afresh each load) or to source.
 function rigModules(def, folder) {
@@ -73,7 +80,11 @@ export async function loadCreature(spec, extraKnobs = null) {
     const rig = mod.kernel(def.rig.kernel);
     const body = def.body(skel);
     const t3 = Date.now();
+    // Its face (creature::face, drawn per pixel by the skin hooks): a .bk
+    // of its folder, else the lab's, which draws none.
+    const face = readApp(def.face ? `${folder}/${def.face}` : 'lab/face.bk');
     return {
+        face,
         spec, dir, variant, knobs: knobs || null, folder, name: def.name,
         label: spec + (extraKnobs && Object.keys(extraKnobs).length ? '+' + Object.entries(extraKnobs).map(([k, v]) => `${k}=${v}`).join(',') : ''), def, skel, mod, rig, body, modules,
         stateStride: mod.consts.STATE,

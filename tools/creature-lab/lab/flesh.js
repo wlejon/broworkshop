@@ -21,7 +21,10 @@
 // chest instead of standing out of it. The field is sampled on a grid of
 // `cell` (5 mm), meshed by surface nets, decimated to the body's triangle
 // budget and every vertex put back on the surface along the field's
-// gradient, its normal the gradient.
+// gradient, its normal the gradient. A mass marked `keep` (true, or the
+// margin in m about its box) keeps the grid's detail through decimation:
+// its vertices are locked and the budget is spent on the rest, so an eye
+// or a nose 3 cm across stays a shape rather than a couple of triangles.
 //
 // Skin weights come from the same field: a vertex goes to the bones of the
 // masses about it, each mass by exp(-d / (blend * soft)) (`soft`, 1.6 by
@@ -104,10 +107,12 @@ export class Flesh {
     // 14000), simplifyError (how far decimating to the budget may move the
     // surface, a share of the body's size, 1e-3: a coarser level of detail
     // allows more), soft (the weights' blend over the shape's, 1.6),
-    // smoothWeights (passes, 2), color.
+    // smoothWeights (passes, 2), keep (whether the masses marked `keep`
+    // keep their detail, true: a coarse level of detail spends nothing on
+    // them), color.
     constructor(skel, opts = {}) {
         this.skel = skel;
-        this.opts = { cell: 0.005, triangles: 14000, simplifyError: 1e-3, soft: 1.6, smoothWeights: 2, ...opts };
+        this.opts = { cell: 0.005, triangles: 14000, simplifyError: 1e-3, soft: 1.6, smoothWeights: 2, keep: true, ...opts };
         this.masses = [];
         this.sections = [];
     }
@@ -176,6 +181,7 @@ export class Flesh {
         for (const p of prims) for (const x of [...p.w0, ...p.w1]) bones.set(x.index, (bones.get(x.index) || 0) + x.w);
         this.masses.push({
             name, prims, blend: opts.blend ?? 0.03, soft: opts.soft ?? this.opts.soft, joint: opts.joint ?? 0, lo, hi,
+            keep: opts.keep ?? false,
             // The rest centre, the middle of its extent: lab/form.js measures
             // its volume from there.
             centre: lo.map((v, k) => (v + hi[k]) / 2),
@@ -224,7 +230,23 @@ export class Flesh {
         const t1 = Date.now();
         const raw = Mesh.surfaceNets(S, dim[0], dim[1], dim[2], 0);
         const rawTris = raw.indices.length / 3;
-        if (rawTris > this.opts.triangles) raw.simplifyToTriangleCount(this.opts.triangles, this.opts.simplifyError);
+        // The kept masses' vertices stay as meshed: decimation spends the
+        // budget on the rest.
+        const kept = this.opts.keep ? this.masses.filter((m) => m.keep) : [];
+        let lock = null, locked = 0;
+        if (kept.length && rawTris > this.opts.triangles) {
+            const G = raw.positions, nv0 = G.length / 3;
+            lock = new Uint8Array(nv0);
+            const boxes = kept.map((m) => {
+                const g = m.keep === true ? 2 * m.blend + 2 * cell : m.keep;
+                return { lo: m.lo.map((x) => x - g), hi: m.hi.map((x) => x + g) };
+            });
+            for (let v = 0; v < nv0; v++) {
+                const p = [0, 1, 2].map((k) => lo[k] + G[3 * v + k] * cell);
+                if (boxes.some((b) => p.every((x, k) => x >= b.lo[k] && x <= b.hi[k]))) { lock[v] = 1; locked++; }
+            }
+        }
+        if (rawTris > this.opts.triangles) raw.simplifyToTriangleCount(this.opts.triangles, this.opts.simplifyError, lock);
         // Triangles in vertex-cache order and vertices in first-use order:
         // the skin hook blends four bones a vertex, so each one shaded again
         // costs (twice the herd's shadow pass in the order decimation leaves).
@@ -268,7 +290,7 @@ export class Flesh {
             pieces: [{ name: 'body', kind: 'flesh', base: 0, count: nv, start: 0, end: indices.length }], piece: new Float32Array(nv),
             masses: this.masses.map((m) => ({ name: m.name, bone: m.bone, centre: m.centre })), vertexMass,
             sections: this.sections,
-            build: { grid: dim, cell, rawTriangles: rawTris, offSurface, ms: { field: t1 - t0, mesh: t2 - t1, place: t3 - t2, total: Date.now() - t0 } },
+            build: { grid: dim, cell, rawTriangles: rawTris, locked, offSurface, ms: { field: t1 - t0, mesh: t2 - t1, place: t3 - t2, total: Date.now() - t0 } },
         };
     }
 

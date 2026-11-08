@@ -2,7 +2,8 @@
 // creature.js exports this shape (lab/creature.js loads it):
 //
 //   name, skeleton { bones, feet, tracks, chartJoints }, body(skel, detail?)
-//   (detail: { cell, triangles } for a coarser level), rig { file, kernel, modules? }, cycles (gaits the sheets cut a cycle
+//   (detail: { cell, triangles } for a coarser level), face (its
+//   creature::face, drawn per pixel: lab/face.bk), rig { file, kernel, modules? }, cycles (gaits the sheets cut a cycle
 //   of, and reference values to compare against), variants (knob sets:
 //   the deliberately broken rigs among them), scenarios (its own, added to
 //   the lab's).
@@ -15,7 +16,8 @@ export default {
     name: 'deer',
     skeleton: { bones, feet, tracks, chartJoints },
     body,
-    rig: { file: 'rig.bk', kernel: 'k_rig', modules: { 'deer::legs': 'legs.bk' } },
+    face: 'face.bk',
+    rig:{ file: 'rig.bk', kernel: 'k_rig', modules: { 'deer::legs': 'legs.bk' } },
     scale: { height: 0.95, length: 1.6 },
     // Reference footfalls (Hildebrand): duty factor and each foot's
     // touchdown after the left hind's, as a share of the stride.

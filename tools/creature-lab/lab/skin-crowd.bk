@@ -2,11 +2,14 @@
 // creature order[k] of its draw list (creature::crowd's ranking), whose
 // bones come as dual quaternions from k_dq (`dq`: two vec4 a bone). Each
 // vertex blends its up to four bones (`skin`, as lab/skin.bk) the same way
-// lab/skin.bk does, without turning matrices into quaternions first.
+// lab/skin.bk does, without turning matrices into quaternions first. The
+// face is drawn as lab/skin.bk draws it (the near level's creature::face is
+// the creature's, the coarser levels' lab/face.bk's none).
 module hook;
 import mesh;
 import scene;
 from creature::skeleton import NB;
+from creature::face import face;
 
 @binding(4, 14) var dq: read_buffer<vec4<f32>>;
 @binding(4, 15) var skin: read_buffer<vec4<f32>>;
@@ -18,11 +21,13 @@ fn rotate(q: vec4<f32>, v: vec3<f32>) -> vec3<f32> {
 }
 
 pub fn fragment(v: mesh::Vertex, s: mesh::Surface) -> mesh::Surface {
-    return s;
+    let rest = v.v0.xyz;
+    return face(rest, max(length(dpdx(rest)), length(dpdy(rest))), s);
 }
 
 pub fn vertex(v_in: mesh::Vertex) -> mesh::Vertex {
     var v = v_in;
+    v.v0 = vec4<f32>(v_in.pos, 0.0);
     let k = v.vertex_index;
     let wt = skin[2 * k];
     let ix = skin[2 * k + 1];

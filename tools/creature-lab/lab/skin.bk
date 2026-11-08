@@ -12,6 +12,9 @@
 // the elbow's section in the deer's trot). lab/form.js places the skin the
 // same way on the CPU.
 //
+// The creature's face (creature::face, lab/face.bk) is drawn per pixel
+// from each point's rest position, passed to the fragment in v0.
+//
 // Three debug views (SceneGraph.setDebugView) show what lab/shots.js reads
 // off an image: `normal` (the world normal, n * 0.5 + 0.5), `depth` (the
 // distance from the eye in whole centimetres: cm / 64 in red, cm mod 64 in
@@ -25,6 +28,7 @@ module hook;
 import mesh;
 import scene;
 from creature::skeleton import NB, HEAD;
+from creature::face import face;
 
 @binding(4, 14) var pose: read_buffer<vec4<f32>>;
 @binding(4, 15) var skin: read_buffer<vec4<f32>>;
@@ -39,7 +43,9 @@ fn lin(c: vec3<f32>) -> vec3<f32> {
 fn level(b: f32) -> f32 { return b / 255.0; }
 
 pub fn fragment(v: mesh::Vertex, s: mesh::Surface) -> mesh::Surface {
-    var out = s;
+    // The face, by the point's rest position (v0) and a pixel's size there.
+    let rest = v.v0.xyz;
+    var out = face(rest, max(length(dpdx(rest)), length(dpdy(rest))), s);
     if (SCENE_DEBUG(normal)) { out.debug = vec4<f32>(lin(normalize(s.normal) * 0.5 + vec3<f32>(0.5)), 1.0); }
     if (SCENE_DEBUG(depth)) {
         let cm = clamp(floor(length(v.world_pos) * 100.0 + 0.5), 0.0, 4095.0);
@@ -85,6 +91,7 @@ fn rotate(q: vec4<f32>, v: vec3<f32>) -> vec3<f32> {
 
 pub fn vertex(v_in: mesh::Vertex) -> mesh::Vertex {
     var v = v_in;
+    v.v0 = vec4<f32>(v_in.pos, 0.0);
     let k = v.vertex_index;
     let wt = skin[2 * k];
     let ix = skin[2 * k + 1];

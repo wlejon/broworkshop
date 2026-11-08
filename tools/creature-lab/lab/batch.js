@@ -6,7 +6,7 @@
 
 import { INTENT, TELE, STATE_HEADER } from "./contract.js";
 import { ROWS } from "./skeleton.js";
-import { readApp } from "./creature.js";
+import { readApp, skinModules } from "./creature.js";
 
 export const IDENTITY_ROW = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 1, 1, 1, 1];
 
@@ -70,7 +70,7 @@ export function drawBatch(scene, creature, poseBuf, count, opts = {}) {
         roughness: opts.roughness ?? 0.85, metallic: 0,
         castsShadow: opts.shadows ?? true, receivesShadow: opts.shadows ?? true,
         module: readApp('lab/skin.bk'), file: 'lab/skin.bk',
-        modules: { 'creature::skeleton': creature.skel.module },
+        modules: skinModules(creature),
     });
     node.cullMargin = 1e5;   // the hook places every vertex
     if (!creature.skinBuf) creature.skinBuf = bro.kernel.createBuffer(creature.body.skin);

@@ -40,6 +40,7 @@ A creature folder (`creatures/<name>/`) has these files, and
 | `creature.js` | `name`, `skeleton`, `body`, `rig: { file, kernel, modules }` (`modules`: the rig's own brokernel modules by name, as files in the folder), `scale`, `cycles` (which scenario is each steady gait, with reference duty factors and footfall offsets), `form` (the body's reference measures), `variants` (named knob sets; the deer's broken ones are `slip`, `sink`, `overbend`, `stumble`), `scenarios` |
 | `skeleton.js` | bones (parent, head, tail, per-axis joint limits in degrees), feet, tracked points, chart joints |
 | `body.js` | the body: masses on bones built with `lab/flesh.js` (the deer splits it into `body.js`, `legs.js` and `coat.js`) |
+| `face.bk` | its face (`creature::face`, named by `creature.js`'s `face`), drawn per pixel over the skin: see below |
 | `rig.bk` | the species' rig. `@knob` constants can be overridden from the command line |
 | `scenarios.js` | the species' own scenarios, added to the lab's |
 
@@ -102,6 +103,11 @@ return B.build();
   joint).
 - `blend` is how far a mass melts into the others (m), so a neck is one
   skin with the chest at a softness the author picks.
+- `keep` (on a blob or limb: true, or a margin in m) keeps the mass's
+  detail through decimation: its vertices are locked
+  (`Mesh.simplifyToTriangleCount`'s lock) and the budget is spent on the
+  rest, so the deer's eyes and nose pad, 3 to 4 cm across, keep their shape.
+  A coarser level of detail passes `keep: false`.
 
 `build()` evaluates the field on the GPU (`lab/flesh.bk`): each mass adds
 `exp(-d / blend)` and the skin is where the sum is 1. It meshes the field once
@@ -113,6 +119,34 @@ along it; they are smoothed over the mesh and the top four kept. The
 colour function is called per vertex with `share(mass)`, how much of each
 mass is there. The result is one closed piece; the lab's dual-quaternion
 skin hook deforms it.
+
+### Faces
+
+A face's marks are smaller than any mesh carries, so they are drawn per
+pixel. The skin hooks (`lab/skin.bk`, and `lab/skin-crowd.bk` at the
+crowd's full level) pass each point's rest position to the fragment, and
+call the creature's `creature::face`:
+
+```
+pub fn face(p: vec3<f32>, foot: f32, s: mesh::Surface) -> mesh::Surface
+```
+
+`p` is the point at rest and `foot` a pixel's size there (from its screen
+derivatives), so each edge is softened over one pixel. The marks ride the
+head however it moves, and stay sharp however coarse the mesh under them is.
+A creature without a face gets `lab/face.bk`, which leaves the skin as its
+coat paints it, and so do the crowd's coarser levels. The deer's
+(`creatures/deer/face.bk`) has:
+
+- glossy dark eyes in almond lids, with a black rim, a pale ring and the
+  preorbital gland's slit;
+- a moist black nose pad with comma nostrils;
+- the white band behind the pad, the pale upper lip, and the lips' dark line;
+- a white chin.
+
+The eyeballs and nose pad are masses kept at full detail, so they stand out
+of the head in silhouette. Its coat (`coat.js`) paints a coarse version of the
+same marks for the levels the face is not drawn on.
 
 ## Commands
 
@@ -150,7 +184,8 @@ p90, max), its passes and the triangle count to `herd-<scenario>-<count>.json`.
 `flock` runs `--count` creatures (200) under the flock brain doing one
 behaviour (graze, travel, mill, flee; `--warm` steps first, 600), seen from
 above the field (`--view field`) or from a standing eye among them
-(`--view ground`); `--cull off` draws every creature into every view, for
+(`--view ground`) or 2.5 m from one of them at its head's height
+(`--view close`: the full level and its face); `--cull off` draws every creature into every view, for
 comparison. It writes `flock-<behaviour>-<count>.json` and a
 screenshot. The JSON holds:
 

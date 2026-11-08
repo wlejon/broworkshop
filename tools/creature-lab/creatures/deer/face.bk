@@ -1,0 +1,115 @@
+// creature::face — the deer's face, drawn per pixel over the head's skin
+// (lab/face.bk has how), in the rest pose's coordinates (body.js: x to the
+// deer's left, y up, z forward, metres). `foot` is a pixel's size there; it
+// softens every edge to a pixel, so a mark neither shimmers far off nor
+// blurs close up.
+//
+// What a white-tailed deer's face shows:
+//   eyes      large and dark, glossy (the sky and sun show in them), an
+//             almond between the lids, the front corner lower; a thin
+//             black lid rim and a pale ring of hair about it; the dark
+//             slit of the preorbital gland running forward and down from
+//             the front corner
+//   nose      the black, moist pad over the muzzle's tip, the nostrils
+//             curling back along its sides
+//   muzzle    a white band across it behind the nose, the lips' dark line
+//             running back from under the nose, white below it on the
+//             lower lip and chin
+module creature::face;
+import mesh;
+
+fn lin(c: vec3<f32>) -> vec3<f32> {
+    return vec3<f32>(pow(c.x, 2.2), pow(c.y, 2.2), pow(c.z, 2.2));
+}
+
+// 1 inside (d < 0), 0 outside, over w either side of the edge.
+fn inside(d: f32, w: f32) -> f32 {
+    return clamp(0.5 - d / (2.0 * w), 0.0, 1.0);
+}
+
+// Distance from q to the segment a-b.
+fn segment(q: vec2<f32>, a: vec2<f32>, b: vec2<f32>) -> f32 {
+    let ab = b - a;
+    let t = clamp(dot(q - a, ab) / dot(ab, ab), 0.0, 1.0);
+    return length(q - a - ab * t);
+}
+
+// The eye (body.js's eye blob): its centre on the left, the opening's half
+// length and height between the lids (m), the front corner's drop per
+// metre forward.
+const EYE: vec3<f32> = vec3<f32>(0.050, 1.313, 0.790);
+const EYE_HALF: vec2<f32> = vec2<f32>(0.019, 0.0115);
+const EYE_SLANT: f32 = 0.16;
+
+pub fn face(p: vec3<f32>, foot: f32, s: mesh::Surface) -> mesh::Surface {
+    var out = s;
+    let w = max(foot, 0.0003);
+    let ax = abs(p.x);
+    let black = lin(vec3<f32>(0.035, 0.03, 0.028));
+    let white = lin(vec3<f32>(0.93, 0.91, 0.87));
+    var c = s.base_color;
+    var rough = s.roughness;
+
+    // The eye, on the head's sides. (u, v): along the head and up, from
+    // the eye's centre, the front corner pulled down.
+    if (ax > 0.03 && p.z > 0.74 && p.z < 0.84) {
+        let u = p.z - EYE.z;
+        let v = p.y - EYE.y + EYE_SLANT * u;
+        // The almond: an ellipse whose ends are drawn to points.
+        let a = u / EYE_HALF.x;
+        let h = EYE_HALF.y * sqrt(max(0.0, 1.0 - a * a)) * (1.0 - 0.18 * a * a);
+        let d = abs(v) - h;
+        let open = inside(max(d, abs(u) - EYE_HALF.x), w) * step(0.04, ax - 0.0);
+        // Pale ring, then the black rim, then the eye itself.
+        let ring = inside(d - 0.006, 0.004 + w) * inside(abs(u) - EYE_HALF.x - 0.007, 0.004 + w);
+        c = mix(c, mix(c, white, 0.55), ring);
+        let rim = inside(d - 0.0016, w) * inside(abs(u) - EYE_HALF.x - 0.0016, w);
+        c = mix(c, black, rim);
+        rough = mix(rough, 0.45, rim);
+        // The iris, nearly black-brown, a darker pupil across its middle.
+        var iris = lin(vec3<f32>(0.10, 0.065, 0.04));
+        let pupil = inside(abs(v) - 0.0035, w) * inside(abs(u) - 0.0075, w);
+        iris = mix(iris, lin(vec3<f32>(0.012, 0.01, 0.01)), pupil);
+        c = mix(c, iris, open);
+        rough = mix(rough, 0.04, open);
+        // The preorbital gland: a dark slit forward and down from the front corner.
+        let g = segment(vec2<f32>(p.z, p.y), vec2<f32>(EYE.z + EYE_HALF.x + 0.002, EYE.y - 0.0045),
+            vec2<f32>(EYE.z + EYE_HALF.x + 0.014, EYE.y - 0.013));
+        c = mix(c, black, 0.8 * inside(g - 0.0016 + 0.0008 * (p.z - EYE.z - EYE_HALF.x) / 0.014, w));
+    }
+
+    // The muzzle's front: the mouth line runs back from under the nose.
+    // The muzzle (body.js: its tip at z 1.005, 3 cm either side, from
+    // y 1.18 to 1.25).
+    if (p.z > 0.90) {
+        // The lips' line: from the corner of the mouth down to under the nose.
+        let lip = 1.210 - 0.26 * (p.z - 0.93);
+        let back = inside(0.93 - p.z, 0.003 + w);
+        // The nose pad: black, moist, over the front of the tip, reaching
+        // back along the sides about the nostrils, its top edge arched.
+        let top = 0.990 - 0.55 * ax - 0.30 * max(0.0, 1.225 - p.y);
+        let pad = inside(top - p.z, w) * inside(lip + 0.009 - p.y, w);
+        // The upper lip under it, pale.
+        let upper = inside(top - 0.004 - p.z, 0.003 + w) * inside(p.y - lip - 0.009, w) * inside(lip - p.y, w);
+        c = mix(c, white, 0.7 * upper);
+        // White below the lips on the lower lip and chin, and across the
+        // muzzle behind the pad.
+        let chin = inside(p.y - lip + 0.0012, w) * inside(0.935 - p.z, 0.006);
+        c = mix(c, white, 0.85 * chin);
+        let band = inside(abs(p.z - top + 0.009) - 0.007, 0.003 + w) * inside(lip - p.y, w);
+        c = mix(c, white, 0.8 * band);
+        c = mix(c, lin(vec3<f32>(0.10, 0.095, 0.095)), pad);
+        rough = mix(rough, 0.28, pad);
+        // The nostrils: commas on the pad's front, curling back and out.
+        let nq = vec2<f32>(ax - 0.0105, p.y - 1.2165);
+        let tilt = vec2<f32>(nq.x * 0.80 - nq.y * 0.60, nq.x * 0.60 + nq.y * 0.80);
+        let nost = inside(length(tilt / vec2<f32>(0.0030, 0.0068)) - 1.0, w / 0.004);
+        c = mix(c, vec3<f32>(0.0), 0.9 * nost * pad);
+        rough = mix(rough, 1.0, nost * pad);
+        let line = inside(abs(p.y - lip) - 0.0008, w) * back;
+        c = mix(c, black, 0.9 * line);
+    }
+    out.base_color = c;
+    out.roughness = rough;
+    return out;
+}

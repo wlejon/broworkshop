@@ -33,9 +33,13 @@ function legColor(p, n, front) {
     return c;
 }
 
+// The head: a darker bridge down the muzzle, the black nose pad at its tip
+// (face.bk draws the pad, the band behind it and the lips sharp on the full
+// body; these are what a coarser level shows of them), white under the chin.
 function headColor(p, n) {
-    let c = mix(COAT, MUZZLE, sstep(0.9, 0.96, p[2]));
-    c = mix(c, DARK, sstep(0.965, 0.985, p[2]));
+    let c = mix(COAT, BACK, 0.6 * sstep(0.86, 0.94, p[2]) * sstep(0.2, 0.7, n[1]));
+    c = mix(c, WHITE, 0.7 * sstep(0.955, 0.97, p[2]) * sstep(0.99, 0.975, p[2]));
+    c = mix(c, DARK, sstep(0.978, 0.99, p[2]));
     return mix(c, WHITE, sstep(-0.5, -0.8, n[1]) * sstep(0.88, 0.94, p[2]));
 }
 
@@ -54,7 +58,7 @@ export function coat(p, n, share) {
         k = mix(k, WHITE, sstep(0.4, 0.8, n[2] > 0 ? n[2] : 0) * sstep(1.12, 1.2, p[1]) * sstep(1.27, 1.22, p[1]));
         c = mix(c, k, neck);
     }
-    c = mix(c, headColor(p, n), share('head') + sum(share, ['jawL', 'jawR']));
+    c = mix(c, headColor(p, n), share('head') + share('nose') + sum(share, ['jawL', 'jawR']));
     c = mix(c, legColor(p, n, true), sum(share, [...LR('fore'), ...LR('arm')]));
     c = mix(c, legColor(p, n, false), sum(share, [...LR('hind'), ...LR('gaskin')]));
     c = mix(c, mix(BACK, WHITE, sstep(0.0, -0.4, n[1])), share('tail'));

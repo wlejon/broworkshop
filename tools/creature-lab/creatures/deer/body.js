@@ -90,14 +90,18 @@ function head(B) {
     B.limb('head', ['head'], [
         { c: [0, 1.31, 0.695], r: [0.050, 0.048] },
         { c: [0, 1.305, 0.735], r: [0.060, 0.070] },
-        { c: [0, 1.29, 0.785], r: [0.060, 0.066] },
-        { c: [0, 1.272, 0.832], r: [0.050, 0.057] },
+        { c: [0, 1.29, 0.785], r: [0.054, 0.066] },
+        { c: [0, 1.272, 0.832], r: [0.045, 0.057] },
         { c: [0, 1.246, 0.890], r: [0.037, 0.045] },
         { c: [0, 1.218, 0.946], r: [0.030, 0.035] },
         { c: [0, 1.203, 0.980], r: [0.022, 0.025] },
     ], { blend: 0.02 });
+    // The nose pad over the muzzle's tip, its detail kept (face.bk draws it).
+    B.blob('nose', 'head', [0, 1.211, 0.979], [0.021, 0.017, 0.011], { blend: 0.004, keep: true });
     for (const [s, t] of SIDES) {
-        B.blob(`eye${t}`, 'head', [0.060 * s, 1.315, 0.79], [0.012, 0.015, 0.016], { blend: 0.004 });
+        // The eyeball standing out of the skull's side, its lids' crease
+        // about it; its detail is kept and face.bk draws the eye on it.
+        B.blob(`eye${t}`, 'head', [0.045 * s, 1.313, 0.79], [0.016, 0.0145, 0.020], { blend: 0.003, keep: true });
         B.limb(`ear${t}`, [`ear${t}`], [
             { c: [0.045 * s, 1.33, 0.75], r: [0.020, 0.012] },
             { c: [0.08 * s, 1.358, 0.738], r: [0.036, 0.011] },

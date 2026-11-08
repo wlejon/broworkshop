@@ -20,12 +20,12 @@
 // ceiling whatever the camera does.
 
 import { IDENTITY_ROW } from "./batch.js";
-import { labModules, readApp } from "./creature.js";
+import { labModules, readApp, skinModules } from "./creature.js";
 
 export const LEVELS = [
     { name: 'near', detail: null },
-    { name: 'mid', detail: { triangles: 2400, cell: 0.008, simplifyError: 0.01 } },
-    { name: 'far', detail: { triangles: 500, cell: 0.014, simplifyError: 0.05 } },
+    { name: 'mid', detail: { triangles: 2400, cell: 0.008, simplifyError: 0.01, keep: false } },
+    { name: 'far', detail: { triangles: 500, cell: 0.014, simplifyError: 0.05, keep: false } },
 ];
 export const NEAR_PX = 240, MID_PX = 70;
 
@@ -97,7 +97,7 @@ export class Crowd {
                 mesh: body.mesh, color: [1, 1, 1], vertexColorTint: true, roughness: 0.85, metallic: 0,
                 castsShadow: shadows, receivesShadow: shadows,
                 module: readApp('lab/skin-crowd.bk'), file: 'lab/skin-crowd.bk',
-                modules: { 'creature::skeleton': creature.skel.module },
+                modules: skinModules(creature, l === 0),
             });
             // The hook places every vertex: where, the owner says (bounds).
             if (opts.bounds) node.setCullBounds(opts.bounds[0], opts.bounds[1]);
