@@ -28,8 +28,18 @@ export const SCAN = { W: 960, H: 640, dist: 3.0, pitch: 8, target: [0, 0.72, 0.0
 const r1 = (x) => Math.round(x * 10) / 10;
 const r3 = (x) => Math.round(x * 1000) / 1000;
 
-export function scanView(v) {
-    return { ...orbitView(SCAN.target, v.yaw, SCAN.pitch, SCAN.dist), name: v.name };
+// The scan cameras are set for a deer (SCAN); a smaller creature's come in
+// by its size, aimed at its own middle, so it fills the frame as a deer
+// does (at 3 m a rabbit is a few pixels, and the deer's aim is over its back).
+export function scanScale(creature) {
+    const s = creature.def.scale || {};
+    return { len: Math.min(1, (s.length || 1.6) / 1.6), h: Math.min(1, (s.height || 0.95) / 0.95) };
+}
+
+export function scanView(v, creature) {
+    const f = scanScale(creature);
+    const target = [SCAN.target[0], SCAN.target[1] * f.h, SCAN.target[2]];
+    return { ...orbitView(target, v.yaw, SCAN.pitch, SCAN.dist * f.len), name: v.name };
 }
 
 // The body at rest: its pieces and the curves where they cross.
@@ -88,7 +98,7 @@ export function scanScenario(creature, scName, opts = {}) {
     }
     const nEven = opts.frames ?? SCAN.frames;
     for (let i = 0; i < nEven; i++) pick.add(frames[Math.floor(((i + 0.5) / nEven) * frames.length)].k);
-    const views = (opts.views || SCAN_VIEWS).map(scanView);
+    const views = (opts.views || SCAN_VIEWS).map((v) => scanView(v, creature));
     const looks = [];
     for (const k of [...pick].sort((a, b) => a - b)) {
         const P = relativePose(rec, k, 0, rel);

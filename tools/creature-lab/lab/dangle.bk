@@ -1,0 +1,58 @@
+// creature::dangle — a loose part's tip on a spring: an ear, a scut, a
+// tail, a dewlap. It is the primitive a rig builds its own secondary motion
+// from, not a layer over the pose: the rig says where the tip would be (its
+// rest, with the parent where the rig put it) and how stiff the part is, and
+// gets back where the tip is, carried by its own momentum; `aim_at` turns
+// the bone to point there. A chain is a tip per bone, each one's rest from
+// its parent as aimed, so a tip lags the bone before it.
+//
+// The spring pulls toward the rest point and damps against the rest point's
+// own motion (not the world's: a part carried along at speed is not dragged
+// back by the damping), and `sag` of gravity weighs on it, so a soft part
+// droops a little and is flung up as the body drops and down as it lands.
+// State: DANGLE_REC floats a point, kept by the rig.
+module creature::dangle;
+import creature::common::*;
+
+pub const DANGLE_REC: i32 = 9;  // position, velocity, the rest point last step
+
+// Step the tip at st[k..] toward `rest` at w rad/s, damped by zeta, `sag` of
+// gravity on it. `init` places it at rest. Returns where it is.
+pub fn dangle_step(st: rw_store<f32, 1>, k: i32, rest: vec3<f32>, w: f32, zeta: f32, sag: f32, dt: f32, init: bool) -> vec3<f32> {
+    if (init) {
+        st3(st, k, rest);
+        st3(st, k + 3, vec3<f32>(0.0));
+        st3(st, k + 6, rest);
+        return rest;
+    }
+    let rv = (rest - ld3(st, k + 6)) / max(dt, 1e-4);
+    var p = ld3(st, k);
+    var v = ld3(st, k + 3);
+    // Two half steps (w dt stays well under 1 for a part as stiff as 8 Hz).
+    let h = 0.5 * dt;
+    for (var i: i32 = 0; i < 2; i += 1) {
+        let r = mix(ld3(st, k + 6), rest, vec3<f32>(0.5 * (i as f32) + 0.5));
+        let a = w * w * (r - p) - 2.0 * zeta * w * (v - rv) - vec3<f32>(0.0, sag * 9.81, 0.0);
+        v += a * h;
+        p += v * h;
+    }
+    st3(st, k, p);
+    st3(st, k + 3, v);
+    st3(st, k + 6, rest);
+    return p;
+}
+
+// Bone rotation q (its head at h; `along` its head-to-tail in its rest frame)
+// turned to point at p, by at most `amax` rad (eased in over its second
+// half, so a part flung to its limit turns there rather than stopping).
+pub fn aim_at(q: vec4<f32>, h: vec3<f32>, along: vec3<f32>, p: vec3<f32>, amax: f32) -> vec4<f32> {
+    let d0 = normalize(q_rot(q, along));
+    let dv = p - h;
+    if (dot(dv, dv) < 1e-10) { return q; }
+    let d1 = normalize(dv);
+    let ang = acos(clamp(dot(d0, d1), -1.0, 1.0));
+    var r = q_from_to(d0, d1);
+    let lim = soft_limit(ang, 0.5 * amax, amax);
+    if (ang > 1e-5 && lim < ang) { r = q_blend(q_id(), r, lim / ang); }
+    return q_norm(q_mul(r, q));
+}

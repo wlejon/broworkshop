@@ -14,7 +14,7 @@ import { relativePose } from "./cycle.js";
 import { skinPositions } from "./form.js";
 import { setPose, capture, viewToward, showGround } from "./lit.js";
 import { imageLines } from "./shots.js";
-import { scanView, restShape } from "./finder.js";
+import { scanView, scanScale, restShape } from "./finder.js";
 import { beginSheet, saveSheet, text, rect, line, dot, INK, DIM, SERIES } from "./page.js";
 import { axes, curve } from "./plot.js";
 
@@ -95,8 +95,9 @@ function bestCloseView(creature, X, key, centre, from) {
     for (const [dy, de] of [[0, 0], [-30, 0], [30, 0], [0, 25], [0, -12], [-30, 20], [30, 20]]) {
         const y = yaw0 + (dy * Math.PI) / 180, e = Math.max(-0.35, Math.min(1.2, el0 + (de * Math.PI) / 180));
         const pos = [centre[0] + Math.sin(y) * Math.cos(e), centre[1] + Math.sin(e), centre[2] + Math.cos(y) * Math.cos(e)];
-        const v = viewToward(centre, pos, 1.1, 40);
-        if (v.position[1] < 0.05) continue;
+        const f = scanScale(creature);
+        const v = viewToward(centre, pos, 1.1 * f.len, 40);
+        if (v.position[1] < 0.05 * f.h) continue;
         const s = imageLines(creature, X, v, 320, 320).sites.get(key);
         const cm = s ? s.cm : 0;
         if (!best || cm > best.cm * 1.1) best = { v, cm };
@@ -112,7 +113,7 @@ export function drawMoment(creature, m, rank, path, recCache) {
     const X = skinPositions(creature, P);
     setPose(creature, P);
     showGround(true);
-    const sv = scanView({ name: m.view, yaw: { left: 90, 'front-left': 35, 'back-left': 145, right: -90 }[m.view] ?? 90 });
+    const sv = scanView({ name: m.view, yaw: { left: 90, 'front-left': 35, 'back-left': 145, right: -90 }[m.view] ?? 90 }, creature);
     const centre = m.centre || sv.target;
     const close = bestCloseView(creature, X, m.key, centre, sv.position);
     const lit = capture(close, CLOSE, CLOSE);
@@ -139,7 +140,7 @@ export function drawMoment(creature, m, rank, path, recCache) {
     dot(g, cx, cy, 34, null, '#ff2020');
     dot(g, cx, cy, 35, null, '#ff2020');
     text(g, `#${rank}  ${m.key}`, 12, 32, { size: 24, weight: 700 });
-    text(g, `${creature.label} · ${m.scenario} · t ${m.t.toFixed(2)} s (step ${m.k}) · seen from the ${m.view} at 3 m · close-up 1.1 m from the site, the live view's light`, 12, 58, { size: 16, color: DIM });
+    text(g, `${creature.label} · ${m.scenario} · t ${m.t.toFixed(2)} s (step ${m.k}) · seen from the ${m.view} at ${sv.dist.toFixed(1)} m · close-up ${Math.hypot(...close.position.map((p, i) => p - centre[i])).toFixed(2)} m from the site, the live view's light`, 12, 58, { size: 16, color: DIM });
     const meshTxt = m.mesh ? ` · on the mesh: ${m.mesh.cm} cm of ${m.kind === 'cross' ? 'crossing' : 'line'} at a mean ${m.mesh.meanAngle}°` : '';
     text(g, `visible: ${m.cm} cm of line, sharpest ${m.angleMax}°, score ${m.score} (cm x angle / 90)${meshTxt}` +
         `${here ? ` · in the close-up ${r1(here.cm)} cm, sharpest ${Math.round(here.angleMax)}°` : ''}`, 12, 84, { size: 16, color: INK });
@@ -194,7 +195,11 @@ export function drawScanChart(scan, path) {
     const fx = scan.frames.map((f) => f.t);
     panel(64, 330, keys.map((k) => ({ xs: fx, ys: scan.frames.map((f) => (f.sites.find((s) => s.key === k) || { score: NaN }).score) })), 'mesh score');
     const lx = scan.looks.map((l) => l.t);
-    panel(404, 330, keys.map((k) => ({ dots: true, xs: lx, ys: scan.looks.map((l) => Math.max(...Object.values(l.views).map((v) => (v.sites.find((s) => s.key === k) || { score: NaN }).score).filter(Number.isFinite), NaN)) })), 'visible score');
+    const seenMax = (l, k) => {
+        const v = Object.values(l.views).map((w) => (w.sites.find((s) => s.key === k) || { score: NaN }).score).filter(Number.isFinite);
+        return v.length ? Math.max(...v) : NaN;
+    };
+    panel(404, 330, keys.map((k) => ({ dots: true, xs: lx, ys: scan.looks.map((l) => seenMax(l, k)) })), 'visible score');
     keys.forEach((k, i) => {
         const y = 80 + i * 22;
         line(g, W - 336, y - 5, W - 312, y - 5, SERIES[i % SERIES.length], 3);

@@ -3,9 +3,9 @@
 // A rabbit does not carry its body along at an even pace on its legs: each
 // end of it goes in its own surges. The hips slow while the hind feet are
 // down (the hind pair holds them while it throws the front on) and run on
-// while those feet swing; the withers slow while the fore feet are down (the
-// fore legs vault the chest over them) and run on through the hind push.
-// The stride's pace is the mean. So the trunk stretches and gathers: long
+// while those feet swing; the withers run on through the hind push and slow
+// as the hips catch up. The two surge against each other about the centre
+// of mass, which keeps the stride's pace. So the trunk stretches and gathers: long
 // as the hind push throws the front forward, short as the hips catch up
 // with the hind feet swung under the chest. The back's arch follows that
 // spacing (`flex_of`): extended as the girdles part, arched as they close.
@@ -34,12 +34,24 @@ pub fn surge(p: f32, m: f32, a: f32, len: f32) -> f32 {
     return -a * len / TAU * sin(TAU * (p - m));
 }
 
-// The surge each girdle can have for the trunk's length to swing no more
-// than `swing` m about its rest, the girdles' stance middles mh and mf
-// apart, at most amax of the pace.
-pub fn surge_share(len: f32, mh: f32, mf: f32, swing: f32, amax: f32) -> f32 {
-    let apart = 2.0 * abs(sin(PI * (mf - mh)));
-    return min(amax, swing * TAU / max(len * apart, 1e-4));
+// The share of the body's mass that goes with the hips (the haunches, the
+// pelvis and the loins); the rest goes with the withers.
+pub const HIND_MASS: f32 = 0.58;
+
+// The girdles surge against each other about the body's centre of mass,
+// which keeps the stride's pace (a surge of the whole body would want the
+// feet to push it where they cannot, at a stance's end): the hips slowest
+// at their stance middle mh, the withers fastest then. `hind` picks the
+// girdle; `a` is the hips' surge as a share of the pace.
+pub fn girdle_surge(p: f32, mh: f32, a: f32, len: f32, hind: bool) -> f32 {
+    let dh = surge(p, mh, a, len);
+    return select_f(hind, dh, -dh * HIND_MASS / (1.0 - HIND_MASS));
+}
+
+// The hips' surge for the trunk's length to swing `swing` m about its rest
+// (the withers' surge against it adds to the swing), at most amax of the pace.
+pub fn surge_share(len: f32, swing: f32, amax: f32) -> f32 {
+    return min(amax, swing * (1.0 - HIND_MASS) * TAU / max(len, 1e-4));
 }
 
 // The body's height over its ride at phase p of a stride T s long whose

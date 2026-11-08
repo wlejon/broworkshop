@@ -41,8 +41,9 @@ export function body(skel, detail = {}) {
         { c: [0, 0.152, 0.150], r: [0.029, 0.031] },
     ], { up: [0, 0, 1], blend: 0.012 });
     head(B);
-    // The scut, carried up against the rump.
-    B.blob('tail', 'tail', [0, 0.128, -0.186], [0.021, 0.022, 0.017], { blend: 0.008 });
+    // The scut, carried up against the rump and standing out of it (its
+    // white underside shows as it flicks up).
+    B.blob('tail', 'tail', [0, 0.140, -0.212], [0.021, 0.022, 0.019], { blend: 0.004 });
     for (const [s, t] of SIDES) {
         const x = (v) => v * s;
         // The haunch: thigh and shank folded under the rump, from the hip

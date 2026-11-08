@@ -309,8 +309,60 @@ export function massPhysics(rec) {
 
 function median(a) { const s = Float64Array.from(a).sort(); return s.length ? s[s.length >> 1] : 0; }
 
+// Per step, the foot event nearest it within `win` steps ('LF down', 'RH
+// lift'), or null: where a kink falls in the step it belongs to.
+function footEvents(rec, win = 3) {
+    const n = rec.steps, feet = rec.creature.skel.feet;
+    const ev = [];
+    for (let k = 1; k < n; k++) feet.forEach((f, i) => {
+        const a = rec.tele[(k - 1) * TELE + T.FOOT + 4 * i] > 0.5, b = rec.tele[k * TELE + T.FOOT + 4 * i] > 0.5;
+        if (a !== b) ev.push({ k, name: `${f.name} ${b ? 'down' : 'lift'}` });
+    });
+    const at = new Array(n).fill(null), dist = new Array(n).fill(win + 1);
+    for (const e of ev) for (let k = Math.max(0, e.k - win); k <= Math.min(n - 1, e.k + win); k++) {
+        if (Math.abs(k - e.k) < dist[k]) { dist[k] = Math.abs(k - e.k); at[k] = e.name; }
+    }
+    return at;
+}
+
+// The kinks in one channel th (deg, or mm for a place) sampled every dt:
+// each acceleration against the line through its neighbours two steps off
+// (a smooth swing, however fast, leaves almost nothing, its fourth
+// derivative over 17 ms; a corner in the velocity leaves a spike), each
+// spike tagged with the foot event nearest it (`near`).
+function kinks(th, dt, near) {
+    const n = th.length;
+    const al = new Float64Array(n), jk = new Float64Array(n);
+    for (let k = 1; k < n - 1; k++) al[k] = (th[k + 1] - 2 * th[k] + th[k - 1]) / (dt * dt);
+    for (let k = 2; k < n - 1; k++) jk[k] = (al[k] - al[k - 1]) / dt;
+    const res = new Float64Array(n);
+    for (let k = 3; k < n - 3; k++) res[k] = Math.abs(al[k] - (al[k - 2] + al[k + 2]) / 2);
+    const med = median(res.subarray(3, n - 3));
+    const lim = Math.max(NATURAL.spike, NATURAL.spikeRel * med);
+    const spikes = [];
+    // One kink leaves half of itself two steps either side: the peak within three steps counts.
+    for (let k = 3; k < n - 3; k++) {
+        if (res[k] <= lim) continue;
+        let peak = true;
+        for (let j = Math.max(3, k - 3); j <= Math.min(n - 4, k + 3) && peak; j++) if (j !== k && (res[j] > res[k] || (res[j] === res[k] && j < k))) peak = false;
+        if (peak) spikes.push({ t: r2(k * dt), jump: Math.round(res[k]), at: near[k] || 'between' });
+    }
+    let js = 0;
+    for (let k = 2; k < n - 1; k++) js += jk[k] * jk[k];
+    return { range: r1(Math.max(...th) - Math.min(...th)), spikes, jerkRms: Math.round(Math.sqrt(js / Math.max(1, n - 3))), medAcc: Math.round(med) };
+}
+
+function mostAt(spikes) {
+    const by = new Map();
+    for (const s of spikes) by.set(s.at, (by.get(s.at) || 0) + 1);
+    return [...by].sort((a, b) => b[1] - a[1])[0][0];
+}
+
+const worse = (e, w) => !w || e.spikes.length > w.spikes.length || (e.spikes.length === w.spikes.length && e.jerkRms > w.jerkRms);
+
 export function smoothness(rec) {
     const S = series(rec), skel = rec.creature.skel, n = rec.steps, dt = rec.dt;
+    const near = footEvents(rec);
     const joints = [];
     for (const b of skel.bones) {
         if (b.parentIndex < 0) continue;
@@ -319,36 +371,30 @@ export function smoothness(rec) {
             const th = new Float64Array(n);
             for (let k = 0; k < n; k++) th[k] = S.angles[k][b.index][c] * DEG;
             for (let k = 1; k < n; k++) th[k] = th[k - 1] + wrap(th[k] - th[k - 1]);
-            const al = new Float64Array(n), jk = new Float64Array(n);
-            for (let k = 1; k < n - 1; k++) al[k] = (th[k + 1] - 2 * th[k] + th[k - 1]) / (dt * dt);
-            for (let k = 2; k < n - 1; k++) jk[k] = (al[k] - al[k - 1]) / dt;
-            // Each acceleration against the line through its neighbours two
-            // steps off: a smooth swing, however fast, leaves almost nothing
-            // (its fourth derivative over 17 ms); a corner in the velocity
-            // leaves a spike.
-            const res = new Float64Array(n);
-            for (let k = 3; k < n - 3; k++) res[k] = Math.abs(al[k] - (al[k - 2] + al[k + 2]) / 2);
-            const med = median(res.subarray(3, n - 3));
-            const lim = Math.max(NATURAL.spike, NATURAL.spikeRel * med);
-            const spikes = [];
-            // One kink leaves half of itself two steps either side: the peak within three steps counts.
-            for (let k = 3; k < n - 3; k++) {
-                if (res[k] <= lim) continue;
-                let peak = true;
-                for (let j = Math.max(3, k - 3); j <= Math.min(n - 4, k + 3) && peak; j++) if (j !== k && (res[j] > res[k] || (res[j] === res[k] && j < k))) peak = false;
-                if (peak) spikes.push({ t: r2(k * dt), jump: Math.round(res[k]) });
-            }
-            let js = 0;
-            for (let k = 2; k < n - 1; k++) js += jk[k] * jk[k];
-            const range = Math.max(...th) - Math.min(...th);
-            const e = { axis: 'xyz'[c], range: r1(range), spikes, jerkRms: Math.round(Math.sqrt(js / Math.max(1, n - 3))), medAcc: Math.round(med) };
-            if (range > 0.5 && (!worst || spikes.length > worst.spikes.length || (spikes.length === worst.spikes.length && e.jerkRms > worst.jerkRms))) worst = e;
+            const e = { axis: 'xyz'[c], ...kinks(th, dt, near) };
+            if (e.range > 0.5 && worse(e, worst)) worst = e;
         }
         if (worst) joints.push({ bone: b.name, ...worst, perSecond: r2(worst.spikes.length / (n * dt)) });
     }
     joints.sort((x, y) => y.spikes.length - x.spikes.length || y.jerkRms - x.jerkRms);
     const total = joints.reduce((s, j) => s + j.spikes.length, 0);
-    return { spikesPerSecond: r2(total / (n * dt)), joints };
+    // The root, which carries every joint: its place (mm, a kink of 80 mm/s
+    // in a step counting as a joint's 80 deg/s) and its turn in the world. A
+    // kink there shows in every leg on the ground at once.
+    const root = [];
+    const r0 = skel.bones.find((b) => b.parentIndex < 0).index;
+    for (let c = 0; c < 3; c++) {
+        const p = new Float64Array(n), a = new Float64Array(n);
+        for (let k = 0; k < n; k++) { p[k] = 1000 * rec.pose[k * rec.poseStride + r0 * ROWS + 4 * c + 3]; a[k] = S.angles[k][r0][c] * DEG; }
+        for (let k = 1; k < n; k++) a[k] = a[k - 1] + wrap(a[k] - a[k - 1]);
+        root.push({ channel: `place ${'xyz'[c]}`, ...kinks(p, dt, near) }, { channel: `turn ${'xyz'[c]}`, ...kinks(a, dt, near) });
+    }
+    root.sort((x, y) => y.spikes.length - x.spikes.length);
+    // Where they fall: the foot events the spikes gather at, most first.
+    const by = new Map();
+    for (const j of joints) for (const s of j.spikes) by.set(s.at, (by.get(s.at) || 0) + 1);
+    const at = [...by].sort((a, b) => b[1] - a[1]).map(([event, count]) => ({ event, count }));
+    return { spikesPerSecond: r2(total / (n * dt)), at, joints, root };
 }
 
 // --- variety ----------------------------------------------------------------------------
@@ -375,7 +421,13 @@ export function variety(rec, cyc) {
         if (b.parentIndex < 0) continue;
         const curves = cyc.map((c) => {
             const out = new Float64Array(m);
-            for (let i = 0; i < m; i++) out[i] = S.angles[Math.min(c.b, Math.round(c.a + (i / m) * (c.b - c.a)))][b.index][0] * DEG;
+            // Between steps by interpolation: a short cycle (a small creature's,
+            // 30 steps) sampled at the nearest step would differ between
+            // cycles by up to half a step of its fastest joints, read as jitter.
+            for (let i = 0; i < m; i++) {
+                const at = c.a + (i / m) * (c.b - c.a), k0 = Math.min(c.b, Math.floor(at)), k1 = Math.min(c.b, k0 + 1), f = at - k0;
+                out[i] = (S.angles[k0][b.index][0] * (1 - f) + S.angles[k1][b.index][0] * f) * DEG;
+            }
             return out;
         });
         const mean = new Float64Array(m);
@@ -529,7 +581,9 @@ export function naturalness(rec) {
     if (M.pullShare > 0.02) f.push(`mass: pulled down faster than gravity with feet on the ground ${Math.round(100 * M.pullShare)}% of the time`);
     if (M.frictionShare > 0.02) f.push(`mass: pushed sideways past friction ${Math.round(100 * M.frictionShare)}% of the time on the ground (worst ${M.worstGround.a} m/s2 over at ${M.worstGround.t} s)`);
     if (M.energyFromNowhere) f.push(`mass: gains energy in ${M.energyFromNowhere} of ${M.flights.length} flights (most ${M.maxGain} J/kg)`);
-    if (out.smoothness.spikesPerSecond > 1) f.push(`smoothness: ${out.smoothness.spikesPerSecond} abrupt velocity changes a second (most in ${out.smoothness.joints.slice(0, 3).map((j) => `${j.bone} ${j.spikes.length}`).join(', ')})`);
+    if (out.smoothness.spikesPerSecond > 1) f.push(`smoothness: ${out.smoothness.spikesPerSecond} abrupt velocity changes a second (most in ${out.smoothness.joints.slice(0, 3).map((j) => `${j.bone} ${j.spikes.length}`).join(', ')}; at ${out.smoothness.at.slice(0, 4).map((a) => `${a.event} ${a.count}`).join(', ')})`);
+    const rk = out.smoothness.root.filter((r) => r.spikes.length);
+    if (rk.length) f.push(`smoothness: the root kinks (${rk.slice(0, 3).map((r) => `${r.channel} ${r.spikes.length}, most at ${mostAt(r.spikes)}`).join('; ')})`);
     const V = out.variety;
     if (V.joints.length) {
         const rep = V.joints.filter((j) => j.verdict === 'repeats'), jit = V.joints.filter((j) => j.verdict === 'jitters');

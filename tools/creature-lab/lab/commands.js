@@ -11,6 +11,7 @@ import { turnaroundSheet } from "./turnaround.js";
 import { chartsSheet } from "./charts.js";
 import { trajectorySheet } from "./trajectory.js";
 import { filmSheet } from "./film.js";
+import { lookSheet } from "./look.js";
 import { rangeSheet } from "./range.js";
 import { kinematicsSheet, spacingSheet } from "./kinematics.js";
 import { restForm, formInMotion } from "./form.js";
@@ -32,6 +33,10 @@ export const HELP = `creature-lab <command> <creature> [scenario ...] [options]
                                            view, slit-scans through head, withers and tail tip
                                            (--from <s> --to <s>: the window, 1.5 s mid-run by default;
                                            --frames <n>)
+  look        <creature> [scenario ...]    the creature as the live view draws it (lit, shadowed), close,
+                                           through a cycle: three-quarter front, side, three-quarter back
+                                           (--rows <n> | --phases, --views front-left,left,back-left,front,right,
+                                           --dist <body lengths>; --pieces: coloured and named by body piece)
   kinematics  <creature> [scenario ...]    per leg, each bone's flexion, velocity and acceleration over
                                            the cycle with contact, lift-off and touchdown; corners in red
   spacing     <creature> [scenario ...]    toes, leg joints and tracked points at 30 fps (--fps): paths
@@ -124,6 +129,10 @@ export function sheet(kind, recs, path, opt = {}) {
     if (kind === 'film') {
         return filmSheet(recs[0], { path, from: opt.from !== undefined ? +opt.from : null, to: opt.to !== undefined ? +opt.to : null,
             frames: opt.frames ? +opt.frames : 14 });
+    }
+    if (kind === 'look') {
+        return lookSheet(recs[0], { path: opt.pieces ? path.replace(/\.png$/, '-pieces.png') : path, pieces: !!opt.pieces, rows: rows || 6, views: opt.views ? String(opt.views).split(',') : null,
+            phases: opt.phases ? String(opt.phases).split(',').map(Number) : null, dist: opt.dist ? +opt.dist : 2.6 });
     }
     if (kind === 'charts') return chartsSheet(recs, { path });
     if (kind === 'kinematics') return kinematicsSheet(recs[0], { path });
@@ -238,8 +247,8 @@ export async function runCommand(argv) {
         const path = `${dir}/form.json`;
         writeFile(path, json({ creature: creature.label, rest: form, motion: runs }));
         written.push(path);
-    } else if (cmd === 'metrics' || KINDS.includes(cmd) || cmd === 'sheets') {
-        const kinds = cmd === 'sheets' ? KINDS : KINDS.includes(cmd) ? [cmd] : [];
+    } else if (cmd === 'metrics' || KINDS.includes(cmd) || cmd === 'look' || cmd === 'sheets') {
+        const kinds = cmd === 'sheets' ? KINDS : KINDS.includes(cmd) || cmd === 'look' ? [cmd] : [];
         for (const sc of scenarios) {
             const rec = runScenario(creature, sc, { seed });
             if (cmd === 'metrics' || cmd === 'sheets') {

@@ -66,7 +66,23 @@ whose blade follows the swing; `solve_hind_flat` for a foot that stands on
 its heel, its angle eased under a limit so the folded pantograph does not
 drive the heel into the ground), the eased bump a swing's lift and folding
 are made of, a soft cap on a length, a planted foot's roll onto its toe, and
-the lean over the feet that carry the body.
+the lean over the feet that carry the body. `swing_arc` carries a swinging
+foot on an arc about its girdle (its angle from straight down and its
+distance each eased from lift-off to the landing mark, both measured from
+where the girdle is now) rather than along the line between them, so a foot
+the body overtakes does not pass close under its girdle and swing the leg
+through that angle at once. `soft_range`, `soft_xyz` and `within_range` ease
+an angle, a bone's angles, or a bone's world rotation into its joint ranges
+over a band instead of clamping, so a joint asked past its range turns to
+rest against it with no corner in its speed.
+
+`creature::dangle` (`lab/dangle.bk`) is a sprung tip for a part that hangs
+off the body (an ear, a scut): `dangle_step` moves a particle toward the
+part's rest tip on a damped spring (damped against the rest point's own
+motion, so it rides with the body and lags only its changes, with a share of
+gravity), and `aim_at` turns the part's bone toward it, softly capped; a rig
+then eases the result into the joint's ranges with `within_range`. Its state
+is `DANGLE_REC` floats a tip.
 
 `lab/common.bk` and `creature::ground` hold the small helpers (smoothsteps
 with no jump in acceleration, quaternions, value noise). The deer's rig
@@ -91,14 +107,21 @@ not on those layers. It has no walk: it hops (the fore feet stepping one
 after the other, then the hind pair swinging up together to land beside or
 ahead of them), and faster it half-bounds with flight; telemetry calls these
 gaits `hop` and `bound`. Its body goes as `bunny::stride` (`stride.bk`) has
-it: each girdle surges on its own about the stride's pace, slowing over its
-own feet's stance and running on while they swing, so the trunk stretches as
-the hind push throws the front on and gathers as the hips catch up, the back
-extended or arched with that spacing; in the bound's flights the body falls
-freely. The head is held steady in space (the neck solved each step so the
-head stays at its posture's smoothed height, its turn set in the world),
-lifted as it goes; the ears sweep back running and spring with the head's
-fall. At rest it sits on its flat hind feet
+it: each girdle surges about the stride's pace, the two opposed about the
+centre of mass (the hindquarters carry 0.58 of it, so the withers surge
+further than the hips), slowing over its own feet's stance and running on
+while they swing, so the trunk stretches as the hind push throws the front
+on and gathers as the hips catch up, the back's flex following that spacing;
+in the bound's flights the body falls freely. The head is held steady in
+space (the neck solved each step so the head stays at its posture's smoothed
+height, eased into the neck's reach, its turn set in the world), lifted as
+it goes and riding a little of the trunk's pitch; the ears sweep back
+running, each of their two bones aimed at a sprung tip (`creature::dangle`),
+and the scut is sprung the same way. Its feet swing on `swing_arc` paths,
+folded toward their girdle only as far as clears the ground by the swing's
+lift; the fore stride is shorter hopping (0.10 m) than bounding (0.13 m),
+since the hop's fore leg stands under its shoulder and the longer stride
+would carry it to full stretch. At rest it sits on its flat hind feet
 (`solve_hind_flat`). Alert, it sits up on its haunches with its fore paws held
 against its chest; lying, it loafs with its ears laid back. Grazing, it chews,
 its nose twitches, its ears turn each on its own, and its scut flicks up as it
@@ -202,6 +225,8 @@ $B tools/creature-lab tools/creature-lab/cli.js -- trajectory deer walk
 $B tools/creature-lab tools/creature-lab/cli.js -- range deer trot
 $B tools/creature-lab tools/creature-lab/cli.js -- charts deer gaits
 $B tools/creature-lab tools/creature-lab/cli.js -- film deer gallop --from 3 --to 4.5
+$B tools/creature-lab tools/creature-lab/cli.js -- look bunny gallop --phases 0.6,0.7 --views front-left,left --dist 1.8
+$B tools/creature-lab tools/creature-lab/cli.js -- look bunny gallop --rows 4 --pieces
 $B tools/creature-lab tools/creature-lab/cli.js -- kinematics deer walk
 $B tools/creature-lab tools/creature-lab/cli.js -- spacing deer walk --fps 24
 $B tools/creature-lab tools/creature-lab/cli.js -- metrics deer all
@@ -351,6 +376,18 @@ Every output is deterministic. A rerun writes the same bytes.
     through the point in the creature's frame, one column a step, the bones
     crossing it drawn by height, so a bob or a swish reads as a wave and a
     jerk as a step in it
+- **Look** (`lab/look.js`): the creature as the live view draws it (its sky
+  light, sun and shadows on the checker ground), close, through a cycle.
+  - rows are phases of the last steady cycle (`--rows`, or `--phases`), or
+    times across an action's run; columns are cameras (`--views` from
+    front-left, left, back-left, front, right, back; the first three by
+    default), `--dist` body lengths out (2.6), aimed at the body's middle at
+    rest
+  - `--pieces` writes `<scenario>-look-pieces.png`: each pixel coloured by
+    the body piece it is on, shaded by the lit picture, each piece named at
+    its middle in view; a body of one piece (a flesh body) is coloured by
+    the bone each vertex mostly follows instead, so a ragged patch on the lit
+    sheet says whose skin it is
 - **Kinematics** (`lab/kinematics.js`): where in a stride the motion jumps.
   - per leg, each bone's flexion, angular velocity and angular acceleration
     over the steady cycle (each cycle thin, the mean bold), the leg's measured
@@ -410,7 +447,8 @@ Every output is deterministic. A rerun writes the same bytes.
   - On the image (`lab/shots.js`, `lab/lit.js`): the frames where the mesh
     is worst, and 8 spread through the run, are drawn lit as the live view
     lights them (its sun, ambient and shadows) from four cameras round the
-    body. The skin hook's debug views give each pixel its piece, its
+    body (set for the deer; a smaller creature's come in by its length and
+    height and aim at its middle, so it fills the frame as the deer does). The skin hook's debug views give each pixel its piece, its
     distance from the eye in cm and its normal (`setDebugView('piece' |
     'depth' | 'normal')`, `lab/skin.bk`). Seams are two pieces meeting at
     one depth at an angle of 8 degrees or more; creases are the normal
@@ -446,7 +484,12 @@ Every output is deterministic. A rerun writes the same bytes.
     (mu 1); no flight may gain energy.
   - **Smoothness**: each joint's angular acceleration against its
     neighbours two steps off; a spike is a corner in the joint's speed.
-    Kinks a second, per joint and overall, with jerk.
+    Kinks a second, per joint and overall, with jerk. Each spike carries the
+    foot event (`LF down`, `RH lift`) within three steps of it, or
+    `between`, and the flag names where they gather. The root is tested the
+    same way, apart from the joints: its place (mm, so a kink of 80 mm/s in
+    a step counts as a joint's 80 deg/s) and its turn in the world, since a
+    kink there shows in every leg on the ground at once.
   - **Variety**: each steady cycle's deviation from the mean cycle, split
     into slow change (variety: `repeats` under 1% of the range, `wanders`
     over 12%) and step-to-step noise (`jitters` over 1.5%).

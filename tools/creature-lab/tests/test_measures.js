@@ -116,7 +116,7 @@ await test('deer at rest: one skin, and the debug views', () => {
 
     const P = restPose(deer.skel), X = skinPositions(deer, P);
     setPose(deer, P);
-    const view = scanView(SCAN_VIEWS[0]);
+    const view = scanView(SCAN_VIEWS[0], deer);
     const D = debugPlanes(view, SCAN.W, SCAN.H);
     let body = 0, zero = 0, near = 0, far = 0;
     for (let i = 0; i < D.piece.length; i++) {
