@@ -174,12 +174,18 @@ export function naturalSheet(creature, N, path) {
 }
 
 // Run and measure each scenario; write the JSON, the sheets and the summary.
-export function naturalReport(creature, scenarios, dir, { seed = 1 } = {}) {
+// The run natural judges: a steady gait's (one a creature's `cycles` names)
+// lengthened to 20 s, so there are cycles to compare and its start weighs little.
+export function naturalRun(creature, name, { seed = 1 } = {}) {
     const steady = new Set(Object.values(creature.def.cycles || {}).map((c) => c.scenario));
+    const sc = scenarioOf(creature, name);
+    return runScenario(creature, steady.has(name) ? { ...sc, duration: Math.max(sc.duration, 20) } : sc, { seed });
+}
+
+export function naturalReport(creature, scenarios, dir, { seed = 1 } = {}) {
     const written = [], lines = [], summary = {};
     for (const name of scenarios) {
-        const sc = scenarioOf(creature, name);
-        const rec = runScenario(creature, steady.has(name) ? { ...sc, duration: Math.max(sc.duration, 20) } : sc, { seed });
+        const rec = naturalRun(creature, name, { seed });
         const N = naturalness(rec);
         const jp = `${dir}/${name}-natural.json`;
         writeFile(jp, JSON.stringify(N) + '\n');

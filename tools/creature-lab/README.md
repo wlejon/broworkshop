@@ -237,6 +237,10 @@ $B tools/creature-lab tools/creature-lab/cli.js -- finder deer all
 $B tools/creature-lab tools/creature-lab/cli.js -- finder deer gallop --top 0
 $B tools/creature-lab tools/creature-lab/cli.js -- finder deer --rank --top 12
 $B tools/creature-lab tools/creature-lab/cli.js -- natural deer
+$B tools/creature-lab tools/creature-lab/cli.js -- score bunny
+$B tools/creature-lab tools/creature-lab/cli.js -- sweep bunny gallop trot --sweep LEG_BAND=0.05,0.3
+$B tools/creature-lab tools/creature-lab/cli.js -- kinks bunny gallop --at "RF lift"
+$B tools/creature-lab tools/creature-lab/cli.js -- trace bunny gallop --leg RF --from 6.4 --to 6.6
 $B tools/creature-lab tools/creature-lab/cli.js -- herd deer trot --count 50
 $B tools/creature-lab tools/creature-lab/cli.js -- flock deer flee --count 1000 --shadows off
 $B tools/creature-lab tools/creature-lab/cli.js -- scenarios deer
@@ -309,6 +313,37 @@ no scenario only ranks; `--top <n>` draws that many close-ups (`0` scans
 without drawing); `--every <steps>` sets how often the mesh is measured (4).
 `natural` runs walk, trot, gallop, start-stop, gaits, trot-turn and startle
 by default; the steady gaits run for 20 s so there are cycles to compare.
+
+The text tools (`lab/iterate.js`) print to the terminal and write the same
+text under the creature's folder; `score`, `sweep` and `kinks` run what
+`natural` runs, so their numbers are its.
+
+- `score` (`score.txt`): a line a scenario: the metrics' flags, natural's
+  flags, kinks a second and the two foot events most fall at, the root's
+  kinks, the share of ground time pushed past friction and pulled down
+  faster than gravity, the share of flight off free fall, the corners the
+  swing feet and tracked points turn, and the joints that jitter; then the
+  metrics' flags in full.
+- `sweep --sweep NAME=a,b,c` (`sweep-NAME.txt`): the score of the rig as it
+  is and with each value, a table a scenario. Other `--knob` overrides apply
+  to every row.
+- `kinks` (`kinks.txt`): per scenario, the foot events the kinks gather at,
+  with the bones kinking at each and their median size; the root's.
+  `--bone <name>` lists that bone's every kink (time, size, event); `--at
+  "<foot> <down|lift>"` every bone kinking there.
+- `trace <scenario>` (`<scenario>-trace.txt`): a row a step from `--from` to
+  `--to` (0.25 s mid-run by default; `--every <n>`): which feet are down,
+  then for `--leg <foot>` its toe over the ground, its distance from the
+  leg's top bone and that offset along the heading and down, and its miss
+  from where the rig's telemetry says it is (its target while it swings),
+  then each bone of the leg and of `--bones` by its flexion (local x, deg)
+  with `*` within a step of a kink, the rig's probe slots that are not zero,
+  and the nearest foot event.
+- `creature::probe` (`lab/probe.bk`): a rig that declares `pub const PROBE`
+  (an offset into its state, with `PROBE_N` floats reserved after it) has
+  that slice recorded every step of a lab run (`rec.probe`); `probe(state, s
+  + PROBE, i, v)` and `probe3` write slots, which `trace` prints as `p0` ..
+  `p15`. The bunny reserves one.
 
 **Naming creatures and scenarios**
 
@@ -612,3 +647,9 @@ Headless runs drive the view through `globalThis.creatureLab`
    skeleton's feet and tracks (`head` and `withers` for the head measure)
    and the body's masses. Run `form <name>` for each mass's volume in
    motion.
+6. Iterate on the rig with the text tools, each a few seconds: `score
+   <name>` after an edit; `kinks <name> <scenario>` for where its kinks
+   gather; `trace <name> <scenario> --leg <foot>` (or `--bones`) through the
+   moment, with `creature::probe` values for what a solver was given; `sweep
+   <name> --sweep KNOB=a,b,c` to choose a value; `look <name> <scenario>`
+   (and `--pieces`) to see it.

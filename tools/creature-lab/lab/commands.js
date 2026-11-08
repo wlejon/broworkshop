@@ -18,9 +18,10 @@ import { restForm, formInMotion } from "./form.js";
 import { compareLookSets } from "/lib/kit/look.js";
 import { scanScenario } from "./finder.js";
 import { finderReport } from "./finder-out.js";
-import { naturalReport } from "./natural-out.js";
+import { naturalReport, naturalRun } from "./natural-out.js";
 import { herdCost } from "./herd.js";
 import { flockCost } from "./flock-cost.js";
+import { scoreTable, sweepTable, kinkReport, traceText } from "./iterate.js";
 
 export const HELP = `creature-lab <command> <creature> [scenario ...] [options]
 
@@ -53,6 +54,17 @@ export const HELP = `creature-lab <command> <creature> [scenario ...] [options]
   natural     <creature> [scenario ...]    motion against principles, no reference: overlap and
                                            follow-through, secondary motion, the mass's physics,
                                            smoothness, variety, head stabilisation, arcs
+  score       <creature> [scenario ...]    one line a scenario, fast: metrics flags, natural flags, kinks a
+                                           second and where most fall, the root's kinks, pushed past friction,
+                                           pulled down, off free fall, swing-foot corners, jittering joints
+  sweep       <creature> [scenario ...]    score for each value of a knob, one table a scenario
+                                           (--sweep NAME=a,b,c; the rig's own value first)
+  kinks       <creature> [scenario ...]    where the kinks are: by foot event, the bones in each, the root
+                                           (--bone <name>: its every kink; --at "LF lift": every bone there)
+  trace       <creature> <scenario>        frame by frame (--from <s> --to <s>, --every <steps>): a leg
+                                           (--leg LF: down, toe height, reach, miss, each bone's angle, *
+                                           at a kink) and/or bones (--bones neck,head), the nearest foot
+                                           event, the rig's creature::probe values
   herd        <creature> [scenario]        a herd's GPU cost a frame and triangles (--count 50, --frames 240)
   flock       <creature> [behaviour]       a flock on the GPU brain (graze travel mill flee): GPU cost,
                                            what the group does, a screenshot (--count 200, --frames 240,
@@ -227,6 +239,32 @@ export async function runCommand(argv) {
         const r = finderReport(creature, scans, fdir, { top: opt.top !== undefined ? +opt.top : 10 });
         for (const m of r.worst) console.log(`  #${m.rank} ${m.score}  ${m.key}  (${m.scenario} t ${m.t} s, ${m.view}) -> ${m.image}`);
         written.push(`${fdir}/finder.json`, r.index, ...r.worst.map((m) => m.image), ...r.charts);
+    } else if (cmd === 'score' || cmd === 'sweep' || cmd === 'kinks' || cmd === 'trace') {
+        const scs = rest.length ? scenarios : NATURAL;
+        let lines = [], file;
+        if (cmd === 'score') {
+            ({ lines } = scoreTable(creature, scs, analyzeRun, { seed }));
+            file = `${dir}/score.txt`;
+        } else if (cmd === 'sweep') {
+            if (!opt.sweep) throw new Error(`sweep: give --sweep NAME=a,b,c\n${HELP}`);
+            const r = await sweepTable(spec, opt.sweep, scs, analyzeRun, { knobs, seed });
+            lines = r.lines;
+            file = `${dir}/sweep-${r.name}.txt`;
+        } else if (cmd === 'kinks') {
+            for (const sc of scs) lines.push(...kinkReport(naturalRun(creature, sc, { seed }), { bone: opt.bone || null, at: opt.at || null }).lines);
+            file = `${dir}/kinks.txt`;
+        } else {
+            if (!rest.length) throw new Error(`trace: name a scenario\n${HELP}`);
+            const r = traceText(runScenario(creature, rest[0], { seed }), {
+                leg: opt.leg || null, bones: opt.bones ? String(opt.bones).split(',') : null,
+                from: opt.from !== undefined ? +opt.from : null, to: opt.to !== undefined ? +opt.to : null, every: opt.every ? +opt.every : 1,
+            });
+            lines = r.lines;
+            file = `${dir}/${rest[0]}-trace.txt`;
+        }
+        for (const l of lines) console.log(l);
+        writeFile(file, lines.join('\n') + '\n');
+        written.push(file);
     } else if (cmd === 'natural') {
         const r = naturalReport(creature, rest.length ? scenarios : NATURAL, `${dir}/natural`, { seed });
         for (const line of r.lines) console.log(line);

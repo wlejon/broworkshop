@@ -72,6 +72,30 @@ await test('A/B sheets: interleaved and overlaid, metrics side by side', async (
     check(out.written.length >= 6, 'files listed');
 });
 
+await test('the text tools: score, sweep, kinks, trace', async () => {
+    const read = (p) => fs.readFileSync(p, 'utf-8').trim().split('\n');
+    await runCommand(['score', 'deer', 'trot', '--out', OUT]);
+    const sc = read(`${root}/deer/score.txt`);
+    check(/^trot\s+\d+\s+\d+\s+[\d.]+/.test(sc[2]), `score: a line for trot (${sc[2]})`);
+    await runCommand(['sweep', 'deer', 'trot', '--sweep', 'HEAD_HOLD=0.3,0.9', '--out', OUT]);
+    const sw = read(`${root}/deer/sweep-HEAD_HOLD.txt`);
+    eq(sw.length, 4, 'sweep: a header and the rig and two values');
+    check(/^HEAD_HOLD=0\.3 /.test(sw[2]) && /^HEAD_HOLD=0\.9 /.test(sw[3]), 'sweep: rows named by value');
+    await runCommand(['kinks', 'bunny', 'gallop', '--out', OUT]);
+    const kn = read(`${root}/bunny/kinks.txt`);
+    check(/^gallop: [\d.]+ kinks a second/.test(kn[0]) && kn.some((l) => /^\s+root: /.test(l)), 'kinks: the rate, by event, the root');
+    await runCommand(['trace', 'bunny', 'gallop', '--leg', 'RF', '--bones', 'neck', '--from', '6.4', '--to', '6.45', '--out', OUT]);
+    const tr = read(`${root}/bunny/gallop-trace.txt`);
+    check(/scapR.*pawR.*neck/.test(tr[1]), 'trace: the leg\'s chain and the named bones');
+    eq(tr.length, 2 + 7 + 2, 'trace: a row a step from 6.40 to 6.45 s');
+    // The bunny reserves a creature::probe slice; the run records it.
+    const { loadCreature } = await import('/app/lab/creature.js');
+    const { runScenario, PROBE_N } = await import('/app/lab/run.js');
+    const rec = runScenario(await loadCreature('bunny'), 'idle');
+    eq(rec.probe && rec.probe.length, rec.steps * PROBE_N, 'the probe slice recorded every step');
+    eq(runScenario(await loadCreature('deer'), 'idle').probe, null, 'a rig without one records none');
+});
+
 test('edit -> sheet in seconds', () => {
     // Each `sheets` call above loaded the creature afresh (rig compiled, body
     // built), ran the scenario and drew four sheets and the metrics.

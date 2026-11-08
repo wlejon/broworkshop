@@ -311,7 +311,7 @@ function median(a) { const s = Float64Array.from(a).sort(); return s.length ? s[
 
 // Per step, the foot event nearest it within `win` steps ('LF down', 'RH
 // lift'), or null: where a kink falls in the step it belongs to.
-function footEvents(rec, win = 3) {
+export function footEvents(rec, win = 3) {
     const n = rec.steps, feet = rec.creature.skel.feet;
     const ev = [];
     for (let k = 1; k < n; k++) feet.forEach((f, i) => {
@@ -330,7 +330,7 @@ function footEvents(rec, win = 3) {
 // (a smooth swing, however fast, leaves almost nothing, its fourth
 // derivative over 17 ms; a corner in the velocity leaves a spike), each
 // spike tagged with the foot event nearest it (`near`).
-function kinks(th, dt, near) {
+export function kinks(th, dt, near) {
     const n = th.length;
     const al = new Float64Array(n), jk = new Float64Array(n);
     for (let k = 1; k < n - 1; k++) al[k] = (th[k + 1] - 2 * th[k] + th[k - 1]) / (dt * dt);

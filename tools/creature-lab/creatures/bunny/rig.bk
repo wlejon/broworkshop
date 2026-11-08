@@ -35,6 +35,7 @@ import creature::limbs::*;
 import bunny::legs::*;
 import bunny::stride::*;
 import creature::dangle::*;
+import creature::probe::*;
 from creature::ground import height, normal;
 
 // --- state layout (after the contract's header) ------------------------------
@@ -81,7 +82,8 @@ const L_ARMED: i32 = 12;
 const L_KIND: i32 = 13;       // 0 a gait step, 1 a settling step, 2 a fore paw held up (sitting up)
 const L_SINCE: i32 = 14;      // s since it landed; in a swing, the roll onto its toe it lifted with
 const D_DANGLE: i32 = D_LEG + 4 * LEG_REC;   // the ears' mid points and tips, the scut's tip (creature::dangle)
-pub const STATE: i32 = D_DANGLE + 5 * DANGLE_REC;
+pub const PROBE: i32 = D_DANGLE + 5 * DANGLE_REC;   // creature::probe's slice
+pub const STATE: i32 = PROBE + PROBE_N;
 
 const HOP_UP: f32 = 1.5;         // m/s the hop gives way to the bound
 const BOUND_DOWN: f32 = 1.1;     //   and back
@@ -94,7 +96,8 @@ const CAP_FADE: f32 = 0.06;      // m a coming or going foot's reach limit is sl
 const CAP_SOFT: f32 = 0.003;     // m over which one reach limit hands over to another
 @knob const SWING_FOLD_F: f32 = 0.6;   // of its reach a swinging fore foot stays from its girdle at least
 @knob const SWING_FOLD_H: f32 = 0.45;  //   and a hind foot (sitting, 0.57)
-const SWING_FOLD_BAND: f32 = 0.015;   // m over which that floor eases in
+@knob const LEG_BAND: f32 = 0.15;     // rad a leg's joint eases into the ends of its range over
+const SWING_FOLD_BAND: f32 = 0.015;  // m over which that floor eases in
 const HOP_ARC: f32 = 0.034;     // m the hips lift over a hop's hind swing
 const HIP_RUN: f32 = 0.145;      // m the hips ride at in the bound (sitting: 0.115)
 const SCAP_RUN: f32 = 0.155;     //   and the withers
@@ -713,13 +716,14 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
         }
         var o: Leg;
         if (hind) { o = solve_hind_flat(b0, d, ah, SOFT_REACH, FOOT_FLAT + slope - par_pitch, 0.12); }
-        else { o = solve_front(b0, d, ah, select_f(held, 1.6, wrist) * fold, SCAP_FOLLOW, SOFT_REACH); }
-        let rho = clamp(o.rho, LIM_LO[b0].z, LIM_HI[b0].z);
+        else { o = solve_front(b0, d, ah, select_f(held, 1.6, wrist) * fold, SCAP_FOLLOW, SOFT_REACH); }        let rho = clamp(o.rho, LIM_LO[b0].z, LIM_HI[b0].z);
         let qr = q_mul(qp, q_z(rho));
         var prev: f32 = 0.0;
         for (var i: i32 = 0; i < nb; i += 1) {
             let b = b0 + i;
-            let loc = clamp(-(leg_angle(o, i) - rest_angle(b)) - prev, LIM_LO[b].x, LIM_HI[b].x);
+            // Eased into its range, not stopped at it (a paw curled to its
+            // limit at lift-off would turn a corner there).
+            let loc = soft_range(-(leg_angle(o, i) - rest_angle(b)) - prev, LIM_LO[b].x, LIM_HI[b].x, LEG_BAND);
             prev = prev + loc;
             T.q[b] = q_mul(qr, q_x(prev));
             if (i == 0) { T.p[b] = j; }

@@ -10,12 +10,13 @@ import { groundEnv, intentTrack, scenariosFor } from "./scenarios.js";
 import { readApp } from "./creature.js";
 
 export const DT = 1 / 120;
+export const PROBE_N = 16;   // creature::probe's PROBE_N
 
 let recorder = null;
 function recordKernels() {
     if (!recorder) {
         const m = bro.kernel.compile(readApp('lab/record.bk'), { file: 'lab/record.bk' });
-        recorder = { pose: m.kernel('k_record_pose'), tele: m.kernel('k_record_tele') };
+        recorder = { pose: m.kernel('k_record_pose'), tele: m.kernel('k_record_tele'), slice: m.kernel('k_record_slice') };
     }
     return recorder;
 }
@@ -79,18 +80,23 @@ export function runScenario(creature, scenario, opts = {}) {
     const histPose = bro.kernel.createBuffer(steps * nPose * 16);
     const histTele = bro.kernel.createBuffer(steps * nTele * 4);
     const rec = recordKernels();
+    // A rig's creature::probe slice (its `PROBE` constant), when it has one.
+    const probeAt = creature.mod.consts.PROBE, nProbe = PROBE_N;
+    const histProbe = probeAt !== undefined ? bro.kernel.createBuffer(steps * nProbe * 4) : null;
     for (let k = 0; k < steps; k++) {
         batch.setIntent(0, intents.subarray(k * INTENT, (k + 1) * INTENT));
         batch.step(dt);
         rec.pose.dispatch(nPose, batch.poseBuf, histPose, k, nPose);
         rec.tele.dispatch(nTele, batch.teleBuf, histTele, k, nTele);
+        if (histProbe) rec.slice.dispatch(nProbe, batch.stateBuf, histProbe, k, nProbe, probeAt);
     }
     const pose = histPose.read(new Float32Array(steps * nb * ROWS));
     const tele = histTele.read(new Float32Array(steps * TELE));
-    histPose.destroy(); histTele.destroy();
+    const probe = histProbe ? histProbe.read(new Float32Array(steps * nProbe)) : null;
+    histPose.destroy(); histTele.destroy(); histProbe?.destroy();
     batch.destroy();
     return {
-        creature, scenario: sc, dt, steps, env, intents, pose, tele,
+        creature, scenario: sc, dt, steps, env, intents, pose, tele, probe,
         poseStride: nb * ROWS, wallMs: Date.now() - t0,
     };
 }

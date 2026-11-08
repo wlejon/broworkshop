@@ -6,6 +6,13 @@ fn k_record_pose(g: grid<1>, pose: read_store<vec4<f32>, 1>, hist: write_store<v
     hist[step * n + i] = pose[i];
 }
 
+// n floats of `src` from `off` (a rig's probe slice of its state).
+@kernel @grid(1)
+fn k_record_slice(g: grid<1>, src: read_store<f32, 1>, hist: write_store<f32, 1>, step: i32, n: i32, off: i32) {
+    let i = g.x();
+    hist[step * n + i] = src[off + i];
+}
+
 @kernel @grid(1)
 fn k_record_tele(g: grid<1>, tele: read_store<f32, 1>, hist: write_store<f32, 1>, step: i32, n: i32) {
     let i = g.x();

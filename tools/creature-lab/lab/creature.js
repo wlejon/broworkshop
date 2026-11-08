@@ -30,6 +30,7 @@ export function labModules() {
         'creature::leap': readApp('lab/leap.bk'),
         'creature::limbs': readApp('lab/limbs.bk'),
         'creature::dangle': readApp('lab/dangle.bk'),
+        'creature::probe': readApp('lab/probe.bk'),
     };
 }
 
