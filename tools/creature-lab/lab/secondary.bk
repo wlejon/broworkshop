@@ -91,6 +91,19 @@ pub fn lift_to(p: vec3<f32>, q: vec4<f32>, b: i32, y: f32) -> vec4<f32> {
 // gaze in space); `on` scales the lag (0: the rig's pose exactly). State:
 // SEC_STATE floats at `base`.
 pub fn carry(st: rw_store<f32, 1>, env: read_store<f32, 1>, base: i32, T: Pose, hold: array<f32, NB>, on: f32, init: bool, dt: f32) -> Pose {
+    var firm: array<f32, NB>;
+    for (var b: i32 = 0; b < NB; b += 1) { firm[b] = 0.0; }
+    return carry_held(st, env, base, T, hold, firm, on, init, dt);
+}
+
+// As carry, with firm[b] (0..1) the share of muscle tone holding bone b
+// where it is carried (a raised tail held up in a gallop rather than flung
+// about by the body's bob): the part's spring FIRM_STIFF times stiffer at
+// full tone, and damped toward FIRM_DAMPING (still swinging a little past).
+pub const FIRM_STIFF: f32 = 1.5;
+pub const FIRM_DAMPING: f32 = 0.7;
+pub fn carry_held(st: rw_store<f32, 1>, env: read_store<f32, 1>, base: i32, T: Pose, hold: array<f32, NB>, firm: array<f32, NB>,
+                  on: f32, init: bool, dt: f32) -> Pose {
     var A = T;
     for (var b: i32 = 0; b < NB; b += 1) {
         if (DANGLE[b] == 0) { continue; }
@@ -109,8 +122,9 @@ pub fn carry(st: rw_store<f32, 1>, env: read_store<f32, 1>, base: i32, T: Pose, 
             A.q[b] = qt;
             continue;
         }
-        let w = part_omega(b);
-        let zeta = part_damping(b);
+        let fb = clamp(firm[b], 0.0, 1.0);
+        let w = part_omega(b) * mix(1.0, FIRM_STIFF, fb);
+        let zeta = mix(part_damping(b), FIRM_DAMPING, fb);
         let t0 = ld(st, k + 6);
         let vt = (tt - t0) / max(dt, 1e-5);
         var x = ld(st, k);

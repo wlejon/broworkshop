@@ -116,20 +116,6 @@ const TUCK_HIND: f32 = 0.4;      // of its reach a leg folds to in a leap's flig
 const TUCK_FORE: f32 = 0.3;
 const LAND_LEAD: f32 = 0.05;     // leg times from a leap's touchdown to the hoof's mid-stance
 
-// How far past its reach the furthest planted hoof is with the body moved
-// by `shift` from `plan` (negative: all within reach).
-fn reach_over(st: rw_store<f32, 1>, s: i32, toes: array<vec3<f32>, 4>, plan: vec3<f32>, qyaw: vec4<f32>,
-              hy: f32, fy: f32, shift: vec3<f32>) -> f32 {
-    var worst: f32 = -1e3;
-    for (var l: i32 = 0; l < 4; l += 1) {
-        if (st[s + D_LEG + l * LEG_REC + L_PLANT] < 0.5) { continue; }
-        let top = leg_top(l, plan, qyaw, hy, fy) + shift;
-        let r = select_f(LEG_HIND[l] == 1, REACH_HIND, REACH_FORE);
-        worst = max(worst, length(toes[l] - top) - r);
-    }
-    return worst;
-}
-
 // The first moment (a leap's tau) past the flight's top at which leg l's
 // landing mark is within its reach from where its girdle will be, the body
 // on its arc: a leg comes down as soon as it reaches the ground past the
@@ -744,21 +730,21 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
     // And no further than they reach any way: a body the planted hooves
     // would have to stretch past their length to follow is held where they
     // still reach (only as far as the plan's own place allows).
-    let over1 = reach_over(state, s, toes, plan, qyaw, hy, fy, shift);
+    let pl4 = vec4<f32>(sup.f[0].down, sup.f[1].down, sup.f[2].down, sup.f[3].down);
+    let over1 = reach_over(toes, pl4, plan, qyaw, hy, fy, shift, REACH_HIND, REACH_FORE);
     if (over1 > 0.0) {
-        let over0 = max(reach_over(state, s, toes, plan, qyaw, hy, fy, vec3<f32>(0.0)), 0.0);
+        let over0 = max(reach_over(toes, pl4, plan, qyaw, hy, fy, vec3<f32>(0.0), REACH_HIND, REACH_FORE), 0.0);
         if (over1 > over0) {
             var lo: f32 = 0.0;
             var hi: f32 = 1.0;
             for (var it: i32 = 0; it < 6; it += 1) {
                 let m = 0.5 * (lo + hi);
-                if (reach_over(state, s, toes, plan, qyaw, hy, fy, shift * m) > over0) { hi = m; } else { lo = m; }
+                if (reach_over(toes, pl4, plan, qyaw, hy, fy, shift * m, REACH_HIND, REACH_FORE) > over0) { hi = m; } else { lo = m; }
             }
             shift = shift * lo;
         }
     }
     // Nor lower than they fold (a leap's gather): held over it, eased in, its fall stopped.
-    let pl4 = vec4<f32>(sup.f[0].down, sup.f[1].down, sup.f[2].down, sup.f[3].down);
     let up = -smin(0.0, -fold_lift(toes, pl4, plan, qyaw, hy, fy, shift, REACH_HIND, REACH_FORE), CAP_SOFT) * (1.0 - smooth01(lie * 3.0));
     if (up > 1e-4) {
         shift.y += up;
@@ -862,10 +848,12 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
         T.p[b] = head_of(T, b);
     }
     // Tail: a swish with the stride, raised in the gallop, flagged in alarm.
+    // (In the gallop, held up, it carries a wave behind the pelvis's rock.)
     let swish = (gw.x + gw.y) * 0.22 * sin(TAU * (phase + 0.25)) * select_f(moving, 1.0, 0.0);
-    T.q[B_TAIL1] = q_mul(T.q[B_PELVIS], q_xyz(clamp_xyz(vec3<f32>(0.6 * gw.z + 1.75 * alert, swish, 0.0), B_TAIL1)));
+    let wave = gw.z * mv * 0.14;
+    T.q[B_TAIL1] = q_mul(T.q[B_PELVIS], q_xyz(clamp_xyz(vec3<f32>(0.6 * gw.z + 1.75 * alert + wave * sin(TAU * (phase - 0.55)), swish, 0.0), B_TAIL1)));
     T.p[B_TAIL1] = head_of(T, B_TAIL1);
-    T.q[B_TAIL2] = q_mul(T.q[B_TAIL1], q_xyz(clamp_xyz(vec3<f32>(0.2 * gw.z + 0.5 * alert, 0.6 * swish, 0.0), B_TAIL2)));
+    T.q[B_TAIL2] = q_mul(T.q[B_TAIL1], q_xyz(clamp_xyz(vec3<f32>(0.2 * gw.z + 0.5 * alert + wave * sin(TAU * (phase - 0.75)), 0.6 * swish, 0.0), B_TAIL2)));
     T.p[B_TAIL2] = head_of(T, B_TAIL2);
 
     // --- legs, to the hooves from where the body is ---------------------------------------------
@@ -935,7 +923,10 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
     var hold: array<f32, NB>;
     for (var b: i32 = 0; b < NB; b += 1) { hold[b] = 0.0; }
     hold[B_HEAD] = HEAD_SPACE * (1.0 - graze) * (1.0 - lie);
-    let A = carry(state, env, s + D_SEC, T, hold, LAYERS, init, dt);
+    // The tail, raised in the gallop or flagged in alarm, is held up, not flung.
+    var firm = hold;
+    for (var b: i32 = 0; b < NB; b += 1) { firm[b] = select_f(b == B_TAIL1 || b == B_TAIL2, min(gw.z * mv + alert, 1.0), 0.0); }
+    let A = carry_held(state, env, s + D_SEC, T, hold, firm, LAYERS, init, dt);
 
     // The pose's centre of mass from the root, kept for the next step.
     let coff = q_rot(q_conj(qyaw), com_of(A) - root);
