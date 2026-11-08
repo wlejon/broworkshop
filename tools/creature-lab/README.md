@@ -54,7 +54,7 @@ legs' bone):
 | Module | What |
 |--------|------|
 | `creature::pose` (`lab/pose.bk`) | `Pose`: every bone's world rotation and head; points on bones, local rotations, the centre of mass, writing a pose out |
-| `creature::body` (`lab/body.bk`) | the centre of mass as a state of its own, moved only by what the loaded feet can push: each leg along its line from foot to swing joint, push only, more as it flexes, a little across it, within friction; free fall with no foot down. `body_step(plan, stiffness, Support)` steers it toward the rig's plan; a foot loads and unloads over 0.125 of the legs' pendulum time (40 ms for the deer, 19 ms for the bunny), the body strays at most a quarter leg from its plan, and a gait with flight pushes harder in stance to carry its weight over the stride. `Support.effort` above 1 is an all-out push (each leg pushes that much more, nearly to full reach); `Support.lead` feeds the plan's vertical acceleration forward, for a deliberate move whose push begins when it is asked rather than when the body has fallen behind |
+| `creature::body` (`lab/body.bk`) | the centre of mass as a state of its own, moved only by what the loaded feet can push: each leg along its line from foot to swing joint, push only, more as it flexes, a little across it, within friction; free fall with no foot down. `body_step(plan, stiffness, Support)` steers it toward the rig's plan; a foot loads and unloads over 0.125 of the legs' pendulum time (40 ms for the deer), the body strays at most a quarter leg from its plan, and a gait with flight pushes harder in stance to carry its weight over the stride. `Support.effort` above 1 is an all-out push (each leg pushes that much more, nearly to full reach); `Support.lead` feeds the plan's vertical acceleration forward, for a deliberate move whose push begins when it is asked rather than when the body has fallen behind |
 | `creature::leap` (`lab/leap.bk`) | a leap from a gait: the run-up's strides paced so the hind feet's last stance ends at the take-off spot, a crouch onto the hind legs and an all-out push held long enough to lift the body, a ballistic flight whose height clears an obstacle (or a bound's rise with none), the trunk pitching nose-up to nose-down, and a landing absorbed fore first. `leap_begin`, `leap_hip` and `leap_pitch` give the plan, `leap_leg` each foot's lift and touchdown, `leap_effort` and `leap_follow` the body's Support; times scale with the legs' pendulum time |
 | `creature::spine` (`lab/spine.bk`) | the back's flex, bend and twist from what the legs do: flexed by the feet's spread along the body (most in a gait whose pairs swing together), bent into a turn's curve and toward gathered feet, twisted by sideways acceleration, hollowed by the body's vertical acceleration; each a spring of the trunk's frequency |
 | `creature::secondary` (`lab/secondary.bk`) | every dangling chain (neck, head, ears, tail) carried by its momentum: the subtree's centre of mass on a spring and damper toward where the rig puts it, its frequency from the part's size and its damping from its share of the body's mass (a heavy neck near critical, so a gait's rhythm never rings it into a whip; an ear or a slender tail light, so it swings past and settles), joint limits eased into, and a part swung into the ground resting on it (a part the rig lays there stays there); `hold` keeps part of a bone's world rotation (a head steadied in space but not pinned). `carry` takes the `env`, for the ground |
@@ -86,20 +86,36 @@ Its rig is on the same layers (`creature::body`, `creature::spine`,
 `creature::secondary`, with the same `LAYERS` knob; `hexa:plan` is it with
 them off), its height held where the planted legs reach.
 
-`bunny` is a wild rabbit (0.2 m high, 0.42 m long) on the same layers. It
-has no walk: it hops (the fore feet stepping one after the other, then the
-hind pair swinging up together to land beside or ahead of them), and faster
-it half-bounds with flight, the back flexing and stretching; telemetry calls
-these gaits `hop` and `bound`. The hop's surges (braking as the hind feet land
-ahead of the hips, driving as the body passes over them) are
-`creature::body`'s, not the plan's. At rest it sits on its flat hind feet
+`bunny` is a wild rabbit (0.2 m high, 0.42 m long) with motion of its own,
+not on those layers. It has no walk: it hops (the fore feet stepping one
+after the other, then the hind pair swinging up together to land beside or
+ahead of them), and faster it half-bounds with flight; telemetry calls these
+gaits `hop` and `bound`. Its body goes as `bunny::stride` (`stride.bk`) has
+it: each girdle surges on its own about the stride's pace, slowing over its
+own feet's stance and running on while they swing, so the trunk stretches as
+the hind push throws the front on and gathers as the hips catch up, the back
+extended or arched with that spacing; in the bound's flights the body falls
+freely. The head is held steady in space (the neck solved each step so the
+head stays at its posture's smoothed height, its turn set in the world),
+lifted as it goes; the ears sweep back running and spring with the head's
+fall. At rest it sits on its flat hind feet
 (`solve_hind_flat`). Alert, it sits up on its haunches with its fore paws held
 against its chest; lying, it loafs with its ears laid back. Grazing, it chews,
 its nose twitches, its ears turn each on its own, and its scut flicks up as it
 runs. A swinging foot is kept no nearer its girdle than the leg folds within
 its joints' ranges, and a girdle is planned over the ground under a swinging
 foot's home, not under its landing mark (a hop's is well ahead, and on a
-slope well below). `bunny:plan` is it with the layers off.
+slope well below).
+
+A creature can carry its own motion oracle: its def's `motion(rec, series,
+{steadyFrom, steady, headBob})`, which `analyze` calls and whose flags join
+the run's (and whose report is the metrics' `motion`). The bunny's
+(`creatures/bunny/motion.js`) measures what a rabbit's hop and bound do: the
+flights (share, longest, the hips' rise), the trunk's stretch and gather
+(the hips-to-withers spacing along the heading), the head's carriage against
+the withers (no lower than at rest) and its bob against theirs, and where
+each hind foot lands against the fore feet's last prints. A steady bound
+must fly, stretch and gather, and land its hind feet ahead.
 
 ## Bodies: masses blended into one skin
 

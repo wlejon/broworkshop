@@ -10,7 +10,8 @@
 // deer/skeleton.js has the conventions). `limits` are each joint's range in
 // degrees, x the flexion: positive swings the bone's tail backward (a
 // hanging bone's toward -Z, the neck's and the head's toward the ground,
-// an ear's back along the neck, the tail's up). `mass` in kg.
+// the tail's up; a bone standing up, as an ear does, swings forward, so an
+// ear lays back along the neck with negative x). `mass` in kg.
 //
 // Below the scapula and the femur head each leg lies in one plane (x
 // constant), for the planar leg solutions (creature::limbs). The blade and
@@ -55,9 +56,9 @@ function ear(side, tag) {
     const x = (v) => v * side;
     return [
         { name: `ear${tag}1`, parent: 'head', head: [x(0.014), 0.178, 0.170], tail: [x(0.022), 0.226, 0.160],
-          limits: { x: [-60, 110], y: [-70, 70], z: [-45, 45] }, mass: 0.006 },
+          limits: { x: [-110, 60], y: [-70, 70], z: [-45, 45] }, mass: 0.006 },
         { name: `ear${tag}2`, parent: `ear${tag}1`, head: [x(0.022), 0.226, 0.160], tail: [x(0.030), 0.281, 0.147],
-          limits: { x: [-40, 50], y: [-15, 15], z: [-20, 20] }, mass: 0.004 },
+          limits: { x: [-50, 40], y: [-15, 15], z: [-20, 20] }, mass: 0.004 },
     ];
 }
 

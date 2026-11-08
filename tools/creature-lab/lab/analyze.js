@@ -292,6 +292,13 @@ export function analyze(rec, opts = {}) {
     const footfalls = footfallStats(rec, S, steadyFrom, opts.reference, !!opts.steady);
     for (const f of footfalls.flags) flags.push(f);
 
+    // --- the creature's own oracle (its def's `motion`) ---------------------------
+    let motion = null;
+    if (rec.creature.def.motion) {
+        motion = rec.creature.def.motion(rec, S, { steadyFrom, steady: !!opts.steady, headBob: head });
+        for (const f of motion.flags) flags.push(f);
+    }
+
     // --- the run as a whole -----------------------------------------------------
     let dist = 0;
     for (let k = 1; k < n; k++) dist += Math.hypot(rec.tele[k * TELE] - rec.tele[(k - 1) * TELE], rec.tele[k * TELE + 2] - rec.tele[(k - 1) * TELE + 2]);
@@ -303,7 +310,7 @@ export function analyze(rec, opts = {}) {
         distance: r3(dist), meanSpeed: r3(dist / (n * rec.dt)),
         body: { heightRange: rng(hs), pitchRangeDeg: rng(ps) },
         feet, jointSink: { depth: r3(jointSink.depth), bone: jointSink.bone, t: r3(jointSink.t) },
-        joints, support, head, footfalls, flags, thresholds: LIMITS,
+        joints, support, head, footfalls, motion, flags, thresholds: LIMITS,
     };
 }
 

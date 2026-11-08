@@ -10,13 +10,14 @@
 import { bones, feet, tracks, chartJoints } from "./skeleton.js";
 import { body } from "./body.js";
 import { scenarios } from "./scenarios.js";
+import { motion } from "./motion.js";
 
 export default {
     name: 'bunny',
     skeleton: { bones, feet, tracks, chartJoints },
     body,
     face: 'face.bk',
-    rig: { file: 'rig.bk', kernel: 'k_rig', modules: { 'bunny::legs': 'legs.bk' } },
+    rig: { file: 'rig.bk', kernel: 'k_rig', modules: { 'bunny::legs': 'legs.bk', 'bunny::stride': 'stride.bk' } },
     scale: { height: 0.2, length: 0.42 },
     speeds: { walk: 0.5, trot: 1.8, gallop: 4.5, circle: 0.4 },
     // m kept between neighbours in a flock.
@@ -27,7 +28,8 @@ export default {
         run: { scenario: 'gallop' },
     },
     form: { reference: {} },
-    // `plan`: the motion layers off, the rig's plan as it draws it.
-    variants: { plan: { LAYERS: 0 } },
+    // Its own motion oracle (flights, the trunk's stretch and gather, the
+    // head's carriage, the hind feet landing ahead): motion.js.
+    motion,
     scenarios,
 };

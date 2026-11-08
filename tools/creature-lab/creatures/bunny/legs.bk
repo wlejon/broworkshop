@@ -33,26 +33,23 @@ pub const REACH_FORE_TOP: f32 = 0.180;
 pub const FOOT_FLAT: f32 = 1.5;
 // The share of a leg's reach where its IK eases the reach in.
 pub const SOFT_REACH: f32 = 0.95;
-// Share of a leg's reach it folds to at the most (a rabbit folds deep).
-const FOLD_MIN: f32 = 0.34;
 // A swing's reach cap's band (creature::limbs soft_cap).
 pub const CAP_BAND: f32 = 0.12;
-// How far the body leans over the feet that carry it, stepping in place.
-pub const LEAN_MAX: f32 = 0.015;
 
-// The fore leg's swing pivot and the hind's, where the body layer and the
-// reach caps measure a leg from (rest frame).
+// The fore leg's swing pivot and the hind's, where the reach caps measure a
+// leg from (rest frame).
 pub fn leg_pivot(l: i32) -> vec3<f32> {
     let b0 = LEG_B0[l];
     if (LEG_HIND[l] == 1) { return HEAD[b0]; }
     return mix(HEAD[b0], TAIL[b0], SCAP_PIVOT);
 }
 
-// The joint leg l swings from, with the hips at `hy` and the withers at `fy`
-// over the root `bpos`.
-pub fn leg_top(l: i32, bpos: vec3<f32>, qyaw: vec4<f32>, hy: f32, fy: f32) -> vec3<f32> {
+// The joint leg l swings from, with the hips at `hy` and the withers at `fy`,
+// its girdle where the root at `o` would put it (each girdle surges on its
+// own, bunny::stride: `o` is the root moved by that girdle's surge).
+pub fn leg_top(l: i32, o: vec3<f32>, qyaw: vec4<f32>, hy: f32, fy: f32) -> vec3<f32> {
     let piv = leg_pivot(l);
-    var top = bpos + q_rot(qyaw, vec3<f32>(piv.x - HEAD[B_PELVIS].x, 0.0, piv.z - HEAD[B_PELVIS].z));
+    var top = o + q_rot(qyaw, vec3<f32>(piv.x - HEAD[B_PELVIS].x, 0.0, piv.z - HEAD[B_PELVIS].z));
     if (LEG_HIND[l] == 1) { top.y = hy - HEAD[B_PELVIS].y + piv.y; }
     else { top.y = fy - HEAD[B_SCAPL].y + piv.y; }
     return top;
@@ -76,29 +73,12 @@ pub fn off_mix(b: f32, l: i32) -> f32 {
 pub fn swing_bump(u: f32) -> f32 { return bump(u, 0.25, 0.72); }
 pub fn fold_bump(u: f32) -> f32 { return bump(u, 0.4, 0.5); }
 
-// How far past its reach the furthest foot `down` is with the body (its
-// girdles at hy and fy over `plan`) moved by `shift` (negative: all within).
-pub fn reach_over(toes: array<vec3<f32>, 4>, down: vec4<f32>, plan: vec3<f32>, qyaw: vec4<f32>, hy: f32, fy: f32, shift: vec3<f32>) -> f32 {
-    var worst: f32 = -1e3;
-    for (var l: i32 = 0; l < 4; l += 1) {
-        if (down[l] < 0.5) { continue; }
-        let top = leg_top(l, plan, qyaw, hy, fy) + shift;
-        worst = max(worst, length(toes[l] - top) - reach_of(l));
-    }
-    return worst;
-}
-
-// How far the body (as reach_over) must rise for every foot `down` to be no
-// nearer its leg's top than the leg folds (negative: by how much all are clear).
-pub fn fold_lift(toes: array<vec3<f32>, 4>, down: vec4<f32>, plan: vec3<f32>, qyaw: vec4<f32>, hy: f32, fy: f32, shift: vec3<f32>) -> f32 {
-    var need: f32 = -1e3;
-    for (var l: i32 = 0; l < 4; l += 1) {
-        if (down[l] < 0.5) { continue; }
-        let d = toes[l] - leg_top(l, plan, qyaw, hy, fy) - shift;
-        let m = FOLD_MIN * reach_of(l);
-        need = max(need, d.y + sqrt(max(m * m - d.x * d.x - d.z * d.z, 0.0)));
-    }
-    return need;
+// The head's (its joint's) height with the neck flexed by `n` (x), from the
+// thorax at (qt, pt).
+pub fn head_y(qt: vec4<f32>, pt: vec3<f32>, n: f32) -> f32 {
+    let p1 = pt + q_rot(qt, HEAD[B_NECK] - HEAD[B_THORAX]);
+    let q1 = q_mul(qt, q_xyz(clamp_xyz(vec3<f32>(n, 0.0, 0.0), B_NECK)));
+    return (p1 + q_rot(q1, HEAD[B_HEAD] - HEAD[B_NECK])).y;
 }
 
 // The nose's height with the neck flexed by `n` and the head held at `qh`

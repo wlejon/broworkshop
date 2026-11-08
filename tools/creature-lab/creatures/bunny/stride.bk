@@ -1,0 +1,99 @@
+// bunny::stride — how a rabbit's body goes through a stride.
+//
+// A rabbit does not carry its body along at an even pace on its legs: each
+// end of it goes in its own surges. The hips slow while the hind feet are
+// down (the hind pair holds them while it throws the front on) and run on
+// while those feet swing; the withers slow while the fore feet are down (the
+// fore legs vault the chest over them) and run on through the hind push.
+// The stride's pace is the mean. So the trunk stretches and gathers: long
+// as the hind push throws the front forward, short as the hips catch up
+// with the hind feet swung under the chest. The back's arch follows that
+// spacing (`flex_of`): extended as the girdles part, arched as they close.
+//
+// Faster (the half-bound) the stride has flights: after the hind push
+// (stretched) and after the fore feet lift (gathered). In the air the body
+// falls freely, a parabola over the flight's time; on the ground the legs
+// turn its fall into the next rise without a corner.
+module bunny::stride;
+import creature::common::*;
+import creature::skeleton::*;
+import creature::limbs::*;
+
+const G: f32 = 9.81;
+// The spine's flex shared out: the loins take most of it.
+const FLEX_LUMBAR: f32 = 0.6;
+// The flex the back is held between: stretched long and gathered (both
+// joints near their range's ends).
+pub const FLEX_EXT: f32 = -0.6;
+pub const FLEX_GATHER: f32 = 0.8;
+
+// A girdle's offset along the path (m) from the stride's even pace at phase
+// p: slowest at m (its feet's stance middle), its speed swinging `a` about
+// the pace, over a stride `len` m long.
+pub fn surge(p: f32, m: f32, a: f32, len: f32) -> f32 {
+    return -a * len / TAU * sin(TAU * (p - m));
+}
+
+// The surge each girdle can have for the trunk's length to swing no more
+// than `swing` m about its rest, the girdles' stance middles mh and mf
+// apart, at most amax of the pace.
+pub fn surge_share(len: f32, mh: f32, mf: f32, swing: f32, amax: f32) -> f32 {
+    let apart = 2.0 * abs(sin(PI * (mf - mh)));
+    return min(amax, swing * TAU / max(len * apart, 1e-4));
+}
+
+// The body's height over its ride at phase p of a stride T s long whose
+// hind feet bear it over [0, he] and fore feet over [fs, fe]: a free fall
+// over each flight between, and on the ground a smooth turn from the fall
+// it landed with into the rise it leaves with (the legs' give).
+pub fn flight(p: f32, T: f32, he: f32, fs: f32, fe: f32) -> f32 {
+    let g1 = max(fs - he, 0.0) * T;          // the stretched flight, after the hind push
+    let g2 = max(1.0 - fe, 0.0) * T;         // the gathered one, after the fore feet lift
+    let v1 = 0.5 * G * g1;                   // the speed it leaves and lands with
+    let v2 = 0.5 * G * g2;
+    if (g1 > 0.0 && p >= he && p < fs) { let t = (p - he) * T; return 0.5 * G * t * (g1 - t); }
+    if (g2 > 0.0 && p >= fe) { let t = (p - fe) * T; return 0.5 * G * t * (g2 - t); }
+    // On the ground: from landing at -v_in to leaving at +v_out over ts.
+    var a: f32 = 0.0;
+    var b: f32 = he;
+    var vin = v2;
+    var vout = v1;
+    if (p >= he) { a = select_f(g1 > 0.0, fs, he); b = select_f(g2 > 0.0, fe, 1.0); vin = v1; vout = v2; }
+    let ts = max(b - a, 1e-3) * T;
+    let u = clamp((p - a) * T / ts, 0.0, 1.0);
+    // Hermite with no change of height and the given speeds at its ends.
+    return ts * (-vin * (u * u * u - 2.0 * u * u + u) + vout * (u * u * u - u * u));
+}
+
+fn rot_zy(v: vec2<f32>, a: f32) -> vec2<f32> {
+    return vec2<f32>(v.x * cos(a) + v.y * sin(a), v.y * cos(a) - v.x * sin(a));
+}
+fn zy(v: vec3<f32>) -> vec2<f32> { return vec2<f32>(v.z, v.y); }
+
+// The chord (z, y) from the hips (pelvis head) to the withers (the blades'
+// tops) in the pelvis's frame, the back flexed by f (positive arches it).
+pub fn chord(f: f32) -> vec2<f32> {
+    let a1 = FLEX_LUMBAR * f;
+    return zy(TAIL[B_PELVIS] - HEAD[B_PELVIS])
+        + rot_zy(zy(TAIL[B_LUMBAR] - HEAD[B_LUMBAR]), a1)
+        + rot_zy(zy(HEAD[B_SCAPL] - HEAD[B_THORAX]), f);
+}
+
+// The back's flex for the girdles `apart` m further apart than at rest (a
+// stretch extends it, a gather arches it), held at `base` between: each
+// `swing` m of it a `per` rad of flex. The chord itself hardly changes
+// length with the flex (the loins lie near along it), so the arch follows
+// the girdles' spacing rather than being solved from it; the legs take up
+// the few millimetres between.
+pub fn flex_of(apart: f32, base: f32, swing: f32, per: f32) -> f32 {
+    return clamp(base - per * apart / max(swing, 1e-4), FLEX_EXT, FLEX_GATHER);
+}
+
+// The trunk: x the flex of the loins, y the thorax's on top of it, z the
+// pelvis's pitch (about x, as the bones turn) for the chord, flexed by f, to
+// point along d (z forward, y up).
+pub fn trunk(f: f32, d: vec2<f32>) -> vec3<f32> {
+    let c = chord(f);
+    let pitch = atan2(c.y, c.x) - atan2(d.y, d.x);
+    return vec3<f32>(FLEX_LUMBAR * f, (1.0 - FLEX_LUMBAR) * f, pitch);
+}
