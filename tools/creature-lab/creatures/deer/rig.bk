@@ -115,7 +115,7 @@ const CAP_FADE: f32 = 0.25;      // m a coming or going hoof's reach limit is sl
 const CAP_SOFT: f32 = 0.01;      // m over which one reach limit hands over to another
 const TUCK_HIND: f32 = 0.4;      // of its reach a leg folds to in a leap's flight
 const TUCK_FORE: f32 = 0.3;
-const GUARD_RATE: f32 = 20.0;   // /s the reach guard's hold eases at
+const GUARD_RATE: f32 = 20.0;  // /s the reach guard's hold eases at
 const LAND_LEAD: f32 = 0.05;    // leg times from a leap's touchdown to the hoof's mid-stance
 
 // The first moment (a leap's tau) past the flight's top at which leg l's
@@ -510,8 +510,7 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
             if (landed && leap_step && length(target - top - vec3<f32>(0.0, state[s + D_LAG + 1] * LAYERS, 0.0)) > rmax) { landed = false; u = 0.999; }
             u = min(u, 1.0);
             let e = smooth01(u);
-            var hgt = lift_h.y;
-            if (hind) { hgt = lift_h.x; }
+            var hgt = select_f(hind, lift_h.x, lift_h.y);
             if (state[k + L_KIND] > 0.5 && state[k + L_KIND] < 1.5) { hgt = 0.05; }
             toe = vec3<f32>(mix(lifted.x, target.x, e), mix(lifted.y, target.y, e), mix(lifted.z, target.z, e));
             toe.y += hgt * swing_bump(u);
@@ -617,8 +616,7 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
         // blade turns with it), the hind about the femur head.
         let b0 = LEG_B0[l];
         let piv = leg_pivot(l);
-        var rmax = REACH_HIND;
-        if (!hind) { rmax = REACH_FORE; }
+        var rmax = select_f(hind, REACH_HIND, REACH_FORE);
         let top = bpos + q_rot(qyaw, piv - HEAD[B_PELVIS]);
         let hd = length(vec2<f32>(feet[l].x - top.x, feet[l].z - top.z));
         let ymax = feet[l].y + sqrt(max(rmax * rmax - hd * hd, 0.49 * rmax * rmax));
@@ -692,7 +690,14 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
     // The trunk's sway over the supporting hooves and its roll with each hind step.
     let mv = select_f(moving, 1.0, 0.0) * smooth01(speed / 0.6);
     let sway_v = left * (0.012 * sway * gw.x);
-    let plan = vec3<f32>(pos.x, hy, pos.z) + sway_v;
+    // Stepping in place, the body leans over the hooves that carry it (deer::legs lean_over).
+    var hold4: array<vec3<f32>, 4>;
+    for (var l: i32 = 0; l < 4; l += 1) {
+        let k = s + D_LEG + l * LEG_REC;
+        hold4[l] = vec3<f32>(state[k + L_PLANT], state[k + L_SINCE], left_t[l]);
+    }
+    let still = select_f(moving && !init, 1.0, 0.0) * (1.0 - smooth01(speed / 0.25)) * (1.0 - lie);
+    let plan = vec3<f32>(pos.x, hy, pos.z) + sway_v + lean_over(toes, hold4, pos + q_rot(qyaw, ld3(state, s + D_COFF))) * still;
     let roll_g = mv * (gw.x + 0.6 * gw.y) * 0.014 * sin(TAU * (phase - 0.1)) * (1.0 - lie);
 
     // --- the body: its centre of mass as the feet move it (creature::body) ------------------
@@ -707,8 +712,7 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
         let k = s + D_LEG + l * LEG_REC;
         let hind = LEG_HIND[l] == 1;
         let piv = leg_pivot(l);
-        var py = hy - HEAD[B_PELVIS].y;
-        if (!hind) { py = fy - HEAD[B_SCAPL].y; }
+        let py = select_f(hind, hy - HEAD[B_PELVIS].y, fy - HEAD[B_SCAPL].y);
         var f: Foot;
         f.at = toes[l];
         f.pivot = vec3<f32>(bpos.x, py, bpos.z) + q_rot(qyaw, piv - vec3<f32>(HEAD[B_PELVIS].x, 0.0, HEAD[B_PELVIS].z));
@@ -877,8 +881,7 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
         let hind = LEG_HIND[l] == 1;
         let b0 = LEG_B0[l];
         let nb = LEG_NB[l];
-        var par = B_THORAX;
-        if (hind) { par = B_PELVIS; }
+        var par = B_THORAX; if (hind) { par = B_PELVIS; }
         let qp = T.q[par];
         let j = T.p[par] + q_rot(qp, HEAD[b0] - HEAD[par]);
         let toe = toes[l];
@@ -909,8 +912,7 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
             o = solve_front(b0, d, ah, kf, SCAP_FOLLOW);
         }
         // Rotations from the limb angles, each joint held within its limits.
-        var lie_l = lie_h;
-        if (!hind) { lie_l = lie_f; }
+        var lie_l = select_f(hind, lie_h, lie_f);
         let rho = mix(clamp(o.rho, LIM_LO[b0].z, LIM_HI[b0].z), 0.0, lie_l);
         let qr = q_mul(qp, q_z(rho));
         var prev: f32 = 0.0;

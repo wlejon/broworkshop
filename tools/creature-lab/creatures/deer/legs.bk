@@ -215,6 +215,26 @@ pub fn muzzle_y(qt: vec4<f32>, pt: vec3<f32>, n1: vec3<f32>, n2: vec3<f32>, qh: 
     return (ph + q_rot(qh, TAIL[B_HEAD] - HEAD[B_HEAD])).y;
 }
 
+// How far (on the ground, at most LEAN_MAX) the body leans from `com` over
+// the hooves that carry it: each hoof (hold: down 0/1, s since it landed, s
+// until it lifts) is taken into its share over LEAN_T after it lands and out
+// over LEAN_T before it lifts, so the weight comes off a hoof before it
+// steps; every hoof down keeps a little of it.
+const LEAN_T: f32 = 0.25;
+const LEAN_MAX: f32 = 0.08;
+pub fn lean_over(toes: array<vec3<f32>, 4>, hold: array<vec3<f32>, 4>, com: vec3<f32>) -> vec3<f32> {
+    var cw = vec4<f32>(0.0);
+    for (var l: i32 = 0; l < 4; l += 1) {
+        let w = hold[l].x * (0.1 + smooth01(hold[l].y / LEAN_T) * smooth01(hold[l].z / LEAN_T));
+        cw += vec4<f32>(toes[l] * w, w);
+    }
+    if (cw.w < 0.15) { return vec3<f32>(0.0); }
+    let d = (cw.xyz / cw.w - com) * vec3<f32>(1.0, 0.0, 1.0);
+    let dl = length(d);
+    if (dl < 1e-4) { return d; }
+    return d * (soft_cap(dl, LEAN_MAX, 0.5) / dl);
+}
+
 // A planted hoof's place in its stance on the clock (ph, the leg's phase;
 // a hoof down just before its beat is at the start of its stance, not past
 // its end), and how far it has rolled onto its toe by then: over the
