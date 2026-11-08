@@ -122,6 +122,25 @@ pub fn solve_hind(b0: i32, d: vec3<f32>, ah: f32, soft: f32) -> Leg {
     return o;
 }
 
+// solve_hind for a foot that stands on its heel (plantigrade, as a rabbit
+// or a bear sits): the pantograph lifts the heel as the leg straightens,
+// but folded further it would drive the heel into the ground, so the foot's
+// limb angle is eased under `a2max` (over `band` rad, no corner) and the
+// thigh and shank reach the heel that leaves.
+pub fn solve_hind_flat(b0: i32, d: vec3<f32>, ah: f32, soft: f32, a2max: f32, band: f32) -> Leg {
+    var o = solve_hind(b0, d, ah, soft);
+    let a2 = soft_limit(o.a2, a2max - band, a2max);
+    if (a2 >= o.a2) { return o; }
+    let pl = leg_plane(b0, b0 + 3, d);
+    let fet = vec2<f32>(pl.y, pl.z) - rest_len(b0 + 3) * limb_dir(ah);
+    let heel = fet - rest_len(b0 + 2) * limb_dir(a2);
+    let s = two_bone_soft(rest_len(b0), rest_len(b0 + 1), heel, 1.0, soft);
+    o.a0 = s.x;
+    o.a1 = s.y;
+    o.a2 = a2;
+    return o;
+}
+
 // A five-bone fore leg (blade, upper arm, forearm, the hand, the toe) from
 // the blade's top b0 to toe d: the toe at ah, the wrist folded by k, the
 // blade taking `follow` of the leg's swing.

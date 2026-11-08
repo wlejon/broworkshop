@@ -1,0 +1,96 @@
+// creature::face — the bunny's face, drawn per pixel over the head's skin
+// (lab/face.bk has how), in the rest pose's coordinates (body.js: x to the
+// bunny's left, y up, z forward, metres). `foot` is a pixel's size there;
+// every edge is softened over it.
+//
+// What a rabbit's face shows:
+//   eyes      large, round, near black and glossy, high on the head's
+//             sides, a thin dark lid rim and a narrow pale ring of fur
+//   nose      a small bare pad at the muzzle's tip, its two nostrils slits
+//             slanting down and out from the top, a Y with the upper lip's
+//             cleft running down from between them
+//   mouth     the cleft parting into the lip line either side, curving back
+//             under the whisker pads; a few dark whisker roots on the pads
+module creature::face;
+import mesh;
+
+fn lin(c: vec3<f32>) -> vec3<f32> {
+    return vec3<f32>(pow(c.x, 2.2), pow(c.y, 2.2), pow(c.z, 2.2));
+}
+
+// 1 inside (d < 0), 0 outside, over w either side of the edge.
+fn inside(d: f32, w: f32) -> f32 {
+    return clamp(0.5 - d / (2.0 * w), 0.0, 1.0);
+}
+
+// Distance from q to the segment a-b.
+fn segment(q: vec2<f32>, a: vec2<f32>, b: vec2<f32>) -> f32 {
+    let ab = b - a;
+    let t = clamp(dot(q - a, ab) / dot(ab, ab), 0.0, 1.0);
+    return length(q - a - ab * t);
+}
+
+// The eye (body.js's eye blob): its centre on the left and the opening's
+// half length and height (m), seen from the side.
+const EYE: vec3<f32> = vec3<f32>(0.0285, 0.164, 0.178);
+const EYE_HALF: vec2<f32> = vec2<f32>(0.0102, 0.0094);
+// The nose pad's middle (x 0) and its tip.
+const NOSE: vec2<f32> = vec2<f32>(0.1365, 0.229);
+
+pub fn face(p: vec3<f32>, foot: f32, s: mesh::Surface) -> mesh::Surface {
+    var out = s;
+    let w = max(foot, 0.0002);
+    let ax = abs(p.x);
+    let dark = lin(vec3<f32>(0.03, 0.025, 0.025));
+    let pale = lin(vec3<f32>(0.90, 0.86, 0.78));
+    var c = s.base_color;
+    var rough = s.roughness;
+
+    // The eye: an ellipse on the head's side (u along the head, v up).
+    if (ax > 0.024 && abs(p.z - EYE.z) < 0.022 && abs(p.y - EYE.y) < 0.022) {
+        let u = (p.z - EYE.z) / EYE_HALF.x;
+        let v = (p.y - EYE.y) / EYE_HALF.y;
+        let r = sqrt(u * u + v * v);
+        // r - 1 in metres, roughly: the edge's distance.
+        let d = (r - 1.0) * EYE_HALF.y;
+        let ring = inside(d - 0.0019, 0.0008 + w);
+        c = mix(c, pale, 0.55 * ring);
+        let rim = inside(d - 0.0009, w);
+        c = mix(c, dark, rim);
+        rough = mix(rough, 0.5, rim);
+        let open = inside(d, w);
+        // The iris near black with a deep brown edge, the pupil black.
+        var iris = mix(lin(vec3<f32>(0.16, 0.09, 0.05)), lin(vec3<f32>(0.04, 0.025, 0.02)), inside(r - 0.8, 0.12));
+        iris = mix(iris, lin(vec3<f32>(0.006, 0.005, 0.005)), inside(r - 0.55, 0.06 + w / EYE_HALF.y));
+        c = mix(c, iris, open);
+        rough = mix(rough, 0.05, open);
+    }
+
+    // The nose and mouth, on the muzzle's front.
+    if (p.z > 0.205) {
+        let q = vec2<f32>(ax, p.y);
+        // The bare pad: pinkish brown, a soft oval over the tip.
+        let pad = inside(length((q - vec2<f32>(0.0, NOSE.x)) / vec2<f32>(0.0068, 0.0056)) - 1.0, w / 0.006) * inside(0.2235 - p.z, 0.002);
+        c = mix(c, lin(vec3<f32>(0.62, 0.45, 0.42)), 0.85 * pad);
+        rough = mix(rough, 0.35, pad);
+        // The nostrils: slits from the top middle down and out.
+        let nost = inside(segment(q, vec2<f32>(0.0012, NOSE.x + 0.0026), vec2<f32>(0.0058, NOSE.x - 0.0026)) - 0.0007, w);
+        c = mix(c, lin(vec3<f32>(0.12, 0.06, 0.06)), 0.95 * nost);
+        // The cleft down from between them, and the lip line parting from
+        // its foot either side, back under the whisker pads.
+        let cleft = inside(segment(q, vec2<f32>(0.0, NOSE.x - 0.001), vec2<f32>(0.0, 0.1262)) - 0.00055, w);
+        let lip = inside(segment(vec2<f32>(ax, p.y + 0.35 * max(0.0, 0.226 - p.z)), vec2<f32>(0.0, 0.1262), vec2<f32>(0.0105, 0.1222)) - 0.00055, w);
+        c = mix(c, lin(vec3<f32>(0.10, 0.07, 0.06)), 0.9 * max(cleft, lip));
+        // Whisker roots: rows of dark dots on the pads.
+        if (ax > 0.004 && p.y > 0.124 && p.y < 0.136) {
+            let g = vec2<f32>((p.z - 0.2) / 0.0028, (p.y - 0.124) / 0.0028);
+            let cell = fract(g) - vec2<f32>(0.5);
+            let row = floor(g.y);
+            let dot_ = inside(length(cell) * 0.0028 - 0.0004, w) * step(0.5, row) * step(row, 3.5) * step(0.208, p.z) * step(p.z, 0.222);
+            c = mix(c, lin(vec3<f32>(0.18, 0.14, 0.11)), 0.7 * dot_);
+        }
+    }
+    out.base_color = c;
+    out.roughness = rough;
+    return out;
+}

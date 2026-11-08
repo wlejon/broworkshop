@@ -37,7 +37,7 @@ A creature folder (`creatures/<name>/`) has these files, and
 
 | File | What |
 |------|------|
-| `creature.js` | `name`, `skeleton`, `body`, `rig: { file, kernel, modules }` (`modules`: the rig's own brokernel modules by name, as files in the folder), `scale`, `cycles` (which scenario is each steady gait, with reference duty factors and footfall offsets), `form` (the body's reference measures), `variants` (named knob sets; the deer's broken ones are `slip`, `sink`, `overbend`, `stumble`), `scenarios` |
+| `creature.js` | `name`, `skeleton`, `body`, `rig: { file, kernel, modules }` (`modules`: the rig's own brokernel modules by name, as files in the folder), `scale`, `speeds` (its walk, trot, gallop and circling pace, which size the lab's scenarios), `space` (m a flock keeps between neighbours, 2.2 if unset), `cycles` (which scenario is each steady gait, with reference duty factors and footfall offsets), `form` (the body's reference measures), `variants` (named knob sets; the deer's broken ones are `slip`, `sink`, `overbend`, `stumble`), `scenarios` |
 | `skeleton.js` | bones (parent, head, tail, per-axis joint limits in degrees), feet, tracked points, chart joints |
 | `body.js` | the body: masses on bones built with `lab/flesh.js` (the deer splits it into `body.js`, `legs.js` and `coat.js`) |
 | `face.bk` | its face (`creature::face`, named by `creature.js`'s `face`), drawn per pixel over the skin: see below |
@@ -54,7 +54,7 @@ legs' bone):
 | Module | What |
 |--------|------|
 | `creature::pose` (`lab/pose.bk`) | `Pose`: every bone's world rotation and head; points on bones, local rotations, the centre of mass, writing a pose out |
-| `creature::body` (`lab/body.bk`) | the centre of mass as a state of its own, moved only by what the loaded feet can push: each leg along its line from foot to swing joint, push only, more as it flexes, a little across it, within friction; free fall with no foot down. `body_step(plan, stiffness, Support)` steers it toward the rig's plan; a foot loads and unloads over 40 ms, and a gait with flight pushes harder in stance to carry its weight over the stride. `Support.effort` above 1 is an all-out push (each leg pushes that much more, nearly to full reach); `Support.lead` feeds the plan's vertical acceleration forward, for a deliberate move whose push begins when it is asked rather than when the body has fallen behind |
+| `creature::body` (`lab/body.bk`) | the centre of mass as a state of its own, moved only by what the loaded feet can push: each leg along its line from foot to swing joint, push only, more as it flexes, a little across it, within friction; free fall with no foot down. `body_step(plan, stiffness, Support)` steers it toward the rig's plan; a foot loads and unloads over 0.125 of the legs' pendulum time (40 ms for the deer, 19 ms for the bunny), the body strays at most a quarter leg from its plan, and a gait with flight pushes harder in stance to carry its weight over the stride. `Support.effort` above 1 is an all-out push (each leg pushes that much more, nearly to full reach); `Support.lead` feeds the plan's vertical acceleration forward, for a deliberate move whose push begins when it is asked rather than when the body has fallen behind |
 | `creature::leap` (`lab/leap.bk`) | a leap from a gait: the run-up's strides paced so the hind feet's last stance ends at the take-off spot, a crouch onto the hind legs and an all-out push held long enough to lift the body, a ballistic flight whose height clears an obstacle (or a bound's rise with none), the trunk pitching nose-up to nose-down, and a landing absorbed fore first. `leap_begin`, `leap_hip` and `leap_pitch` give the plan, `leap_leg` each foot's lift and touchdown, `leap_effort` and `leap_follow` the body's Support; times scale with the legs' pendulum time |
 | `creature::spine` (`lab/spine.bk`) | the back's flex, bend and twist from what the legs do: flexed by the feet's spread along the body (most in a gait whose pairs swing together), bent into a turn's curve and toward gathered feet, twisted by sideways acceleration, hollowed by the body's vertical acceleration; each a spring of the trunk's frequency |
 | `creature::secondary` (`lab/secondary.bk`) | every dangling chain (neck, head, ears, tail) carried by its momentum: the subtree's centre of mass on a spring and damper toward where the rig puts it, its frequency from the part's size and its damping from its share of the body's mass (a heavy neck near critical, so a gait's rhythm never rings it into a whip; an ear or a slender tail light, so it swings past and settles), joint limits eased into, and a part swung into the ground resting on it (a part the rig lays there stays there); `hold` keeps part of a bone's world rotation (a head steadied in space but not pinned). `carry` takes the `env`, for the ground |
@@ -62,7 +62,9 @@ legs' bone):
 `creature::limbs` (`lab/limbs.bk`) is the library a species' legs module
 calls: a leg solved in its plane (the abduction that puts the plane through
 the foot, then a four-bone hind leg as a pantograph and a five-bone fore leg
-whose blade follows the swing), the eased bump a swing's lift and folding
+whose blade follows the swing; `solve_hind_flat` for a foot that stands on
+its heel, its angle eased under a limit so the folded pantograph does not
+drive the heel into the ground), the eased bump a swing's lift and folding
 are made of, a soft cap on a length, a planted foot's roll onto its toe, and
 the lean over the feet that carry the body.
 
@@ -83,6 +85,21 @@ reference behind it: six legs on a tripod walk, a long tail and a heavy head.
 Its rig is on the same layers (`creature::body`, `creature::spine`,
 `creature::secondary`, with the same `LAYERS` knob; `hexa:plan` is it with
 them off), its height held where the planted legs reach.
+
+`bunny` is a wild rabbit (0.2 m high, 0.42 m long) on the same layers. It
+has no walk: it hops (the fore feet stepping one after the other, then the
+hind pair swinging up together to land beside or ahead of them), and faster
+it half-bounds with flight, the back flexing and stretching; telemetry calls
+these gaits `hop` and `bound`. The hop's surges (braking as the hind feet land
+ahead of the hips, driving as the body passes over them) are
+`creature::body`'s, not the plan's. At rest it sits on its flat hind feet
+(`solve_hind_flat`). Alert, it sits up on its haunches with its fore paws held
+against its chest; lying, it loafs with its ears laid back. Grazing, it chews,
+its nose twitches, its ears turn each on its own, and its scut flicks up as it
+runs. A swinging foot is kept no nearer its girdle than the leg folds within
+its joints' ranges, and a girdle is planned over the ground under a swinging
+foot's home, not under its landing mark (a hop's is well ahead, and on a
+slope well below). `bunny:plan` is it with the layers off.
 
 ## Bodies: masses blended into one skin
 
@@ -191,7 +208,7 @@ p90, max), its passes and the triangle count to `herd-<scenario>-<count>.json`.
 `flock` runs `--count` creatures (200) under the flock brain doing one
 behaviour (graze, travel, mill, flee; `--warm` steps first, 600), seen from
 above the field (`--view field`) or from a standing eye among them
-(`--view ground`) or 2.5 m from one of them at its head's height
+(`--view ground`) or 2.5 m from one of them (scaled by its height over the deer's) at its head's height
 (`--view close`: the full level and its face); `--cull off` draws every creature into every view, for
 comparison. It writes `flock-<behaviour>-<count>.json` and a
 screenshot. The JSON holds:
@@ -231,7 +248,8 @@ round field sized to its count. Its behaviours:
   brain turns it back.
 
 A flock in a scene draws as a crowd (`lab/crowd.js`, `lab/crowd.bk`): the
-creature's body meshed three times (full; about 2400 triangles; about 500),
+creature's body meshed three times (full; about 2400 triangles; about 500,
+on a grid 1.6 and 2.8 times the full level's cell),
 each an instanced node skinned by `lab/skin-crowd.bk`. Each frame a kernel
 turns the poses into dual quaternions, and another puts every creature in
 view on a level's list by its height on screen (full above 240 px, the middle
@@ -436,6 +454,11 @@ The lab's scenarios (`lab/scenarios.js`) are scripted intent tracks:
 - rough-walk, rough-trot
 - idle, graze, startle, lie-down
 
+They are sized to the creature: speeds from its `speeds` (the deer's walk
+1.1, trot 3.0, gallop 7.5 m/s and circling 0.9 when it has none), gaze
+points and rough ground's amplitude and wavelength by its `scale.height` over
+the deer's 0.95 m.
+
 A scenario has these parts:
 
 - `about`
@@ -452,7 +475,7 @@ A scenario has these parts:
 A creature's `scenarios.js` adds its own, such as the deer's
 `browse-and-flee`, `leap` (a run-up at 5 m/s, a leap over a 1 m log, the
 run-out) and `startle-bound` (grazing, startled, escaping in bounds, then
-galloping on).
+galloping on), and the bunny's `sit-up`, `graze-and-bolt` and `hop-about`.
 
 ## Live view
 

@@ -14,79 +14,95 @@
 // start: { pos: [x, z], yaw (deg) }.
 //
 // A creature's scenarios.js adds its own (and may replace these by name).
+//
+// The lab's are sized to the species: walk, trot and gallop are its slow,
+// middle and fast paces (the creature's `speeds`, m/s; a deer's 1.1, 3 and
+// 7.5 without them), and the gaze points and rough ground scale with its
+// height (`scale.height`) against a deer's 0.95 m.
 
 import { INTENT, I, ACTION } from "./contract.js";
 
 const DEG = Math.PI / 180;
 
-const walk = 1.1, trot = 3.0, gallop = 7.5;
+export const DEER_SPEEDS = { walk: 1.1, trot: 3.0, gallop: 7.5, circle: 0.9 };
+const DEER_HEIGHT = 0.95;
 
-export const SCENARIOS = {
-    stand: { about: 'standing still: breath, ear flicks', duration: 4, track: [{ t: 0 }] },
-    walk: { about: 'a straight walk', duration: 7, track: [{ t: 0, speed: walk }] },
-    trot: { about: 'a straight trot', duration: 7, track: [{ t: 0, speed: trot }] },
-    gallop: { about: 'a straight gallop', duration: 7, track: [{ t: 0, speed: gallop }] },
-    'start-stop': {
-        about: 'stand, walk off, stop, stand',
-        duration: 8, track: [{ t: 0 }, { t: 1, speed: walk }, { t: 5, speed: 0 }],
-    },
-    gaits: {
-        about: 'walk, trot, gallop and back down to a stop',
-        duration: 16,
-        track: [{ t: 0, speed: walk }, { t: 3, speed: trot }, { t: 6, speed: gallop }, { t: 9, speed: trot },
-                { t: 11.5, speed: walk }, { t: 13.5, speed: 0 }],
-    },
-    'tight-turn': {
-        about: 'a walk round a tight circle (70 deg/s)',
-        duration: 8, track: [{ t: 0, speed: 0.9 }, { t: 1.5, turn: 70 }],
-    },
-    'trot-turn': {
-        about: 'a trot into a 90 degree turn',
-        duration: 6, track: [{ t: 0, speed: trot }, { t: 2.5, heading: 90 }],
-    },
-    'turn-in-place': {
-        about: 'standing, turn to face behind',
-        duration: 6, track: [{ t: 0, face: 0 }, { t: 1, face: 180 }],
-    },
-    'slope-up': {
-        about: 'walk straight up a 15 degree slope',
-        duration: 7, ground: { slope: 15, uphill: 0 }, track: [{ t: 0, speed: walk }],
-    },
-    'slope-down': {
-        about: 'walk straight down a 15 degree slope',
-        duration: 7, ground: { slope: 15, uphill: 180 }, track: [{ t: 0, speed: walk }],
-    },
-    'slope-across': {
-        about: 'walk across a 15 degree slope (uphill to the left)',
-        duration: 7, ground: { slope: 15, uphill: 90 }, track: [{ t: 0, speed: walk }],
-    },
-    'rough-walk': {
-        about: 'walk over rough ground (6 cm bumps, 1.4 m apart)',
-        duration: 7, ground: { rough: 0.06, wavelength: 1.4, seed: 3 }, track: [{ t: 0, speed: walk }],
-    },
-    'rough-trot': {
-        about: 'trot over rough ground',
-        duration: 7, ground: { rough: 0.06, wavelength: 1.4, seed: 3 }, track: [{ t: 0, speed: trot }],
-    },
-    idle: {
-        about: 'standing, looking round',
-        duration: 8,
-        track: [{ t: 0 }, { t: 1, gaze: [2, 1.3, 3] }, { t: 3, gaze: [-2.5, 1.0, 2] }, { t: 5, gaze: [0.5, 0.3, 2.5] }, { t: 6.5, gaze: null }],
-    },
-    graze: { about: 'grazing', duration: 6, track: [{ t: 0 }, { t: 0.5, action: 'graze' }] },
-    startle: {
-        about: 'standing, then startled by something ahead-right',
-        duration: 5, track: [{ t: 0 }, { t: 1, action: 'startle', gaze: [2, 1.2, 4] }, { t: 4, action: 'move', gaze: null }],
-    },
-    'lie-down': {
-        about: 'lie down, rest, get up',
-        duration: 12, track: [{ t: 0 }, { t: 1, action: 'lie' }, { t: 7.5, action: 'move' }],
-    },
-};
+// (`circle`: the pace round tight-turn's circle, a little under the walk.)
+function labScenarios(speeds, k) {
+    const { walk, trot, gallop } = { ...DEER_SPEEDS, ...speeds };
+    const circle = speeds.circle ?? (speeds.walk ? 0.82 * walk : DEER_SPEEDS.circle);
+    const at = (p) => p.map((v) => v * k);
+    const rough = { rough: 0.06 * k, wavelength: 1.4 * k, seed: 3 };
+    const cm = Math.round(600 * k) / 100;
+    return {
+        stand: { about: 'standing still: breath, ear flicks', duration: 4, track: [{ t: 0 }] },
+        walk: { about: 'a straight walk', duration: 7, track: [{ t: 0, speed: walk }] },
+        trot: { about: 'a straight trot', duration: 7, track: [{ t: 0, speed: trot }] },
+        gallop: { about: 'a straight gallop', duration: 7, track: [{ t: 0, speed: gallop }] },
+        'start-stop': {
+            about: 'stand, walk off, stop, stand',
+            duration: 8, track: [{ t: 0 }, { t: 1, speed: walk }, { t: 5, speed: 0 }],
+        },
+        gaits: {
+            about: 'walk, trot, gallop and back down to a stop',
+            duration: 16,
+            track: [{ t: 0, speed: walk }, { t: 3, speed: trot }, { t: 6, speed: gallop }, { t: 9, speed: trot },
+                    { t: 11.5, speed: walk }, { t: 13.5, speed: 0 }],
+        },
+        'tight-turn': {
+            about: 'a walk round a tight circle (70 deg/s)',
+            duration: 8, track: [{ t: 0, speed: circle }, { t: 1.5, turn: 70 }],
+        },
+        'trot-turn': {
+            about: 'a trot into a 90 degree turn',
+            duration: 6, track: [{ t: 0, speed: trot }, { t: 2.5, heading: 90 }],
+        },
+        'turn-in-place': {
+            about: 'standing, turn to face behind',
+            duration: 6, track: [{ t: 0, face: 0 }, { t: 1, face: 180 }],
+        },
+        'slope-up': {
+            about: 'walk straight up a 15 degree slope',
+            duration: 7, ground: { slope: 15, uphill: 0 }, track: [{ t: 0, speed: walk }],
+        },
+        'slope-down': {
+            about: 'walk straight down a 15 degree slope',
+            duration: 7, ground: { slope: 15, uphill: 180 }, track: [{ t: 0, speed: walk }],
+        },
+        'slope-across': {
+            about: 'walk across a 15 degree slope (uphill to the left)',
+            duration: 7, ground: { slope: 15, uphill: 90 }, track: [{ t: 0, speed: walk }],
+        },
+        'rough-walk': {
+            about: `walk over rough ground (${cm} cm bumps, ${Math.round(140 * k) / 100} m apart)`,
+            duration: 7, ground: rough, track: [{ t: 0, speed: walk }],
+        },
+        'rough-trot': {
+            about: 'trot over rough ground',
+            duration: 7, ground: rough, track: [{ t: 0, speed: trot }],
+        },
+        idle: {
+            about: 'standing, looking round',
+            duration: 8,
+            track: [{ t: 0 }, { t: 1, gaze: at([2, 1.3, 3]) }, { t: 3, gaze: at([-2.5, 1.0, 2]) }, { t: 5, gaze: at([0.5, 0.3, 2.5]) }, { t: 6.5, gaze: null }],
+        },
+        graze: { about: 'grazing', duration: 6, track: [{ t: 0 }, { t: 0.5, action: 'graze' }] },
+        startle: {
+            about: 'standing, then startled by something ahead-right',
+            duration: 5, track: [{ t: 0 }, { t: 1, action: 'startle', gaze: at([2, 1.2, 4]) }, { t: 4, action: 'move', gaze: null }],
+        },
+        'lie-down': {
+            about: 'lie down, rest, get up',
+            duration: 12, track: [{ t: 0 }, { t: 1, action: 'lie' }, { t: 7.5, action: 'move' }],
+        },
+    };
+}
 
-// A creature's scenarios merged over the lab's.
+// A creature's scenarios merged over the lab's, sized to it.
 export function scenariosFor(creature) {
-    return { ...SCENARIOS, ...((creature && creature.def.scenarios) || {}) };
+    const def = (creature && creature.def) || {};
+    const k = ((def.scale && def.scale.height) || DEER_HEIGHT) / DEER_HEIGHT;
+    return { ...labScenarios(def.speeds || {}, k), ...(def.scenarios || {}) };
 }
 
 // The ground record lab/ground.bk reads (16 floats). `g.log`, a round log

@@ -31,8 +31,9 @@ export function flockCost(creature, { count = 200, behaviour = 'graze', frames =
     // 'field': the whole field from above and to the side; 'ground': a
     // person's eye at the herd's edge (where mill's ring runs), looking
     // across the field.
-    // 'close': 2.5 m from one creature at its head's height, three quarters
-    // to its front, once the flock has warmed (its full level and face).
+    // 'close': 2.5 m from one creature at its head's height (for a deer's
+    // size; nearer and lower for a smaller one), three quarters to its
+    // front, once the flock has warmed (its full level and face).
     const cam = view === 'ground'
         ? { fov: 50, near: 0.1, far: R * 8, position: [R * 0.1, 1.6, -R * 0.6], target: [0, 0.8, 0], up: [0, 1, 0] }
         : { fov: 50, near: 0.1, far: R * 8, position: [R * 0.9, R * 0.75, -R * 1.25], target: [0, 0, 0], up: [0, 1, 0] };
@@ -41,9 +42,12 @@ export function flockCost(creature, { count = 200, behaviour = 'graze', frames =
     const step = () => { flock.step(dt / 2); flock.step(dt / 2); flock.draw(cam, H, W / H); };
     for (let i = 0; i < warm; i++) step();
     if (view === 'close') {
+        // (Sized to the creature: a deer's 0.95 m height at 2.5 m.)
+        const k = ((creature.def.scale && creature.def.scale.height) || 0.95) / 0.95;
         const t = flock.readTele(), x = t[T.POS], z = t[T.POS + 2], yaw = t[T.YAW] + 0.8;
-        cam.position = [x + Math.sin(yaw) * 2.5, 1.3, z + Math.cos(yaw) * 2.5];
-        cam.target = [x + Math.sin(yaw - 0.8) * 0.5, 1.1, z + Math.cos(yaw - 0.8) * 0.5];
+        cam.near = 0.1 * Math.min(k, 1);
+        cam.position = [x + Math.sin(yaw) * 2.5 * k, 1.3 * k, z + Math.cos(yaw) * 2.5 * k];
+        cam.target = [x + Math.sin(yaw - 0.8) * 0.5 * k, 1.1 * k, z + Math.cos(yaw - 0.8) * 0.5 * k];
         scene.setCamera(cam);
     }
     advanceTime(16);

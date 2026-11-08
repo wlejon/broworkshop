@@ -22,17 +22,24 @@
 import { IDENTITY_ROW } from "./batch.js";
 import { labModules, readApp, skinModules } from "./creature.js";
 
+// A coarser level's grid is its body's own cell times `cellScale` (a deer's
+// 5 mm: 8 and 14 mm), so a small creature's level keeps its ears.
 export const LEVELS = [
     { name: 'near', detail: null },
-    { name: 'mid', detail: { triangles: 2400, cell: 0.008, simplifyError: 0.01, keep: false } },
-    { name: 'far', detail: { triangles: 500, cell: 0.014, simplifyError: 0.05, keep: false } },
+    { name: 'mid', detail: { triangles: 2400, cellScale: 1.6, simplifyError: 0.01, keep: false } },
+    { name: 'far', detail: { triangles: 500, cellScale: 2.8, simplifyError: 0.05, keep: false } },
 ];
 export const NEAR_PX = 240, MID_PX = 70;
 
 // The creature's body at each level (built once a creature, on first use).
 export function levelBodies(creature) {
     if (!creature.levels) {
-        creature.levels = LEVELS.map((l) => (l.detail ? creature.def.body(creature.skel, l.detail) : creature.body));
+        creature.levels = LEVELS.map((l) => {
+            if (!l.detail) return creature.body;
+            const { cellScale, ...detail } = l.detail;
+            detail.cell = Math.round(creature.body.build.cell * cellScale * 1e5) / 1e5;
+            return creature.def.body(creature.skel, detail);
+        });
     }
     return creature.levels;
 }

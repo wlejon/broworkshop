@@ -25,8 +25,12 @@ import creature::common::*;
 import creature::skeleton::*;
 
 pub const BODY_STATE: i32 = 13;
-pub const T_SHARE: f32 = 0.5;    // s over which the share of loaded time is kept
 const G: f32 = 9.81;
+// Times are in units of the legs' pendulum time sqrt(MEAN_LEG / g) and
+// distances in leg lengths, so a small animal's quicker, shorter strides
+// load and steer its body as a large one's do theirs.
+fn t_leg() -> f32 { return sqrt(max(MEAN_LEG, 0.05) / G); }
+pub const T_SHARE: f32 = 1.6;    // leg times over which the share of loaded time is kept
 pub const K_REL: f32 = 12.0;     // leg stiffness, in body weights per leg length of compression
 pub const H_RATIO: f32 = 0.5;    // the steering's horizontal frequency over its vertical
 pub const LEG_PUSH: f32 = 2.5;   // body weights one loaded leg can push at most
@@ -34,7 +38,8 @@ pub const EXT_FADE: f32 = 0.1;  // the last share of a leg's reach over which it
 pub const EXT_FADE_ALL: f32 = 0.04; //   and in an all-out effort (driven nearly to full reach)
 pub const MU: f32 = 0.75;        // friction the feet use, at most
 pub const MU_T: f32 = 0.35;      // the push across a leg (hip torque), as a share of its load
-pub const T_LOAD: f32 = 0.04;    // s to load a foot after touchdown, and to unload it before lift-off
+pub const T_LOAD: f32 = 0.125;   // leg times to load a foot after touchdown, and to unload it before lift-off
+pub const STRAY: f32 = 0.25;     // leg lengths the body may stray from its plan at most
 
 // One foot for the body: where it is, the joint its leg swings from, the
 // leg's reach, s since it landed and s until it lifts (large when not
@@ -55,7 +60,8 @@ pub struct Body { com: vec3<f32>, vel: vec3<f32>, acc: vec3<f32>, tvel: vec3<f32
 pub fn body_omega(stiff: f32) -> f32 { return sqrt(stiff * K_REL * G / max(MEAN_LEG, 0.05)); }
 
 pub fn load_of(f: Foot) -> f32 {
-    return f.down * smooth01(f.since / T_LOAD) * smooth01(f.left / T_LOAD);
+    let t = T_LOAD * t_leg();
+    return f.down * smooth01(f.since / t) * smooth01(f.left / t);
 }
 
 // The push a leg with load l can give (m/s^2 of the body): a straight leg
@@ -130,7 +136,7 @@ pub fn body_step(st: rw_store<f32, 1>, base: i32, target: vec3<f32>, stiff: f32,
         load += l;
     }
     let held = min(load, 1.0);
-    let share = mix(held, st[base + 9], exp(-dt / T_SHARE));
+    let share = mix(held, st[base + 9], exp(-dt / (T_SHARE * t_leg())));
     st[base + 9] = share;
     var a = vec3<f32>(0.0, -G, 0.0);
     if (cap > 1e-4) {
@@ -159,7 +165,8 @@ pub fn body_step(st: rw_store<f32, 1>, base: i32, target: vec3<f32>, stiff: f32,
     // plan the feet could never follow gets this far).
     let gap = com - target;
     let gl = length(gap);
-    if (gl > 0.25) { com = target + gap * (0.25 / gl); }
+    let stray = STRAY * MEAN_LEG;
+    if (gl > stray) { com = target + gap * (stray / gl); }
     sv(st, base, com);
     sv(st, base + 3, vel);
     sv(st, base + 6, target);

@@ -49,8 +49,11 @@ export const T = {
     FOOT: 16,         // per foot k at FOOT + 4k: planted (0/1), then where (x, y, z)
 };
 
-export const GAIT = { STAND: 0, WALK: 1, TROT: 2, GALLOP: 3 };
-export const GAIT_NAMES = ['stand', 'walk', 'trot', 'gallop'];
+// HOP: the fore feet down one after the other, then the hind pair together
+// beside or ahead of them, no flight; BOUND: the same order run with a flight
+// after the hind pair's push (a half-bound).
+export const GAIT = { STAND: 0, WALK: 1, TROT: 2, GALLOP: 3, HOP: 4, BOUND: 5 };
+export const GAIT_NAMES = ['stand', 'walk', 'trot', 'gallop', 'hop', 'bound'];
 
 export function contractModule() {
     let s = 'module creature::contract;\n';

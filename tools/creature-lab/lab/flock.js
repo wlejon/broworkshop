@@ -32,13 +32,14 @@ function brain() {
 export function fieldRadius(count, space = 2.2) { return Math.max(18, Math.sqrt(count) * space * 1.25); }
 
 export class Flock {
-    // opts: behaviour, scene, shadows, space (m kept between neighbours), seed
+    // opts: behaviour, scene, shadows, space (m kept between neighbours: the
+    // creature's `space`, else a deer's 2.2), seed
     constructor(creature, count, opts = {}) {
         const b = brain();
         this.b = b;
         this.creature = creature;
         this.count = count;
-        this.space = opts.space ?? 2.2;
+        this.space = opts.space ?? creature.def.space ?? 2.2;
         this.radius = fieldRadius(count, this.space);
         this.center = [0, 0];
         // Drawn as a crowd (lab/crowd.js), not by the batch's own mesh.

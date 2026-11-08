@@ -19,6 +19,9 @@ export default {
     face: 'face.bk',
     rig:{ file: 'rig.bk', kernel: 'k_rig', modules: { 'deer::legs': 'legs.bk' } },
     scale: { height: 0.95, length: 1.6 },
+    // Its walk, trot and gallop (m/s), and round a tight circle: the lab's
+    // scenarios and a flock's brain go at these.
+    speeds: { walk: 1.1, trot: 3.0, gallop: 7.5, circle: 0.9 },
     // Reference footfalls (Hildebrand): duty factor and each foot's
     // touchdown after the left hind's, as a share of the stride.
     cycles: {
