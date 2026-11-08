@@ -2,10 +2,12 @@
 // the sheets read) and played back through the creature's batch mesh, with
 // a scrub bar, playback speed, an orbit camera (right-drag orbit, middle-drag
 // pan, wheel zoom), a second version beside it for A/B, the run's metric
-// flags, and any sheet of the shown runs, drawn on demand.
+// flags, and any sheet of the shown runs, drawn on demand. The flock panel
+// swaps the runs for a live group of the A creature (lab/flock-view.js):
+// how many, what they do, shadows, and a threat sent across.
 //
 // globalThis.creatureLab drives it from a headless test: load(), setTime(),
-// state, dispose().
+// setFlock(count, behaviour, shadows), state, dispose().
 
 import { sceneViewport } from "/lib/kit/viewport3d.js";
 import { loadCreature, appPath } from "./lab/creature.js";
@@ -15,6 +17,7 @@ import { drawBatch } from "./lab/batch.js";
 import { ROWS } from "./lab/skeleton.js";
 import { T, TELE } from "./lab/contract.js";
 import { analyzeRun, sheet } from "./lab/commands.js";
+import { FlockView } from "./lab/flock-view.js";
 
 const fs = require('fs');
 const $ = (id) => document.getElementById(id);
@@ -38,6 +41,7 @@ const S = {
     scenario: 'walk', specA: 'deer', specB: '', show: 'a',
     disposed: false,
     sheet: null,       // the sheet last opened: { width, height, png, canvas, ... }
+    flock: null,       // a FlockView while the flock panel's count is not off
 };
 
 function status(s) { $('status').textContent = s; }
@@ -109,7 +113,8 @@ async function load(specA = S.specA, specB = S.specB, scenario = S.scenario) {
 }
 
 function applyShow() {
-    S.runs.forEach((r, i) => { r.node.visible = S.show === 'ab' || (S.show === 'a' ? i === 0 : i === 1); });
+    S.runs.forEach((r, i) => { r.node.visible = !S.flock && (S.show === 'ab' || (S.show === 'a' ? i === 0 : i === 1)); });
+    if (S.ground) S.ground.visible = !S.flock;
 }
 
 function setTime(t) {
@@ -129,8 +134,25 @@ function setTime(t) {
     }
 }
 
+// --- the flock: the runs hidden, a live group of the A creature instead ------
+async function setFlock(count = +$('flockCount').value, behaviour = $('flockDoes').value, shadows = $('flockShadows').checked) {
+    if (S.flock) { S.flock.destroy(); S.flock = null; }
+    $('flockCount').value = String(count); $('flockDoes').value = behaviour; $('flockShadows').checked = shadows;
+    const on = count > 0;
+    sun.castShadow = shadows || !on;
+    if (!on) { applyShow(); vp.cam.far = 400; vp.reframe([0, 0.7, 0], 4.2); status('flock off'); return; }
+    const creature = await loadCreature(S.specA);
+    S.flock = new FlockView(vp, creature, { count, behaviour, shadows });
+    S.flock.speed = S.speed;
+    applyShow();
+    $('sub').textContent = `${S.specA} · flock of ${count} · ${behaviour}`;
+    status(`flock: ${count} ${S.specA}, ${behaviour}, field ${S.flock.flock.radius.toFixed(0)} m`);
+}
+
 vp.onFrame((dt) => {
-    if (S.disposed || !S.runs.length || !S.playing) return;
+    if (S.disposed) return;
+    if (S.flock) { if (S.playing) S.flock.frame(dt); return; }
+    if (!S.runs.length || !S.playing) return;
     let t = S.t + dt * S.speed;
     if (t > (S.steps - 1) * S.dt) t = 0;
     setTime(t);
@@ -180,17 +202,22 @@ async function init() {
     $('play').onclick = () => { S.playing = !S.playing; $('play').textContent = S.playing ? 'pause' : 'play'; };
     $('restart').onclick = () => setTime(0);
     $('scrub').oninput = () => { S.playing = false; $('play').textContent = 'play'; setTime(+$('scrub').value * S.dt); };
-    $('speed').oninput = () => { S.speed = +$('speed').value; $('sval').textContent = `${S.speed.toFixed(2)}x`; };
+    $('speed').oninput = () => { S.speed = +$('speed').value; $('sval').textContent = `${S.speed.toFixed(2)}x`; if (S.flock) S.flock.speed = S.speed; };
+    $('flockCount').onchange = () => setFlock();
+    $('flockShadows').onchange = () => setFlock();
+    $('flockDoes').onchange = () => { if (S.flock) S.flock.setBehaviour($('flockDoes').value); };
+    $('flockThreat').onclick = () => { if (S.flock) { S.flock.threat(); $('flockDoes').value = 'flee'; } };
     $('open').onclick = openSheet;
     $('close').onclick = () => $('sheet').classList.remove('open');
     await load();
 }
 
 globalThis.creatureLab = {
-    state: S, load, setTime, applyShow, openSheet,
+    state: S, load, setTime, applyShow, openSheet, setFlock,
     setShow(v) { S.show = v; $('show').value = v; applyShow(); },
     dispose() {
         S.disposed = true;
+        if (S.flock) { S.flock.destroy(); S.flock = null; }
         clearRuns();
         try { sun.destroy(); } catch (_) { /* gone with the page */ }
         globalThis.creatureLab = null;

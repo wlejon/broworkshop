@@ -19,6 +19,7 @@ import { scanScenario } from "./finder.js";
 import { finderReport } from "./finder-out.js";
 import { naturalReport } from "./natural-out.js";
 import { herdCost } from "./herd.js";
+import { flockCost } from "./flock-cost.js";
 
 export const HELP = `creature-lab <command> <creature> [scenario ...] [options]
 
@@ -48,7 +49,10 @@ export const HELP = `creature-lab <command> <creature> [scenario ...] [options]
                                            follow-through, secondary motion, the mass's physics,
                                            smoothness, variety, head stabilisation, arcs
   herd        <creature> [scenario]        a herd's GPU cost a frame and triangles (--count 50, --frames 240)
-  snapshot    <creature> <label>         copy creatures/<creature> to <creature>@<label> for A/B
+  flock       <creature> [behaviour]       a flock on the GPU brain (graze travel mill flee): GPU cost,
+                                           what the group does, a screenshot (--count 200, --frames 240,
+                                           --warm <steps>, --shadows off)
+  snapshot    <creature> <label>        copy creatures/<creature> to <creature>@<label> for A/B
   scenarios   <creature>                   list its scenarios
 
 <creature>: a folder of creatures/ (deer), a snapshot (deer@before), a variant (deer:slip).
@@ -181,6 +185,17 @@ export async function runCommand(argv) {
         const path = `${dir}/herd-${r.scenario}-${r.count}.json`;
         writeFile(path, json(r));
         written.push(path);
+    } else if (cmd === 'flock') {
+        const behaviour = rest[0] || 'graze', count = opt.count ? +opt.count : 200;
+        const shadows = opt.shadows !== 'off';
+        const base = `${dir}/flock-${behaviour}-${count}${shadows ? '' : '-noshadow'}`;
+        const r = flockCost(creature, { count, behaviour, shadows, frames: opt.frames ? +opt.frames : 240,
+            warm: opt.warm ? +opt.warm : 600, shot: base + '.png' });
+        console.log(`${r.count} x ${r.creature} ${r.behaviour} (field ${r.field} m, shadows ${r.shadows ? 'on' : 'off'}): ${r.triangles} triangles, GPU ms a frame mean ${r.gpu.mean}, median ${r.gpu.median}, p90 ${r.gpu.p90}; kernels ${JSON.stringify(r.kernelsBy)}`);
+        console.log(`  passes ${JSON.stringify(r.passes)}`);
+        console.log(`  group ${JSON.stringify(r.group)}`);
+        writeFile(base + '.json', json(r));
+        written.push(base + '.json', base + '.png');
     } else if (cmd === 'finder') {
         const fdir = `${dir}/finder`;
         const fs = require('fs');

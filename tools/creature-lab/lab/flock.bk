@@ -1,0 +1,290 @@
+// creature::flock — a group's brain on the GPU: one dispatch writes every
+// creature's intent (creature::contract) from where the group is, so a
+// batch of any size steps with no work a creature on the CPU.
+//
+// Each creature reads its neighbours (found through a grid, below) from the
+// rig's telemetry (where each is, its heading and speed, last step) and its
+// own mind (MIND floats,
+// double-buffered: read from `mind`, written to `mind_out`, so the result
+// does not depend on the order the creatures run in). Neighbours within
+// SEE metres are weighed: kept off from within the group's spacing
+// (separation), matched in heading (alignment) and drawn toward
+// (cohesion); a creature past the field's edge turns back in.
+//
+// Behaviours (P_MODE):
+//   0 graze   a loose herd: each grazes a while, then walks a few metres
+//             (back toward the others when it has strayed), then grazes
+//   1 travel  the group moves together toward a goal (P_GOAL) at a trot
+//   2 mill    the group circles the field's middle
+//   3 flee    as graze, until a threat (P_THREAT, on with P_THREAT_ON) is
+//             within P_ALARM metres of a creature or a neighbour is
+//             alarmed: it startles, then bounds and gallops away from the
+//             threat, the alarm fading over ALARM_FADE s once it is far
+//
+// Speeds are the species' (P_WALK, P_TROT, P_GALLOP); each creature keeps
+// its own share of them (its pace, from its seed).
+module creature::flock;
+import creature::common::*;
+import creature::contract::*;
+
+pub const MIND: i32 = 8;
+// mind: [0] s left in what it is doing   [1] grazing (0/1)
+//       [2] alarm 0..1                    [3] s since it was alarmed
+//       [4..5] a wander target (x, z)     [6] pace (0.9..1.1)  [7] set (0/1)
+
+pub const P_MODE: i32 = 0;
+pub const P_TIME: i32 = 1;
+pub const P_CENTER: i32 = 2;     // (x, z)
+pub const P_RADIUS: i32 = 4;
+pub const P_WALK: i32 = 5;
+pub const P_TROT: i32 = 6;
+pub const P_GALLOP: i32 = 7;
+pub const P_GOAL: i32 = 8;       // (x, z)
+pub const P_THREAT: i32 = 10;    // (x, z)
+pub const P_THREAT_ON: i32 = 12;
+pub const P_ALARM: i32 = 13;
+pub const P_COUNT: i32 = 14;
+pub const P_SPACE: i32 = 15;
+pub const P_GRID: i32 = 16;      // cells a side of the neighbour grid
+pub const PARAMS: i32 = 20;
+
+pub const SEE: f32 = 7.0;        // m a creature heeds its neighbours within; a grid cell's side
+const ALARM_FADE: f32 = 6.0;     // s an alarm takes to fade once the threat is far
+const STARTLE_T: f32 = 0.45;     // s an alarmed creature startles before it runs
+const FLEE_FAN: f32 = 1.2;       // rad off straight away a fleeing creature may run
+
+fn sel(c: bool, a: f32, b: f32) -> f32 { if (c) { return a; } return b; }
+
+fn pos_of(tele: read_store<f32, 1>, j: i32) -> vec2<f32> {
+    return vec2<f32>(tele[j * TELE + T_POS], tele[j * TELE + T_POS + 2]);
+}
+
+fn vel_of(tele: read_store<f32, 1>, j: i32) -> vec2<f32> {
+    let y = tele[j * TELE + T_YAW];
+    return vec2<f32>(sin(y), cos(y)) * tele[j * TELE + T_SPEED];
+}
+
+// --- the neighbour grid ------------------------------------------------------------
+// SEE-metre cells, P_GRID a side, centred on the field; one outside it counts
+// in the nearest edge cell. Each cell's creatures are a list: head[cell] is
+// the first, next[i] the one after i (-1 ends it). k_grid_clear empties the
+// heads, k_grid_bin threads every creature in, k_flock walks the 3x3 cells
+// around each creature.
+
+fn cell_xy(params: read_store<f32, 1>, p: vec2<f32>) -> vec2<i32> {
+    let gn = params[P_GRID] as i32;
+    let o = vec2<f32>(params[P_CENTER], params[P_CENTER + 1]) - vec2<f32>(0.5 * SEE * f32(gn));
+    let c = floor((p - o) / SEE);
+    return vec2<i32>(clamp(c.x as i32, 0, gn - 1), clamp(c.y as i32, 0, gn - 1));
+}
+
+@kernel @grid(1)
+fn k_grid_clear(g: grid<1>, head: rw_store<i32, 1>) {
+    head[g.x()] = -1;
+}
+
+@kernel @grid(1)
+fn k_grid_bin(g: grid<1>, tele: read_store<f32, 1>, params: read_store<f32, 1>, head: rw_store<i32, 1>, next: rw_store<i32, 1>) {
+    let i = g.x();
+    let c = cell_xy(params, pos_of(tele, i));
+    next[i] = head.atomic_exchange(c.y * (params[P_GRID] as i32) + c.x, i);
+}
+
+// A vector no longer than m.
+fn cap2(v: vec2<f32>, m: f32) -> vec2<f32> {
+    let l = length(v);
+    if (l > m) { return v * (m / l); }
+    return v;
+}
+
+// A new wander target: a few metres away, toward the group's middle when
+// the creature is off on its own.
+fn wander(p: vec2<f32>, mid: vec2<f32>, seed: f32, t: f32) -> vec2<f32> {
+    let a = TAU * hash01(seed * 7.13 + floor(t * 0.37) * 1.97);
+    let r = 2.0 + 4.0 * hash01(seed * 3.71 + floor(t * 0.37) * 5.3);
+    let home = (mid - p) * 0.6;
+    return p + home + vec2<f32>(sin(a), cos(a)) * r;
+}
+
+@kernel @grid(1)
+fn k_flock(g: grid<1>, tele: read_store<f32, 1>, mind: read_store<f32, 1>, mind_out: write_store<f32, 1>,
+           params: read_store<f32, 1>, head: read_store<i32, 1>, next: read_store<i32, 1>,
+           intent: write_store<f32, 1>, dt: f32) {
+    let i = g.x();
+    let n = params[P_COUNT] as i32;
+    let mode = params[P_MODE] as i32;
+    let t = params[P_TIME];
+    let m = i * MIND;
+    let seed = f32(i) + 1.0;
+    let center = vec2<f32>(params[P_CENTER], params[P_CENTER + 1]);
+    let radius = params[P_RADIUS];
+    let space = params[P_SPACE];
+    let p = pos_of(tele, i);
+
+    var left = mind[m];
+    var grazing = mind[m + 1];
+    var alarm = mind[m + 2];
+    var since = mind[m + 3];
+    var tgt = vec2<f32>(mind[m + 4], mind[m + 5]);
+    var pace = mind[m + 6];
+    if (mind[m + 7] < 0.5) {
+        pace = 0.9 + 0.2 * hash01(seed * 1.37);
+        left = 3.0 * hash01(seed * 2.11);
+        grazing = sel(hash01(seed * 4.7) < 0.6, 1.0, 0.0);
+        tgt = p;
+        alarm = 0.0;
+        since = 99.0;
+    }
+
+    // --- neighbours -------------------------------------------------------------
+    var sep = vec2<f32>(0.0);
+    var ali = vec2<f32>(0.0);
+    var mid = vec2<f32>(0.0);
+    var cnt: f32 = 0.0;
+    var heard: f32 = 0.0;
+    var ahead: f32 = 99.0;     // m to the nearest neighbour in its path
+    let yaw = tele[i * TELE + T_YAW];
+    let fwd = vec2<f32>(sin(yaw), cos(yaw));
+    let gn = params[P_GRID] as i32;
+    let ci = cell_xy(params, p);
+    for (var cy: i32 = max(ci.y - 1, 0); cy <= min(ci.y + 1, gn - 1); cy += 1) {
+        for (var cx: i32 = max(ci.x - 1, 0); cx <= min(ci.x + 1, gn - 1); cx += 1) {
+            var j = head[cy * gn + cx];
+            var guard: i32 = 0;
+            while (j >= 0 && guard < n) {
+                let d = pos_of(tele, j) - p;
+                let dd = dot(d, d);
+                if (j != i && dd < SEE * SEE) {
+                    let dl = sqrt(max(dd, 1e-6));
+                    let along = dot(d, fwd);
+                    if (along > 0.0 && abs(d.x * fwd.y - d.y * fwd.x) < 0.7) { ahead = min(ahead, along); }
+                    // Separation stiffens as they close: w at the spacing's edge, about 5w close in.
+                    if (dl < space) { let w = (space - dl) / space; sep -= d / dl * w * (1.0 + 4.0 * w * w); }
+                    ali += vel_of(tele, j);
+                    mid += d;
+                    cnt += 1.0;
+                    heard = max(heard, mind[j * MIND + 2] * (1.0 - dl / SEE));
+                }
+                j = next[j];
+                guard += 1;
+            }
+        }
+    }
+    var mid_p = p;
+    if (cnt > 0.0) { ali /= cnt; mid_p = p + mid / cnt; }
+
+    // --- alarm ------------------------------------------------------------------
+    let threat = vec2<f32>(params[P_THREAT], params[P_THREAT + 1]);
+    let tdist = length(p - threat);
+    let threat_on = params[P_THREAT_ON] > 0.5 && mode == 3;
+    var sensed: f32 = 0.0;
+    if (threat_on) { sensed = sel(tdist < params[P_ALARM], 1.0, 0.0); }
+    let was = alarm;
+    // An alarm spreads at a little less than its strength, and fades.
+    alarm = max(max(sensed, 0.85 * heard * sel(threat_on, 1.0, 0.0)), alarm - dt / ALARM_FADE * sel(tdist > params[P_ALARM] * 1.5 || !threat_on, 1.0, 0.0));
+    if (alarm > 0.5 && was <= 0.5) { since = 0.0; } else { since += dt; }
+
+    // --- what it wants ----------------------------------------------------------
+    var v = vec2<f32>(0.0);
+    var action = ACT_MOVE;
+    var gaze = vec4<f32>(0.0);
+    left -= dt;
+    let walk = params[P_WALK] * pace;
+    let trot = params[P_TROT] * pace;
+    let gallop = params[P_GALLOP] * pace;
+
+    if (alarm > 0.5) {
+        // Fleeing: a startle facing the threat, then away from it at a gallop
+        // (bounding at first), keeping off the others.
+        grazing = 0.0;
+        // Away from the threat, but within FLEE_FAN of the way it already
+        // faces: off at once on a slant rather than spinning round first.
+        let away0 = normalize(p - threat + vec2<f32>(1e-3, 0.0));
+        let aa = atan2(away0.x, away0.y) + clamp(wrap_pi(atan2(fwd.x, fwd.y) - atan2(away0.x, away0.y)), -FLEE_FAN, FLEE_FAN);
+        let away = vec2<f32>(sin(aa), cos(aa));
+        gaze = vec4<f32>(threat.x, 1.0, threat.y, 1.0 - smooth01(since / 1.5));
+        if (since < STARTLE_T) { action = ACT_STARTLE; }
+        else {
+            if (since < STARTLE_T + 1.2) { action = ACT_BOUND; }
+            v = normalize(away + 0.5 * ali / max(gallop, 0.1) + 0.8 * sep) * gallop * (0.7 + 0.3 * alarm);
+        }
+        left = 1.0 + 2.0 * hash01(seed + t);
+        tgt = p;
+    } else if (mode == 1) {
+        let goal = vec2<f32>(params[P_GOAL], params[P_GOAL + 1]);
+        // A heading the neighbourhood shares (from its middle to the goal), not
+        // the goal itself, so they go together rather than pile onto it.
+        let want = normalize(goal - mid_p + vec2<f32>(1e-3, 0.0));
+        let dir = want + 0.6 * ali / max(trot, 0.1) + 0.15 * (mid_p - p) / SEE + 1.6 * sep;
+        v = normalize(dir + vec2<f32>(1e-4, 0.0)) * trot * smooth01(length(goal - mid_p) / 3.0);
+    } else if (mode == 2) {
+        let r = p - center;
+        let rl = max(length(r), 1e-3);
+        let tan = vec2<f32>(r.y, -r.x) / rl;
+        let ring = radius * 0.55;
+        let dir = tan - (r / rl) * clamp((rl - ring) / 4.0, -1.0, 1.0) + 0.5 * ali / max(trot, 0.1) + 1.6 * sep;
+        v = normalize(dir + vec2<f32>(1e-4, 0.0)) * trot * 0.8;
+    } else {
+        // Grazing, or walking a few metres to graze somewhere else.
+        if (left <= 0.0) {
+            if (grazing > 0.5) {
+                grazing = 0.0;
+                tgt = wander(p, mid_p, seed, t);
+                left = 2.0 + 4.0 * hash01(seed * 9.1 + t);
+            } else {
+                grazing = 1.0;
+                left = 4.0 + 8.0 * hash01(seed * 5.3 + t);
+            }
+        }
+        // Crowded where it stands: it gives up the spot and walks out.
+        if (length(sep) > 0.35 && (grazing > 0.5 || length(tgt - p) < 0.4)) {
+            grazing = 0.0;
+            tgt = p + normalize(sep) * space * 1.2;
+            left = 3.0;
+        }
+        let to = tgt - p;
+        if (grazing > 0.5 || length(to) < 0.4) {
+            if (grazing > 0.5) { action = ACT_GRAZE; }
+            v = cap2(sep * walk * 0.6, walk * 0.6);
+        } else {
+            v = cap2(normalize(to) * walk + sep * walk, walk * 1.2);
+        }
+    }
+    // Someone close ahead in its path: it eases off rather than run into them
+    // (in flight only when about to, and only a little).
+    if (dot(v, fwd) > 0.0) {
+        if (alarm > 0.5) { v *= mix(0.75, 1.0, smooth01((ahead - 0.8) / 1.0)); }
+        else { v *= mix(0.2, 1.0, smooth01((ahead - 1.1) / 1.5)); }
+    }
+    // The field's edge: past it, back in.
+    let out = length(p - center) - radius;
+    if (out > 0.0 && alarm <= 0.5) {
+        let back = normalize(center - p);
+        v = cap2(v + back * walk * smooth01(out / 3.0) * 2.0, max(length(v), walk));
+        grazing = sel(out > 1.0, 0.0, grazing);
+        if (grazing < 0.5 && action == ACT_GRAZE) { action = ACT_MOVE; }
+    }
+
+    let o = i * INTENT;
+    intent[o + I_VEL_X] = v.x;
+    intent[o + I_VEL_Z] = v.y;
+    intent[o + I_HEADING] = 0.0;
+    intent[o + I_HEADING_MODE] = 0.0;
+    intent[o + I_GAZE_X] = gaze.x;
+    intent[o + I_GAZE_Y] = gaze.y;
+    intent[o + I_GAZE_Z] = gaze.z;
+    intent[o + I_GAZE_W] = gaze.w;
+    intent[o + I_ACTION] = f32(action);
+    intent[o + I_ACTION_PARAM] = 0.0;
+    intent[o + I_SEED] = seed;
+    for (var q: i32 = I_SEED + 1; q < INTENT; q += 1) { intent[o + q] = 0.0; }
+
+    mind_out[m] = left;
+    mind_out[m + 1] = grazing;
+    mind_out[m + 2] = alarm;
+    mind_out[m + 3] = since;
+    mind_out[m + 4] = tgt.x;
+    mind_out[m + 5] = tgt.y;
+    mind_out[m + 6] = pace;
+    mind_out[m + 7] = 1.0;
+}

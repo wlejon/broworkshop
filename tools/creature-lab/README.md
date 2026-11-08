@@ -139,12 +139,48 @@ $B tools/creature-lab tools/creature-lab/cli.js -- finder deer gallop --top 0
 $B tools/creature-lab tools/creature-lab/cli.js -- finder deer --rank --top 12
 $B tools/creature-lab tools/creature-lab/cli.js -- natural deer
 $B tools/creature-lab tools/creature-lab/cli.js -- herd deer trot --count 50
+$B tools/creature-lab tools/creature-lab/cli.js -- flock deer flee --count 1000 --shadows off
 $B tools/creature-lab tools/creature-lab/cli.js -- scenarios deer
 ```
 
 `herd` runs `--count` creatures (50) of one batch through a scenario under the
 live view's light and shadows, and writes the GPU frame time (mean, median,
 p90, max), its passes and the triangle count to `herd-<scenario>-<count>.json`.
+
+`flock` runs `--count` creatures (200) under the flock brain doing one
+behaviour (graze, travel, mill, flee; `--warm` steps first, 600). It writes
+`flock-<behaviour>-<count>.json` and a screenshot. The JSON holds:
+
+- the GPU frame time, its passes, and each kernel's ms (the brain, the grid,
+  the rig);
+- what the group is doing: gaits, median and top speed, how many are off the
+  field, the nearest-neighbour spacing, and how many have a neighbour within
+  80 cm.
+
+## Flocks
+
+A flock (`lab/flock.js`) is a batch whose intents come from a brain on the
+GPU (`lab/flock.bk`), so stepping it costs nothing on the CPU per creature.
+A step is four dispatches:
+
+1. the neighbour grid cleared;
+2. the grid filled: 7 m cells, each a list threaded with an atomic exchange;
+3. the brain, which reads each creature's neighbours from the 3x3 cells
+   around it and writes its intent;
+4. the rig.
+
+The brain keeps neighbours apart, eases off when one is close ahead in its
+path, matches their heading and draws toward them. It keeps the group on a
+round field sized to its count. Its behaviours:
+
+- **graze**: each grazes a while, then walks a few metres (back toward the
+  others when it has strayed). A crowded one walks out.
+- **travel**: they trot together along a heading shared from their
+  neighbourhood's middle toward a goal that circles the field.
+- **mill**: they circle the field's middle.
+- **flee**: they graze until a threat crosses. One within 9 m of it, or near
+  an alarmed neighbour, startles, then bounds and gallops away (within 70° of
+  the way it faces). The alarm fades once the threat is far.
 
 `finder` scans each named scenario into `finder/scan-<scenario>.json`
 (about 10 to 20 s a scenario), then ranks every scan in that folder, so
@@ -374,12 +410,17 @@ back.
   sheets and put on a hidden canvas of the document for each capture (a
   parked scene is not rendered), and it renders at one pixel a CSS px
   whatever the display's scale.
+- The flock panel swaps the run for a live flock of the A creature
+  (`lab/flock-view.js`): the count (25 to 10000), what they do, shadows on or
+  off, and a threat sent across (a red post). It steps at the rig's 120 Hz,
+  at most four steps a frame, on a checker ground sized to the field.
 
-Headless runs drive the view through `globalThis.creatureLab`.
+Headless runs drive the view through `globalThis.creatureLab`
+(`setFlock(count, behaviour, shadows)` for the flock).
 
 ## Tests
 
-`scripts/validate.sh tools/creature-lab` runs the smoke test and four tests:
+`scripts/validate.sh tools/creature-lab` runs the smoke test and five tests:
 
 - `tests/test_oracle.js`:
   - the deer's walk and trot are clean
@@ -408,6 +449,12 @@ Headless runs drive the view through `globalThis.creatureLab`.
   - on a deer walk with a defect put in: a corner in a joint's speed is one
     kink, noise on a joint jitters, a body lifted along a line gains energy
     and is off free fall while one lifted on a free-fall arc is not
+- `tests/test_flock.js`, the flock brain on deer:
+  - grazing, they stay slow, on the field, and apart
+  - travelling, they move at pace with their headings agreeing
+  - fleeing, nobody runs before the threat. After it, the alarm spreads
+    beyond those near it, most alarmed 2 s are running away, and some gallop.
+  - the neighbour grid lists every creature once, in its own cell
 
 ## Adding a creature
 
