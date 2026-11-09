@@ -129,7 +129,9 @@ export function createSolveTab(app) {
     state.result = null; state.all = null; state.truth = null;
     state.window = preset.window || null;
 
-    if (mode.value === 'all') runAll(src, fn, names, preset); else runOne(src, fn, names, preset);
+    try {
+      if (mode.value === 'all') runAll(src, fn, names, preset); else runOne(src, fn, names, preset);
+    } catch (e) { app.fail('The solver cannot model this predicate: ' + e.message); return; }
     app.redraw();
   }
 
@@ -169,11 +171,13 @@ export function createSolveTab(app) {
   function runAll(src, fn, names, preset) {
     const limit = Math.max(1, Math.min(4096, Number($('#solve-limit').value) || 1024));
     const t0 = Date.now();
-    const sols = bro.solveAll(src, limit, {}) || [];
+    const sols = bro.solveAll(src, limit, {});
     const ms = Date.now() - t0;
     state.all = sols;
     answer.set(sols.length ? 'ok' : 'err', sols.length ? `${num(sols.length)} SOLUTIONS` : 'UNSAT',
-      sols.length >= limit ? `stopped at the limit of ${num(limit)}` : 'the complete set');
+      sols.status === 'complete' ? 'the complete set'
+        : sols.status === 'limit' ? `stopped at the limit of ${num(limit)}`
+        : 'the solver gave up: there may be more');
     kv.set('status', sols.length ? `${num(sols.length)} found` : 'none', sols.length > 0);
     kv.set('model', sols.slice(0, 4).map((s) => `(${s.join(', ')})`).join(' ') + (sols.length > 4 ? ' …' : ''));
     kv.set('time', `${ms} ms for the set`);

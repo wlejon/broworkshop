@@ -27,6 +27,7 @@ test("solve: a witness, a hash preimage, a whole set and a proven contradiction"
 
   lab.panes.solve.load("sierpinski");
   check(s.all && s.all.length === 729, `solveAll enumerates all 729 Sierpinski points (got ${s.all && s.all.length})`);
+  check(s.all && s.all.status === "complete", `solveAll says the set is complete (got ${s.all && s.all.status})`);
   check(s.truth && s.truth.size === 729, "the page's brute force agrees on 729");
   check(failedChecks("#solve-checks") === 0, "no page check fails");
   frames(2);
