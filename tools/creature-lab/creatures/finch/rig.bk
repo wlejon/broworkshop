@@ -75,7 +75,7 @@ pub const STATE: i32 = PROBE + PROBE_N;
 
 @knob const LAYERS: f32 = 1.0;       // the motion layers' share (0: the rig's plan as it is)
 @knob const SOFT_REACH: f32 = 0.95;  // share of a leg's reach where its IK eases the reach in
-@knob const HOP_F: f32 = 3.2;        // hops a second barely moving
+@knob const HOP_F: f32 = 3.2;       // hops a second barely moving
 @knob const HOP_FV: f32 = 1.2;       //   and more per m/s
 @knob const TUCK: f32 = 0.3;       // share of the hip's height the feet are drawn up in a flight
 @knob const ROLL: f32 = 0.8;         // rad the toes stand up as the feet leave them
@@ -278,7 +278,16 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
     let raw = go * hop_bounce(phase, duty, freq);
     var boff = vec2<f32>(state[s + D_BOFF], state[s + D_BOFF_V]);
     if (moving != was_moving && !init) { boff = vec2<f32>(state[s + D_BPREV] - raw, 0.0); }
-    boff = crit_step(boff, 0.0, 25.0, dt);
+    // (It is let go only while the feet are down, most at the middle of a
+    // stance and not at all where they leave and land: in the air nothing
+    // can move the body off its fall, so what is left waits for the next
+    // stance.)
+    var let_go: f32 = 1.0;
+    if (moving) {
+        let su = clamp(fract01(phase) / duty, 0.0, 1.0);
+        let_go = 16.0 * su * su * (1.0 - su) * (1.0 - su);
+    }
+    boff = crit_step(boff, 0.0, 25.0, dt * let_go);
     let bounce = raw + boff.x;
     state[s + D_BOFF] = boff.x;
     state[s + D_BOFF_V] = boff.y;
@@ -427,8 +436,10 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
     sup.lead = go;
     let bd = body_step(state, s + D_BODY, plan + coff_m, mix(3.0, 1.0, go), sup, init, dt);
     let wl = smooth01(lie * 3.0);
-    var shift = (bd.com - coff_p - plan) * LAYERS * (1.0 - wl);
-    if (wl > 0.0) { body_set(state, s + D_BODY, mix(bd.com, plan + coff_p, wl), mix(bd.vel, bd.tvel, wl)); }
+    // (Hopping, the body rides its plan: the bounce is already a true fall
+    // and an even push, and the layer's feet, too slow for a stance this
+    // short, only held the mass to the plan by its stray limit.)
+    var shift = (bd.com - coff_p - plan) * LAYERS * (1.0 - wl) * (1.0 - go);    if (wl > 0.0) { body_set(state, s + D_BODY, mix(bd.com, plan + coff_p, wl), mix(bd.vel, bd.tvel, wl)); }
     var held = 0.0;
     let over0 = max(reach_over(state, s, balls, plan, qbody), 0.0);
     if (reach_over(state, s, balls, plan + shift, qbody) > over0) {
@@ -441,6 +452,9 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
         held = 1.0 - lo;
     }
     if (!init) { held = max(held, state[s + D_HELD] * exp(-dt / CAP_EASE)); }
+    // (With both feet in the air there is no reach to keep within: the
+    // body goes where its mass does.)
+    if (state[s + D_LEG + L_PLANT] < 0.5 && state[s + D_LEG + LEG_REC + L_PLANT] < 0.5) { held = 0.0; }
     state[s + D_HELD] = held;
     shift = shift * (1.0 - held);
     st3(state, s + D_LAG, shift);
@@ -549,6 +563,19 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
     st3(state, s + D_COFF1, coff);
     st3(state, s + D_COFF, select_v3(init, coff, mix(ld3(state, s + D_COFF), coff, 1.0 - exp(-dt / 0.3))));
     if (init) { body_set(state, s + D_BODY, com_of(A), vec3<f32>(0.0)); }
+    // In the air the whole bird is put on its mass: legs tucking through a
+    // flight carry the mass off its usual place over the root, and with no
+    // foot down nothing need stay still, so all of it goes back by that
+    // (most at the middle of the feet's swing, nothing where they leave and
+    // meet the ground).
+    var air: f32 = go * (1.0 - wl);
+    for (var l: i32 = 0; l < 2; l += 1) {
+        let k = s + D_LEG + l * LEG_REC;
+        let u = state[k + L_U];
+        let bell = 4.0 * u * (1.0 - u);
+        air = min(air, select_f(state[k + L_PLANT] > 0.5 || state[k + L_KIND] > 0.5, 0.0, bell * bell));
+    }
+    if (!init) { A = moved(A, q_rot(qyaw, ld3(state, s + D_COFF) - coff) * (LAYERS * air)); }
 
     // --- out ---------------------------------------------------------------------------------------
     put(pose, c, A);

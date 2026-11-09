@@ -313,6 +313,18 @@ export function massPhysics(rec) {
             a: r1(-(b.mass / skel.mass) * ((jy(k + h, b.index) - 2 * jy(k, b.index) + jy(k - h, b.index)) / (H * H) + g)),
         })).sort((x, y) => y.a - x.a).slice(0, 5);
     }
+    // And what kept it from falling freely at its worst in flight: each
+    // bone's share of the mass's rise against free fall (negative: of its
+    // fall past it), the largest either way first.
+    let flightBy = [];
+    if (worstF.a > NATURAL.flightTol) {
+        const k = Math.round(worstF.t / dt), nb = skel.count;
+        const jy = (j, b) => S.jointH[j * nb + b];
+        flightBy = skel.bones.filter((b) => b.mass).map((b) => ({
+            bone: b.name,
+            a: r1((b.mass / skel.mass) * ((jy(k + h, b.index) - 2 * jy(k, b.index) + jy(k - h, b.index)) / (H * H) + g)),
+        })).sort((x, y) => Math.abs(y.a) - Math.abs(x.a)).slice(0, 5);
+    }
     // Energy (per kg) over each flight.
     const flights = [];
     for (let k = 0; k < n; k++) {
@@ -326,7 +338,7 @@ export function massPhysics(rec) {
     const gained = flights.filter((f) => f.gain > NATURAL.energy);
     return {
         flightSteps: nFlight, groundSteps: nGround,
-        flightOff: r3(badFlight / Math.max(1, nFlight)), worstFlight: { a: r1(worstF.a), t: r2(worstF.t) },
+        flightOff: r3(badFlight / Math.max(1, nFlight)), worstFlight: { a: r1(worstF.a), t: r2(worstF.t), by: flightBy },
         pullShare: r3(pull / Math.max(1, nGround)), frictionShare: r3(slide / Math.max(1, nGround)),
         worstPull: { a: r1(worstP.a), t: r2(worstP.t), by: pullBy },
         worstGround: { a: r1(worstG.a), t: r2(worstG.t), along: r1(worstG.along ?? 0), across: r1(worstG.across ?? 0), bore: r1(worstG.bore ?? 0) },
@@ -612,7 +624,7 @@ export function naturalness(rec) {
     }
     if (out.secondary.rigidSkin > 0.5) f.push(`secondary: ${Math.round(100 * out.secondary.rigidSkin)}% of the skin is weighted to one bone alone: no soft mass moves on its own`);
     const M = out.mass;
-    if (M.flightOff > 0.1) f.push(`mass: off free fall in ${Math.round(100 * M.flightOff)}% of flight (worst ${M.worstFlight.a} m/s2 at ${M.worstFlight.t} s)`);
+    if (M.flightOff > 0.1) f.push(`mass: off free fall in ${Math.round(100 * M.flightOff)}% of flight (worst ${M.worstFlight.a} m/s2 at ${M.worstFlight.t} s; held up by ${M.worstFlight.by.map((p) => `${p.bone} ${p.a}`).join(', ')})`);
     if (M.pullShare > 0.02) f.push(`mass: pulled down faster than gravity with feet on the ground ${Math.round(100 * M.pullShare)}% of the time (worst ${M.worstPull.a} m/s2 past it at ${M.worstPull.t} s; carried down by ${M.worstPull.by.map((p) => `${p.bone} ${p.a}`).join(', ')})`);
     if (M.frictionShare > 0.02) f.push(`mass: pushed sideways past friction ${Math.round(100 * M.frictionShare)}% of the time on the ground (worst ${M.worstGround.a} m/s2 over at ${M.worstGround.t} s: ${M.worstGround.along} along its travel, ${M.worstGround.across} across, the feet bearing ${M.worstGround.bore})`);
     if (M.energyFromNowhere) f.push(`mass: gains energy in ${M.energyFromNowhere} of ${M.flights.length} flights (most ${M.maxGain} J/kg)`);
