@@ -67,7 +67,11 @@ const D_BODY: i32 = D_COFF + 9;           // creature::body (BODY_STATE)
 const D_SPINE: i32 = D_BODY + BODY_STATE; // creature::spine (SPINE_STATE)
 pub const STATE: i32 = D_SPINE + SPINE_STATE;
 
-@knob const DUTY: f32 = 0.6;
+// The part of a cycle a foot is down. Walking, the six go one after another
+// a sixth of a cycle apart, and at 0.68 never more than two are in the air;
+// as the ripple closes into the tripod three go together and each is down
+// little more than half.
+@knob const DUTY_WALK: f32 = 0.68;@knob const DUTY_RUN: f32 = 0.55;
 @knob const LIFT: f32 = 0.09;
 @knob const SWAY: f32 = 0.07;
 @knob const LAYERS: f32 = 1.0;       // the motion layers' share (0: the rig's plan as it is)
@@ -234,7 +238,10 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
     let vd = length(vdes);
     if (intent[ii + I_HEADING_MODE] > 0.5) { want = intent[ii + I_HEADING]; }
     else if (vd > 0.05) { want = atan2(vdes.x, vdes.y); }
-    let tw = turn_toward(yaw, want, 0.9, dt);
+    // Long and narrow, it turns on the spot slowly: its end feet go sideways
+    // under it half a metre from the middle, and a quick turn carries one
+    // across the other. Walking, its feet go forward and it turns freely.
+    let tw = turn_toward(yaw, want, mix(0.6, 0.9, smooth01(speed / 0.6)), dt);
     yaw = tw.x;
     let omega = mix(state[s + D_OMEGA], tw.y, 1.0 - exp(-8.0 * dt));
     let err = wrap_pi(want - yaw);
@@ -250,18 +257,22 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
     var moving = vd > 0.05 || speed > 0.05 || abs(err) > 0.1;
     if (was_moving) { moving = moving || speed > 0.03 || abs(err) > 0.04; }
     if (lie > 0.001) { moving = false; }
-    let veff = max(speed, 0.6 * abs(omega));
+    // Turning on the spot it steps quickly for the same reason: a long
+    // stance carries the end feet out from under the body.
+    let veff = max(speed, 1.6 * abs(omega));
     // Long legs take long steps, but a stance travels less than the pairs
     // stand apart (0.54 m), so a leg never reaches into its neighbour's
     // ground.
     let freq = 0.75 + 0.72 * veff;
-    if (moving && !was_moving) { phase = floor(phase) + 1.0 + DUTY; }
+    let tripod = smooth01((speed - RIPPLE_V) / (TRIPOD_V - RIPPLE_V));
+    let step = mix(1.0 / 3.0, 0.5, tripod);
+    let duty = mix(DUTY_WALK, DUTY_RUN, tripod);
+    if (moving && !was_moving) { phase = floor(phase) + 1.0 + duty; }
     if (moving) { phase += freq * dt; }
     let go = smooth01(veff / 0.4) * select_f(moving, 1.0, 0.0);
-    let step = mix(1.0 / 3.0, 0.5, smooth01((speed - RIPPLE_V) / (TRIPOD_V - RIPPLE_V)));
 
     // --- feet ------------------------------------------------------------------------
-    let swing_t = (1.0 - DUTY) / freq;
+    let swing_t = (1.0 - duty) / freq;
     var ground_sum: f32 = 0.0;
     var front_y: f32 = 0.0;
     var rear_y: f32 = 0.0;
@@ -271,11 +282,17 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
     var swing: array<f32, 6>;
     var left_t: array<f32, 6>;
     var busy = false;
+    var up: f32 = 0.0;
     let lag = select_v3(init, vec3<f32>(0.0), ld3(state, s + D_LAG) * vec3<f32>(1.0, 0.0, 1.0));
     for (var l: i32 = 0; l < 6; l += 1) {
         let k = s + D_LEG + l * LEG_REC;
-        if (state[k + L_PLANT] < 0.5) { busy = true; }
+        if (state[k + L_PLANT] < 0.5) { busy = true; up += 1.0; }
     }
+    // No more feet leave the ground than the gait has in the air: two
+    // walking, three in the tripod. A foot whose turn comes while that many
+    // are up waits for one to land (setting off, the first steps are slow
+    // and the next legs' turns come before they end).
+    let up_max = 2.0 + smooth01(tripod * 2.0);
     for (var l: i32 = 0; l < 6; l += 1) {
         let k = s + D_LEG + l * LEG_REC;
         let home = home_of(l, pos, qyaw);
@@ -285,16 +302,17 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
         var at = toe;
         // Where a swing lands: home as it will be at landing, ahead by half
         // the stance's travel, and turned on by the turn the stance will make.
-        let stance_t = DUTY / freq;
+        let stance_t = duty / freq;
         let to_mid = select_f(planted, swing_t, (1.0 - state[k + L_U]) * state[k + L_DUR]) + 0.5 * stance_t;
         // It is placed from the body where it is, not where the plan has it.
         // (And a little ahead of that: it reaches into its step.)
         let ahead = q_rot(q_y(omega * to_mid), home - pos) + pos + fwd * (speed * to_mid + REACH_AHEAD * go) + lag;
         let target = vec3<f32>(ahead.x, height(env, ahead.x, ahead.z), ahead.z);
         if (planted) {
-            if (ph < DUTY) { state[k + L_ARMED] = 1.0; }
+            if (ph < duty) { state[k + L_ARMED] = 1.0; }
             let stray = length(vec2<f32>(toe.x - home.x, toe.z - home.z));
-            var lift = moving && state[k + L_ARMED] > 0.5 && ph >= DUTY;
+            var lift = moving && state[k + L_ARMED] > 0.5 && ph >= duty && up < up_max - 0.5;
+            if (lift) { up += 1.0; }
             var dur = clamp((1.0 - ph) / freq, 0.15, 0.8);
             // Standing: a foot strayed from home steps back, one at a time.
             if (!moving && !busy && stray > 0.05 && lie < 0.01) { lift = true; dur = 0.45; busy = true; }
@@ -324,8 +342,8 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
         // How long until this foot lifts (for the body's loading).
         var lt: f32 = 1e3;
         if (planted && moving) {
-            if (state[k + L_ARMED] > 0.5) { lt = max(DUTY - ph, 0.0) / freq; }
-            else { lt = (1.0 + DUTY - ph) / freq; }
+            if (state[k + L_ARMED] > 0.5) { lt = max(duty - ph, 0.0) / freq; }
+            else { lt = (1.0 + duty - ph) / freq; }
         }
         left_t[l] = lt;
         st3(state, k + L_AT, at);
@@ -352,7 +370,7 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
     // and no higher than the planted feet can hold it (lying, the legs fold).
     // Stepping, it rides as much lower as its legs need to reach a step's
     // ends without straightening: a longer step, a lower body.
-    let step_h = REACH_AHEAD * go + 0.5 * speed * DUTY / freq;
+    let step_h = REACH_AHEAD * go + 0.5 * speed * duty / freq;
     let leg_r = 0.94 * (rest_len(B_UPPERL1) + rest_len(B_UPPERL1 + 1));
     let stand_h = HEAD[B_UPPERL1].y - HEAD[B_UPPERL1 + 2].y;
     let crouch = max(stand_h - sqrt(max(leg_r * leg_r - step_h * step_h, 0.01)), 0.0);

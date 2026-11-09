@@ -225,7 +225,7 @@ export function analyze(rec, opts = {}) {
     }
 
     // --- support ---------------------------------------------------------------
-    let supported = 0, outside = 0, minMargin = Infinity, airborne = 0;
+    let supported = 0, outside = 0, minMargin = Infinity, airborne = 0, worstAt = -1;
     const margin = new Float32Array(n);
     for (let k = 0; k < n; k++) {
         const down = [];
@@ -240,15 +240,27 @@ export function analyze(rec, opts = {}) {
         if (down.length >= 3) {
             supported++;
             if (m < 0) outside++;
-            minMargin = Math.min(minMargin, m);
+            if (m < minMargin) { minMargin = m; worstAt = k; }
         }
+    }
+    // The worst moment: when, and the feet it stood on then.
+    // Each foot by where it is from the mass, along the heading and to the
+    // left of it (cm), so the side the mass has gone off is read from them.
+    let worstOn = '';
+    if (worstAt >= 0) {
+        const yaw = rec.tele[worstAt * TELE + T.YAW], sy = Math.sin(yaw), cy = Math.cos(yaw), c = S.com[worstAt];
+        worstOn = skel.feet.map((f, i) => {
+            if (!S.contact[worstAt * nf + i]) return null;
+            const p = S.sole.subarray(((worstAt * nf + i) * S.ns) * 3), dx = p[0] - c[0], dz = p[2] - c[2];
+            return `${f.name} (${(100 * (dx * sy + dz * cy)).toFixed(0)} ahead, ${(100 * (dx * cy - dz * sy)).toFixed(0)} left)`;
+        }).filter(Boolean).join(', ');
     }
     const still = rec.tele[(n - 1) * TELE + T.SPEED] < 0.05 && rec.tele[T.SPEED] < 0.05 && rec.scenario.track.every((key) => !key.speed);
     const support = {
         stepsOnThree: supported, outsideShare: r3(outside / Math.max(1, supported)),
         minMargin: r3(Number.isFinite(minMargin) ? minMargin : 0), airborneShare: r3(airborne / n),
     };
-    if (still && outside > 0.02 * Math.max(1, supported)) flags.push(`support: standing, the centre of mass is outside the hooves ${(100 * outside / supported).toFixed(0)}% of the time (worst ${(minMargin * 100).toFixed(1)} cm)`);
+    if (still && outside > 0.02 * Math.max(1, supported)) flags.push(`support: standing, the centre of mass is outside the hooves ${(100 * outside / supported).toFixed(0)}% of the time (worst ${(minMargin * 100).toFixed(1)} cm at ${(worstAt * rec.dt).toFixed(2)} s, standing on ${worstOn})`);
 
     // --- head ----------------------------------------------------------------
     const ti = (name) => skel.tracks.findIndex((t) => t.name === name);
