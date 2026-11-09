@@ -88,8 +88,9 @@ export async function startPlanet(world) {
     const kTexelSpread = core.kernel('k_texel_spread');
     // An anchor's size is the world's lattices' (core/anchor.bk).
     setAnchorWords(core.consts.ANCHOR_WORDS);
-    // The sun's path is the world's season's.
-    setNoon(world.noon);
+    // The sun's path is the world's season's, its noon over where the world opens.
+    const start = world.start ?? { lat: 0.45, lon: 0.3, alt: 2.8 * world.radius, heading: 0, pitch: -90 };
+    setNoon(world.noon, start.lon);
 
     const canvas = document.querySelector('#stage');
     const scene = canvas.getContext('scene');
@@ -258,8 +259,7 @@ export async function startPlanet(world) {
 
     // ── Camera: doubles about the planet's center ───────────────────────────
 
-    const start = world.start ?? { lat: 0.45, lon: 0.3, alt: 2.8 * RADIUS, heading: 0, pitch: -90 };
-    const cam = { lat: start.lat, lon: start.lon, alt: start.alt, heading: start.heading, pitch: start.pitch };
+    const cam ={ lat: start.lat, lon: start.lon, alt: start.alt, heading: start.heading, pitch: start.pitch };
     // The farthest the camera goes: the world's, else 4.7 radii.
     const MAX_ALT = world.maxAltitude ?? 4.7 * RADIUS;
     // The lowest ground's sphere, and how far past its horizon the camera's

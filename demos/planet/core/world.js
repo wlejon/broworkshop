@@ -15,7 +15,8 @@
 //   atmosphere    scene.setAtmosphere's settings, less the planet's radius
 //                 and centre (the core's)
 //   noon          optional: the direction the sun's light travels at hour
-//                 12, its tilt off the equator the season (core/hour.js)
+//                 12, its tilt off the equator the season (core/hour.js);
+//                 turned about the axis so noon falls over `start`
 //   exposure      optional: the auto exposure's compensation, stops (-0.6)
 //   horizonReach  optional: metres the far plane reaches past the horizon
 //                 of the lowest ground (else as far as the highest ground
