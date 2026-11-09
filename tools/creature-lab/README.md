@@ -174,9 +174,16 @@ bouts; resting (`lie`) it sits back on its haunches with its tail laid
 round; startled it flinches down and back with its ears flat, then stands
 tall and alert. Standing it breathes, shifts its weight from foot to foot,
 sways its tail, flicks an ear and glances about (`LIFE`). Its head turns to
-the gaze, the ears leading. The tail, ears, arms and head ride
-`creature::secondary` from where the keys put them, the tail firmer as it
-runs (`strider:plan` is the keys with that off). Its face (`face.bk`) draws
+the gaze, the ears leading; each ear listens on its own, swivelling to a
+new place every second or two, and its hands are never quite still. Its
+upper body is its own rig's, with no shared layer over it: the head is held
+steady (where the keys would turn it is eased, and the neck and head each
+take half the turn back from the chest, `HEAD_SPACE`), and the ears,
+forearms, hands and tail carry their momentum, each bone's tip on a spring
+from where the keys have it (`creature::dangle`, the rig's `LOOSE` table:
+firmer as it runs). `strider:plan` is the keys with both off. Its skeleton
+rests with the arms held out from the trunk so each is meshed in a skin of
+its own; every pose brings them in (`poses.js` `ARM_IN`). Its face (`face.bk`) draws
 amber eyes in dark rims, a nose pad and a mouth.
 
 ### Keys: a creature drawn pose by pose
@@ -369,6 +376,9 @@ $B tools/creature-lab tools/creature-lab/cli.js -- look bunny gallop --rows 4 --
 $B tools/creature-lab tools/creature-lab/cli.js -- look strider walk --rows 3 --dist 2.3 --cell 1.3
 $B tools/creature-lab tools/creature-lab/cli.js -- poses strider walk gallop
 $B tools/creature-lab tools/creature-lab/cli.js -- upper strider start-stop --from 0.8 --to 2.2
+$B tools/creature-lab tools/creature-lab/cli.js -- skin strider walk trot --rows 2
+$B tools/creature-lab tools/creature-lab/cli.js -- parts strider walk trot idle
+$B tools/creature-lab tools/creature-lab/cli.js -- parts strider walk --part head,ear1L --frames 8
 $B tools/creature-lab tools/creature-lab/cli.js -- kinematics deer walk
 $B tools/creature-lab tools/creature-lab/cli.js -- spacing deer walk --fps 24
 $B tools/creature-lab tools/creature-lab/cli.js -- metrics deer all
@@ -523,6 +533,35 @@ text under the creature's folder; `score`, `sweep` and `kinks` run what
 Every output is deterministic. A rerun writes the same bytes.
 
 ## Outputs
+
+- **Skin** (`skin`, `lab/skinsee.js`): whether each limb has a skin of its
+  own, and where the skin is pulled as the bones move.
+  - **bound**: at rest each limb (a chain of bones out to a leaf) is cut
+    across along its length. A limb drawn inside another mass (an arm laid
+    against the trunk it was meshed with) has the other's skin in the loop
+    about it, or none: there is no limb there to move, and its bones pull a
+    web out of the body. A limb's root lies in the body it grows from
+    (`SKIN.root` of its length may); past that it is flagged, with whose
+    skin it is in. `model` prints these too.
+  - **stretch**: through a run, every edge of the mesh against its rest
+    length; where it is pulled past `SKIN.stretch` or crushed under
+    `SKIN.squash` is listed by the bones either side.
+  - The sheet draws the body by it at phases of the run: blue crushed, grey
+    at rest, red pulled.
+- **Parts** (`parts`, `lab/parts.js`): how each part moves against what
+  carries it. The parts are the limbs (one of each mirrored pair) and each
+  bone that branches with all it carries (a head with its ears).
+  - Per part: its turn and its tip's travel in the world and on its
+    carrier, the carrier's turn, and each of its joints' turn.
+  - Verdicts: **glued** (it does not move on its carrier), **rides** (thrown
+    about the world, hardly moving on its carrier), **wobbles** (a part that
+    carries others swinging further in the world than its carrier, in a
+    stride), **steadied** (it swings less than its carrier: a head held
+    over a working trunk). A joint of a part that does not turn is listed.
+  - The sheet gives each part a row of close-ups through the run and two
+    smears, every frame laid over the others: going along with the
+    creature, and with its carrier held still. A part that rides its
+    carrier is sharp in the second; a steadied one is sharp in the first.
 
 - **Turnaround**: 8 views at 45 degrees by 8 to 12 phases.
   - Steady gaits are cut to one measured cycle; other scenarios are spread
@@ -796,8 +835,16 @@ Headless runs drive the view through `globalThis.creatureLab`
 
 ## Tests
 
-`scripts/validate.sh tools/creature-lab` runs the smoke test and six tests:
+`scripts/validate.sh tools/creature-lab` runs the smoke test and seven tests:
 
+- `tests/test_parts.js`, the skin and the parts seen:
+  - a tube of skin about an arm is the arm's own; weighted to the trunk it
+    is found, with where the arm comes out of the body
+  - a head fixed on a swinging chest is glued, one swinging further
+    wobbles, one turned back against it is steadied
+  - the strider's limbs are bound in their own skin and its skin is not
+    pulled walking or trotting; its parts sheets are clean, its head
+    steadied at the walk
 - `tests/test_keys.js`, keys and the strider drawn in them:
   - a pose puts the feet and the root where it draws them; a mirrored pose
     is the pose with its sides exchanged
@@ -857,6 +904,10 @@ Headless runs drive the view through `globalThis.creatureLab`
 3. Name its steady gaits in `cycles` (with references if known) and its
    broken variants.
 4. Run `sheets <name> all` and `metrics <name> all`, and read the sheets.
+   Run `skin <name> walk` (each limb in a skin of its own, nothing pulled)
+   and `parts <name>` on a gait and on `idle` (nothing glued, riding or
+   wobbling) before judging the motion from whole-body sheets, which are
+   too small to show either.
 5. Run `finder <name> all` and `natural <name>`: both need only the
    skeleton's feet and tracks (`head` and `withers` for the head measure)
    and the body's masses. Run `form <name>` for each mass's volume in

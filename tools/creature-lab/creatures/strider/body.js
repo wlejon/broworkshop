@@ -39,7 +39,7 @@ function coat(p, n, share) {
     // Dark stockings from the hock down, gloves from the wrist.
     c = mix(c, DARK, 0.92 * LR('leg') * sstep(0.30, 0.19, p[1]));
     c = mix(c, DARK, LR('foot') + LR('paw') + LR('toe0') + LR('toe1') + LR('toe2'));
-    c = mix(c, DARK, 0.92 * LR('arm') * sstep(0.68, 0.60, p[1]));
+    c = mix(c, DARK, 0.92 * LR('arm') * sstep(0.2, 0.26, Math.abs(p[0])));
     c = mix(c, DARK, LR('palm') + LR('thumb') + LR('finger0') + LR('finger1') + LR('finger2'));
     // The ears: dark tips and backs, pale inside.
     const er = LR('ear');
@@ -108,14 +108,14 @@ export function body(skel, detail = {}) {
         // The arm: slim, a small round shoulder under the ruff.
         const ua = bn(`upperarm${t}`), fa = bn(`forearm${t}`), hd = bn(`hand${t}`);
         B.limb(`arm${t}`, [`shoulder${t}`, `upperarm${t}`, `forearm${t}`], [
-            { c: [0.05 * s, 0.925, 0.09], r: [0.034, 0.036], bone: `shoulder${t}` },
-            { c: at(ua, 0.08), r: [0.036, 0.038], bone: `upperarm${t}` },
-            { c: at(ua, 0.6), r: [0.027, 0.029] },
-            { c: fa.head, r: [0.023, 0.025] },
-            { c: at(fa, 0.3), r: [0.025, 0.026] },
-            { c: at(fa, 0.8), r: [0.018, 0.019] },
-            { c: hd.head, r: [0.015, 0.017], bone: `forearm${t}` },
-        ], { up: [0, 0, 1], blend: 0.016 });
+            { c: [0.055 * s, 0.925, 0.09], r: [0.036, 0.038], bone: `shoulder${t}` },
+            { c: at(ua, 0.1), r: [0.038, 0.04], bone: `upperarm${t}` },
+            { c: at(ua, 0.6), r: [0.03, 0.032] },
+            { c: fa.head, r: [0.025, 0.027] },
+            { c: at(fa, 0.3), r: [0.027, 0.028] },
+            { c: at(fa, 0.8), r: [0.02, 0.021] },
+            { c: hd.head, r: [0.016, 0.018], bone: `forearm${t}` },
+        ], { up: [0, 0, 1], blend: 0.014 });
         // The hand: a narrow palm, three fingers on from it and a thumb.
         B.limb(`palm${t}`, [`hand${t}`], [
             { c: at(hd, 0.05), r: [0.014, 0.02] },

@@ -40,11 +40,13 @@ function arm(side, tag) {
     return [
         { name: `shoulder${tag}`, parent: 'chest', head: [x(0.03), 0.925, 0.09], tail: [x(0.09), 0.915, 0.09],
           limits: { x: [-25, 25], y: [-25, 25], z: out(-20, 25) }, mass: 0.4 },
-        { name: `upperarm${tag}`, parent: `shoulder${tag}`, head: [x(0.09), 0.915, 0.09], tail: [x(0.135), 0.745, 0.05],
-          limits: { x: [-120, 80], y: [-60, 60], z: out(-40, 100) }, mass: 0.9 },
-        { name: `forearm${tag}`, parent: `upperarm${tag}`, head: [x(0.135), 0.745, 0.05], tail: [x(0.15), 0.585, 0.12],
+        // (At rest the arms are held out from the body, so each is meshed
+        // in a skin of its own; every pose brings them in: poses.js ARM_IN.)
+        { name: `upperarm${tag}`, parent: `shoulder${tag}`, head: [x(0.09), 0.915, 0.09], tail: [x(0.214), 0.791, 0.075],
+          limits: { x: [-120, 80], y: [-60, 60], z: out(-70, 60) }, mass: 0.9 },
+        { name: `forearm${tag}`, parent: `upperarm${tag}`, head: [x(0.214), 0.791, 0.075], tail: [x(0.327), 0.678, 0.105],
           limits: { x: [-130, 25], y: [-50, 50], z: [-15, 15] }, mass: 0.6 },
-        { name: `hand${tag}`, parent: `forearm${tag}`, head: [x(0.15), 0.585, 0.12], tail: [x(0.152), 0.50, 0.15],
+        { name: `hand${tag}`, parent: `forearm${tag}`, head: [x(0.327), 0.678, 0.105], tail: [x(0.39), 0.615, 0.125],
           limits: { x: [-70, 70], y: [-30, 30], z: [-35, 35] }, mass: 0.3 },
     ];
 }
@@ -53,9 +55,9 @@ function ear(side, tag) {
     const x = (v) => v * side;
     return [
         { name: `ear1${tag}`, parent: 'head', head: [x(0.067), 1.2, 0.08], tail: [x(0.105), 1.31, 0.062],
-          limits: { x: [-50, 70], y: [-40, 40], z: [-45, 45] }, mass: 0.04 },
+          limits: { x: [-80, 70], y: [-40, 40], z: [-45, 45] }, mass: 0.04 },
         { name: `ear2${tag}`, parent: `ear1${tag}`, head: [x(0.105), 1.31, 0.062], tail: [x(0.135), 1.415, 0.04],
-          limits: { x: [-50, 70], y: [-30, 30], z: [-45, 45] }, mass: 0.02 },
+          limits: { x: [-65, 70], y: [-30, 30], z: [-45, 45] }, mass: 0.02 },
     ];
 }
 

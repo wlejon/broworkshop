@@ -15,6 +15,8 @@ import { lookSheet } from "./look.js";
 import { posesSheet } from "./poses.js";
 import { modelSheet } from "./posing.js";
 import { upperSheet, upperLines } from "./upper.js";
+import { skinSheet, boundFlags } from "./skinsee.js";
+import { partsSheet } from "./parts.js";
 import { rangeSheet } from "./range.js";
 import { kinematicsSheet, spacingSheet } from "./kinematics.js";
 import { restForm, formInMotion } from "./form.js";
@@ -55,6 +57,15 @@ export const HELP = `creature-lab <command> <creature> [scenario ...] [options]
                                            bones (world turning speed), kinks tagged with the start/stop
                                            they follow; each bone's own swing against its parent
                                            (--from <s> --to <s>: the window)
+  parts       <creature> [scenario ...]    each part of the body (an ear, an arm, the head, the tail) close
+                                           through the cycle, and every frame laid over the others, going
+                                           along with the creature and with the part's carrier held still;
+                                           how far it turns and travels on its carrier and in the world:
+                                           glued, wobbling, steadied (--part head,shoulderL, --frames <n>,
+                                           --cell <scale>)
+  skin        <creature> [scenario ...]    whether each limb has a skin of its own at rest, and through
+                                           the run the body coloured by how far the skin is pulled or
+                                           crushed from rest, the places listed (--rows, --cell, --dist)
   kinematics  <creature> [scenario ...]    per leg, each bone's flexion, velocity and acceleration over
                                            the cycle with contact, lift-off and touchdown; corners in red
   spacing     <creature> [scenario ...]    toes, leg joints and tracked points at 30 fps (--fps): paths
@@ -117,6 +128,9 @@ export function parseArgs(argv) {
     return { pos, opt };
 }
 
+// The sheets asked for by name only (`sheets` draws KINDS).
+const CLOSE = ['look', 'poses', 'upper', 'skin', 'parts'];
+
 const safe = (label) => label.replace(/[:@+=,]/g, '_');
 export function outRoot(opt) {
     const cwd = bro.app.cwd.replace(/\\/g, '/');
@@ -168,6 +182,14 @@ export function sheet(kind, recs, path, opt = {}) {
             phases: opt.phases ? String(opt.phases).split(',').map(Number) : null, dist: opt.dist ? +opt.dist : 2.6,
             focus: opt.focus ? String(opt.focus) : null, cell: opt.cell ? Math.round(360 * +opt.cell) : 360 });
     }
+    if (kind === 'skin') {
+        const s = skinSheet(recs[0], { path, rows: rows || 4, cell: opt.cell ? Math.round(300 * +opt.cell) : 300, dist: opt.dist ? +opt.dist : 2.2 });
+        return { ...s, json: { flags: s.flags, bound: s.bound, places: s.motion.places } };
+    }
+    if (kind === 'parts') {
+        return partsSheet(recs[0], { path, part: opt.part ? String(opt.part).split(',') : null, frames: opt.frames ? +opt.frames : 6,
+            cell: opt.cell ? Math.round(230 * +opt.cell) : 230 });
+    }
     if (kind === 'charts') return chartsSheet(recs, { path });
     if (kind === 'kinematics') return kinematicsSheet(recs[0], { path });
     if (kind === 'spacing') return spacingSheet(recs[0], { path, fps: opt.fps ? +opt.fps : 30 });
@@ -218,7 +240,8 @@ export async function runCommand(argv) {
         const s = modelSheet(creature, { path, poses: rest0.length ? rest0 : null, cycles: opt.cycles ? String(opt.cycles).split(',') : null,
             cell: opt.cell ? +opt.cell : 1, frames: opt.frames ? +opt.frames : 8, dist: opt.dist ? +opt.dist : 2.1 });
         report('model', s);
-        for (const f of s.flags) console.log(`  - ${f}`);
+        // (A limb drawn inside another mass at rest is no limb: said with the model.)
+        for (const f of [...s.flags, ...boundFlags(creature)]) console.log(`  - ${f}`);
         return { written: [path], summary: `model sheet in ${Date.now() - t0} ms (body ${creature.timing.bodyMs} ms)` };
     }
     if (cmd === 'scenarios') {
@@ -320,8 +343,8 @@ export async function runCommand(argv) {
         const path = `${dir}/form.json`;
         writeFile(path, json({ creature: creature.label, rest: form, motion: runs }));
         written.push(path);
-    } else if (cmd === 'metrics' || KINDS.includes(cmd) || ['look', 'poses', 'upper'].includes(cmd) || cmd === 'sheets') {
-        const kinds = cmd === 'sheets' ? KINDS : KINDS.includes(cmd) || ['look', 'poses', 'upper'].includes(cmd) ? [cmd] : [];
+    } else if (cmd === 'metrics' || KINDS.includes(cmd) || CLOSE.includes(cmd) || cmd === 'sheets') {
+        const kinds = cmd === 'sheets' ? KINDS : KINDS.includes(cmd) || CLOSE.includes(cmd) ? [cmd] : [];
         for (const sc of scenarios) {
             const rec = runScenario(creature, sc, { seed });
             if (cmd === 'metrics' || cmd === 'sheets') {

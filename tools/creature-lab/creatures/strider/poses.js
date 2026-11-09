@@ -13,8 +13,14 @@ const both = (name, [x, y, z]) => ({ [`${name}L`]: [x, y, z], [`${name}R`]: [x, 
 
 // The arms: each upper arm's swing (deg back), its elbow's bend, and how
 // far the elbows are held in from the rest pose's.
+// (The skeleton rests with its arms held out, for the skin: ARM_IN brings
+// them down to hang by its sides.)
+const ARM_IN = 34;
+// The shoulders go with them: back and a little up as the arm swings back.
+const SHOULDER = 0.3;
 const arms = (backL, backR, bendL, bendR, inn = 9, wrist = 18) => ({
-    upperarmL: [backL, 0, -inn], upperarmR: [backR, 0, inn],
+    shoulderL: [0, SHOULDER * backL, 0.12 * Math.abs(backL)], shoulderR: [0, -SHOULDER * backR, -0.12 * Math.abs(backR)],
+    upperarmL: [backL, 0, -inn - ARM_IN], upperarmR: [backR, 0, inn + ARM_IN],
     forearmL: [-bendL, 0, 0], forearmR: [-bendR, 0, 0],
     handL: [wrist, 0, 0], handR: [wrist, 0, 0],
 });
@@ -144,7 +150,7 @@ export const poses = {
     // Flinching: down and back from what startled it, the ears flat.
     flinch: {
         root: [0, -0.13, -0.04], turn: [14, 0, 0],
-        bones: { spine: [8, 0, 0], neck: [-14, 0, 0], head: [-6, 0, 0], ...arms(-30, -30, 110, 110, -6, 20), ...tail(0, { lift: 40, curl: 10 }), ...ears(0, 62) },
+        bones: { spine: [8, 0, 0], neck: [-14, 0, 0], head: [-6, 0, 0], ...arms(-30, -30, 110, 110, -6, 20), ...tail(0, { lift: 40, curl: 10 }), ...ears(0, 52) },
         feet: { L: { at: [0.02, 0, 0], heel: -16 }, R: { at: [-0.02, 0, 0], heel: -16 } },
     },
     // Foraging: crouched low over the ground, the nose and hands down to it,

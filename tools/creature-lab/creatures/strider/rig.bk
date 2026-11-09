@@ -18,13 +18,18 @@
 //           an ear and glances about; foraging it noses and scrabbles at
 //           the ground; its head turns to what it is given to look at.
 //
-// The parts that hang (the tail, the ears, the arms, the head on its neck)
-// are carried by creature::secondary from where the keys put them.
+//   head    held steady: the keys turn the trunk under it every step, and the
+//           neck and head turn back against that, so the head keeps the
+//           heading it has had rather than riding the chest.
+//   loose   the ears, the forearms and hands and the tail are the keys'
+//           with their own momentum: each bone's tip on a spring
+//           (creature::dangle) from where the keys have it, so an ear nods
+//           after the head, a hand trails its elbow and the tail whips.
 import creature::common::*;
 import creature::contract::*;
 import creature::skeleton::*;
 import creature::pose::*;
-import creature::secondary::*;
+import creature::dangle::*;
 import creature::limbs::*;
 import creature::keys::*;
 import creature::keyed::*;
@@ -59,16 +64,29 @@ const L_YAW: i32 = 7;        // the foot's heading
 const L_ARMED: i32 = 8;      // set in stance, so a leg lifts once a cycle
 const L_HOME: i32 = 9;       // a step home: its progress (0: none), and where from (3)
 const L_FROM: i32 = 10;
-const D_SEC: i32 = D_LEG + 2 * LEG_REC;
-pub const PROBE: i32 = D_SEC + SEC_STATE;   // creature::probe's slice
+const D_HEADQ: i32 = D_LEG + 2 * LEG_REC;   // the head's turn in the creature's frame, eased (4)
+const D_LOOSE: i32 = D_HEADQ + 4;           // the loose bones' tips (creature::dangle), in LOOSE's order
+const NLOOSE: i32 = 13;
+pub const PROBE: i32 = D_LOOSE + NLOOSE * DANGLE_REC;   // creature::probe's slice
 pub const STATE: i32 = PROBE + PROBE_N;
 
-@knob const LAYERS: f32 = 1.0;       // the motion layers' share (0: the keys as they are)
+// The loose bones, each after the one it hangs from, and each one's spring:
+// rad/s walking, rad/s more running (a part is held firmer at speed), its
+// damping, and the most it turns from where the keys have it (rad).
+const LOOSE: array<i32, NLOOSE> = [B_EAR1L, B_EAR2L, B_EAR1R, B_EAR2R, B_FOREARML, B_HANDL, B_FOREARMR, B_HANDR,
+                                   B_TAIL1, B_TAIL2, B_TAIL3, B_TAIL4, B_TAIL5];
+const LOOSE_W: array<f32, NLOOSE> = [52.0, 42.0, 48.0, 39.0, 17.0, 24.0, 17.5, 25.0, 26.0, 24.0, 22.0, 20.0, 19.0];
+const LOOSE_RUN: array<f32, NLOOSE> = [0.0, 0.0, 0.0, 0.0, 16.0, 16.0, 16.0, 16.0, 10.0, 10.0, 10.0, 10.0, 10.0];
+const LOOSE_ZETA: array<f32, NLOOSE> = [0.5, 0.45, 0.5, 0.45, 0.6, 0.6, 0.6, 0.6, 0.55, 0.55, 0.5, 0.5, 0.5];
+const LOOSE_MAX: array<f32, NLOOSE> = [0.4, 0.4, 0.4, 0.4,0.5, 0.6, 0.5, 0.6, 0.3, 0.35, 0.4, 0.4, 0.4];
+
+@knob const LAYERS: f32 = 1.0;       // the head's steadying and the loose parts' share (0: the keys as they are)
 @knob const SOFT_REACH: f32 = 0.985; // share of a leg's reach where its IK eases the reach in
 @knob const WALK_V: f32 = 1.0;       // m/s the walk's keys are drawn for: slower, it is blended toward the stand
 @knob const JOG_V: f32 = 1.2;        // m/s the walk begins to go over to the run
 @knob const RUN_V: f32 = 2.6;        // m/s it is all the run's keys
-@knob const HEAD_SPACE: f32 = 0.6;   // share of its place in space the head holds
+@knob const HEAD_SPACE: f32 = 0.8;   // share of the trunk's turning under it the head is held against
+const HEAD_RATE: f32 = 3.0;          // 1/s the head's heading follows where the keys would have it
 @knob const LIFE: f32 = 1.0;         // the idle life's share (breath, sway, flicks, glances)
 const HOME_T: f32 = 0.32;            // s a step home takes
 const BREATH_T: f32 = 3.2;           // s of a breath
@@ -83,6 +101,18 @@ fn select_i(c: bool, a: i32, b: i32) -> i32 {
 // Where leg l's ball rests on the ground at p, `lift` over it.
 fn ball_on(env: read_store<f32, 1>, p: vec3<f32>, l: i32, lift: f32) -> vec3<f32> {
     return vec3<f32>(p.x, height(env, p.x, p.z) + HEAD[LEG_TOP[l] + 3].y + lift, p.z);
+}
+
+// Bone b of T hung again from its parent as K turns it, then turned to its
+// tip, which is on a spring at st[k..] from where that puts it.
+fn loose(st: rw_store<f32, 1>, k: i32, T: Pose, K: Key, b: i32, w: f32, zeta: f32, amax: f32, share: f32, dt: f32, init: bool) -> Pose {
+    var P = T;
+    P.q[b] = q_mul(P.q[PARENT[b]], K.q[b]);
+    P.p[b] = head_of(P, b);
+    let along = TAIL[b] - HEAD[b];
+    let tip = dangle_step(st, k, P.p[b] + q_rot(P.q[b], along), w, zeta, 0.0, dt, init);
+    P.q[b] = q_blend(P.q[b], aim_at(P.q[b], P.p[b], along, tip, amax), share);
+    return P;
 }
 
 @kernel @grid(1)
@@ -317,21 +347,28 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
     state[s + D_LOOK_P] = lp.x;
     state[s + D_LOOK_PV] = lp.y;
     var KP = K;
-    let turn = vec3<f32>(0.5 * lp.x, 0.5 * lk.x, 0.0);
-    KP = key_turn(KP, B_NECK, turn);
-    KP = key_turn(KP, B_HEAD, turn);
-    // (The ears lead the head round.)
-    KP = key_turn(KP, B_EAR1L, vec3<f32>(0.0, 0.25 * (look - lk.x), 0.0));
-    KP = key_turn(KP, B_EAR1R, vec3<f32>(0.0, 0.25 * (look - lk.x), 0.0));
 
     // --- life ---------------------------------------------------------------------------
-    // Breathing: the chest lifts and the shoulders with it, the head held.
-    let breath = LIFE * (0.014 + 0.008 * wl + 0.01 * alert) * (1.0 - 0.7 * gw) * sin(TAU * clock / BREATH_T + seed);
+    // Breathing: the chest lifts and the shoulders with it.
+    let breath = LIFE * (0.02 + 0.01 * wl + 0.012 * alert) * (1.0 - 0.7 * gw) * sin(TAU * clock / BREATH_T + seed);
     KP = key_turn(KP, B_SPINE, vec3<f32>(-0.5 * breath, 0.0, 0.0));
     KP = key_turn(KP, B_CHEST, vec3<f32>(-breath, 0.0, 0.0));
-    KP = key_turn(KP, B_NECK, vec3<f32>(1.2 * breath, 0.0, 0.0));
-    KP = key_turn(KP, B_UPPERARML, vec3<f32>(0.8 * breath, 0.0, 0.0));
-    KP = key_turn(KP, B_UPPERARMR, vec3<f32>(0.8 * breath, 0.0, 0.0));
+    KP = key_turn(KP, B_SHOULDERL, vec3<f32>(0.0, 0.0, 3.0 * breath));
+    KP = key_turn(KP, B_SHOULDERR, vec3<f32>(0.0, 0.0, -3.0 * breath));
+    KP = key_turn(KP, B_UPPERARML, vec3<f32>(0.8 * breath, 0.0, -2.0 * breath));
+    KP = key_turn(KP, B_UPPERARMR, vec3<f32>(0.8 * breath, 0.0, 2.0 * breath));
+    // Its hands are never quite still: each arm shifts on its own, and now
+    // and then a hand is drawn up and let down.
+    for (var a: i32 = 0; a < 2; a += 1) {
+        let side = 1.0 - 2.0 * f32(a);
+        let ch = 10.0 + 4.0 * f32(a);
+        let fid = idle * (1.0 - wl);
+        let up = fid * smooth01(3.0 * noise1(clock * 0.17, seed, ch) - 1.2);
+        let ua = select_i(a == 0, B_UPPERARML, B_UPPERARMR);
+        KP = key_turn(KP, ua, vec3<f32>(0.1 * fid * noise1(clock * 0.31, seed, ch + 1.0) - 0.25 * up, 0.0, -side * 0.06 * fid * noise1(clock * 0.23, seed, ch + 2.0)));
+        KP = key_turn(KP, ua + 1, vec3<f32>(0.14 * fid * noise1(clock * 0.43, seed, ch + 3.0) - 0.7 * up, 0.0, 0.0));
+        KP = key_turn(KP, ua + 2, vec3<f32>(0.2 * fid * noise1(clock * 0.61, seed, ch + 4.0) + 0.4 * up, 0.0, side * 0.15 * fid * noise1(clock * 0.37, seed, ch + 5.0)));
+    }
     // Its weight wanders from foot to foot, the hips tipping with it.
     let shift = idle * (1.0 - wl) * noise1(clock * 0.21, seed, 1.0);
     KP.root.x += 0.016 * shift;
@@ -352,9 +389,42 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
         if (fu < 1.0 && hash01(fk * 3.7 + f32(e) * 17.0 + seed) > 0.45) { fl = LIFE * sin(0.5 * TAU * fu) * sin(0.5 * TAU * fu); }
         let side = 1.0 - 2.0 * f32(e);
         let b = select_i(e == 0, B_EAR1L, B_EAR1R);
-        KP = key_turn(KP, b, vec3<f32>(-0.12 * fl, 0.0, 0.0));
-        KP = key_turn(KP, b + 1, vec3<f32>(0.1 * fl, -side * 0.5 * fl, 0.0));
+        // Each ear listens on its own: it swivels to a new place every
+        // second or two, quickly, and holds there (less so on the move).
+        let lt = clock / (1.3 + 0.5 * f32(e)) + seed * 2.3 + 0.5 * f32(e);
+        let lk0 = floor(lt);
+        let lu = smooth01((lt - lk0) * (1.3 + 0.5 * f32(e)) / 0.16);
+        let l0 = hash01((lk0 - 1.0) * 6.1 + f32(e) * 29.0 + seed) - 0.5;
+        let l1 = hash01(lk0 * 6.1 + f32(e) * 29.0 + seed) - 0.5;
+        let listen = LIFE * (1.0 - 0.6 * gw) * (1.0 - 0.8 * rw) * mix(l0, l1, lu);
+        // (And both lead the head round to what it turns to.)
+        let lead = 0.25 * (look - lk.x);
+        KP = key_turn(KP, b, vec3<f32>(-0.12 * fl - 0.12 * abs(listen), 0.9 * listen + lead, 0.25 * listen));
+        KP = key_turn(KP, b + 1, vec3<f32>(0.1 * fl, -side * 0.36 * fl + 0.15 * listen, 0.0));
     }
+
+    // --- the head, held steady ---------------------------------------------------------
+    // Where the keys would turn the head, in the creature's frame, is eased;
+    // the neck and the head each take half of the turn from the chest to
+    // that, so the trunk works under a head that looks where it is going.
+    let qc = q_mul(q_mul(KP.q[B_PELVIS], KP.q[B_SPINE]), KP.q[B_CHEST]);
+    let qk = q_mul(qc, q_mul(KP.q[B_NECK], KP.q[B_HEAD]));
+    var qe = vec4<f32>(state[s + D_HEADQ], state[s + D_HEADQ + 1], state[s + D_HEADQ + 2], state[s + D_HEADQ + 3]);
+    if (init) { qe = qk; }
+    qe = q_blend(qe, qk, 1.0 - exp(-(HEAD_RATE + 12.0 * flinch) * dt));
+    state[s + D_HEADQ] = qe.x;
+    state[s + D_HEADQ + 1] = qe.y;
+    state[s + D_HEADQ + 2] = qe.z;
+    state[s + D_HEADQ + 3] = qe.w;
+    let qn2 = q_mul(q_conj(qc), q_blend(qk, qe, HEAD_SPACE * LAYERS));
+    let qn = q_blend(q_id(), qn2, 0.5);
+    KP.q[B_NECK] = qn;
+    KP.q[B_HEAD] = q_mul(q_conj(qn), qn2);
+    // Over that, it turns to what it looks at.
+    let turn = vec3<f32>(0.5 * lp.x, 0.5 * lk.x, 0.0);
+    KP = key_turn(KP, B_NECK, turn);
+    KP = key_turn(KP, B_HEAD, turn);
+
     // Foraging, it noses about and scrabbles at the ground in bouts.
     if (wg > 0.0) {
         let nose = wg * (0.05 * sin(TAU * clock / 0.8 + seed) + 0.08 * noise1(clock * 0.7, seed, 3.0));
@@ -381,23 +451,11 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
     probe3(state, s + PROBE, 3, q_rot(q_conj(qyaw), balls[0] - org));
     probe3(state, s + PROBE, 6, q_rot(q_conj(qyaw), T.p[LEG_TOP[0]] - org));
 
-    // --- the parts that hang carry their momentum (creature::secondary) -------------
-    var hold: array<f32, NB>;
-    var firm: array<f32, NB>;
-    for (var b: i32 = 0; b < NB; b += 1) { hold[b] = 0.0; firm[b] = 0.0; }
-    hold[B_HEAD] = HEAD_SPACE;
-    hold[B_NECK] = 0.5 * HEAD_SPACE;
-    firm[B_SPINE] = 1.0;
-    firm[B_CHEST] = 1.0;
-    firm[B_NECK] = 1.0;
-    firm[B_HEAD] = 1.0;
-    // (The ears are stiff at their roots and loose at their tips; the arms
-    // are held, the tail mostly its own.)
-    firm[B_EAR1L] = 1.0; firm[B_EAR1R] = 1.0;
-    firm[B_EAR2L] = 0.8; firm[B_EAR2R] = 0.8;
-    for (var b: i32 = B_SHOULDERL; b <= B_HANDR; b += 1) { firm[b] = 0.6; }
-    for (var b: i32 = B_TAIL1; b <= B_TAIL5; b += 1) { firm[b] = 0.25 + 0.45 * rw; }
-    var A = carry_held(state, env, s + D_SEC, T, hold, firm, LAYERS, init, dt);
+    // --- the loose parts carry their momentum ---------------------------------------
+    var A = T;
+    for (var i: i32 = 0; i < NLOOSE; i += 1) {
+        A = loose(state, s + D_LOOSE + i * DANGLE_REC, A, KP, LOOSE[i], LOOSE_W[i] + LOOSE_RUN[i] * rw, LOOSE_ZETA[i], LOOSE_MAX[i], LAYERS, dt, init);
+    }
 
     // --- in the air ----------------------------------------------------------------------
     // With no foot down its mass is in free fall (creature::keyed's air):
