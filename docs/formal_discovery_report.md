@@ -4,7 +4,7 @@
 
 This report documents the findings, counterexample witnesses, formal equivalence proofs, and surgical bug fixes produced by dogfooding the **Bronze** formal verification suite (`bronze check`, `bronze check --deterministic`, `bronze prove-equiv`, and `bronze synth-tests`) across:
 
-1. **Production Ecosystem JavaScript (`#125`)**: `broworkshop/lib/kit/`, `broworkshop/lib/arcade/`, `broworkshop/lib/`, `smallworlds/game/`, `ffmpeg-bro/supercut/` & `ui/`, `helm/ui/js/`, and `helmapps/`.
+1. **Production Ecosystem JavaScript (`#125`)**: `broworkshop/lib/kit/`, `broworkshop/lib/arcade/`, `broworkshop/lib/`, `ffmpeg-bro/supercut/` & `ui/`, `helm/ui/js/`, and `helmapps/`.
 2. **Open-Source 3D Math, Geometry & Graphics (`#122`)**: `three.js` r160 (`MathUtils`, `Color`, `Vector3`, `Quaternion`, `Triangle`, `Box3`), `gl-matrix`, `earcut`, and `rbush`.
 3. **Open-Source Codecs, Compression & Hashing (`#123`)**: Mozilla `source-map` Base64-VLQ, Protobuf ZigZag/Varint32, RFC 4648 Base64, UTF-8 scalar codecs, Morton Z-order curves, MurmurHash3, xxHash32, and FNV-1a.
 4. **Open-Source Micro-Libraries & Branch Synthesis (`#124`)**: `date-fns` / Howard Hinnant civil calendar algorithms, `semver` ordering, `color-convert` RGB/HSL conversions, and financial basis-point rounding.
