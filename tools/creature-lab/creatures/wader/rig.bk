@@ -98,6 +98,9 @@ pub const STATE: i32 = PROBE + PROBE_N;
 
 const LEG_B0: array<i32, 2> = [B_FEMURL, B_FEMURR];
 const WING_B0: array<i32, 2> = [B_HUMERUSL, B_HUMERUSR];
+// The share of a sideways look each neck bone has turned by, from the body up.
+const NECK_TWIST: array<f32, 3> = [0.15, 0.35, 0.6];
+@knob const LOOK_CARRY: f32 = 0.06;  // how far the head goes to the side it looks to (m, at a right angle)
 const OFFS: array<f32, 2> = [0.0, 0.5];
 const SIDE: array<f32, 2> = [1.0, -1.0];
 const REACH: f32 = 0.97;
@@ -641,7 +644,18 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
     head_at = mix(head_at, forage, graze);
     probe(state, pr, 6, ol);
     probe(state, pr, 7, bob);
+    // The head is carried toward what it looks at, the neck bending after it,
+    // not turned on a post.
+    head_at += (q_rot(qyaw, vec3<f32>(1.0, 0.0, 0.0)) * (LOOK_CARRY * sin(look))
+                - fwd * (0.5 * LOOK_CARRY * (1.0 - cos(look)))) * (1.0 - graze);
     T = solve_neck(T, head_at);
+    // The look winds up the neck: each bone twisted about its own length by
+    // a growing share of it (which moves no joint), the head taking the rest.
+    for (var i: i32 = 0; i < 3; i += 1) {
+        let b = B_NECK1 + i;
+        let along = normalize(q_rot(T.q[b], TAIL[b] - HEAD[b]));
+        T.q[b] = q_mul(q_axis(along, look * NECK_TWIST[i]), T.q[b]);
+    }
     T.p[B_HEAD] = head_of(T, B_HEAD);
     // The bill level, down foraging (further at a strike), up alert.
     let pitch = 1.05 * graze + 0.3 * strike * graze - 0.12 * alert + 0.5 * look_p * (1.0 - graze) + 0.15 * flinch;
@@ -655,12 +669,19 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
         let sd = SIDE[w];
         let b0 = WING_B0[w];
         // Half open startled: lifted out from the body, the forearm unfolding.
-        let open = 0.5 * flinch;
+        // Folded they are not dead weight: standing, now and then a wing is
+        // shrugged loose and tucked again (each in its own time); walking,
+        // the wing over the leg that carries the bird is pressed to its
+        // flank and the other rides a little loose, its tip dipping.
+        let shrug = (1.0 - go) * (1.0 - lie) * smooth01((noise1(clock / 2.6, seed, 9.0 + f32(w)) - 0.5) / 0.4);
+        let ride = 0.5 - 0.5 * sd * sway_u;
+        let open = 0.5 * flinch + 0.07 * shrug + 0.035 * ride * go;
+        let dip = 0.1 * ride * go + 0.12 * shrug;
         T.q[b0] = q_mul(qbody, q_xyz(soft_xyz(vec3<f32>(-0.15 * open, 0.0, sd * 1.0 * open), b0, 0.1)));
         T.p[b0] = head_of(T, b0);
         T.q[b0 + 1] = q_mul(T.q[b0], q_xyz(soft_xyz(vec3<f32>(0.0, -sd * 0.9 * open, 0.0), b0 + 1, 0.1)));
         T.p[b0 + 1] = head_of(T, b0 + 1);
-        T.q[b0 + 2] = q_mul(T.q[b0 + 1], q_xyz(soft_xyz(vec3<f32>(0.0, -sd * 0.4 * open, 0.0), b0 + 2, 0.1)));
+        T.q[b0 + 2] = q_mul(T.q[b0 + 1], q_xyz(soft_xyz(vec3<f32>(dip, -sd * 0.4 * open, 0.0), b0 + 2, 0.1)));
         T.p[b0 + 2] = head_of(T, b0 + 2);
     }
 
