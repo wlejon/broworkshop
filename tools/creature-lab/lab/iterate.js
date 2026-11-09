@@ -144,7 +144,7 @@ export function kinkReport(rec, { bone = null, at = null, top = 6 } = {}) {
 
 // Frame by frame from `from` to `to` s. opts.leg: a foot's name (LF); or
 // opts.bones: bone names; `every` steps.
-export function traceText(rec, { leg = null, bones = null, from = null, to = null, every = 1 } = {}) {
+export function traceText(rec, { leg = null, bones = null, root = false, from = null, to = null, every = 1 } = {}) {
     const skel = rec.creature.skel, dt = rec.dt, n = rec.steps;
     if (!(Number.isInteger(every) && every >= 1)) throw new Error(`trace: --every counts steps (a whole number, 1 or more; a step is ${dt.toFixed(4)} s), got ${every}`);
     const k0 = Math.max(3, Math.round((from ?? rec.scenario.duration * 0.5) / dt));
@@ -163,7 +163,18 @@ export function traceText(rec, { leg = null, bones = null, from = null, to = nul
         for (const b of bones) if (skel.index(b) < 0) throw new Error(`trace: no bone '${b}'`);
         chain = chain.concat(bones.map((b) => skel.index(b)));
     }
-    if (!chain.length) throw new Error('trace: name a leg (--leg LF) or bones (--bones a,b)');
+    if (!chain.length && !root) throw new Error('trace: name a leg (--leg LF), bones (--bones a,b) or the root (--root)');
+    // The root bone's place against the plan's (telemetry's position), in the
+    // heading's frame, mm: across and ahead; its height in the world; and
+    // how far each step's place in the world is off the line through the
+    // steps either side (a pop shows as one large value, a smooth path as
+    // almost none).
+    const r0 = skel.bones.find((b) => b.parentIndex < 0).index;
+    const rootAt = (k) => {
+        const p = boneHead(rec.pose, k * rec.poseStride, r0), tb = k * TELE, yaw = rec.tele[tb + T.YAW];
+        const d = [p[0] - rec.tele[tb + T.POS], p[1] - rec.tele[tb + T.POS + 1], p[2] - rec.tele[tb + T.POS + 2]];
+        return [1000 * (d[0] * Math.cos(yaw) - d[2] * Math.sin(yaw)), 1000 * d[1], 1000 * (d[0] * Math.sin(yaw) + d[2] * Math.cos(yaw))];
+    };
     // Each bone's flexion (its local x, the leg's plane) through the run,
     // and the steps it kinks at.
     const ang = chain.map(() => new Float64Array(n));
@@ -180,6 +191,7 @@ export function traceText(rec, { leg = null, bones = null, from = null, to = nul
     const fx = (v, w = 7) => pad(v.toFixed(3), w);
     const head = ['t', 'feet'];
     if (foot) head.push('   h', '  reach', '  ahead', ' below', '   miss');
+    if (root) head.push(' across', '     up', '  ahead', ' off line');
     head.push(...chain.map((b) => pad(skel.bones[b].name.slice(0, 8), 9)), ...slots.map((i) => pad(`p${i}`, 8)), '  event');
     const lines = [`${rec.creature.label} ${rec.scenario.name}: ${leg ? `leg ${leg} (top ${skel.bones[top].name})` : ''}${bones ? ` bones ${bones.join(', ')}` : ''}; angles are each bone's flexion (deg, local x), * where it kinks`,
         head.join('  ')];
@@ -198,6 +210,12 @@ export function traceText(rec, { leg = null, bones = null, from = null, to = nul
             row.push(fx(toe[1] - gh, 6), fx(Math.hypot(...d)), fx(d[0] * Math.sin(yaw) + d[2] * Math.cos(yaw)), fx(-d[1], 6),
                 fx(Math.hypot(toe[0] - c[0], toe[1] - c[1], toe[2] - c[2])));
         }
+        if (root) {
+            const b = rootAt(k);
+            const w = [-1, 0, 1].map((j) => boneHead(rec.pose, (k + j) * rec.poseStride, r0));
+            row.push(pad(b[0].toFixed(1), 7), pad((1000 * w[1][1]).toFixed(1), 7), pad(b[2].toFixed(1), 7),
+                pad((1000 * Math.hypot(w[1][0] - (w[0][0] + w[2][0]) / 2, w[1][1] - (w[0][1] + w[2][1]) / 2, w[1][2] - (w[0][2] + w[2][2]) / 2)).toFixed(2), 9));
+        }
         chain.forEach((b, i) => row.push(pad(ang[i][k].toFixed(1) + (near1(kinked[i], k) ? '*' : ' '), 9)));
         for (const i of slots) row.push(pad(P[k * PROBE_N + i].toPrecision(4), 8));
         row.push(`  ${near[k] || ''}`);
@@ -205,5 +223,6 @@ export function traceText(rec, { leg = null, bones = null, from = null, to = nul
     }
     lines.push('feet: a name where it is down (the rig\'s claim); h: the toe over the ground; reach: toe from the leg\'s top; ahead/below: along the heading and down;');
     lines.push('miss: the toe from the place the rig\'s telemetry gives (its target while it swings)');
+    if (root) lines.push('across/ahead: the root bone from the plan\'s place, mm, in the heading\'s frame; up: its height in the world, mm; off line: mm its place in the world is from the line through the steps either side');
     return { lines };
 }

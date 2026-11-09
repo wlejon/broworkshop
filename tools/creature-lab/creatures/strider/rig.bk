@@ -59,7 +59,7 @@ const D_LEG: i32 = D_AIR + AIR_STATE;
 const LEG_REC: i32 = 14;
 const L_PLANT: i32 = 0;
 const L_PIN: i32 = 1;        // the ball: pinned, or where the swing has it (3)
-const L_OFF: i32 = 4;        // where it lifted from, off the key's place for it, in the creature's frame (3)
+const L_OFF: i32 = 4;        // where on the ground it lifted from (3)
 const L_YAW: i32 = 7;        // the foot's heading
 const L_ARMED: i32 = 8;      // set in stance, so a leg lifts once a cycle
 const L_HOME: i32 = 9;       // a step home: its progress (0: none), and where from (3)
@@ -85,6 +85,7 @@ const LOOSE_MAX: array<f32, NLOOSE> = [0.4, 0.4, 0.4, 0.4, 0.22, 0.5, 0.22, 0.5,
 @knob const SOFT_REACH: f32 = 0.985; // share of a leg's reach where its IK eases the reach in
 @knob const WALK_V: f32 = 1.0;       // m/s the walk's keys are drawn for: slower, it is blended toward the stand
 @knob const JOG_V: f32 = 1.2;        // m/s the walk begins to go over to the run
+@knob const JOIN_U: f32 = 0.6;      // share of a swing over which the foot goes from the ground it left to the keys' path
 @knob const LIFT_DRAWN: f32 = 0.012; // m off the ground the keys draw a standing foot before it has left it
 @knob const RUN_V: f32 = 2.6;       // m/s it is all the run's keys
 @knob const HEAD_SPACE: f32 = 0.8;   // share of the trunk's turning under it the head is held against
@@ -270,7 +271,7 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
     state[s + D_GROUND] = ground_y;
     let org = vec3<f32>(pos.x, ground_y, pos.z);
     // (What its last flight left it off the keys' place, creature::keyed's air.)
-    let lift = air_lift(state, s + D_AIR);
+    let lift = air_lift(state, s + D_AIR, dt);
 
     // --- feet ---------------------------------------------------------------------------
     // Standing, a foot left away from its place steps home, the one further
@@ -292,7 +293,6 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
         let sp = gait_stance(C_WALK, C_RUN, rw, l, phase);
         var planted = state[k + L_PLANT] > 0.5;
         var home_u = state[k + L_HOME];
-        let key_at = key_ball(K, l, org, qyaw);
         var ball = ld3(state, k + L_PIN);
         var fyaw = state[k + L_YAW];
         if (planted) {
@@ -304,10 +304,10 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
             // falling), and waits armed at -1 for the clock's own lift.
             let drawn_off = moving && sp >= 0.0 && state[k + L_ARMED] > 0.5 && K.foot[l].y > LIFT_DRAWN;
             if ((moving && sp < 0.0 && state[k + L_ARMED] > 0.5) || drawn_off) {
-                // Lift-off: from where it is, off the key's place for it.
+                // Lift-off: from where it stands.
                 planted = false;
                 state[k + L_ARMED] = select_f(drawn_off, -1.0, 0.0);
-                st3(state, k + L_OFF, q_rot(q_conj(qyaw), (ball - key_at) * vec3<f32>(1.0, 0.0, 1.0)));
+                st3(state, k + L_OFF, ball);
             } else if (settled && !stepping && stray[l] > 0.04 && stray[l] >= stray[1 - l]) {
                 planted = false;
                 stepping = true;
@@ -342,7 +342,7 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
             // draw it a centimetre off for a tenth of a second.
             let since = select_f(arm < -40.0, -arm - 50.0, -arm - 1.0);
             let clear = select_f(arm < -0.5, 0.022 * smooth01(since / 0.06) * (1.0 - smooth01(u / 0.6)), 0.0);
-            let join = 1.0 - smooth01(u / 0.7);
+            let join = 1.0 - smooth01(u / JOIN_U);
             // (A step on the spot, which the stand's key has no lift for, is
             // lifted here.)
             let hop = 0.045 * (1.0 - gw) * bump(u, 0.4, 0.6);
@@ -352,7 +352,10 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
             let lead_at = key_ball(K, l, org, q_y(yaw + omega * 0.5 * duty / freq * smooth01(u)));
             // (A foot in the air comes down with the body's flight, but
             // gives the dip of a landing no more than half its clearance.)
-            ball = ball_on(env, lead_at + q_rot(qyaw, ld3(state, k + L_OFF)) * join + lift * vec3<f32>(1.0, 0.0, 1.0), l, max(K.foot[l].y + hop + clear + max(lift.y, -0.5 * (K.foot[l].y + hop + clear)), 0.0));
+            // (Joined from the ground it left, not from an offset carried
+            // with the body: it leaves at the ground's speed and gathers the
+            // swing's, with no corner in its path or in the legs' turning.)
+            ball = ball_on(env, mix(lead_at + lift * vec3<f32>(1.0, 0.0, 1.0), ld3(state, k + L_OFF), join), l, max(K.foot[l].y + hop + clear + max(lift.y, -0.5 * (K.foot[l].y + hop + clear)), 0.0));
             fyaw = yaw + wrap_pi(fyaw - yaw) * join;
             if (sp >= 0.0 && !early) {
                 planted = true;
@@ -504,22 +507,23 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
     probe3(state, s + PROBE, 3, q_rot(q_conj(qyaw), balls[0] - org));
     probe3(state, s + PROBE, 6, q_rot(q_conj(qyaw), T.p[LEG_TOP[0]] - org));
 
+    // --- in the air ----------------------------------------------------------------------
+    // With no foot down its mass is in free fall (creature::keyed's air):
+    // the whole of it is moved to where that has it. (Before the loose
+    // parts, which swing from where the body is: hung from the keys' place
+    // and moved after, they felt none of the fall and a jolt at each end of it.)
+    var grounded = false;
+    for (var l: i32 = 0; l < NLEGS; l += 1) {
+        if (state[s + D_LEG + l * LEG_REC + L_PLANT] > 0.5 || state[s + D_LEG + l * LEG_REC + L_HOME] > 0.0) { grounded = true; }
+    }
+    var A = moved(T, air_step(state, s + D_AIR, com_of(T), grounded, init, dt));
+
     // --- the loose parts carry their momentum ---------------------------------------
-    var A = T;
     for (var i: i32 = 0; i < NLOOSE; i += 1) {
         let k = s + D_LOOSE + i * DANGLE_REC;
         if (LOOSE[i] >= B_TAIL1) { A = trail(state, k, A, KP, LOOSE[i], org, LOOSE_W[i], LOOSE_MAX[i], LAYERS, dt, init); }
         else { A = loose(state, k, A, KP, LOOSE[i], LOOSE_W[i] + LOOSE_RUN[i] * rw, LOOSE_ZETA[i], LOOSE_MAX[i], LAYERS, dt, init); }
     }
-
-    // --- in the air ----------------------------------------------------------------------
-    // With no foot down its mass is in free fall (creature::keyed's air):
-    // the whole of it is moved to where that has it.
-    var grounded = false;
-    for (var l: i32 = 0; l < NLEGS; l += 1) {
-        if (state[s + D_LEG + l * LEG_REC + L_PLANT] > 0.5 || state[s + D_LEG + l * LEG_REC + L_HOME] > 0.0) { grounded = true; }
-    }
-    A = moved(A, air_step(state, s + D_AIR, com_of(A), grounded, init, dt));
 
     // --- out -------------------------------------------------------------------------------
     put(pose, c, A);

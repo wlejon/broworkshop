@@ -196,7 +196,18 @@ pub const AIR_STATE: i32 = 12;  // the mass's place (3), its velocity (3), the l
 // rather than meeting the keys' path at a corner.
 const AIR_LAND: f32 = 13.0;
 
-pub fn air_lift(st: rw_store<f32, 1>, at: i32) -> vec3<f32> { return ld3(st, at + 6); }
+// The lift for this step: last step's, let go a step further. (Stepped here,
+// before the pose is made, and not after it in air_step: a flight's step
+// moves the pose by its fall at once, and a landed step that stood on the
+// lift of the step before would skip a step of its motion, a pop in the body
+// on every landing.)
+pub fn air_lift(st: rw_store<f32, 1>, at: i32, dt: f32) -> vec3<f32> {
+    let l0 = ld3(st, at + 6);
+    let lv = ld3(st, at + 9) + (-AIR_LAND * AIR_LAND * l0 - 2.0 * AIR_LAND * ld3(st, at + 9)) * dt;
+    st3(st, at + 9, lv);
+    st3(st, at + 6, l0 + lv * dt);
+    return l0 + lv * dt;
+}
 
 pub fn air_step(st: rw_store<f32, 1>, at: i32, com: vec3<f32>, grounded: bool, init: bool, dt: f32) -> vec3<f32> {
     if (init) {
@@ -209,10 +220,6 @@ pub fn air_step(st: rw_store<f32, 1>, at: i32, com: vec3<f32>, grounded: bool, i
     if (grounded) {
         st3(st, at + 3, (com - ld3(st, at)) / max(dt, 1e-5));
         st3(st, at, com);
-        let l0 = ld3(st, at + 6);
-        let lv = ld3(st, at + 9) + (-AIR_LAND * AIR_LAND * l0 - 2.0 * AIR_LAND * ld3(st, at + 9)) * dt;
-        st3(st, at + 9, lv);
-        st3(st, at + 6, l0 + lv * dt);
         return vec3<f32>(0.0);
     }
     let v = ld3(st, at + 3) - vec3<f32>(0.0, 9.81 * dt, 0.0);
@@ -220,8 +227,10 @@ pub fn air_step(st: rw_store<f32, 1>, at: i32, com: vec3<f32>, grounded: bool, i
     let d = p - com;
     st3(st, at, p);
     st3(st, at + 3, v);
+    // (The lift and its speed are what the fall made them, not what
+    // air_lift let go this step.)
     st3(st, at + 6, ld3(st, at + 6) + d);
-    st3(st, at + 9, d / max(dt, 1e-5));
+    st3(st, at + 9, ld3(st, at + 9) + d / max(dt, 1e-5));
     return d;
 }
 

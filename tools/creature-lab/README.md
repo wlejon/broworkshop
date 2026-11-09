@@ -206,7 +206,11 @@ toes lie along the ground under them. A foot leaves the ground when the
 keys draw it off (`LIFT_DRAWN`), not on the clock alone, and a swing lands
 where the turn will have carried its place by then. With neither foot down
 its mass falls freely (`air_step`), and what the flight left it off the keys
-is let go at the landing without overshoot. Turning on the spot it steps where it stands, and
+is let go at the landing without overshoot (`air_lift` steps that before the
+pose is made, so a landed step stands on this step's lift as a flight's
+does, and the ears, arms and tail swing from the body where the fall has
+it). A foot that lifts is joined to the keys' swing from the ground it left
+over `JOIN_U` of the swing, so it leaves at the ground's speed. Turning on the spot it steps where it stands, and
 standing with a foot astray it steps home. Foraging (`graze`) it crouches
 with its nose and hands at the ground, nosing about and scrabbling in
 bouts; resting (`lie`) it sits back on its haunches with its tail laid
@@ -554,6 +558,9 @@ text under the creature's folder; `score`, `sweep` and `kinks` run what
   then for `--leg <foot>` its toe over the ground, its distance from the
   leg's top bone and that offset along the heading and down, and its miss
   from where the rig's telemetry says it is (its target while it swings),
+  for `--root` the root bone's place across and ahead of the plan's, its
+  height, and how far each step is off the line through the steps either
+  side (mm: a pop in the body is one large value, which a sheet cannot show),
   then each bone of the leg and of `--bones` by its flexion (local x, deg)
   with `*` within a step of a kink, the rig's probe slots that are not zero,
   and the nearest foot event.
