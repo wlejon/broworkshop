@@ -111,7 +111,9 @@ with each tripod (`RUN_BOB`) and its head, ears and tail beat with the
 stride, more the more it hurries. A swinging foot leaves and lands with no
 speed (a quintic ease along its path, its lift and the hoof's curl one bell),
 so a footfall is no corner in any joint. Turning on the spot it steps round
-at a rate its legs can follow; a stance travels less
+at a rate its legs can follow. The body rides low enough that a leg reaches
+only `STEP_REACH` of its length at a step's ends, short of where its reach
+begins to ease in (`SOFT_REACH`), so no footfall falls inside that easing; a stance travels less
 than the pairs stand apart, and the body rides as much lower as the legs
 need to reach a step's ends still bent. Its rig moves the body on
 `creature::body` and `creature::spine` (the `LAYERS` knob; `hexa:plan` is it

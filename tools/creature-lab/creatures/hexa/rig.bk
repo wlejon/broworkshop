@@ -37,6 +37,7 @@ from creature::ground import height;
 // Share of a leg's full reach where its IK eases the reach in (common
 // two_bone): early, a trotting hexa's legs often reaching straight at speed.
 @knob const SOFT_REACH: f32 = 0.9;
+@knob const STEP_REACH: f32 = 0.87;  // the share of a leg's length it reaches at a step's ends (the body rides that low)
 
 const D_SPEED: i32 = 5;
 const D_OMEGA: i32 = 6;
@@ -71,7 +72,7 @@ pub const STATE: i32 = D_SPINE + SPINE_STATE;
 // a sixth of a cycle apart, and at 0.68 never more than two are in the air;
 // as the ripple closes into the tripod three go together and each is down
 // little more than half.
-@knob const DUTY_WALK: f32 = 0.68;@knob const DUTY_RUN: f32 = 0.55;
+@knob const DUTY_WALK: f32 = 0.68;@knob const DUTY_RUN: f32 = 0.5;
 @knob const RUN_BOB: f32 = 0.014;    // m the body rises and falls, tripod to tripod, at a run
 @knob const LIFT: f32 = 0.09;
 @knob const SWAY: f32 = 0.07;
@@ -380,7 +381,10 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
     // Stepping, it rides as much lower as its legs need to reach a step's
     // ends without straightening: a longer step, a lower body.
     let step_h = REACH_AHEAD * go + 0.5 * speed * duty / freq;
-    let leg_r = 0.94 * (rest_len(B_UPPERL1) + rest_len(B_UPPERL1 + 1));
+    // (Still bent: short of where the leg's reach begins to ease in,
+    // SOFT_REACH, or every footfall would fall inside that easing and the
+    // knee turn a corner there.)
+    let leg_r = STEP_REACH * (rest_len(B_UPPERL1) + rest_len(B_UPPERL1 + 1));
     let stand_h = HEAD[B_UPPERL1].y - HEAD[B_UPPERL1 + 2].y;
     let crouch = max(stand_h - sqrt(max(leg_r * leg_r - step_h * step_h, 0.01)), 0.0);
     let want_y = ground_sum / 6.0 + HEAD[B_PELVIS].y - 0.6 * smooth01(lie) - 0.03 * graze - crouch;
