@@ -17,7 +17,7 @@ export default {
     face: 'face.bk',
     rig: { file: 'rig.bk', kernel: 'k_rig' },
     scale: { height: 1.3, length: 0.45 },
-    speeds: { walk: 1.1, trot: 2.4, gallop: 3.6, circle: 0.8 },
+    speeds: { walk: 1.1, trot: 2.0, gallop: 3.0, circle: 0.8 },
     space: 1.2,
     cycles: {
         walk: { scenario: 'walk' },

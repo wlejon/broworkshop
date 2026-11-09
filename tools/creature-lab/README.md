@@ -157,20 +157,29 @@ vaults over the stance leg on a smooth wave of the cycle (`VAULT`, the
 knees soft by `KNEE_W`), held no higher than the planted legs reach,
 and that height rides a critical spring so the arcs meet without a corner
 at each touchdown. Faster it runs (telemetry's gait `run`): each foot down
-for under half its cycle, on the ball of the foot, the swing folded up
-behind, and a flight between steps. The run's height is planned as a
+for under half its cycle, on the midfoot, the heel kicked up behind early
+in the swing, and a flight between steps, the trunk nearly upright and the
+elbows near a right angle. The run's height is planned as a
 bouncing body moves: free fall in the flight, an even push through the
 stance, fed forward to `creature::body` (`Support.lead`), so the legs push
 as hard late in a stance as early and the run keeps its pace. A swinging
 foot folds toward the hip only as far as clears the ground. The pelvis
 turns with the feet's spread and dips on the swing side, the shoulders turn
 against it, and the arms swing against the legs, the forearm a little late.
-Standing, the plan keeps the centre of mass over the feet. Foraging, it
-crouches and picks at the ground with one hand; resting (`lie`), it squats
+Standing, the plan keeps the centre of mass over the feet; idle, it
+breathes, shifts its weight from foot to foot, glances about and now and
+then scratches its belly. Foraging (`graze`), it squats on the balls of its
+feet and reaches down with its right hand to a spot ahead, picks, brings
+it to its mouth and chews, its eyes on the spot; resting (`lie`), it squats
 on its heels; startled, it flinches down with its arms flung up, then
-stands alert. Its root is placed from the last step's centre-of-mass offset
-without carrying it on: the legs are a third of its mass, and an offset
-carried on rings from step to step. Its face (`face.bk`) draws large
+stands alert. A reaching arm is solved to its wrist with the elbow's hinge
+as each bone's axis, so it bends as an arm does. The head is set in the
+world and holds its gaze through the trunk's bob (`HEAD_STEADY`). A planted
+foot keeps the heading it landed with through a turn, the leg turning
+above it. Its root is placed from the last step's centre-of-mass offset
+without carrying it on (the legs are a third of its mass, and an offset
+carried on rings from step to step), and follows `creature::body`'s centre
+through a short lag (`SHIFT_W`), so a foot loading eases into the trunk. Its face (`face.bk`) draws large
 forward eyes, a nose pad and a mouth.
 
 `wader` is an invented long-legged wading bird (0.95 m, 2 kg) on the same
