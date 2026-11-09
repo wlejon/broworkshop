@@ -43,7 +43,10 @@ export function scoreRun(rec, analyzeRun) {
         root: sm.root.reduce((s, r) => s + r.spikes.length, 0),
         friction: n.mass.frictionShare,
         pull: n.mass.pullShare,
-        flightOff: n.mass.flightOff,
+        // Of its steps in the air, those not falling as a body falls; null
+        // when it is hardly ever in the air (a walker's instant between
+        // footfalls is not a flight to judge).
+        flightOff: n.mass.flightSteps >= 0.03 * rec.steps ? n.mass.flightOff : null,
         corners: n.arcs.reduce((s, a) => s + a.corners.length, 0),
         jitter: n.variety.joints.filter((j) => j.verdict === 'jitters').length,
         metricFlags: m.flags,
@@ -53,7 +56,7 @@ export function scoreRun(rec, analyzeRun) {
 const COLS = [
     ['flags', 6, (r) => r.flags], ['natural', 8, (r) => r.natural], ['kinks/s', 8, (r) => r.kinks.toFixed(1)],
     ['root', 5, (r) => r.root], ['friction', 9, (r) => pct(r.friction)], ['pull', 5, (r) => pct(r.pull)],
-    ['flight', 7, (r) => pct(r.flightOff)], ['corners', 8, (r) => r.corners], ['jitter', 7, (r) => r.jitter],
+    ['flight', 7, (r) => (r.flightOff == null ? '-' : pct(r.flightOff))], ['corners', 8, (r) => r.corners], ['jitter', 7, (r) => r.jitter],
 ];
 
 export function scoreHeader(first, w) {

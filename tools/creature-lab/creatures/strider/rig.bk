@@ -85,7 +85,8 @@ const LOOSE_MAX: array<f32, NLOOSE> = [0.4, 0.4, 0.4, 0.4, 0.22, 0.5, 0.22, 0.5,
 @knob const SOFT_REACH: f32 = 0.985; // share of a leg's reach where its IK eases the reach in
 @knob const WALK_V: f32 = 1.0;       // m/s the walk's keys are drawn for: slower, it is blended toward the stand
 @knob const JOG_V: f32 = 1.2;        // m/s the walk begins to go over to the run
-@knob const RUN_V: f32 = 2.6;        // m/s it is all the run's keys
+@knob const LIFT_DRAWN: f32 = 0.012; // m off the ground the keys draw a standing foot before it has left it
+@knob const RUN_V: f32 = 2.6;       // m/s it is all the run's keys
 @knob const HEAD_SPACE: f32 = 0.8;   // share of the trunk's turning under it the head is held against
 const HEAD_RATE: f32 = 3.0;          // 1/s the head's heading follows where the keys would have it
 @knob const LIFE: f32 = 1.0;         // the idle life's share (breath, sway, flicks, glances)
@@ -296,10 +297,16 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
         var fyaw = state[k + L_YAW];
         if (planted) {
             if (sp >= 0.0) { state[k + L_ARMED] = 1.0; }
-            if (moving && sp < 0.0 && state[k + L_ARMED] > 0.5) {
+            // Between the walk and the run the clock's stance outlasts the
+            // drawn one: the keys have the foot leaving the ground while the
+            // clock still holds it down. It leaves when it is drawn to (a
+            // foot held down in the air would carry a body that should be
+            // falling), and waits armed at -1 for the clock's own lift.
+            let drawn_off = moving && sp >= 0.0 && state[k + L_ARMED] > 0.5 && K.foot[l].y > LIFT_DRAWN;
+            if ((moving && sp < 0.0 && state[k + L_ARMED] > 0.5) || drawn_off) {
                 // Lift-off: from where it is, off the key's place for it.
                 planted = false;
-                state[k + L_ARMED] = 0.0;
+                state[k + L_ARMED] = select_f(drawn_off, -1.0, 0.0);
                 st3(state, k + L_OFF, q_rot(q_conj(qyaw), (ball - key_at) * vec3<f32>(1.0, 0.0, 1.0)));
             } else if (settled && !stepping && stray[l] > 0.04 && stray[l] >= stray[1 - l]) {
                 planted = false;
@@ -323,14 +330,31 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
             if (home_u >= 1.0) { planted = true; home_u = 0.0; ball = to; fyaw = yaw; }
         } else {
             // The swing: the key's path, joined from where the foot left.
-            let u = select_f(sp >= 0.0, 1.0, gait_swing(C_WALK, C_RUN, rw, l, phase));
+            // (L_ARMED below zero: -1 and the time since it left early, while
+            // it waits for the clock's lift; -50 and that time once it has
+            // come.)
+            var arm = state[k + L_ARMED];
+            let early = arm < -0.5 && arm > -40.0;
+            if (early) { arm -= dt; if (sp < 0.0) { arm -= 49.0; } state[k + L_ARMED] = arm; }
+            let u = select_f(early, 0.0, select_f(sp >= 0.0, 1.0, gait_swing(C_WALK, C_RUN, rw, l, phase)));
+            // Left early, the toes come clear of the ground at once: the
+            // keys, between the walk's foot down and the run's foot up,
+            // draw it a centimetre off for a tenth of a second.
+            let since = select_f(arm < -40.0, -arm - 50.0, -arm - 1.0);
+            let clear = select_f(arm < -0.5, 0.022 * smooth01(since / 0.06) * (1.0 - smooth01(u / 0.6)), 0.0);
             let join = 1.0 - smooth01(u / 0.7);
             // (A step on the spot, which the stand's key has no lift for, is
             // lifted here.)
             let hop = 0.045 * (1.0 - gw) * bump(u, 0.4, 0.6);
-            ball = ball_on(env, key_at + q_rot(qyaw, ld3(state, k + L_OFF)) * join + lift * vec3<f32>(1.0, 0.0, 1.0), l, max(K.foot[l].y + hop + lift.y, 0.0));
+            // Turning, it lands where the key will have it halfway through
+            // its stance: pinned where the key has it now, the body turns on
+            // over it and the leg is carried across under the hips.
+            let lead_at = key_ball(K, l, org, q_y(yaw + omega * 0.5 * duty / freq * smooth01(u)));
+            // (A foot in the air comes down with the body's flight, but
+            // gives the dip of a landing no more than half its clearance.)
+            ball = ball_on(env, lead_at + q_rot(qyaw, ld3(state, k + L_OFF)) * join + lift * vec3<f32>(1.0, 0.0, 1.0), l, max(K.foot[l].y + hop + clear + max(lift.y, -0.5 * (K.foot[l].y + hop + clear)), 0.0));
             fyaw = yaw + wrap_pi(fyaw - yaw) * join;
-            if (sp >= 0.0) {
+            if (sp >= 0.0 && !early) {
                 planted = true;
                 ball = ball_on(env, ball, l, 0.0);
                 fyaw = yaw;

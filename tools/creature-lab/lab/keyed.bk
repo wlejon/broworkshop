@@ -190,7 +190,11 @@ pub fn gait_span(a: i32, b: i32, w: f32) -> f32 { return mix(CYC_SPAN[a], CYC_SP
 // left the ground with, and air_step returns how far to move the pose
 // (pose::moved) to have it there; landed, the lift is let go through the
 // stance.
-pub const AIR_STATE: i32 = 9;   // the mass's place (3), its velocity (3), the lift (3)
+pub const AIR_STATE: i32 = 12;  // the mass's place (3), its velocity (3), the lift (3) and its speed (3)
+// 1/s the landed lift is let go at: critically damped from the speed it
+// came down with, so the body sinks on into its landing and comes back
+// rather than meeting the keys' path at a corner.
+const AIR_LAND: f32 = 13.0;
 
 pub fn air_lift(st: rw_store<f32, 1>, at: i32) -> vec3<f32> { return ld3(st, at + 6); }
 
@@ -199,12 +203,16 @@ pub fn air_step(st: rw_store<f32, 1>, at: i32, com: vec3<f32>, grounded: bool, i
         st3(st, at, com);
         st3(st, at + 3, vec3<f32>(0.0));
         st3(st, at + 6, vec3<f32>(0.0));
+        st3(st, at + 9, vec3<f32>(0.0));
         return vec3<f32>(0.0);
     }
     if (grounded) {
         st3(st, at + 3, (com - ld3(st, at)) / max(dt, 1e-5));
         st3(st, at, com);
-        st3(st, at + 6, ld3(st, at + 6) * exp(-9.0 * dt));
+        let l0 = ld3(st, at + 6);
+        let lv = ld3(st, at + 9) + (-AIR_LAND * AIR_LAND * l0 - 2.0 * AIR_LAND * ld3(st, at + 9)) * dt;
+        st3(st, at + 9, lv);
+        st3(st, at + 6, l0 + lv * dt);
         return vec3<f32>(0.0);
     }
     let v = ld3(st, at + 3) - vec3<f32>(0.0, 9.81 * dt, 0.0);
@@ -213,6 +221,7 @@ pub fn air_step(st: rw_store<f32, 1>, at: i32, com: vec3<f32>, grounded: bool, i
     st3(st, at, p);
     st3(st, at + 3, v);
     st3(st, at + 6, ld3(st, at + 6) + d);
+    st3(st, at + 9, d / max(dt, 1e-5));
     return d;
 }
 

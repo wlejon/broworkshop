@@ -112,7 +112,9 @@ export function series(rec) {
             for (let j = 0; j < ns; j++) {
                 const s = (k * nf + i) * ns + j;
                 soleH[s] = sole[s * 3 + 1] - gh[k * per + i * ns + j];
-                if (j === 0 && soleH[s] < LIMITS.contact) down = true;
+                // Down on any of its sole: a foot that lands heel first, its
+                // toe still coming down, is already carrying the body.
+                if (soleH[s] < LIMITS.contact) down = true;
             }
             contact[k * nf + i] = down ? 1 : 0;
         }
@@ -222,7 +224,7 @@ export function analyze(rec, opts = {}) {
         });
         joints[b.name] = Object.fromEntries(ax.map((a) => [a.name, a]));
         for (const a of ax) {
-            if (a.over) flags.push(`limit: ${b.name}.${a.name} past its range by ${a.excess.toFixed(1)} deg for ${(100 * a.over / n).toFixed(0)}% of the run (first at ${a.firstOver.toFixed(2)} s; range ${a.lo}..${a.hi})`);
+            if (a.over) flags.push(`limit: ${b.name}.${a.name} past its range by ${a.excess.toFixed(1)} deg for ${(100 * a.over / n).toFixed(0)}% of the run (first at ${a.firstOver.toFixed(2)} s; range ${a.lo}..${a.hi}, it went ${a.min}..${a.max})`);
         }
     }
 
