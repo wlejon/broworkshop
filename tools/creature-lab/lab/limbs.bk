@@ -96,7 +96,7 @@ pub fn toe_roll(ph: f32, duty: f32) -> f32 { return smooth01((stance_phase(ph, d
 // landed, s until it lifts) is taken into its share over LEAN_T after it
 // lands and out over LEAN_T before it lifts, so the weight comes off a foot
 // before it steps; every foot down keeps a little of it.
-const LEAN_T: f32 = 0.25;
+const LEAN_T: f32 = 0.12;
 pub fn lean_over(toes: array<vec3<f32>, NFEET>, hold: array<vec3<f32>, NFEET>, com: vec3<f32>, lean_max: f32) -> vec3<f32> {
     var cw = vec4<f32>(0.0);
     for (var l: i32 = 0; l < NFEET; l += 1) {

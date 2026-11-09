@@ -255,7 +255,20 @@ export function rigidSkin(creature) {
 export function massPhysics(rec) {
     const S = series(rec), n = rec.steps, dt = rec.dt, nf = rec.creature.skel.feet.length, g = 9.81;
     const h = 3, H = h * dt;
-    const down = (k) => { for (let i = 0; i < nf; i++) if (S.contact[k * nf + i]) return true; return false; };
+    // On the ground: a foot down, or lying (its root well under where it
+    // stood at the start), when the body carries it and no foot need.
+    const skel = rec.creature.skel, root = skel.bones.find((b) => b.parentIndex < 0).index;
+    // (Or kneeling its way there, brisket down and rump still up: any of
+    // the joints it carries high, down to nearly half its standing height.)
+    let tall = 0;
+    for (let b = 0; b < skel.count; b++) tall = Math.max(tall, S.jointH[b]);
+    const high = skel.bones.filter((b) => S.jointH[b.index] > 0.6 * tall).map((b) => b.index);
+    const lying = (k) => {
+        if (S.jointH[k * skel.count + root] < 0.6 * S.jointH[root]) return true;
+        for (const b of high) if (S.jointH[k * skel.count + b] < 0.55 * S.jointH[b]) return true;
+        return false;
+    };
+    const down = (k) => { if (lying(k)) return true; for (let i = 0; i < nf; i++) if (S.contact[k * nf + i]) return true; return false; };
     const acc = [], vel = [], flight = new Uint8Array(n), viol = [];
     let nFlight = 0, nGround = 0, badFlight = 0, pull = 0, slide = 0, worstF = { a: 0, t: 0 }, worstG = { a: 0, t: 0 };
     for (let k = 0; k < n; k++) {

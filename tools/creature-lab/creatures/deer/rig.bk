@@ -97,7 +97,8 @@ const GALLOP_DOWN: f32 = 4.0;
 const SETTLE_TRIG: f32 = 0.05;   // m a still hoof may stray before it steps home
 const REACH_TRIG: f32 = 0.52;    // m a planted hoof may trail its home before it must step
 const SETTLE_T: f32 = 0.34;
-@knob const HEAD_HOLD: f32 = 0.6;      // share of the body's bob and pitch the neck takes up
+@knob const FOLD_AHEAD: f32 = 0.8;     // how far a leg's lower joints run ahead of its top one, folding to lie
+@knob const HEAD_HOLD: f32 = 0.6;     // share of the body's bob and pitch the neck takes up
 @knob const HEAD_SPACE: f32 = 0.6;     // share of its gaze in space the head holds (the rest it is carried)
 @knob const NECK_LEVER: f32 = 0.35;    // m the head rises per radian of neck extension
 @knob const REACH_FORE: f32 = 0.90;    // m from that pivot to the toe the fore leg can hold
@@ -339,8 +340,14 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
     if (was_moving) { moving = moving || speed > 0.03 || vd > 0.03 || abs(err) > 0.05; }
     if (lie > 0.001) { moving = false; }
     var offs: array<f32, 4>;
+    let pivot = (1.0 - smooth01(speed / 0.3)) * smooth01(abs(omega) / 0.15);
     for (var l: i32 = 0; l < 4; l += 1) {
         offs[l] = off_mix(OFF_WALK, OFF_TROT, OFF_GALLOP, gw, l);
+        // Wheeling on the spot it steps in diagonal pairs, as it trots:
+        // its hooves go nowhere ahead to make the walk's triangles under
+        // it, and with one hoof up the three left do not hold its weight;
+        // a diagonal pair does, the weight on the line between them.
+        offs[l] += pivot * phase_diff(offs[l], OFF_TROT[l]);
     }
     // A stumble: the right hind's beat jumps every other stride.
     let cyc = floor(phase);
@@ -921,7 +928,13 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
             let b = b0 + i;
             let abs_t = -(leg_angle(o, i) - rest_angle(b));
             var loc = abs_t - prev;
-            if (hind) { loc = mix(loc, FOLD_HIND[i], lie_l); } else { loc = mix(loc, FOLD_FRONT[i], lie_l); }
+            // The joints below the top one fold ahead of it (and unfold after
+            // it, getting up): a leg turned toward its fold at full length
+            // puts its hoof through the ground, one that shortens first
+            // lifts it clear.
+            var fw = lie_l;
+            if (i > 0) { fw = min(lie_l + FOLD_AHEAD * lie_l * (1.0 - lie_l), 1.0); }
+            if (hind) { loc = mix(loc, FOLD_HIND[i], fw); } else { loc = mix(loc, FOLD_FRONT[i], fw); }
             if (l == 0 && i == 2 && FAULT_OVERBEND > 0.0) {
                 loc -= FAULT_OVERBEND * sw[l];
             } else {
@@ -989,7 +1002,9 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
         let f0 = t0 + T_FOOT + 4 * l;
         var pl = state[k + L_PLANT];
         let lie_l = select_f(LEG_HIND[l] == 1, lie_h, lie_f);
-        if (lie_l > 0.05) { pl = 0.0; }
+        // A leg that has begun to fold is not a stance: its hoof is drawn
+        // in under it, and the brisket and haunch take the weight.
+        if (lie_l > 0.004) { pl = 0.0; }
         tele[f0] = pl;
         var at = toes[l];
         if (state[k + L_PLANT] < 0.5) { at = ld3(state, k + L_TO); }
