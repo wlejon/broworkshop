@@ -1,0 +1,77 @@
+// creature::face — the strider's face, drawn per pixel over the head's skin
+// (lab/face.bk has how), in the rest pose's coordinates (body.js: x to its
+// left, y up, z forward, metres). `foot` is a pixel's size there; every
+// edge is softened over it.
+//
+// What it shows, looking ahead:
+//   eyes    large and set forward on the eyeball masses, a warm brown iris
+//           about a black pupil, glossy, in a dark lid rim with a pale
+//           ring of bare skin about it
+//   nose    a broad dark pad on the muzzle's top, two round nostrils
+//   mouth   a wide line across the muzzle under it, turning up at its ends
+module creature::face;
+import mesh;
+
+fn lin(c: vec3<f32>) -> vec3<f32> {
+    return vec3<f32>(pow(c.x, 2.2), pow(c.y, 2.2), pow(c.z, 2.2));
+}
+
+// 1 inside (d < 0), 0 outside, over w either side of the edge.
+fn inside(d: f32, w: f32) -> f32 {
+    return clamp(0.5 - d / (2.0 * w), 0.0, 1.0);
+}
+
+// The eye (body.js's eye mass): its centre on the left, seen from the
+// front, and the opening's radius.
+const EYE: vec2<f32> = vec2<f32>(0.042, 1.219);
+const EYE_R: f32 = 0.0168;
+// The nose pad's middle and the mouth's middle.
+const NOSE: vec2<f32> = vec2<f32>(0.0, 1.193);
+const MOUTH_Y: f32 = 1.148;
+
+pub fn face(p: vec3<f32>, foot: f32, s: mesh::Surface) -> mesh::Surface {
+    var out = s;
+    let w = max(foot, 0.0003);
+    let ax = abs(p.x);
+    var c = s.base_color;
+    var rough = s.roughness;
+    let q = vec2<f32>(ax, p.y);
+
+    if (p.z > 0.098 && abs(p.y - EYE.y) < 0.03 && abs(ax - EYE.x) < 0.03) {
+        let r = length(q - EYE);
+        let d = r - EYE_R;
+        // The pale ring of bare skin, then the dark lid rim.
+        c = mix(c, lin(vec3<f32>(0.62, 0.52, 0.42)), 0.6 * inside(d - 0.0045, 0.0015 + w));
+        let rim = inside(d - 0.0016, w);
+        c = mix(c, lin(vec3<f32>(0.08, 0.05, 0.04)), rim);
+        rough = mix(rough, 0.45, rim);
+        // The upper lid shades the top of the eye a little.
+        let open = inside(d, w) * inside(p.y - (EYE.y + 0.8 * EYE_R) + 0.25 * (ax - EYE.x) * (ax - EYE.x) / EYE_R, w);
+        let k = r / EYE_R;
+        var iris = mix(lin(vec3<f32>(0.42, 0.24, 0.10)), lin(vec3<f32>(0.20, 0.10, 0.04)), smoothstep(0.35, 0.95, k));
+        iris = mix(iris, lin(vec3<f32>(0.01, 0.008, 0.007)), inside(r - 0.42 * EYE_R, w));
+        // A dark ring at the iris's edge.
+        iris = mix(iris, lin(vec3<f32>(0.05, 0.03, 0.02)), smoothstep(0.85, 1.0, k));
+        c = mix(c, iris, open);
+        rough = mix(rough, 0.04, open);
+    }
+
+    if (p.z > 0.12) {
+        // The nose pad, broader than tall, and its nostrils.
+        let pd = length((q - NOSE) / vec2<f32>(0.021, 0.0125)) - 1.0;
+        let pad = inside(pd * 0.012, w);
+        c = mix(c, lin(vec3<f32>(0.10, 0.07, 0.06)), pad);
+        rough = mix(rough, 0.3, pad);
+        let nost = inside(length((q - vec2<f32>(0.0085, NOSE.y - 0.002)) / vec2<f32>(0.0048, 0.0032)) * 0.004 - 0.004, w);
+        c = mix(c, lin(vec3<f32>(0.015, 0.01, 0.01)), nost);
+        // The mouth: a line across, curving up at its corners.
+        if (ax < 0.05) {
+            let y = MOUTH_Y + 0.006 * (ax / 0.045) * (ax / 0.045);
+            let m = inside(abs(p.y - y) - 0.0011, w) * inside(ax - 0.045, w);
+            c = mix(c, lin(vec3<f32>(0.10, 0.06, 0.05)), 0.9 * m);
+        }
+    }
+    out.base_color = c;
+    out.roughness = rough;
+    return out;
+}

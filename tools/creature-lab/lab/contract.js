@@ -52,8 +52,9 @@ export const T = {
 // HOP: the fore feet down one after the other, then the hind pair together
 // beside or ahead of them, no flight; BOUND: the same order run with a flight
 // after the hind pair's push (a half-bound).
-export const GAIT = { STAND: 0, WALK: 1, TROT: 2, GALLOP: 3, HOP: 4, BOUND: 5 };
-export const GAIT_NAMES = ['stand', 'walk', 'trot', 'gallop', 'hop', 'bound'];
+// RUN: a biped's gait with flight, the feet down one after the other.
+export const GAIT = { STAND: 0, WALK: 1, TROT: 2, GALLOP: 3, HOP: 4, BOUND: 5, RUN: 6 };
+export const GAIT_NAMES = ['stand', 'walk', 'trot', 'gallop', 'hop', 'bound', 'run'];
 
 export function contractModule() {
     let s = 'module creature::contract;\n';

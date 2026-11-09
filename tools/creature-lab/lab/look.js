@@ -83,7 +83,8 @@ export function lookSheet(rec, { path, rows = 6, phases = null, views = null, ce
     const V = views ? LOOK_VIEWS.filter((v) => views.includes(v.name)) : LOOK_VIEWS.slice(0, 3);
     const ext = restExtent(creature.skel);
     const rest = [0, ext.top * 0.5, ext.mid];
-    const d = ext.len * dist;
+    // Out by its length, or by its height for one that stands taller than long.
+    const d = Math.max(ext.len, ext.top) * dist;
     const fb = focus ? creature.skel.bones[creature.skel.index(focus)] : null;
     if (focus && !fb) throw new Error(`look: no bone '${focus}' to focus on`);
     const LM = 112, TM = 86, cw = cell, ch = Math.round(cell * 0.75);

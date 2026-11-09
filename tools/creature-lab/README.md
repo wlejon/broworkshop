@@ -148,6 +148,30 @@ its joints' ranges, and a girdle is planned over the ground under a swinging
 foot's home, not under its landing mark (a hop's is well ahead, and on a
 slope well below).
 
+`strider` is an invented upright biped (1.3 m, 38 kg) with long arms and
+no tail, on the same layers as the deer (`creature::body`,
+`creature::secondary`, `LAYERS`; `strider:plan` is its plan alone). Its two
+legs run on a clock half a cycle apart. Walking, it lands on its heel with
+the toes up, rocks flat, and rolls off its toes as the heel lifts; the body
+vaults over the stance leg, held no higher than the planted legs reach,
+and that height rides a critical spring so the arcs meet without a corner
+at each touchdown. Faster it runs (telemetry's gait `run`): each foot down
+for under half its cycle, on the ball of the foot, the swing folded up
+behind, and a flight between steps. The run's height is planned as a
+bouncing body moves: free fall in the flight, an even push through the
+stance, fed forward to `creature::body` (`Support.lead`), so the legs push
+as hard late in a stance as early and the run keeps its pace. A swinging
+foot folds toward the hip only as far as clears the ground. The pelvis
+turns with the feet's spread and dips on the swing side, the shoulders turn
+against it, and the arms swing against the legs, the forearm a little late.
+Standing, the plan keeps the centre of mass over the feet. Foraging, it
+crouches and picks at the ground with one hand; resting (`lie`), it squats
+on its heels; startled, it flinches down with its arms flung up, then
+stands alert. Its root is placed from the last step's centre-of-mass offset
+without carrying it on: the legs are a third of its mass, and an offset
+carried on rings from step to step. Its face (`face.bk`) draws large
+forward eyes, a nose pad and a mouth.
+
 A creature can carry its own motion oracle: its def's `motion(rec, series,
 {steadyFrom, steady, headBob})`, which `analyze` calls and whose flags join
 the run's (and whose report is the metrics' `motion`). The bunny's
