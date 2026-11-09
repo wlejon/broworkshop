@@ -1,7 +1,8 @@
-// The hexa: an invented six-legged grazer with a long tail and a heavy
-// head, on its own skeleton and rig, its body masses blended into one skin.
-// No reference behind it, so the lab judges it by the finder, form and
-// natural alone.
+// The hexa: an invented six-legged browser of the open plain, slender and
+// long-backed on three pairs of long legs, with an arched neck, lyre horns
+// and a tufted tail; on its own skeleton and rig, its body masses blended
+// into one skin. No reference behind it, so the lab judges it by watching
+// it (watch), the finder, form and natural.
 
 import { bones, feet, tracks, chartJoints } from "./skeleton.js";
 import { body } from "./body.js";
@@ -11,7 +12,8 @@ export default {
     skeleton: { bones, feet, tracks, chartJoints },
     body,
     rig: { file: 'rig.bk', kernel: 'k_rig' },
-    scale: { height: 0.85, length: 4.2 },
+    scale: { height: 1.5, length: 2.6 },
+    speeds: { walk: 1.2, trot: 1.9, gallop: 2.6, circle: 1.0 },
     cycles: {
         walk: { scenario: 'walk' },
     },

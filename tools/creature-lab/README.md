@@ -98,10 +98,18 @@ The reference creature is `deer`: a deer-sized quadruped with spine, neck,
 head, ears and tail. Its gaits are walk, trot and gallop, and its actions are
 idle, graze, startle, lie down and bound; from a gallop it leaps a log in its
 path (`creature::leap`). `hexa` is an invented one with no
-reference behind it: six legs on a tripod walk, a long tail and a heavy head.
-Its rig is on the same layers (`creature::body`, `creature::spine`,
-`creature::secondary`, with the same `LAYERS` knob; `hexa:plan` is it with
-them off), its height held where the planted legs reach.
+reference behind it: a slender six-legged browser of the plain, a long back
+on three pairs of long legs, an arched neck of two bones, lyre horns, long
+ears and a thin tufted tail. Walking, its legs go in a ripple up each side
+(each a third of a cycle after the one behind, `leg_off`), which closes up
+into a tripod as it hurries (`RIPPLE_V`, `TRIPOD_V`); a stance travels less
+than the pairs stand apart, and the body rides as much lower as the legs
+need to reach a step's ends still bent. Its rig moves the body on
+`creature::body` and `creature::spine` (the `LAYERS` knob; `hexa:plan` is it
+with them off), its height held where the planted legs reach; its neck,
+head, ears and tail are the rig's own (the neck giving at each step, the
+ears roaming and flicking, the tail a hanging cord the hips' sway runs down
+as a wave, drawn from the stride's phase so nothing in it rings).
 
 `bunny` is a wild rabbit (0.2 m high, 0.42 m long) with motion of its own,
 not on those layers. It has no walk: it hops (the fore feet stepping one
