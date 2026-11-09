@@ -567,7 +567,10 @@ Every output is deterministic. A rerun writes the same bytes.
     legs part against the hip joints' height, the share of the trunk's
     height with the arms clear of it, and the front width profile's pinches
     (neck, waist, a leg's joints), each against the widths within 12 cm
-    above and below; no waist pinch is a tube, a weak neck pinch a stalk
+    above and below; no waist pinch is a tube, a weak neck pinch a stalk;
+    and the first leg's own skin side on, the thigh's greatest depth over
+    its middle against the shank's (`thighCalf`): a calf deeper than the
+    thigh makes the leg top-light
 - **Kinematics** (`lab/kinematics.js`): where in a stride the motion jumps.
   - per leg, each bone's flexion, angular velocity and angular acceleration
     over the steady cycle (each cycle thin, the mean bold), the leg's measured

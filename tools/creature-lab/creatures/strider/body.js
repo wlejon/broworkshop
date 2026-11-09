@@ -76,7 +76,7 @@ export function body(skel, detail = {}) {
     // The neck, slim under the skull.
     B.limb('neck', ['chest', 'neck'], [
         { c: [0, 1.035, -0.012], r: [0.062, 0.056] },
-        { c: [0, 1.095, 0.004], r: [0.043, 0.046] },
+        { c: [0, 1.095, 0.004], r: [0.039, 0.044] },
         { c: [0, 1.14, 0.012], r: [0.046, 0.05], bone: 'head' },
     ], { up: [0, 0, 1], blend: 0.02 });
     // The head: a large round skull, full cheeks, a short muzzle.
@@ -99,7 +99,7 @@ export function body(skel, detail = {}) {
         const at = (b, u) => lerp(b.head, b.tail, u);
         // The shoulder's slope, from the neck's base out to the deltoid.
         B.limb(`trap${t}`, [`shoulder${t}`], [
-            { c: [0.035 * s, 1.07, -0.022], r: [0.035, 0.032] },
+            { c: [0.035 * s, 1.045, -0.022], r: [0.03, 0.028] },
             { c: [0.13 * s, 1.025, -0.02], r: [0.04, 0.036] },
         ], { up: [0, 1, 0], blend: 0.02 });
         B.blob(`delt${t}`, `upperarm${t}`, add(ua.head, [0.006 * s, -0.016, 0.0]), [0.043, 0.056, 0.047], { blend: 0.018 });
@@ -137,16 +137,18 @@ export function body(skel, detail = {}) {
         const th = bn('thigh'), sn = bn('shin'), ft = bn('foot');
         const x = th.head[0];
         B.limb(`leg${t}`, [`thigh${t}`, `shin${t}`], [
-            { c: [x * 1.04, 0.645, -0.004], r: [0.066, 0.074], bone: `thigh${t}` },
-            { c: [x, 0.55, 0.01], r: [0.056, 0.062] },
-            { c: [x, 0.445, 0.016], r: [0.043, 0.049] },
-            { c: sn.head, r: [0.038, 0.043] },
-            { c: [x, 0.3, -0.004], r: [0.039, 0.043] },
-            { c: [x, 0.19, -0.01], r: [0.028, 0.03] },
+            { c: [x * 1.04, 0.645, -0.004], r: [0.066, 0.076], bone: `thigh${t}` },
+            { c: [x, 0.56, 0.008], r: [0.06, 0.074] },
+            { c: [x, 0.47, 0.014], r: [0.05, 0.062] },
+            { c: sn.head, r: [0.037, 0.042] },
+            { c: [x, 0.31, -0.006], r: [0.036, 0.04] },
+            { c: [x, 0.19, -0.01], r: [0.026, 0.028] },
             { c: ft.head, r: [0.021, 0.023], bone: `shin${t}` },
         ], { up: [0, 0, 1], blend: 0.018 });
         B.blob(`glute${t}`, [[`thigh${t}`, 0.35], ['pelvis', 0.65]], [0.052 * s, 0.65, -0.058], [0.062, 0.068, 0.055], { blend: 0.02 });
-        B.blob(`calf${t}`, `shin${t}`, [x, 0.29, -0.03], [0.033, 0.058, 0.03], { blend: 0.018 });
+        // The front of the thigh, full over its middle.
+        B.blob(`quad${t}`, `thigh${t}`, [x, 0.53, 0.036], [0.044, 0.07, 0.036], { blend: 0.02 });
+        B.blob(`calf${t}`, `shin${t}`, [x, 0.315, -0.026], [0.028, 0.05, 0.024], { blend: 0.018 });
         // The foot: a round heel behind the ankle, the sole flat, three
         // short toes on its front.
         B.limb(`sole${t}`, [`foot${t}`], [

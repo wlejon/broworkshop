@@ -27,7 +27,10 @@
 //               the front width profile's pinches (neck, waist, the joints
 //               of a leg): each against the bulges either side of it. A
 //               profile with no pinch between shoulders and legs is a tube;
-//               a head no wider than its neck is a stalk.
+//               a head no wider than its neck is a stalk. The first leg's
+//               own skin side on: the thigh's greatest depth against the
+//               shank's (POSES.thighCalf), as a calf deeper than the thigh
+//               makes a leg top-light.
 
 import { cycles, relativePose, planted, rootOf } from "./cycle.js";
 import { groundHeights } from "./run.js";
@@ -37,7 +40,7 @@ import { boneHead, boneTail } from "./skeleton.js";
 import { skinPositions } from "./form.js";
 
 const DEG = 180 / Math.PI;
-export const POSES = { walkBend: 20, walkVault: 0.4, pushOff: 0.95, crotch: 0.75, armGap: 0.5, pinch: 1.15, headNeck: 1.3 };
+export const POSES = { walkBend: 20, walkVault: 0.4, pushOff: 0.95, crotch: 0.75, armGap: 0.5, pinch: 1.15, headNeck: 1.3, thighCalf: 1.3 };
 
 const sub = (a, b) => [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
 const len = (a) => Math.hypot(a[0], a[1], a[2]);
@@ -91,12 +94,15 @@ function tailBones(skel) {
     return out;
 }
 
-function silhouette(creature, X, side, cell = 0.004) {
+// `only`, a set of bones, keeps just the triangles all of whose corners those
+// bones carry most.
+function silhouette(creature, X, side, cell = 0.004, only = null) {
     const n = X.length / 3;
     const tails = tailBones(creature.skel), W0 = creature.body.weights;
     const all = creature.body.indices, keep = [];
     for (let t = 0; t < all.length; t += 3) {
-        if (!side && [0, 1, 2].every((j) => tails.has(W0[all[t + j]][0].index))) continue;
+        const own = [0, 1, 2].map((j) => W0[all[t + j]][0].index);
+        if (only ? !own.every((b) => only.has(b)) : (!side && own.every((b) => tails.has(b)))) continue;
         keep.push(all[t], all[t + 1], all[t + 2]);
     }
     const idx = keep;
@@ -187,6 +193,29 @@ function frontForm(skel, S) {
     return { crotch, hipY, crotchShare: crotch / hipY, armClear: rows ? clear / rows : 0, shoulder, profile: prof, pinches };
 }
 
+// The first leg's two upper bones seen from the side alone: its greatest
+// depth (front to back) over the thigh's middle (the buttock above it is
+// not the thigh) and over the shank between its joints' ends.
+function legForm(creature) {
+    const skel = creature.skel, leg = skel.parts.legs[0];
+    if (!leg) return null;
+    const th = skel.bones[leg.top];
+    const shin = skel.bones.find((b) => b.parentIndex === th.index);
+    if (!shin) return null;
+    const S = silhouette(creature, creature.body.positions, true, 0.003, new Set([th.index, shin.index]));
+    const hipY = th.head[1], kneeY = th.tail[1], ankleY = shin.tail[1];
+    let thigh = 0, shank = 0, thighY = 0, shankY = 0;
+    for (let r = 0; r < S.H; r++) {
+        const y = S.yOf(r), runs = runsOf(S, r);
+        if (!runs.length) continue;
+        const d = Math.max(...runs.map((q) => q[1] - q[0]));
+        const ut = (y - kneeY) / (hipY - kneeY), us = (y - ankleY) / (kneeY - ankleY);
+        if (ut > 0.3 && ut < 0.6 && d > thigh) { thigh = d; thighY = y; }
+        if (us > 0.15 && us < 0.85 && d > shank) { shank = d; shankY = y; }
+    }
+    return { thigh, shank, thighY, shankY, ratio: thigh / Math.max(shank, 1e-3) };
+}
+
 function drawSil(g, S, x0, y0, w, h, color) {
     const k = Math.min(w / (S.W * S.cell), h / (S.H * S.cell));
     const img = new ImageData(S.W, S.H);
@@ -264,6 +293,8 @@ export function posesSheet(rec, { path } = {}) {
     if (!gait.run && formMid.crotchShare < POSES.crotch) flags.push(`silhouette: at mid-stance the legs part ${(100 * formMid.crotch).toFixed(0)} cm up (${(100 * formMid.crotchShare).toFixed(0)}% of the hips' height)`);
     if (form.armClear < POSES.armGap) flags.push(`silhouette: the arms stand clear of the trunk over ${(100 * form.armClear).toFixed(0)}% of its height (want >= ${(100 * POSES.armGap).toFixed(0)}%)`);
     if (!trunkPinch.some((p) => p.contrast >= POSES.pinch)) flags.push(`silhouette: no waist: the trunk narrows nowhere by ${(100 * (POSES.pinch - 1)).toFixed(0)}% between its bulges (a tube)`);
+    const leg = legForm(creature);
+    if (leg && leg.ratio < POSES.thighCalf) flags.push(`silhouette: the thigh (${(100 * leg.thigh).toFixed(1)} cm deep) is only ${leg.ratio.toFixed(2)}x the shank's ${(100 * leg.shank).toFixed(1)} cm, side on (want >= ${POSES.thighCalf})`);
     if (neck && neck.contrast < POSES.headNeck) flags.push(`silhouette: the neck (${(100 * neck.w).toFixed(1)} cm) is only ${neck.contrast.toFixed(2)}x narrower than what is about it (want >= ${POSES.headNeck})`);
 
     // --- draw ---
@@ -321,6 +352,7 @@ export function posesSheet(rec, { path } = {}) {
     const lines = [
         `crotch ${(100 * form.crotch).toFixed(0)} cm = ${(100 * form.crotchShare).toFixed(0)}% of the hip joints' ${(100 * form.hipY).toFixed(0)} (mid-stance ${(100 * formMid.crotchShare).toFixed(0)}%)`,
         `arms clear of the trunk over ${(100 * form.armClear).toFixed(0)}% of its height`,
+        ...(leg ? [`leg, side on: thigh ${(100 * leg.thigh).toFixed(1)} cm deep, shank ${(100 * leg.shank).toFixed(1)} (${leg.ratio.toFixed(2)}x)`] : []),
         `pinches (width, contrast), top down:`,
         ...form.pinches.map((p) => `  ${(100 * p.y).toFixed(0)} cm: ${(100 * p.w).toFixed(1)} cm wide, ${p.contrast.toFixed(2)}x`),
     ];
@@ -334,5 +366,5 @@ export function posesSheet(rec, { path } = {}) {
         legs: at(k).legs.map((L, f) => ({ foot: skel.feet[f].name, bend: r(L.bend), ext: r(L.ext), down: at(k).down[f] })) }));
     const strip = (fm) => ({ crotch: r(fm.crotch), crotchShare: r(fm.crotchShare), armClear: r(fm.armClear), pinches: fm.pinches.map((p) => ({ y: r(p.y), w: r(p.w), contrast: r(p.contrast) })) });
     return { path, width: out.width, height: out.height, ms: Date.now() - t0,
-        json: { gait: Object.fromEntries(Object.entries(gait).map(([k, v]) => [k, typeof v === 'number' ? r(v) : v])), keys: keyJson, rest: strip(form), midStance: strip(formMid), flags } };
+        json: { gait: Object.fromEntries(Object.entries(gait).map(([k, v]) => [k, typeof v === 'number' ? r(v) : v])), keys: keyJson, rest: strip(form), midStance: strip(formMid), leg: leg && { thigh: r(leg.thigh), shank: r(leg.shank), ratio: r(leg.ratio) }, flags } };
 }
