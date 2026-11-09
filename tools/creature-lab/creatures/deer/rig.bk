@@ -113,6 +113,7 @@ const SETTLE_T: f32 = 0.34;
 const BREAKOVER: f32 = 0.55;     // rad the hoof rolls onto its toe before lift
 const WITHERS_Z: f32 = 0.69;     // hips (pelvis head) to withers, along the back
 const RISE_EASE: f32 = 0.015;    // m over which the body's rise eases into the legs' reach
+@knob const GALLOP_FREE: f32 = 0.06;  // m a galloping body may rise past what its planted hooves hold
 const CAP_FADE: f32 = 0.25;      // m a coming or going hoof's reach limit is slackened by
 const CAP_SOFT: f32 = 0.01;      // m over which one reach limit hands over to another
 const TUCK_HIND: f32 = 0.4;      // of its reach a leg folds to in a leap's flight
@@ -741,7 +742,11 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
     // the body meets the ceiling, rides it and leaves it without a corner
     // (a walk's plan rides it all stride long); a body that runs well past it
     // is put back.
-    let rise = max(smin(ch - hy, cf - fy, CAP_SOFT), 0.0);
+    // (Galloping it may rise GALLOP_FREE past that: held to it, the push of
+    // each stride was cut short and the body drawn down faster than it
+    // could fall. The reach guard below still keeps the hooves' legs within
+    // their length.)
+    let rise = max(smin(ch - hy, cf - fy, CAP_SOFT), 0.0) + GALLOP_FREE * gw.z;
     if (!lp.on) {
         let over = shift.y - rise;
         shift.y = smin(shift.y, rise, RISE_EASE);
