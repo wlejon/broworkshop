@@ -339,7 +339,7 @@ creatures it holds (`setInstanceCullSpheres`). The nodes' cull box
 (`setCullBounds`) is the field and the run past it.
 
 `finder` scans each named scenario into `finder/scan-<scenario>.json`
-(about 30 to 40 s a scenario for the bunny), then ranks every scan in that folder, so
+(about 15 s a scenario for the bunny), then ranks every scan in that folder, so
 scenarios can be scanned a few at a time and ranked together. `--rank` with
 no scenario only ranks; `--top <n>` draws that many close-ups (`0` scans
 without drawing); `--every <steps>` sets how often the mesh is measured (4).
