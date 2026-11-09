@@ -97,12 +97,21 @@ body moves about), so the body's own motion shows against it.
 The reference creature is `deer`: a deer-sized quadruped with spine, neck,
 head, ears and tail. Its gaits are walk, trot and gallop, and its actions are
 idle, graze, startle, lie down and bound; from a gallop it leaps a log in its
-path (`creature::leap`). `hexa` is an invented one with no
+path (`creature::leap`). Turning on the spot it steps round in diagonal
+pairs, and lying down its lower joints fold ahead of the rest
+(`FOLD_AHEAD`). `hexa` is an invented one with no
 reference behind it: a slender six-legged browser of the plain, a long back
 on three pairs of long legs, an arched neck of two bones, lyre horns, long
 ears and a thin tufted tail. Walking, its legs go in a ripple up each side
 (each a third of a cycle after the one behind, `leg_off`), which closes up
-into a tripod as it hurries (`RIPPLE_V`, `TRIPOD_V`); a stance travels less
+into a tripod as it hurries (`RIPPLE_V`, `TRIPOD_V`), a foot's share of the
+cycle on the ground falling from `DUTY_WALK` to `DUTY_RUN` with it, and never
+more feet in the air than leave it standing; the run's back rises and falls
+with each tripod (`RUN_BOB`) and its head, ears and tail beat with the
+stride, more the more it hurries. A swinging foot leaves and lands with no
+speed (a quintic ease along its path, its lift and the hoof's curl one bell),
+so a footfall is no corner in any joint. Turning on the spot it steps round
+at a rate its legs can follow; a stance travels less
 than the pairs stand apart, and the body rides as much lower as the legs
 need to reach a step's ends still bent. Its rig moves the body on
 `creature::body` and `creature::spine` (the `LAYERS` knob; `hexa:plan` is it
@@ -137,7 +146,9 @@ running they sweep back, loafing they lie along the neck. Each of their two
 bones is aimed at a sprung tip (`creature::dangle`), and the scut is sprung
 the same way. Moving a little (under `SHUFFLE_TOP` m/s) it shuffles rather
 than hops: the fore paws step one after the other, the hind feet come up
-low after them near together, and the rump does not vault. Its feet swing on `swing_arc` paths,
+low after them near together, and the rump does not vault. Turning it hops
+round, never shuffles, and a hind foot left astray is brought home with its
+pair (`settle_hinds`). Its feet swing on `swing_arc` paths,
 folded toward their girdle only as far as clears the ground by the swing's
 lift; the fore stride is shorter hopping (0.10 m) than bounding (0.13 m),
 since the hop's fore leg stands under its shoulder and the longer stride
@@ -180,8 +191,11 @@ poses (telemetry's gait `run` past halfway). The stride's rate is what
 carries the body one stance's ground in one stance's time. A foot that
 lands is pinned where it landed and its leg solved to it; one that lifts
 leaves from where it was and joins the key's path through its swing; the
-toes lie along the ground under them. With neither foot down its mass falls
-freely (`air_step`). Turning on the spot it steps where it stands, and
+toes lie along the ground under them. A foot leaves the ground when the
+keys draw it off (`LIFT_DRAWN`), not on the clock alone, and a swing lands
+where the turn will have carried its place by then. With neither foot down
+its mass falls freely (`air_step`), and what the flight left it off the keys
+is let go at the landing without overshoot. Turning on the spot it steps where it stands, and
 standing with a foot astray it steps home. Foraging (`graze`) it crouches
 with its nose and hands at the ground, nosing about and scrabbling in
 bouts; resting (`lie`) it sits back on its haunches with its tail laid
@@ -259,7 +273,12 @@ so reaching down it hooks over, and the two below it are the sides of a
 triangle that brings it there, their joint kept to the side it lies on at
 rest, so the S deepens as the head draws in and opens as it reaches. Its
 reach eases in at either end, and the head keeps its bill level, turned to
-the gaze.
+the gaze. Looking aside, the head is carried toward what it looks at
+(`LOOK_CARRY`) and the neck bends after it, twisted along its length by a
+share of the look growing up it (`NECK_TWIST`). The folded wings are not
+still: standing, one is now and then shrugged loose and tucked again;
+walking, the wing over the leg that carries the bird is pressed to its flank
+and the other rides a little loose, its tip dipping.
 Foraging, it leans forward, the neck lowered and the bill down, and strikes
 at the ground now and then. Resting, it sits back on its folded legs.
 Startled, it crouches with its wings lifted from the body, then stands alert
@@ -271,7 +290,8 @@ like the wader's, on the same layers (`finch:plan` is its plan alone). Both
 feet are on one clock, with a short stance and a flight each cycle (telemetry's
 gait `hop`). The body's height is a bouncing body's, measured from where it
 lands and leaves: a free fall through the flight, an even push through the
-stance. It starts and stops hopping at the bottom of a stance, where the
+stance. A hop keeps the pace it left the ground at (the pace is followed in
+the stance and held through the flight). It starts and stops hopping at the bottom of a stance, where the
 body is still, and a spring lets go of whatever bounce is left across the
 switch. A foot leaving the ground is carried up with the body from where
 it left the hip, then tucked under the belly, then reaches out to land flat.
@@ -729,8 +749,10 @@ Every output is deterministic. A rerun writes the same bytes.
     reference for steady gaits
   - `flags`: one line per finding
 
-  Contact is measured from the geometry: the sole within 1.2 cm of the
-  ground. It is not taken from the rig's claim.
+  Contact is measured from the geometry: any point of the sole within
+  1.2 cm of the ground. It is not taken from the rig's claim. A support
+  flag names its worst moment and where each standing foot is from the
+  mass, and a body off its feet's support for under 0.06 s is not flagged.
 - **Form JSON** (`lab/form.js`, the `form` command, `form.json`): the body
   measured, its skin placed on the CPU exactly as `lab/skin.bk` places it.
   - at rest: each named section's area, girth, width, depth, top and bottom,
