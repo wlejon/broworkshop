@@ -53,7 +53,8 @@ const D_BAL: i32 = 25;       // standing: the plan's shift that keeps the centre
 const D_BOFF: i32 = 27;      // the bounce left over from a start or stop, its speed, and the bounce last step
 const D_BOFF_V: i32 = 28;
 const D_BPREV: i32 = 29;
-const D_LEG: i32 = 30;
+const D_PACE: i32 = 30;      // the pace the hop under way left the ground at
+const D_LEG: i32 = 31;
 const LEG_REC: i32 = 16;
 const L_PLANT: i32 = 0;
 const L_TOE: i32 = 1;        // the toe tip: planted, or where the swing has it (3)
@@ -252,7 +253,14 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
     var moving = vd > 0.02 || speed > 0.02 || abs(err) > 0.15;
     if (was_moving) { moving = moving || speed > 0.012 || abs(err) > 0.06; }
     if (lie > 0.001 || flinch > 0.05) { moving = false; }
-    let veff = max(speed, 0.08 * abs(omega));
+    // A hop's length and height are settled as it leaves the ground: the
+    // pace is followed in the stance and kept through the flight, which a
+    // change of pace would otherwise bend out of a free fall.
+    var veff = max(speed, 0.08 * abs(omega));
+    let pace0 = state[s + D_PACE];
+    let flying = was_moving && !init && fract01(phase) >= clamp(0.42 - 0.18 * pace0, 0.22, 0.42);
+    if (flying) { veff = pace0; }
+    state[s + D_PACE] = veff;
     let freq = HOP_F + HOP_FV * veff;
     let duty = clamp(0.42 - 0.18 * veff, 0.22, 0.42);
     // Hopping starts and stops at the bottom of a stance, where the body is
