@@ -128,4 +128,18 @@ test('the strider\'s parts sheet: the head steadied, nothing glued or riding', a
     }
 });
 
+test('the watch sheet draws one run from one view large, and takes no more', async () => {
+    const out = await runCommand(['watch', 'strider', 'walk', '--view', 'front', '--out', OUT]);
+    const png = out.written.find((p) => p.endsWith('walk-watch-front.png'));
+    check(png && fs.statSync(png).size > 50000, `the sheet is drawn (${png})`);
+    const refused = async (args, what) => {
+        let msg = '';
+        try { await runCommand(['watch', 'strider', ...args, '--out', OUT]); } catch (e) { msg = String(e.message); }
+        check(/^watch:/.test(msg), `${what} is refused (${msg.slice(0, 60)})`);
+    };
+    await refused(['walk'], 'no view');
+    await refused(['walk', 'trot', '--view', 'side'], 'two scenarios');
+    await refused(['walk', '--view', 'side', '--frames', '12'], 'twelve frames');
+});
+
 await done('creature-lab parts');

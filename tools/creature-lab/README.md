@@ -376,6 +376,8 @@ $B tools/creature-lab tools/creature-lab/cli.js -- look bunny gallop --rows 4 --
 $B tools/creature-lab tools/creature-lab/cli.js -- look strider walk --rows 3 --dist 2.3 --cell 1.3
 $B tools/creature-lab tools/creature-lab/cli.js -- poses strider walk gallop
 $B tools/creature-lab tools/creature-lab/cli.js -- upper strider start-stop --from 0.8 --to 2.2
+$B tools/creature-lab tools/creature-lab/cli.js -- watch strider walk --view side
+$B tools/creature-lab tools/creature-lab/cli.js -- watch strider walk --view front --from 0.4 --span 0.25
 $B tools/creature-lab tools/creature-lab/cli.js -- skin strider walk trot --rows 2
 $B tools/creature-lab tools/creature-lab/cli.js -- parts strider walk trot idle
 $B tools/creature-lab tools/creature-lab/cli.js -- parts strider walk --part head,ear1L --frames 8
@@ -534,6 +536,22 @@ Every output is deterministic. A rerun writes the same bytes.
 
 ## Outputs
 
+- **Watch** (`watch <creature> <scenario> --view <view>`, `lab/watch.js`):
+  the sheet a motion is judged by eye in, before any measure of it is
+  read. A picture read whole has only so many pixels, and a sheet of forty
+  cells leaves the creature a hundred tall, where a missing arm or a body
+  that never shifts its weight cannot be seen. So it draws one scenario
+  from one view in at most six consecutive frames, shaped to the creature
+  so it fills each (five to six hundred pixels tall), and refuses more: it
+  is run again per view (`side`, `front`, `back`, `front-quarter`,
+  `back-quarter`, `top`) and per part of a cycle (`--from 0.4 --span 0.25`).
+  - One camera for all the frames, standing where the creature does at its
+    steady pace, not on its hips: its rise and fall, sway and lean are in
+    the picture.
+  - Each frame carries the outline of the frame before, so what moved
+    since, and how far, is seen.
+  - A plumb line through where it stands and level lines at its hips' and
+    head's rest heights; under each frame, which feet are down.
 - **Skin** (`skin`, `lab/skinsee.js`): whether each limb has a skin of its
   own, and where the skin is pulled as the bones move.
   - **bound**: at rest each limb (a chain of bones out to a leaf) is cut
@@ -845,6 +863,8 @@ Headless runs drive the view through `globalThis.creatureLab`
   - the strider's limbs are bound in their own skin and its skin is not
     pulled walking or trotting; its parts sheets are clean, its head
     steadied at the walk
+  - the watch sheet is drawn for one scenario and one view, and refuses a
+    run without a view, two scenarios, or more than six frames
 - `tests/test_keys.js`, keys and the strider drawn in them:
   - a pose puts the feet and the root where it draws them; a mirrored pose
     is the pose with its sides exchanged
@@ -903,7 +923,9 @@ Headless runs drive the view through `globalThis.creatureLab`
    edit, then its cycles; its rig stands them on the ground.
 3. Name its steady gaits in `cycles` (with references if known) and its
    broken variants.
-4. Run `sheets <name> all` and `metrics <name> all`, and read the sheets.
+4. Look first: `watch <name> walk --view side`, then `--view front`, and
+   say what is seen in them before reading any flag.
+   Run `sheets <name> all` and `metrics <name> all`, and read the sheets.
    Run `skin <name> walk` (each limb in a skin of its own, nothing pulled)
    and `parts <name>` on a gait and on `idle` (nothing glued, riding or
    wobbling) before judging the motion from whole-body sheets, which are

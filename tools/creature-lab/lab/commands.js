@@ -17,6 +17,7 @@ import { modelSheet } from "./posing.js";
 import { upperSheet, upperLines } from "./upper.js";
 import { skinSheet, boundFlags } from "./skinsee.js";
 import { partsSheet } from "./parts.js";
+import { watchSheet, WATCH, WATCH_VIEWS } from "./watch.js";
 import { rangeSheet } from "./range.js";
 import { kinematicsSheet, spacingSheet } from "./kinematics.js";
 import { restForm, formInMotion } from "./form.js";
@@ -43,6 +44,13 @@ export const HELP = `creature-lab <command> <creature> [scenario ...] [options]
                                            view, slit-scans through head, withers and tail tip
                                            (--from <s> --to <s>: the window, 1.5 s mid-run by default;
                                            --frames <n>)
+  watch       <creature> <scenario> --view side|front|back|front-quarter|back-quarter|top
+                                           the sheet a motion is judged by eye in: one run from one view in
+                                           at most 6 consecutive frames, the creature filling each; one
+                                           still camera, the frame before outlined in each, a plumb line
+                                           and its hips' and head's rest heights. Run again per view.
+                                           (--frames <1..6>; --from <phase> --span <share of the cycle>:
+                                           part of a cycle closer in time; without a cycle --from/--to s)
   look        <creature> [scenario ...]    the creature as the live view draws it (lit, shadowed), close,
                                            through a cycle: three-quarter front, side, three-quarter back
                                            (--rows <n> | --phases, --views front-left,left,back-left,front,right,
@@ -343,6 +351,16 @@ export async function runCommand(argv) {
         const path = `${dir}/form.json`;
         writeFile(path, json({ creature: creature.label, rest: form, motion: runs }));
         written.push(path);
+    } else if (cmd === 'watch') {
+        // One run from one side, large: it takes one scenario and a view, and no more.
+        if (rest.length !== 1 || !opt.view) throw new Error(`watch: name one scenario and one --view (${Object.keys(WATCH_VIEWS).join(', ')}); it draws at most ${WATCH.frames} frames, large, and is run again for another view`);
+        const sc = rest[0], rec = runScenario(creature, sc, { seed });
+        const num = (v) => (v !== undefined ? +v : null);
+        const part = opt.from !== undefined || opt.span !== undefined ? `-${String(opt.from ?? 0)}+${String(opt.span ?? 1)}` : '';
+        const s = watchSheet(rec, { path: `${dir}/${sc}-watch-${opt.view}${part}.png`, view: String(opt.view), frames: opt.frames ? +opt.frames : WATCH.frames,
+            from: num(opt.from), span: num(opt.span), to: num(opt.to) });
+        written.push(s.path);
+        report(sc, s, ` ${s.cell} px a frame`);
     } else if (cmd === 'metrics' || KINDS.includes(cmd) || CLOSE.includes(cmd) || cmd === 'sheets') {
         const kinds = cmd === 'sheets' ? KINDS : KINDS.includes(cmd) || CLOSE.includes(cmd) ? [cmd] : [];
         for (const sc of scenarios) {
