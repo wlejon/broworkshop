@@ -78,6 +78,7 @@ const D_PY: i32 = 31;        // the plan's height through its spring, and its sp
 const D_PV: i32 = 32;
 const D_LOOK_V: i32 = 33;    // the gaze's turn and pitch speeds
 const D_LOOK_PV: i32 = 34;
+const D_ROOT_Y: i32 = 35;    // the root's height last step (the hips the swing is drawn about)
 const D_LEG: i32 = 36;
 const LEG_REC: i32 = 17;
 const L_PLANT: i32 = 0;
@@ -103,6 +104,7 @@ pub const STATE: i32 = PROBE + PROBE_N;
 @knob const SOFT_REACH: f32 = 0.985; // share of a leg's reach where its IK eases the reach in
 @knob const RUN_UP: f32 = 1.6;       // m/s the walk gives way to the run
 @knob const RUN_DOWN: f32 = 1.35;    //   and back
+@knob const WALK_F0: f32 = 0.85;     // strides a second walking at no speed (and 0.35 more per m/s)
 @knob const LIFT_W: f32 = 0.035;     // m a walking foot is lifted at most
 @knob const LIFT_R: f32 = 0.07;      //   and a running one
 @knob const FOLD_R: f32 = 0.22;     // of its reach a running foot is drawn in toward the hip mid-swing
@@ -540,7 +542,7 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
     let ts_r = mix(RUN_SWEEP + 0.06, RUN_SWEEP, fast_w) / max(veff, 0.8);
     let tf_r = mix(0.05, RUN_FLIGHT, fast_w);
     let freq_r = 0.5 / (ts_r + tf_r);
-    let freq = mix(0.85 + 0.35 * veff, freq_r, rw);
+    let freq = mix(WALK_F0 + 0.35 * veff, freq_r, rw);
     let duty = mix(clamp(0.64 - 0.04 * veff, 0.56, 0.64), clamp(ts_r * freq_r, 0.22, 0.45), rw);
     if (moving && !was_moving) { phase = floor(phase) + 1.0 + duty; }
     if (moving) { phase += freq * dt; }
@@ -633,7 +635,10 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
             // foot rocks flat over the rest; running it lands on the ball.
             let heel_end = mix(0.74, 1.0, rw);
             let e = smooth01(u / heel_end);
-            let hip = pos + q_rot(qyaw, HEAD[LEG_B0[l]] - HEAD[B_PELVIS]) + vec3<f32>(0.0, state[s + D_BODY_Y] - pos.y, 0.0);
+            // (About the hip where the root really was last step: walking,
+            // the plan asks above what the legs hold.)
+            let hip_y = select_f(init, state[s + D_BODY_Y], state[s + D_ROOT_Y]);
+            let hip = pos + q_rot(qyaw, HEAD[LEG_B0[l]] - HEAD[B_PELVIS]) + vec3<f32>(0.0, hip_y - pos.y, 0.0);
             var path = swing_arc(hip, qyaw, lifted, target, e);
             let lift_h = select_f(settle, 0.025, mix(LIFT_W, LIFT_R, rw) * (0.5 + 0.5 * go));
             let up = smooth01(u / 0.3) * (1.0 - smooth01((u - 0.45) / (heel_end - 0.45)));
@@ -803,6 +808,7 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
     if (!init) { shift = mix(lag, shift, 1.0 - exp(-dt * SHIFT_W)); }
     st3(state, s + D_LAG, shift);
     let root = plan + shift;
+    state[s + D_ROOT_Y] = root.y;
     let pr = s + PROBE;
     probe(state, pr, 0, plan.y - ground_y);
     probe3(state, pr, 1, q_rot(q_conj(qyaw), bd.com - coff_p - plan));
@@ -881,7 +887,7 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
         // hand comes up to the chest, the elbow drives back.)
         let sw0 = arm_k * spread * sd;
         let sw = select_f(sw0 < 0.0, sw0 * (1.0 - 0.45 * rw), sw0);
-        let trail = 0.6 * arm_k * (spread_l - spread) * sd * (1.0 - rw);
+        let trail = 0.6 * arm_k * (spread_l - spread) * sd * (1.0 - 0.6 * rw);
         // (Less the trunk's lean, an arm hangs. Foraging, the left forearm
         // rests across the left knee; resting, the upper arms hang a little
         // forward and the hands down between the knees.)
@@ -923,8 +929,10 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
     var tb = B_TAIL1;
     for (var i: i32 = 0; i < 4; i += 1) {
         let fi = f32(i);
-        let sw = -tail_swing * cos(TAU * (phase - 0.5 * duty - 0.07 * fi)) + idle_sway * (0.6 + 0.2 * fi) - select_f(i == 0, twist, 0.0);
-        let bob = 0.05 * go * (1.0 - 0.5 * rw) * sin(2.0 * TAU * (phase - 0.08 * fi));
+        // (Each joint takes the swing an eighth of a stride after the one
+        // before, and swings it further: a whip, not a stick.)
+        let sw = -tail_swing * (0.7 + 0.25 * fi) * cos(TAU * (phase - 0.5 * duty - 0.13 * fi)) + idle_sway * (0.6 + 0.2 * fi) - select_f(i == 0, twist, 0.0);
+        let bob = 0.05 * go * (1.0 - 0.5 * rw) * sin(2.0 * TAU * (phase - 0.1 * fi));
         // (The tip curls up a little more than the rest.)
         let lx = tail_lift * share[i] + bob + select_f(i == 3, 0.12, 0.0);
         tq = q_mul(tq, q_xyz(soft_xyz(vec3<f32>(lx, sw * 0.6, 0.0), tb, 0.1)));
