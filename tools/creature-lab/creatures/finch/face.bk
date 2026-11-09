@@ -1,0 +1,57 @@
+// creature::face — the finch's face, drawn per pixel over the head's skin
+// (lab/face.bk has how), in the rest pose's coordinates (body.js: x to its
+// left, y up, z forward, metres). `foot` is a pixel's size there; every
+// edge is softened over it.
+//
+// What it shows, from the side: a round black eye, glossy, in a thin pale
+// eye-ring, and a dark stripe from the bill's base back through the eye.
+module creature::face;
+import mesh;
+
+fn lin(c: vec3<f32>) -> vec3<f32> {
+    return vec3<f32>(pow(c.x, 2.2), pow(c.y, 2.2), pow(c.z, 2.2));
+}
+
+// 1 inside (d < 0), 0 outside, over w either side of the edge.
+fn inside(d: f32, w: f32) -> f32 {
+    return clamp(0.5 - d / (2.0 * w), 0.0, 1.0);
+}
+
+// The eye (body.js's eye mass) seen from the side: (y, z) of its middle,
+// the side it is on (|x|), the opening's radius.
+const EYE: vec2<f32> = vec2<f32>(0.0785, 0.0455);
+const EYE_X: f32 = 0.0095;
+const EYE_R: f32 = 0.0019;
+// Where the stripe meets the bill's base, and how far back it runs.
+const BILL: vec2<f32> = vec2<f32>(0.0765, 0.0485);
+const STRIPE_BACK: f32 = 0.036;
+
+pub fn face(p: vec3<f32>, foot: f32, s: mesh::Surface) -> mesh::Surface {
+    var out = s;
+    let w = max(foot, 0.00005);
+    let ax = abs(p.x);
+    var c = s.base_color;
+    var rough = s.roughness;
+    let q = vec2<f32>(p.y, p.z);
+
+    if (ax > EYE_X - 0.004 && p.z > STRIPE_BACK - 0.002 && p.z < 0.05 && abs(p.y - EYE.x) < 0.008) {
+        // The stripe: from the bill's base through the eye, fading behind it.
+        let t = clamp((p.z - BILL.y) / (STRIPE_BACK - BILL.y), 0.0, 1.0);
+        let sy = mix(BILL.x, EYE.x - 0.0004, t);
+        let fade = 1.0 - smoothstep(0.6, 1.0, t);
+        let stripe = inside(abs(p.y - sy) - 0.0011, w) * fade;
+        c = mix(c, lin(vec3<f32>(0.12, 0.09, 0.07)), 0.85 * stripe);
+        // The eye in its pale ring.
+        let r = length(q - EYE);
+        let d = r - EYE_R;
+        c = mix(c, lin(vec3<f32>(0.85, 0.82, 0.74)), inside(d - 0.0005, w));
+        let open = inside(d, w);
+        var eye = lin(vec3<f32>(0.03, 0.025, 0.02));
+        eye = mix(eye, lin(vec3<f32>(0.20, 0.12, 0.06)), smoothstep(0.7, 1.0, r / EYE_R) * 0.6);
+        c = mix(c, eye, open);
+        rough = mix(rough, 0.04, open);
+    }
+    out.base_color = c;
+    out.roughness = rough;
+    return out;
+}

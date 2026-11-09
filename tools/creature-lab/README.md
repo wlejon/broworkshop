@@ -192,6 +192,25 @@ Startled, it crouches with its wings lifted from the body, then stands alert
 with the neck stretched up. Its face draws side-set yellow eyes, the lores
 and a black brow stripe into the crest.
 
+`finch` is an invented small songbird (14 cm, 24 g) that hops, with legs
+like the wader's, on the same layers (`finch:plan` is its plan alone). Both
+feet are on one clock, with a short stance and a flight each cycle (telemetry's
+gait `hop`). The body's height is a bouncing body's, measured from where it
+lands and leaves: a free fall through the flight, an even push through the
+stance. It starts and stops hopping at the bottom of a stance, where the
+body is still, and a spring lets go of whatever bounce is left across the
+switch. A foot leaving the ground is carried up with the body from where
+it left the hip, then tucked under the belly, then reaches out to land flat.
+Those moves are eased with no acceleration at their ends, because the legs
+are a seventh of the mass and a quick tuck would jerk a body that should be
+falling freely. The folded wings are held to the body outside the startle;
+sprung, a landing flings them open. Its head glances: quick turns to a new
+side every so often, held between, toward the gaze when there is one. The
+tail cocks up as it lands. Foraging, it leans over and pecks in quick jabs.
+Resting, it settles onto its belly. Startled, it crouches and flutters its
+wings, then stands alert. Its face draws a black eye in a pale ring and a
+stripe from the bill through the eye.
+
 A creature can carry its own motion oracle: its def's `motion(rec, series,
 {steadyFrom, steady, headBob})`, which `analyze` calls and whose flags join
 the run's (and whose report is the metrics' `motion`). The bunny's
