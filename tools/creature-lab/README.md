@@ -172,6 +172,26 @@ without carrying it on: the legs are a third of its mass, and an offset
 carried on rings from step to step. Its face (`face.bk`) draws large
 forward eyes, a nose pad and a mouth.
 
+`wader` is an invented long-legged wading bird (0.95 m, 2 kg) on the same
+layers (`wader:plan` is its plan alone). Each leg is a bird's Z (femur,
+drumstick, bare tarsus, toes) solved hip to toe tip by `solve_hind`. In
+stance the toes lie flat, and the foot rises onto their tips as it leaves.
+In the swing they curl under, then open to land flat. The walk is on a
+little bend of the legs, more the faster it goes, so a foot that lands well
+ahead still has its reach. Faster it runs, as the strider does. Walking, its
+head bobs: it holds still in the world while the body passes, then thrusts
+to where its place on the body will be halfway through the next hold. The
+thrust is eased with no speed or acceleration at either end, because the
+neck carries a tenth of the mass and an abrupt thrust jolts the body. The
+neck is solved as one S (`solve_neck`): folded deeper to draw the head in,
+straightened to reach out, and turned to point at the head. Its reach eases
+in at either end, and the head keeps its bill level, turned to the gaze.
+Foraging, it leans forward, the neck lowered and the bill down, and strikes
+at the ground now and then. Resting, it sits back on its folded legs.
+Startled, it crouches with its wings lifted from the body, then stands alert
+with the neck stretched up. Its face draws side-set yellow eyes, the lores
+and a black brow stripe into the crest.
+
 A creature can carry its own motion oracle: its def's `motion(rec, series,
 {steadyFrom, steady, headBob})`, which `analyze` calls and whose flags join
 the run's (and whose report is the metrics' `motion`). The bunny's

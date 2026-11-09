@@ -1,0 +1,66 @@
+// creature::face — the wader's face, drawn per pixel over the head's skin
+// (lab/face.bk has how), in the rest pose's coordinates (body.js: x to its
+// left, y up, z forward, metres). `foot` is a pixel's size there; every
+// edge is softened over it.
+//
+// What it shows, from the side (a bird's eyes look out to either side):
+//   eyes    on the eye masses, a yellow iris about a round black pupil,
+//           glossy, a thin dark rim
+//   lores   a bare greenish-yellow strip from the eye forward to the bill
+//   brow    a black stripe from over the eye back into the crest
+module creature::face;
+import mesh;
+
+fn lin(c: vec3<f32>) -> vec3<f32> {
+    return vec3<f32>(pow(c.x, 2.2), pow(c.y, 2.2), pow(c.z, 2.2));
+}
+
+// 1 inside (d < 0), 0 outside, over w either side of the edge.
+fn inside(d: f32, w: f32) -> f32 {
+    return clamp(0.5 - d / (2.0 * w), 0.0, 1.0);
+}
+
+// The eye (body.js's eye mass) as seen from the side: (y, z) of its middle,
+// the side it is on (|x|), the opening's radius.
+const EYE: vec2<f32> = vec2<f32>(0.912, 0.237);
+const EYE_X: f32 = 0.022;
+const EYE_R: f32 = 0.0052;
+// Where the bill's base meets the lores.
+const BILL_Y: f32 = 0.904;
+const BILL_Z: f32 = 0.258;
+
+pub fn face(p: vec3<f32>, foot: f32, s: mesh::Surface) -> mesh::Surface {
+    var out = s;
+    let w = max(foot, 0.0002);
+    let ax = abs(p.x);
+    var c = s.base_color;
+    var rough = s.roughness;
+    let q = vec2<f32>(p.y, p.z);
+
+    if (ax > EYE_X - 0.006 && p.z > 0.19 && p.z < 0.28 && abs(p.y - EYE.y) < 0.025) {
+        // (EYE is (y, z).) The lores: a strip from the eye's front down to
+        // the bill's base.
+        let t = clamp((p.z - EYE.y) / (BILL_Z - EYE.y), 0.0, 1.0);
+        let lore = inside(abs(p.y - mix(EYE.x, BILL_Y, t)) - 0.0028, w) * step(EYE.y, p.z) * inside(p.z - BILL_Z, w);
+        c = mix(c, lin(vec3<f32>(0.62, 0.62, 0.30)), 0.85 * lore);
+        // The brow stripe: over the eye, sweeping back and up into the crest.
+        let by = EYE.x + 0.0075 + 0.06 * max(EYE.y - p.z, 0.0);
+        let brow = inside(abs(p.y - by) - 0.0022, w) * inside(p.z - (EYE.y + 0.004), w);
+        c = mix(c, lin(vec3<f32>(0.05, 0.05, 0.06)), brow);
+        // The eye.
+        let r = length(q - EYE);
+        let d = r - EYE_R;
+        let rim = inside(d - 0.0008, w);
+        c = mix(c, lin(vec3<f32>(0.10, 0.09, 0.05)), rim);
+        rough = mix(rough, 0.4, rim);
+        let open = inside(d, w);
+        let k = r / EYE_R;
+        var iris = mix(lin(vec3<f32>(0.95, 0.85, 0.25)), lin(vec3<f32>(0.80, 0.62, 0.12)), smoothstep(0.5, 1.0, k));
+        iris = mix(iris, lin(vec3<f32>(0.01, 0.01, 0.01)), inside(r - 0.45 * EYE_R, w));
+        c = mix(c, iris, open);
+        rough = mix(rough, 0.05, open);
+    }
+    out.base_color = c;
+    out.roughness = rough;
+    return out;
+}
