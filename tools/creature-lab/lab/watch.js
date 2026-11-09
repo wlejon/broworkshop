@@ -173,11 +173,15 @@ export function watchSheet(rec, { path, view = 'side', frames = WATCH.frames, fr
         if (!top) {
             const a = project(cam, cw, ch, [0, 0, 0]), b = project(cam, cw, ch, [0, hi[1] * 1.05, 0]);
             line(g, x0 + a.x, y0 + a.y, x0 + b.x, y0 + b.y, 'rgba(20,20,20,0.55)', 1, [5, 5]);
-            for (const [name, h] of levels) {
-                const p = project(cam, cw, ch, [0, h, 0]);
-                line(g, x0, y0 + p.y, x0 + cw, y0 + p.y, 'rgba(20,20,20,0.4)', 1, [2, 6]);
-                if (i === 0) text(g, name, x0 + 6, y0 + p.y - 4, { size: 11, color: '#333' });
-            }
+            // (Two lines close together, as a low creature's are: the lower
+            // one's name goes under it, so the names do not run together.)
+            const ys = levels.map(([, h]) => project(cam, cw, ch, [0, h, 0]).y);
+            const close = ys.length === 2 && Math.abs(ys[0] - ys[1]) < 18;
+            levels.forEach(([name], j) => {
+                line(g, x0, y0 + ys[j], x0 + cw, y0 + ys[j], 'rgba(20,20,20,0.4)', 1, [2, 6]);
+                const under = close && ys[j] === Math.max(...ys);
+                if (i === 0) text(g, name, x0 + 6, y0 + ys[j] + (under ? 13 : -4), { size: 11, color: '#333' });
+            });
         }
         const down = feet.map((ft, k) => `${ft.name}${planted(rec, f.step, k) ? '▼' : '△'}`).join(' ');
         text(g, f.label, x0 + 4, y0 + ch + 20, { size: 15, weight: 700 });

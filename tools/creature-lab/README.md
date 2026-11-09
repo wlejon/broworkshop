@@ -130,7 +130,13 @@ centre of mass (the hindquarters carry 0.58 of it, so the withers surge
 further than the hips), slowing over its own feet's stance and running on
 while they swing, so the trunk stretches as the hind push throws the front
 on and gathers as the hips catch up, the back's flex following that spacing;
-in the bound's flights the body falls freely. The head is held steady in
+in the bound's flights the body falls freely. The body recoils from its own
+legs, which are a large share of it: the legs are solved twice, and between
+the two the trunk is moved by what the mass stands off its usual place over
+the path's point and the hips' planned height (a mean over `RECOIL_T`), a
+foot in the air carried with it through the middle of its swing, so legs
+thrown forward and down send the trunk back and up and the mass keeps the
+stride's even pace and the plan's rise and fall. The head is held steady in
 space (the neck solved each step so the head stays at its posture's smoothed
 height, eased into the neck's reach, its turn set in the world), lifted as
 it goes and riding a little of the trunk's pitch. The ears (`ear.js`: their
@@ -291,7 +297,10 @@ feet are on one clock, with a short stance and a flight each cycle (telemetry's
 gait `hop`). The body's height is a bouncing body's, measured from where it
 lands and leaves: a free fall through the flight, an even push through the
 stance. A hop keeps the pace it left the ground at (the pace is followed in
-the stance and held through the flight). It starts and stops hopping at the bottom of a stance, where the
+the stance and held through the flight). Hopping, the body rides that plan
+and not `creature::body`, whose feet are too slow for a stance this short;
+in the air the whole bird is put back on its mass's usual place over the
+root, which the tucking legs carry it off. It starts and stops hopping at the bottom of a stance, where the
 body is still, and a spring lets go of whatever bounce is left across the
 switch. A foot leaving the ground is carried up with the body from where
 it left the hip, then tucked under the belly, then reaches out to land flat.
@@ -821,7 +830,11 @@ Every output is deterministic. A rerun writes the same bytes.
   - **The mass's physics**: the centre of mass's acceleration. In flight
     (no foot down) it must be free fall; with feet down it must not be
     pulled down faster than gravity nor pushed sideways past friction
-    (mu 1); no flight may gain energy.
+    (mu 1); no flight may gain energy. Each flag says why: the flight and
+    pull flags name the bones that held the mass up or carried it down at
+    the worst moment (each bone's mass times how its joint moved against
+    free fall), and the friction flag gives the push along the creature's
+    travel and across it, with what the feet bore then.
   - **Smoothness**: each joint's angular acceleration against its
     neighbours two steps off; a spike is a corner in the joint's speed.
     Kinks a second, per joint and overall, with jerk. Each spike carries the
