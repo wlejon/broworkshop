@@ -106,7 +106,7 @@ export function watchSheet(rec, { path, view = 'side', frames = WATCH.frames, fr
     // its whole length from a camera that stays where it began.
     const first = rootOf(rec, 0), last = rootOf(rec, rec.steps - 1);
     const turned = Math.abs(Math.atan2(Math.sin(last.yaw - first.yaw), Math.cos(last.yaw - first.yaw)));
-    const turns = turned > 0.6 && Math.hypot(last.x - first.x, last.z - first.z) < 0.5;
+    const turns = turned > 0.6 && rec.scenario.track.every((key) => !key.speed);
     const cyc = turns ? null : lastCycle(rec);
     const F = framesOf(rec, cyc, frames, { from, span, to });
     const poseAt = (step) => {

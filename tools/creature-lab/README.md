@@ -572,7 +572,10 @@ Every output is deterministic. A rerun writes the same bytes.
   `back-quarter`, `top`) and per part of a cycle (`--from 0.4 --span 0.25`).
   - One camera for all the frames, standing where the creature does at its
     steady pace, not on its hips: its rise and fall, sway and lean are in
-    the picture.
+    the picture. A run that turns where it stands (`turn-in-place`) is
+    drawn through its whole length from a camera that stays where the
+    creature began, so the turn itself is seen (`--from`/`--to` s for a
+    part of it).
   - Each frame carries the outline of the frame before, so what moved
     since, and how far, is seen.
   - A plumb line through where it stands and level lines at its hips' and
