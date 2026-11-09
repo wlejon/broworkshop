@@ -803,7 +803,8 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
         }
         var o: Leg;
         if (hind) { o = solve_hind_flat(b0, d, ah, SOFT_REACH, FOOT_FLAT + slope - par_pitch, 0.12); }
-        else { o = solve_front(b0, d, ah, select_f(held, 1.6, wrist) * fold, SCAP_FOLLOW, SOFT_REACH); }        let rho = clamp(o.rho, LIM_LO[b0].z, LIM_HI[b0].z);
+        else { o = solve_front(b0, d, ah, select_f(held, 1.6, wrist) * fold, SCAP_FOLLOW, SOFT_REACH); }
+        let rho = clamp(o.rho, LIM_LO[b0].z, LIM_HI[b0].z);
         let qr = q_mul(qp, q_z(rho));
         var prev: f32 = 0.0;
         for (var i: i32 = 0; i < nb; i += 1) {
