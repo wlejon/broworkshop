@@ -253,9 +253,13 @@ head bobs: it holds still in the world while the body passes, then thrusts
 to where its place on the body will be halfway through the next hold. The
 thrust is eased with no speed or acceleration at either end, because the
 neck carries a tenth of the mass and an abrupt thrust jolts the body. The
-neck is solved as one S (`solve_neck`): folded deeper to draw the head in,
-straightened to reach out, and turned to point at the head. Its reach eases
-in at either end, and the head keeps its bill level, turned to the gaze.
+neck has one shape for each place of the head (`solve_neck`): its last bone
+turns with the line from the neck's root to the head and a little past it,
+so reaching down it hooks over, and the two below it are the sides of a
+triangle that brings it there, their joint kept to the side it lies on at
+rest, so the S deepens as the head draws in and opens as it reaches. Its
+reach eases in at either end, and the head keeps its bill level, turned to
+the gaze.
 Foraging, it leans forward, the neck lowered and the bill down, and strikes
 at the ground now and then. Resting, it sits back on its folded legs.
 Startled, it crouches with its wings lifted from the body, then stands alert

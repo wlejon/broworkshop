@@ -56,7 +56,7 @@ export const bones = [
     { name: 'neck3', parent: 'neck2', head: [0, 0.82, 0.165], tail: [0, 0.895, 0.20],
       limits: { x: [-70, 80], y: [-45, 45], z: [-25, 25] }, mass: 0.05 },
     { name: 'head', parent: 'neck3', head: [0, 0.895, 0.20], tail: [0, 0.885, 0.40],
-      limits: { x: [-80, 80], y: [-60, 60], z: [-30, 30] }, mass: 0.07 },
+      limits: { x: [-95, 80], y: [-60, 60], z: [-30, 30] }, mass: 0.07 },
     ...wing(L, 'L'),
     ...wing(R, 'R'),
     ...leg(L, 'L'),

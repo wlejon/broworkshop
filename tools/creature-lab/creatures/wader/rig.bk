@@ -220,52 +220,78 @@ fn run_bounce(phase: f32, duty: f32, freq: f32) -> f32 {
 
 // --- the neck --------------------------------------------------------------------------
 
-const NECK_N: i32 = 3;
-const NECK_B: array<i32, 3> = [B_NECK1, B_NECK2, B_NECK3];
-// How each neck bone's limb angle moves as the S deepens by k (forward,
-// back, forward: the S folds), and the range of k.
-const NECK_FOLD: array<f32, 3> = [-1.0, 0.8, -0.8];
-const FOLD_LO: f32 = -0.35;
-const FOLD_HI: f32 = 0.6;
-
-// The neck's end (its root to neck3's tail) in the body's rest frame, as
-// (z, y), with the S folded by k.
-fn neck_end(k: f32) -> vec2<f32> {
-    var e = vec2<f32>(0.0);
-    for (var i: i32 = 0; i < NECK_N; i += 1) {
-        let b = NECK_B[i];
-        e += rest_len(b) * limb_dir(rest_angle(b) + NECK_FOLD[i] * k);
-    }
-    return e;
+// A neck bone as it lies at rest, in the body's frame.
+fn neck_rest(b: i32) -> vec3<f32> {
+    let dl = rest_len(b) * limb_dir(rest_angle(b));
+    return vec3<f32>(0.0, dl.y, dl.x);
 }
 
-// The neck put from its root on the body to reach `to` (world): the S
-// folded until it spans the distance, then the whole of it turned to point
-// there. Out of reach it reaches as far as it goes.
+// How far past the turn of the whole neck its last bone turns: reaching
+// down, the top of the neck hooks over toward the ground.
+const NECK_HOOK: f32 = 1.12;
+// The nearest and furthest the neck's end comes to its root, as parts of
+// its length laid straight.
+const NECK_NEAR: f32 = 0.62;
+const NECK_FAR: f32 = 0.985;
+
+// The turn q taken t of the way (or past it, t > 1) about its own axis.
+// A blend of quaternions will not do here: reaching for the ground the
+// neck turns most of a half circle, where a blend's angle is far from t of
+// the whole and, a little further, goes round the other way.
+fn q_part(q0: vec4<f32>, t: f32) -> vec4<f32> {
+    var q = q0;
+    if (q.w < 0.0) { q = -q; }
+    let s = length(q.xyz);
+    if (s < 1e-6) { return q_id(); }
+    let h = atan2(s, q.w) * t;
+    return vec4<f32>(q.xyz * (sin(h) / s), cos(h));
+}
+
+// The neck put from its root on the body to reach `to` (world). Each
+// target has one neck: the last bone turns with the line from the root to
+// the target (and a little past it), and the two below it are the two
+// sides of a triangle that brings it there, their joint kept to the side
+// it lies on at rest, so the S deepens as the head draws in and opens as
+// it reaches. Out of reach it reaches as far as it goes.
 fn solve_neck(T: Pose, to: vec3<f32>) -> Pose {
     var P = T;
     let qb = P.q[B_BODY];
     let base = head_of(P, B_NECK1);
-    let d = q_rot(q_conj(qb), to - base);
-    // Past what the S spans folded or straight the reach eases in, so the
-    // neck comes to rest against its ends rather than stopping at them.
-    let lmax = length(neck_end(FOLD_LO));
-    let lmin = length(neck_end(FOLD_HI));
-    let want = lmin + soft_cap(max(length(d) - lmin, 0.0), lmax - lmin, 0.3);
-    var lo = FOLD_LO;
-    var hi = FOLD_HI;
-    for (var it: i32 = 0; it < 10; it += 1) {
-        let m = 0.5 * (lo + hi);
-        if (length(neck_end(m)) > want) { lo = m; } else { hi = m; }
-    }
-    let k = 0.5 * (lo + hi);
-    let e = neck_end(k);
-    let qs = q_from_to(vec3<f32>(0.0, e.y, e.x), d);
-    for (var i: i32 = 0; i < NECK_N; i += 1) {
-        let b = NECK_B[i];
-        P.q[b] = q_mul(qb, q_mul(qs, q_x(-NECK_FOLD[i] * k)));
-        P.p[b] = head_of(P, b);
-    }
+    let r1 = neck_rest(B_NECK1);
+    let r2 = neck_rest(B_NECK2);
+    let r3 = neck_rest(B_NECK3);
+    let l1 = length(r1);
+    let l2 = length(r2);
+    // Past its near and far ends the reach eases in, so the neck comes to
+    // rest against them rather than stopping at them.
+    var d = q_rot(q_conj(qb), to - base);
+    let full = l1 + l2 + length(r3);
+    let near = NECK_NEAR * full;
+    let dl = max(length(d), 1e-6);
+    let over = 0.5 * (dl - near + sqrt((dl - near) * (dl - near) + 0.0009));
+    d = d * ((near + soft_cap(over, NECK_FAR * full - near, 0.3)) / dl);
+    // The last bone.
+    let q3 = q_part(q_from_to(r1 + r2 + r3, d), NECK_HOOK);
+    // The two below it, to where the last begins: turned whole onto the
+    // line there, then opened or closed about their joint.
+    let w = d - q_rot(q3, r3);
+    let dmin = abs(l1 - l2) + 0.004;
+    let D = dmin + soft_cap(max(length(w) - dmin, 0.0), (l1 + l2) * 0.995 - dmin, 0.12);
+    let wn = w / max(length(w), 1e-6);
+    let qt = q_from_to(r1 + r2, w);
+    let e0 = q_rot(qt, r1);
+    var side = e0 - wn * dot(e0, wn);
+    side = side / max(length(side), 1e-6);
+    let a = (l1 * l1 - l2 * l2 + D * D) / (2.0 * D);
+    let joint = wn * a + side * sqrt(max(l1 * l1 - a * a, 0.0));
+    let q1 = q_mul(q_from_to(e0, joint), qt);
+    let q2 = q_mul(q_from_to(q_rot(qt, r2), wn * D - joint), qt);
+    P.q[B_NECK1] = q_mul(qb, q1);
+    P.p[B_NECK1] = head_of(P, B_NECK1);
+    P.q[B_NECK2] = q_mul(qb, q2);
+    P.p[B_NECK2] = head_of(P, B_NECK2);
+    P.q[B_NECK3] = q_mul(qb, q3);
+    P.p[B_NECK3] = head_of(P, B_NECK3);
     return P;
 }
 
@@ -609,7 +635,9 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
     // Foraging: the neck down and forward, the bill over the ground ahead,
     // and now and then a strike.
     let gy = height(env, root.x + fwd.x * 0.32, root.z + fwd.z * 0.32);
-    let forage = vec3<f32>(root.x, gy + 0.28 - 0.12 * strike, root.z) + fwd * (0.32 + 0.05 * strike);
+    // (Ahead of where the neck leaves the body, however the body is tipped,
+    // so the neck bows down to it and is never coiled under the breast.)
+    let forage = vec3<f32>(base.x, gy + 0.27 - 0.12 * strike, base.z) + fwd * (0.25 + 0.05 * strike);
     head_at = mix(head_at, forage, graze);
     probe(state, pr, 6, ol);
     probe(state, pr, 7, bob);
@@ -664,7 +692,13 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
     firm[B_NECK2] = 1.0;
     firm[B_NECK3] = 1.0;
     firm[B_HEAD] = 1.0;
-    let A = carry_held(state, env, s + D_SEC, T, hold, firm, LAYERS, init, dt);
+    var A = carry_held(state, env, s + D_SEC, T, hold, firm, LAYERS, init, dt);
+    // The neck is not a mass on springs: it is what holds the head where
+    // the bird means it. It is solved again to the head's place over the
+    // body as it now is.
+    A = solve_neck(A, head_at);
+    A.p[B_HEAD] = head_of(A, B_HEAD);
+    A.q[B_HEAD] = T.q[B_HEAD];
 
     let coff = q_rot(q_conj(qyaw), com_of(A) - root);
     st3(state, s + D_COFF1, coff);

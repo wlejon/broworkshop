@@ -109,8 +109,11 @@ pub fn q_blend(a: vec4<f32>, b: vec4<f32>, t: f32) -> vec4<f32> {
     return q_norm(mix(a, bb, t));
 }
 
-// The shortest rotation taking unit vector a onto unit vector b.
-pub fn q_from_to(a: vec3<f32>, b: vec3<f32>) -> vec4<f32> {
+// The shortest rotation taking a's direction onto b's (of any lengths: on
+// vectors not of unit length the half-angle form below turns too little).
+pub fn q_from_to(a0: vec3<f32>, b0: vec3<f32>) -> vec4<f32> {
+    let a = a0 / max(length(a0), 1e-9);
+    let b = b0 / max(length(b0), 1e-9);
     let c = dot(a, b);
     if (c < -0.9999) {
         var ax = cross(a, vec3<f32>(1.0, 0.0, 0.0));

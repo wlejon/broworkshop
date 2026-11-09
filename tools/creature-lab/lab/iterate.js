@@ -143,6 +143,7 @@ export function kinkReport(rec, { bone = null, at = null, top = 6 } = {}) {
 // opts.bones: bone names; `every` steps.
 export function traceText(rec, { leg = null, bones = null, from = null, to = null, every = 1 } = {}) {
     const skel = rec.creature.skel, dt = rec.dt, n = rec.steps;
+    if (!(Number.isInteger(every) && every >= 1)) throw new Error(`trace: --every counts steps (a whole number, 1 or more; a step is ${dt.toFixed(4)} s), got ${every}`);
     const k0 = Math.max(3, Math.round((from ?? rec.scenario.duration * 0.5) / dt));
     const k1 = Math.min(n - 3, Math.round((to ?? (k0 * dt + 0.25)) / dt));
     const near = footEvents(rec);
