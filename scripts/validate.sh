@@ -192,7 +192,7 @@ grants_for() {   # grants_for <tags> -> declared[,cap...]
     echo "$g"
 }
 # The app's own arguments for a run (`args=a[,b]`), after the script: a
-# planet world's tests boot that world (args=--world=mars).
+# test of one of the app's modes boots that mode.
 args_for() {   # args_for <tags> -> words, one per line
     local w
     for w in $1; do case "$w" in args=*) echo "${w#args=}" | tr ',' '\n' ;; esac; done
@@ -221,7 +221,7 @@ selected() {   # selected <app> [script]
 tests_of() {   # tests_of <app> -> script paths, one per line
     local f
     for f in "$1"/tests/test_*.js "$1"/test*.js; do [ -f "$f" ] && echo "$f"; done
-    # And a part's own tests folder inside the app (demos/planet/worlds/earth/tests).
+    # And a part's own tests folder inside the app (<app>/<part>/tests).
     [ -d "$1" ] && find "$1" -mindepth 3 -path '*/tests/test_*.js' -not -path '*/node_modules/*' -not -path '*/tests/out/*' | sort
     if [ "$1" = lib-tests ]; then
         find lib -name 'test_*.js' -not -path '*/node_modules/*' | sort
