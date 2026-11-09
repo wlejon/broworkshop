@@ -9,12 +9,14 @@
 //   head         8.5 cm from the back of the skull to the nose, round, the
 //                eyes large and high on its sides, the cheeks full under
 //                them, the muzzle a blunt pad split by the upper lip
-//   ears         10 cm, upright, a spoon 3 cm across and 8 mm thick
+//   ears         10.5 cm, standing in a V from bases 4 cm apart, 3.3 cm
+//                across, a shell hollowed on its face (ear.js)
 //   scut         a ball of fur 4.5 cm across, carried up against the rump
 // The mesh is fine (a 2 mm grid) for an ear's thickness to be a shape.
 
 import { Flesh, SIDES } from "/app/lab/flesh.js";
 import { coat } from "./coat.js";
+import { earAxis, EAR_KEYS, HOLLOW_KEYS } from "./ear.js";
 
 // A trunk ring by its z, the back's and the belly's heights and half width.
 const ring = (z, top, bottom, hw) => ({ c: [0, (top + bottom) / 2, z], r: [hw, (top - bottom) / 2] });
@@ -101,16 +103,23 @@ function head(B) {
         // The eye: large, high on the head's side; kept at full detail, and
         // face.bk draws it.
         B.blob(`eye${t}`, 'head', [x(0.0285), 0.164, 0.178], [0.0105, 0.0125, 0.0135], { blend: 0.0025, keep: true });
-        // The ear: a spoon, wide across and thin, from the crown.
-        B.limb(`ear${t}`, [`ear${t}1`, `ear${t}2`], [
-            { c: [x(0.016), 0.180, 0.168], r: [0.009, 0.007], bone: `ear${t}1` },
-            { c: [x(0.019), 0.200, 0.164], r: [0.0135, 0.0050] },
-            { c: [x(0.023), 0.226, 0.159], r: [0.0158, 0.0045] },
-            { c: [x(0.026), 0.250, 0.154], r: [0.0150, 0.0042], bone: `ear${t}2` },
-            { c: [x(0.029), 0.268, 0.150], r: [0.0105, 0.0038], bone: `ear${t}2` },
-            { c: [x(0.030), 0.279, 0.147], r: [0.0035, 0.0030], bone: `ear${t}2` },
-        ], { up: [0, 0, 1], blend: 0.003, steps: 6 });
+        ear(B, s, t);
     }
+}
+
+// The ear (ear.js): a shell rolled narrow where it leaves the crown, widest
+// past halfway, rounded at the tip, its opening forward and out; the hollow
+// a mass carved from its face, deepest down its middle and running out at
+// the rim, a funnel at the base and shallow at the tip.
+function ear(B, side, t) {
+    const E = earAxis(side);
+    const bone = (u) => (u >= 0.45 ? `ear${t}2` : `ear${t}1`);
+    B.limb(`ear${t}`, [`ear${t}1`, `ear${t}2`],
+        EAR_KEYS.map(([u, w, h]) => ({ c: E.at(u), r: [w, h], bone: bone(u) })),
+        { up: E.face, blend: 0.003, steps: 6, keep: true, joint: 0.0025 });
+    B.limb(`hollow${t}`, [`ear${t}1`, `ear${t}2`],
+        HOLLOW_KEYS.map(([u, w, o, h]) => ({ c: E.at(u, o), r: [w, h], bone: bone(u) })),
+        { up: E.face, blend: 0.003, steps: 6, carve: true, joint: 0.001 });
 }
 
 // Where form measures the body: across the trunk, the neck and the head.
@@ -121,5 +130,6 @@ function sections(B) {
     across('chest', 'thorax', [0, 0.11, 0.06]);
     across('neck', 'neck', [0, 0.135, 0.125], 0.06);
     across('eyes', 'head', [0, 0.155, 0.178], 0.06);
-    B.section('ear', { at: [0.023, 0.226, 0.159], normal: [0.16, 0.98, -0.2], bone: 'earL1', radius: 0.03 });
+    const E = earAxis(1);
+    B.section('ear', { at: E.at(0.4), normal: E.t, bone: 'earL1', radius: 0.03 });
 }

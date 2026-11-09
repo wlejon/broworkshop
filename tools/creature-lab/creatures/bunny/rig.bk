@@ -59,7 +59,8 @@ const D_PREV_ACT: i32 = 21;
 const D_GAZE_YAW: i32 = 22;
 const D_GAZE_PITCH: i32 = 23;
 const D_HEAD_S: i32 = 24;     // the head's height as its posture has it, slowly smoothed
-const D_REAR: i32 = 26;       // sitting up: how far (0..1) and its speed
+const D_SHUF: i32 = 25;       // the shuffle's weight against the hop, eased
+const D_REAR: i32 = 26;      // sitting up: how far (0..1) and its speed
 const D_REAR_V: i32 = 27;
 const D_HY_O: i32 = 28;       // the hips' and withers' heights as placed last step
 const D_FY_O: i32 = 29;
@@ -70,7 +71,11 @@ const D_CAP_FV: i32 = 33;
 const D_EAR: i32 = 34;        // each ear's turn (2) and lean back (2), eased toward its whim
 const D_PITCH_O: i32 = 38;    // the trunk's pitch last step
 const D_CHEST_S: i32 = 39;    // the chest's pitch, slowly smoothed (what the head rides a share of)
-const D_LEG: i32 = 44;        // per leg, LEG_REC floats
+const D_EAR_NEXT: i32 = 40;   // each ear's next turn (s on the clock)
+const D_EAR_N: i32 = 42;      //   and how many it has made (its whims are hashed from it)
+const D_EAR_SPL: i32 = 44;    // each ear's splay, eased toward its whim
+const D_EAR_V: i32 = 46;      // the speeds of each ear's swivel (2) and lean back (2)
+const D_LEG: i32 = 50;        // per leg, LEG_REC floats
 const LEG_REC: i32 = 16;
 const L_PLANT: i32 = 0;
 const L_TOE: i32 = 1;         // the toe: planted point, or where the swing has it
@@ -99,6 +104,9 @@ const CAP_SOFT: f32 = 0.003;     // m over which one reach limit hands over to a
 @knob const LEG_BAND: f32 = 0.15;    // rad a leg's joint eases into the ends of its range over
 const SWING_FOLD_BAND: f32 = 0.015;  // m over which that floor eases in
 @knob const HOP_ARC: f32 = 0.045;     // m the hips vault over a hop's hind swing
+@knob const SHUFFLE_FULL: f32 = 0.2;  // m/s at and under which it shuffles
+@knob const SHUFFLE_TOP: f32 = 0.7;   //   and by which it hops
+@knob const SHUFFLE_LIFT: f32 = 0.012; // m a shuffling hind foot lifts
 @knob const HOP_LAND_H: f32 = 0.02;  // m a hopping hind foot lands ahead of its home, beside the fore prints
 const HIP_RUN: f32 = 0.145;      // m the hips ride at in the bound (sitting: 0.115)
 const SCAP_RUN: f32 = 0.155;     //   and the withers
@@ -126,6 +134,11 @@ const LIE_WITHERS: f32 = 0.098;  //   and the withers
 @knob const NECK_HOP: f32 = -0.45;   // rad the neck lifts the head by, hopping
 @knob const SCAP_FOLLOW: f32 = 0.6;  // of the leg's swing the blade takes
 @knob const EAR_RUN: f32 = 0.8;      // rad the ears sweep back running flat out
+@knob const EAR_SNAP: f32 = 20.0;    // rad/s an ear's swivel's spring (critical) turns it toward where it listens
+@knob const EAR_FLICK_T: f32 = 0.3;  // s an ear's flick lasts
+@knob const EAR_FLICKS: f32 = 0.07;  // share of an ear's turns that are a flick instead
+@knob const EAR_GRAZE_UP: f32 = 0.6; // rad the ears lean back grazing, against the head's pitch down
+@knob const EAR_BACK: f32 = 1.25;   // rad an ear's opening swivels back at most
 @knob const NECK_RUN: f32 = -0.5;   // rad the neck lifts the head by, bounding
 @knob const HIND_WIDE: f32 = 0.02;   // m a hind foot's home moves out, bounding
 @knob const VARY: f32 = 1.0;        // share of the individual's wander in speed and heading
@@ -250,7 +263,17 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
     let slow = 0.18 * (1.0 - smooth01(veff / 0.35));
     let duty_h = min(min(TRAVEL_H * freq / max(veff, 0.05), 0.47) + slow, 0.8);
     let duty_f = min(min(mix(TRAVEL_F_HOP, TRAVEL_F, bw) * freq / max(veff, 0.05), 0.5) + slow, 0.78);
-    let lift_h = mix(vec2<f32>(0.030, 0.022), vec2<f32>(0.055, 0.045), bw);
+    // Moving a little it shuffles rather than hops: the fore paws step one
+    // after the other, the hind feet are brought up low and quick, and the
+    // rump does not vault (gone by SHUFFLE_TOP m/s).
+    // (Eased, so a change of pace does not move the feet's timing at once.)
+    let shuf_t = 1.0 - smooth01((veff - SHUFFLE_FULL) / (SHUFFLE_TOP - SHUFFLE_FULL));
+    var shuf_s = state[s + D_SHUF];
+    if (init) { shuf_s = shuf_t; }
+    shuf_s = approach(shuf_s, shuf_t, 1.5, dt);
+    state[s + D_SHUF] = shuf_s;
+    let shuf = hw * shuf_s;
+    let lift_h = mix(vec2<f32>(mix(0.030, SHUFFLE_LIFT, shuf), 0.022), vec2<f32>(0.055, 0.045), bw);
     let wrist = mix(1.2, 2.0, bw);
     let curl = mix(0.5, 0.9, bw);
 
@@ -260,7 +283,7 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
     if (was_moving) { moving = moving || speed > 0.02 || vd > 0.02 || abs(err) > 0.06; }
     if (lie > 0.001 || rear > 0.08) { moving = false; }
     var offs: array<f32, 4>;
-    for (var l: i32 = 0; l < 4; l += 1) { offs[l] = off_mix(bw, l); }
+    for (var l: i32 = 0; l < 4; l += 1) { offs[l] = off_mix(bw, shuf, l); }
     if (moving && !was_moving) {
         // Start with the fore feet's step: the clock just past the left
         // fore's lift (the hind pair still down).
@@ -470,7 +493,7 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
     let hind_ground = 0.5 * (grounds[0] + grounds[3]);
     let fore_ground = 0.5 * (grounds[1] + grounds[2]);
     // The hop vaults the hips over the fore legs as the hind pair swings.
-    let bob_h = HOP_ARC * hind_swing * hw * select_f(moving, 1.0, 0.0);
+    let bob_h = HOP_ARC * hind_swing * (hw - shuf) * select_f(moving, 1.0, 0.0);
     // Startle: a flinch, flattened to the ground, then up.
     var crouch: f32 = 0.0;
     if (st_t >= 0.0) { crouch = -0.022 * sin(PI * clamp(st_t / 0.35, 0.0, 1.0)); }
@@ -526,7 +549,8 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
     let fl = FLIGHT * bw * mv * flight(fract01(phase - offs[0]), 1.0 / max(freq, 0.1), he, f_s, f_e);
     // The hop's vault rides on top, as the bound's flights do: through the
     // height's spring it would peak late, as the hind feet come down.
-    let hy = hs.x + fl + bob_h;    var fy = fs.x + fl;
+    let hy = hs.x + fl + bob_h;
+    var fy = fs.x + fl;
     let ch_t = min(cap_h, hind_ground + HEAD[B_PELVIS].y + CAP_FADE);
     let cf_t = min(cap_f, fore_ground + HEAD[B_SCAPL].y + CAP_FADE);
     var chs = crit_step(vec2<f32>(state[s + D_CAP_H], state[s + D_CAP_HV]), ch_t, wh, dt);
@@ -644,32 +668,88 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
     T.q[B_NOSE] = q_mul(T.q[B_HEAD], q_xyz(clamp_xyz(vec3<f32>(-0.09 * burst * tw * tw, 0.0, 0.0), B_NOSE)));
     T.p[B_NOSE] = head_of(T, B_NOSE);
 
-    // Ears: up, each turning on its own whims about the field; alert both
-    // up and forward toward the gaze; running, swept back as it goes faster;
-    // laid back along the neck loafing; flattened in the flinch. Each ear's
-    // two bones then follow their tips, sprung (creature::dangle): the base
-    // stiff, the tip softer and later, so each landing and each turn of the
-    // head runs up the ear.
+    // Ears: each listens on its own. An ear holds where it has turned for a
+    // while (0.35 to 3 s, shorter grazing), then turns quickly to the next:
+    // half the time toward the sound the pair attends (one direction about
+    // the field, wandering on its own beat), else on its own scan; now and
+    // then it flicks instead, a quick shake where it is. An ear turns its
+    // opening about its own length (the swivel, positive back on its own
+    // side), leaning back as it turns back, and stands splayed out relaxed.
+    // Alert both stand up close, their openings forward toward the gaze;
+    // hopping they listen mostly ahead; running they sweep back as it goes
+    // faster; laid back along the neck loafing; flattened in the flinch.
+    // Each ear's two bones then follow their tips, sprung (creature::dangle):
+    // the base stiff, the tip softer and later, so each landing, each turn
+    // of the head and each snap of its swivel runs up the ear.
     let run_back = smooth01((speed - 0.8) / 3.0) * mv;
+    let snd_n = floor(clock * 0.23 + seed * 0.71);
+    let snd_az = PI * (2.0 * hash01(seed * 1.3 + snd_n * 4.17) - 1.0);
     for (var e: i32 = 0; e < 2; e += 1) {
         let side = 1.0 - 2.0 * (e as f32);
-        let hb = floor(clock * 0.37 + 0.5 * (e as f32) + seed * 0.13);
-        let whim = 2.0 * hash01(seed * 3.7 + hb * 1.91 + 11.0 * (e as f32)) - 1.0;
-        let lean = hash01(seed * 5.3 + hb * 2.73 + 7.0 * (e as f32));
-        let turn_t = mix(mix(side * (0.15 + 0.55 * whim), side * 0.1 + 0.5 * gyaw_s, alert), side * 0.12, run_back);
-        let back_t = mix(mix(0.25 * lean, -0.15, alert), EAR_RUN, run_back);
-        let ty = damp(state[s + D_EAR + e], turn_t, 9.0, dt);
-        let tx = damp(state[s + D_EAR + 2 + e], back_t, 7.0, dt);
-        state[s + D_EAR + e] = ty;
+        let fe = e as f32;
+        var nxt = state[s + D_EAR_NEXT + e];
+        var n = state[s + D_EAR_N + e];
+        if (init) { nxt = clock + 0.4 + 1.6 * hash01(seed * 2.1 + 3.0 * fe); n = 0.0; }
+        if (clock >= nxt) {
+            n += 1.0;
+            let hd = hash01(seed * 6.1 + n * 1.37 + 17.0 * fe);
+            var dur = mix(mix(0.35, 3.0, hd * hd), mix(0.25, 1.2, hd), graze);
+            if (hash01(seed * 7.7 + n * 2.53 + 5.0 * fe) > 1.0 - EAR_FLICKS) { dur = EAR_FLICK_T; }
+            nxt = clock + dur;
+        }
+        state[s + D_EAR_NEXT + e] = nxt;
+        state[s + D_EAR_N + e] = n;
+        let flicking = hash01(seed * 7.7 + n * 2.53 + 5.0 * fe) > 1.0 - EAR_FLICKS && n > 0.5;
+        // A flick keeps the whims of the turn before it.
+        let na = select_f(flicking, n - 1.0, n);
+        let h_mode = hash01(seed * 9.1 + na * 1.93 + 13.0 * fe);
+        let h_aim = hash01(seed * 8.9 + na * 3.11 + 9.0 * fe);
+        let h_lean = hash01(seed * 5.3 + na * 2.73 + 7.0 * fe);
+        // Toward the sound: on its own side the opening turns to face it;
+        // across, forward for a sound ahead and back for one behind.
+        let a_e = snd_az * side;
+        // (At most EAR_BACK back: past it the swivel nears a quarter turn,
+        // where its angles read as x, y, z turn over.)
+        let to_snd = select_f(a_e > 0.0, clamp(a_e - 0.5, -0.6, EAR_BACK), select_f(a_e < -0.5 * PI, EAR_BACK, -0.4));
+        let sw_idle = select_f(h_mode < 0.5, to_snd, mix(-0.5, EAR_BACK, h_aim));
+        let sw_alert = clamp(-0.4 + 0.5 * side * gyaw_s, -0.8, 0.8);
+        var sw_t = mix(sw_idle, sw_alert, alert);
+        sw_t = mix(sw_t, 0.35 * sw_t - 0.1, mv * (1.0 - run_back));
+        sw_t = mix(sw_t, 0.4, run_back);
+        // Grazing, the ears stay up as the head goes down: leaned back by
+        // a share of its pitch.
+        let back_t = mix(mix(0.2 * h_lean + 0.2 * max(sw_t, 0.0), -0.15, alert), EAR_RUN, run_back) + EAR_GRAZE_UP * graze;
+        let spl_t = mix(mix(0.04 + 0.16 * hash01(seed * 4.4 + na * 2.21 + 3.0 * fe), -0.08, alert), 0.02, mv);
+        // Sprung, critically: each turn starts from rest and settles without
+        // overshoot (the dangle's springs give the ear its follow-through).
+        var swv = vec2<f32>(state[s + D_EAR + e], state[s + D_EAR_V + e]);
+        var txv = vec2<f32>(state[s + D_EAR + 2 + e], state[s + D_EAR_V + 2 + e]);
+        if (init) { swv = vec2<f32>(sw_t, 0.0); txv = vec2<f32>(back_t, 0.0); }
+        swv = crit_step(swv, sw_t, EAR_SNAP, dt);
+        txv = crit_step(txv, back_t, 0.6 * EAR_SNAP, dt);
+        let sw = swv.x;
+        let tx = txv.x;
+        let spl = damp(state[s + D_EAR_SPL + e], spl_t, 5.0, dt);
+        state[s + D_EAR + e] = sw;
+        state[s + D_EAR_V + e] = swv.y;
         state[s + D_EAR + 2 + e] = tx;
+        state[s + D_EAR_V + 2 + e] = txv.y;
+        state[s + D_EAR_SPL + e] = spl;
+        // The flick: a few fast shakes, in and out over EAR_FLICK_T.
+        var shake: f32 = 0.0;
+        if (flicking) {
+            let ft = clamp(1.0 - (nxt - clock) / EAR_FLICK_T, 0.0, 1.0);
+            shake = sin(PI * ft) * sin(TAU * 3.0 * ft);
+        }
         var flinch: f32 = 0.0;
         if (st_t >= 0.0) { flinch = sin(PI * clamp(st_t / 0.35, 0.0, 1.0)); }
         let laid = max(0.9 * lie_f, 0.8 * flinch);
         let b1 = select_i(e == 0, B_EARL1, B_EARR1);
         // (An ear stands up: its flexion forward, so its lean back negative.)
-        let a = vec3<f32>(-mix(tx - 0.1 * rear_s, 1.55, laid), ty * (1.0 - laid), side * mix(0.06 - 0.12 * alert, -0.12, laid));
-        let kd = s + D_DANGLE + 2 * e * DANGLE_REC;
-        T.q[b1] = q_mul(T.q[B_HEAD], q_xyz(clamp_xyz(a, b1)));
+        let a = vec3<f32>(-mix(tx + 0.12 * shake - 0.1 * rear_s, 1.55, laid), 0.0, side * mix(spl, -0.12, laid));
+        let ax = normalize(TAIL[b1 + 1] - HEAD[b1]);
+        let swivel = side * (sw + 0.35 * shake) * (1.0 - laid);        let kd = s + D_DANGLE + 2 * e * DANGLE_REC;
+        T.q[b1] = q_mul(T.q[B_HEAD], q_mul(q_xyz(clamp_xyz(a, b1)), q_axis(ax, swivel)));
         T.p[b1] = head_of(T, b1);
         let along1 = TAIL[b1] - HEAD[b1];
         let m = dangle_step(state, kd, T.p[b1] + q_rot(T.q[b1], along1), EAR_W1, EAR_ZETA, EAR_SAG, dt, init);

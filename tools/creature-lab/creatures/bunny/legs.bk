@@ -19,6 +19,9 @@ pub const LEG_NB: array<i32, 4> = [4, 5, 5, 4];
 // fore feet land halfway through the stride; at speed (a half-bound) the
 // lead fore foot comes down later and nearer its partner.
 pub const OFF_HOP: array<f32, 4> = [0.0, 0.44, 0.56, 0.025];
+// Moving a little, it shuffles: the fore paws step one after the other and
+// the hind feet are brought up after them, near together.
+pub const OFF_SHUFFLE: array<f32, 4> = [0.0, 0.28, 0.64, 0.07];
 pub const OFF_BOUND: array<f32, 4> = [0.0, 0.46, 0.57, 0.05];
 
 pub const SCAP_PIVOT: f32 = 0.4;   // where along the blade the fore leg swings about
@@ -62,9 +65,11 @@ pub fn turn_z() -> f32 {
     return 0.5 * (leg_pivot(0).z + leg_pivot(1).z) - HEAD[B_PELVIS].z;
 }
 
-// Leg l's touchdown phase, the hop's and the bound's blended by `b`.
-pub fn off_mix(b: f32, l: i32) -> f32 {
-    return OFF_HOP[l] + b * phase_diff(OFF_HOP[l], OFF_BOUND[l]);
+// Leg l's touchdown phase: the hop's, toward the shuffle's by `w` and the
+// bound's by `b`.
+pub fn off_mix(b: f32, w: f32, l: i32) -> f32 {
+    let o = OFF_HOP[l] + w * phase_diff(OFF_HOP[l], OFF_SHUFFLE[l]);
+    return o + b * phase_diff(o, OFF_BOUND[l]);
 }
 
 // The shape of a swing (creature::limbs bump): the foot's lift eases in over

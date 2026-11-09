@@ -12,6 +12,7 @@ import { restExtent } from "./turnaround.js";
 import { setPose, capture, orbitView, showGround } from "./lit.js";
 import { beginSheet, saveSheet, text, rect, DIM } from "./page.js";
 import { debugPlanes } from "./shots.js";
+import { boneAt } from "./skeleton.js";
 
 export const LOOK_VIEWS = [
     { name: 'front-left', yaw: 40, pitch: 12 },
@@ -70,7 +71,10 @@ function pieceShot(creature, view, cw, ch) {
     return { img: out, labels };
 }
 
-export function lookSheet(rec, { path, rows = 6, phases = null, views = null, cell = 360, dist = 2.6, pieces = false } = {}) {
+// `focus`: a bone's name; each shot is then aimed at its middle as it is in
+// that row's pose (a close-up of a head or a foot follows it), not at the
+// body at rest.
+export function lookSheet(rec, { path, rows = 6, phases = null, views = null, cell = 360, dist = 2.6, pieces = false, focus = null } = {}) {
     const t0 = Date.now();
     const creature = rec.creature;
     const cyc = lastCycle(rec);
@@ -78,8 +82,10 @@ export function lookSheet(rec, { path, rows = 6, phases = null, views = null, ce
     const samples = sampleRows(rec, rows, cyc, phases);
     const V = views ? LOOK_VIEWS.filter((v) => views.includes(v.name)) : LOOK_VIEWS.slice(0, 3);
     const ext = restExtent(creature.skel);
-    const target = [0, ext.top * 0.5, ext.mid];
+    const rest = [0, ext.top * 0.5, ext.mid];
     const d = ext.len * dist;
+    const fb = focus ? creature.skel.bones[creature.skel.index(focus)] : null;
+    if (focus && !fb) throw new Error(`look: no bone '${focus}' to focus on`);
     const LM = 112, TM = 86, cw = cell, ch = Math.round(cell * 0.75);
     const W = LM + V.length * (cw + 6) + 6, H = TM + rows * (ch + 6) + 10;
     // The lit captures first (the lit scene is its own canvas), then the sheet.
@@ -89,6 +95,7 @@ export function lookSheet(rec, { path, rows = 6, phases = null, views = null, ce
         const P = relativePose(rec, smp.step, g0, new Float32Array(rec.poseStride));
         setPose(creature, P);
         showGround(true);
+        const target = fb ? boneAt(P, 0, fb, 0.5) : rest;
         return V.map((v) => {
             const view = orbitView(target, v.yaw, v.pitch, d, 30);
             return pieces ? pieceShot(creature, view, cw, ch) : { img: capture(view, cw, ch), labels: [] };

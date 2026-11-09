@@ -6,7 +6,9 @@
 // masses' share of the skin (lab/flesh.js), and face.bk draws the eyes,
 // nose and lip sharp per pixel over the head.
 
-export const COAT = [0.53, 0.44, 0.33];
+import { earAxis, hollowWidth } from "./ear.js";
+
+export const COAT =[0.53, 0.44, 0.33];
 export const BACK = [0.40, 0.32, 0.24];
 export const NAPE = [0.66, 0.45, 0.27];
 export const CREAM = [0.86, 0.81, 0.72];
@@ -15,6 +17,8 @@ export const EAR_IN = [0.86, 0.70, 0.66];
 export const EAR_TIP = [0.18, 0.15, 0.13];
 export const PAW = [0.78, 0.72, 0.62];
 export const DARK = [0.05, 0.04, 0.04];
+
+const EAR_L = earAxis(1), EAR_R = earAxis(-1);
 
 const mix = (a, b, t) => a.map((x, i) => x + (b[i] - x) * Math.max(0, Math.min(1, t)));
 const sstep = (e0, e1, x) => { const t = Math.max(0, Math.min(1, (x - e0) / (e1 - e0))); return t * t * (3 - 2 * t); };
@@ -45,12 +49,17 @@ export function coat(p, n, share) {
         h = mix(h, CREAM, 0.3 * sstep(0.016, 0.013, Math.hypot(ey, ez)) * sstep(-0.012, -0.004, ex));
         c = mix(c, h, head);
     }
-    // The ears: the backs as the coat, edged dark at the tip; the insides pink.
+    // The ears (ear.js): the backs and the rims as the coat, the tips edged
+    // dark; the hollow (facing its opening, below the rim) lined pale pink,
+    // furred toward the base and the tip.
     const ears = sum(share, LR('ear'));
     if (ears > 0) {
-        const inner = Math.max(0, n[2]) - 0.3 * Math.abs(n[0]);
-        let e = mix(COAT, EAR_IN, sstep(0.15, 0.55, inner) * sstep(0.27, 0.24, p[1]) * sstep(0.19, 0.205, p[1]));
-        e = mix(e, EAR_TIP, sstep(0.255, 0.275, p[1]) * sstep(0.1, -0.3, inner));
+        const E = p[0] >= 0 ? EAR_L : EAR_R;
+        const { u, front, off } = E.where(p);
+        const w = hollowWidth(u);
+        const lining = sstep(-0.0040, -0.0030, front) * sstep(w + 0.001, w - 0.0015, off) * sstep(0.16, 0.3, u) * sstep(0.95, 0.84, u);
+        let e = mix(COAT, EAR_IN, lining);
+        e = mix(e, EAR_TIP, sstep(0.88, 0.97, u) * (1 - lining));
         c = mix(c, e, ears);
     }
     // The haunches: the coat, cream inside and on the hind feet's soles;

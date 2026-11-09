@@ -20,6 +20,8 @@
 // wider than the rest. The hind's ranges reach a push onto the toes (the
 // stifle and hock near straight), the blades' a step out to the side.
 
+import { earAxis } from "./ear.js";
+
 const L = 1, R = -1;
 
 function frontLeg(side, tag) {
@@ -52,12 +54,13 @@ function hindLeg(side, tag) {
     ];
 }
 
+// Two bones up the ear (ear.js), the first to just under its widest.
 function ear(side, tag) {
-    const x = (v) => v * side;
+    const E = earAxis(side), mid = E.at(0.45);
     return [
-        { name: `ear${tag}1`, parent: 'head', head: [x(0.014), 0.178, 0.170], tail: [x(0.022), 0.226, 0.160],
-          limits: { x: [-110, 60], y: [-70, 70], z: [-45, 45] }, mass: 0.006 },
-        { name: `ear${tag}2`, parent: `ear${tag}1`, head: [x(0.022), 0.226, 0.160], tail: [x(0.030), 0.281, 0.147],
+        { name: `ear${tag}1`, parent: 'head', head: E.base, tail: mid,
+          limits: { x: [-110, 60], y: [-105, 105], z: [-45, 45] }, mass: 0.006 },
+        { name: `ear${tag}2`, parent: `ear${tag}1`, head: mid, tail: E.tip,
           limits: { x: [-50, 40], y: [-15, 15], z: [-20, 20] }, mass: 0.004 },
     ];
 }

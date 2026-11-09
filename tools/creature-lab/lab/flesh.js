@@ -12,7 +12,9 @@
 // each with a radius or [side, up] radii (an elliptical section, its `up`
 // leaning to the limb's `up` hint), splined between them, its spans joined
 // with a rounding of `joint` (1 cm). Each has a `blend` (m): the distance
-// over which it melts into the masses about it.
+// over which it melts into the masses about it. A mass given `carve: true`
+// takes the body away inside it instead (an ear's hollow, a nostril), cut
+// with a rounding of about its blend; it has no weights or colour.
 //
 // The field (lab/flesh.bk, on the GPU). A mass at distance d (negative
 // inside) contributes exp(-d / blend); the body is where the contributions
@@ -182,6 +184,7 @@ export class Flesh {
         this.masses.push({
             name, prims, blend: opts.blend ?? 0.03, soft: opts.soft ?? this.opts.soft, joint: opts.joint ?? 0, lo, hi,
             keep: opts.keep ?? false,
+            carve: opts.carve ?? false,
             // The rest centre, the middle of its extent: lab/form.js measures
             // its volume from there.
             centre: lo.map((v, k) => (v + hi[k]) / 2),
@@ -207,7 +210,7 @@ export class Flesh {
         const M = new Float32Array(this.masses.length * 12);
         let first = 0;
         this.masses.forEach((m, i) => {
-            M.set([first, m.prims.length, m.blend, m.joint, ...m.lo, m.soft, ...m.hi, 0], 12 * i);
+            M.set([first, m.prims.length, m.blend, m.joint, ...m.lo, m.soft, ...m.hi, m.carve ? 1 : 0], 12 * i);
             first += m.prims.length;
         });
         return { prims, P, M };

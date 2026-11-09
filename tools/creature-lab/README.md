@@ -115,9 +115,20 @@ on and gathers as the hips catch up, the back's flex following that spacing;
 in the bound's flights the body falls freely. The head is held steady in
 space (the neck solved each step so the head stays at its posture's smoothed
 height, eased into the neck's reach, its turn set in the world), lifted as
-it goes and riding a little of the trunk's pitch; the ears sweep back
-running, each of their two bones aimed at a sprung tip (`creature::dangle`),
-and the scut is sprung the same way. Its feet swing on `swing_arc` paths,
+it goes and riding a little of the trunk's pitch. The ears (`ear.js`: their
+axis and opening, shared by the skeleton, the body and the coat) are shells
+from narrow bases 4 cm apart, standing in a V, each hollowed by a carved
+mass and lined pale inside. Each listens on its own: it holds where it has
+turned for an irregular while, then swivels its opening about its own
+length on a critical spring to the next, half the time toward a sound the
+pair shares and else on its own scan, now and then flicking instead
+(`EAR_FLICKS`); relaxed they splay, alert they stand close facing the gaze,
+grazing they stay up as the head goes down, hopping they listen ahead,
+running they sweep back, loafing they lie along the neck. Each of their two
+bones is aimed at a sprung tip (`creature::dangle`), and the scut is sprung
+the same way. Moving a little (under `SHUFFLE_TOP` m/s) it shuffles rather
+than hops: the fore paws step one after the other, the hind feet come up
+low after them near together, and the rump does not vault. Its feet swing on `swing_arc` paths,
 folded toward their girdle only as far as clears the ground by the swing's
 lift; the fore stride is shorter hopping (0.10 m) than bounding (0.13 m),
 since the hop's fore leg stands under its shoulder and the longer stride
@@ -178,6 +189,15 @@ return B.build();
   (`Mesh.simplifyToTriangleCount`'s lock) and the budget is spent on the
   rest, so the deer's eyes and nose pad, 3 to 4 cm across, keep their shape.
   A coarser level of detail passes `keep: false`.
+- `carve: true` (on a blob or limb) makes a mass that takes the body away
+  inside it, as the bunny's ear hollows: the field is the smooth greater of
+  the body's and the carve's inside distance in its blends, rounded over one
+  blend, so the cut keeps a gradient for the vertices to find the surface
+  by. A carve weighs and colours nothing.
+- `joint` (a limb's, 1 cm by default) rounds the meeting of its spans by a
+  smooth minimum; a point near several short spans takes it from each, so a
+  thin limb swells by up to a joint's quarter a span. A thin shell (an ear)
+  wants a small one.
 
 `build()` evaluates the field on the GPU (`lab/flesh.bk`): each mass adds
 `exp(-d / blend)` and the skin is where the sum is 1. It meshes the field once
@@ -426,7 +446,8 @@ Every output is deterministic. A rerun writes the same bytes.
     times across an action's run; columns are cameras (`--views` from
     front-left, left, back-left, front, right, back; the first three by
     default), `--dist` body lengths out (2.6), aimed at the body's middle at
-    rest
+    rest, or with `--focus <bone>` at that bone's middle as each row has it
+    (a close-up of the ears: `--focus earL1 --dist 0.8`)
   - `--pieces` writes `<scenario>-look-pieces.png`: each pixel coloured by
     the body piece it is on, shaded by the lit picture, each piece named at
     its middle in view; a body of one piece (a flesh body) is coloured by

@@ -37,7 +37,8 @@ export const HELP = `creature-lab <command> <creature> [scenario ...] [options]
   look        <creature> [scenario ...]    the creature as the live view draws it (lit, shadowed), close,
                                            through a cycle: three-quarter front, side, three-quarter back
                                            (--rows <n> | --phases, --views front-left,left,back-left,front,right,
-                                           --dist <body lengths>; --pieces: coloured and named by body piece)
+                                           --dist <body lengths>; --focus <bone>: aimed at that bone as
+                                           it moves; --pieces: coloured and named by body piece)
   kinematics  <creature> [scenario ...]    per leg, each bone's flexion, velocity and acceleration over
                                            the cycle with contact, lift-off and touchdown; corners in red
   spacing     <creature> [scenario ...]    toes, leg joints and tracked points at 30 fps (--fps): paths
@@ -146,7 +147,8 @@ export function sheet(kind, recs, path, opt = {}) {
     }
     if (kind === 'look') {
         return lookSheet(recs[0], { path: opt.pieces ? path.replace(/\.png$/, '-pieces.png') : path, pieces: !!opt.pieces, rows: rows || 6, views: opt.views ? String(opt.views).split(',') : null,
-            phases: opt.phases ? String(opt.phases).split(',').map(Number) : null, dist: opt.dist ? +opt.dist : 2.6 });
+            phases: opt.phases ? String(opt.phases).split(',').map(Number) : null, dist: opt.dist ? +opt.dist : 2.6,
+            focus: opt.focus ? String(opt.focus) : null });
     }
     if (kind === 'charts') return chartsSheet(recs, { path });
     if (kind === 'kinematics') return kinematicsSheet(recs[0], { path });

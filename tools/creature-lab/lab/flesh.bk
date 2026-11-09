@@ -6,7 +6,7 @@
 // side and up (a blob's frame, a span's section axes), its radii (a blob's
 // rx, ry, rz; a span's side and up radius at a and at the far end), and its
 // box lo and hi. A mass is 3 vec4: (first primitive, count, blend, joint),
-// (box lo, soft), (box hi, 0). A mass at distance d contributes
+// (box lo, soft), (box hi, carve: 1 for a mass that cuts the body away). A mass at distance d contributes
 // exp(-d / blend), faded out between FADE0 and FADE1 blends; the field is
 // -log of the contributions' sum, negative inside.
 const FADE0: f32 = 3.5;
@@ -82,16 +82,35 @@ fn contribution(d: f32, blend: f32) -> f32 {
     return c;
 }
 
+// A carving mass (its box hi's w 1) takes the body away inside it: the
+// field is the smooth greater of the body's and the carve's own inside
+// distance in its blends (-d / blend), rounded over one blend. Near a
+// surface the body's field is its distance in its blends too, so a carve
+// whose blend is its mass's cuts it as a distance would, and the field keeps
+// a gradient inside the cut for the vertices to find the surface by.
+fn is_carve(masses: read_store<vec4<f32>, 1>, m: i32) -> bool { return masses[3 * m + 2].w > 0.5; }
+
+fn smax(a: f32, b: f32, k: f32) -> f32 { return -smin(-a, -b, k); }
+
 fn field(prims: read_store<vec4<f32>, 1>, masses: read_store<vec4<f32>, 1>, nm: i32, p: vec3<f32>) -> f32 {
     var s = 0.0;
+    var cut = -1e9;
     for (var m: i32 = 0; m < nm; m += 1) {
         let blend = masses[3 * m].z;
+        if (is_carve(masses, m)) {
+            if (outside(p, masses[3 * m + 1].xyz, masses[3 * m + 2].xyz, blend)) { continue; }
+            let cd = mass_dist(prims, masses, m, p, blend);
+            cut = max(cut, -cd.x / blend);
+            continue;
+        }
         let reach = FADE1 * blend;
         if (outside(p, masses[3 * m + 1].xyz, masses[3 * m + 2].xyz, reach)) { continue; }
         let md = mass_dist(prims, masses, m, p, reach);
         s += contribution(md.x, blend);
     }
-    return -log(max(s, 1e-4));
+    let f = -log(max(s, 1e-4));
+    if (cut < -1e8) { return f; }
+    return smax(f, cut, 1.0);
 }
 
 // The field over the grid: cell (x, y, z) at lo + cell * (x, y, z).
@@ -131,7 +150,8 @@ fn k_project(g: grid<1>, prims: read_store<vec4<f32>, 1>, masses: read_store<vec
 }
 
 // Every mass at every vertex: (distance, nearest primitive, where along it,
-// 0); the primitive is -1 where the mass does not reach.
+// 0); the primitive is -1 where the mass does not reach (and for a carving
+// mass, which weighs and colours nothing).
 @kernel @grid(2)
 fn k_masses(g: grid<2>, prims: read_store<vec4<f32>, 1>, masses: read_store<vec4<f32>, 1>,
             pos: read_store<vec4<f32>, 1>, out: write_store<vec4<f32>, 1>) {
@@ -141,7 +161,7 @@ fn k_masses(g: grid<2>, prims: read_store<vec4<f32>, 1>, masses: read_store<vec4
     let blend = masses[3 * m].z;
     let reach = FADE1 * blend * max(1.0, masses[3 * m + 1].w) + 0.02;
     var r = vec4<f32>(1e9, -1.0, 0.0, 0.0);
-    if (!outside(p, masses[3 * m + 1].xyz, masses[3 * m + 2].xyz, reach)) {
+    if (!is_carve(masses, m) && !outside(p, masses[3 * m + 1].xyz, masses[3 * m + 2].xyz, reach)) {
         let md = mass_dist(prims, masses, m, p, reach);
         r = vec4<f32>(md.x, md.y, md.z, 0.0);
     }
