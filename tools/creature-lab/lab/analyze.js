@@ -41,6 +41,8 @@ function circMean(xs) {
 const circDiff = (a, b) => { let d = (b - a) % 1; if (d > 0.5) d -= 1; if (d < -0.5) d += 1; return d; };
 
 const SOLE_NAMES = ['toe', 'heel'];
+// s a set of feet must stay down, unchanged, to be a stance it is balanced on.
+const SUPPORT_HELD = 0.06;
 // Sole points of a foot in its bone's rest frame: the toe, and a heel under the fetlock.
 function solePoints(bone) {
     return [bone.tail, [bone.head[0], bone.tail[1] + 0.006, bone.head[2] + 0.35 * (bone.tail[2] - bone.head[2])]];
@@ -227,6 +229,16 @@ export function analyze(rec, opts = {}) {
     // --- support ---------------------------------------------------------------
     let supported = 0, outside = 0, minMargin = Infinity, airborne = 0, worstAt = -1;
     const margin = new Float32Array(n);
+    // Balance is asked of a set of feet it stands on, not of the instant
+    // between a pair's footfalls: hopping, one hind foot leaves or lands a
+    // step or two before the other, and that is not a stance on three.
+    // held[k]: how long (steps) the set of feet down at k stays as it is.
+    const held = new Int32Array(n);
+    const same = (a, b) => { for (let i = 0; i < nf; i++) if (S.contact[a * nf + i] !== S.contact[b * nf + i]) return false; return true; };
+    for (let k = 0, from = 0; k <= n; k++) {
+        if (k === n || !same(k, from)) { held.fill(k - from, from, k); from = k; }
+    }
+    const heldMin = Math.ceil(SUPPORT_HELD / rec.dt);
     for (let k = 0; k < n; k++) {
         const down = [];
         for (let i = 0; i < nf; i++) if (S.contact[k * nf + i]) {
@@ -237,7 +249,7 @@ export function analyze(rec, opts = {}) {
         const m = supportMargin([c[0], c[2]], down);
         margin[k] = m == null ? NaN : m;
         if (!down.length) { airborne++; continue; }
-        if (down.length >= 3) {
+        if (down.length >= 3 && held[k] >= heldMin) {
             supported++;
             if (m < 0) outside++;
             if (m < minMargin) { minMargin = m; worstAt = k; }

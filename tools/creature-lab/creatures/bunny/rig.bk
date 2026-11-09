@@ -130,7 +130,7 @@ const REAR_HIP: f32 = 0.104;     // m the hips sit at, sitting up
 const REAR_STRETCH: f32 = 0.012; // m the back lengthens sitting up (its arch let out)
 const LIE_HIP: f32 = 0.072;      // m the hips rest over the ground, loafing
 const LIE_WITHERS: f32 = 0.098;  //   and the withers
-@knob const HEAD_HOLD: f32 = 0.85;   // share of the chest's bob the neck keeps from the head
+@knob const HEAD_HOLD: f32 = 0.92; // share of the chest's bob the neck keeps from the head
 @knob const NECK_HOP: f32 = -0.45;   // rad the neck lifts the head by, hopping
 @knob const SCAP_FOLLOW: f32 = 0.6;  // of the leg's swing the blade takes
 @knob const EAR_RUN: f32 = 0.8;      // rad the ears sweep back running flat out
@@ -267,7 +267,10 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
     // after the other, the hind feet are brought up low and quick, and the
     // rump does not vault (gone by SHUFFLE_TOP m/s).
     // (Eased, so a change of pace does not move the feet's timing at once.)
-    let shuf_t = 1.0 - smooth01((veff - SHUFFLE_FULL) / (SHUFFLE_TOP - SHUFFLE_FULL));
+    // Turning on the spot it does not shuffle: its weight is over the hind
+    // feet and one cannot leave the ground alone, so it turns as it hops,
+    // the hind feet going round together in little hops of the rump.
+    let shuf_t = (1.0 - smooth01((veff - SHUFFLE_FULL) / (SHUFFLE_TOP - SHUFFLE_FULL))) * (1.0 - smooth01((abs(omega) - 0.3) / 0.5));
     var shuf_s = state[s + D_SHUF];
     if (init) { shuf_s = shuf_t; }
     shuf_s = approach(shuf_s, shuf_t, 1.5, dt);
@@ -327,6 +330,11 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
             if (e > worst_e) { worst_e = e; worst = l; }
         }
     }
+    // Its weight is over its hind feet, and one cannot leave the ground
+    // while the other holds it: when a hind foot has strayed they both
+    // step home together, in one small shift of the rump.
+    var settle_hinds = false;
+    if (worst >= 0) { settle_hinds = !any_swing && LEG_HIND[worst] == 1; }
     var feet: array<vec3<f32>, 4>;
     var toes: array<vec3<f32>, 4>;
     var left_t: array<f32, 4>;
@@ -368,7 +376,7 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
                 // Out of reach early: step now, landing on the clock's beat.
                 lift = true; kind = 0.0;
                 lift_t = clamp((1.0 - ph) / max(freq, 0.1), min(0.1, 0.5 * (1.0 - duty) / max(freq, 0.1)), 0.4);
-            } else if (!moving && !any_swing && worst == l && rear < 0.05 && lie < 0.05) {
+            } else if (!moving && ((!any_swing && worst == l) || (settle_hinds && hind)) && rear < 0.05 && lie < 0.05) {
                 lift = true;
             }
             if (lift) {
@@ -616,7 +624,7 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
     let hy_pose = head_y(T.q[B_THORAX], T.p[B_THORAX], n_pose);
     var hy_s = state[s + D_HEAD_S];
     if (init) { hy_s = hy_pose; }
-    hy_s = damp(hy_s, hy_pose, 3.0, dt);
+    hy_s = damp(hy_s, hy_pose, 1.4, dt);
     state[s + D_HEAD_S] = hy_s;
     let carry_n = (1.0 - graze) * (1.0 - lie) * (1.0 - rear_s) * HEAD_HOLD;
     // Held no further than the neck reaches, eased in: past it the head

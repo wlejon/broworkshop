@@ -101,11 +101,17 @@ export function watchSheet(rec, { path, view = 'side', frames = WATCH.frames, fr
     if (!V) throw new Error(`watch: no view '${view}' (have ${Object.keys(WATCH_VIEWS).join(', ')})`);
     if (!(frames >= 1 && frames <= WATCH.frames)) throw new Error(`watch: 1 to ${WATCH.frames} frames a sheet (asked ${frames}): more would be too small to judge; draw another part of the cycle with --from and --span`);
     const creature = rec.creature, skel = creature.skel;
-    const cyc = lastCycle(rec);
+    // A run that turns where it stands is not a cycle seen from a camera
+    // that turns with it (which shows no turn at all): it is drawn through
+    // its whole length from a camera that stays where it began.
+    const first = rootOf(rec, 0), last = rootOf(rec, rec.steps - 1);
+    const turned = Math.abs(Math.atan2(Math.sin(last.yaw - first.yaw), Math.cos(last.yaw - first.yaw)));
+    const turns = turned > 0.6 && Math.hypot(last.x - first.x, last.z - first.z) < 0.5;
+    const cyc = turns ? null : lastCycle(rec);
     const F = framesOf(rec, cyc, frames, { from, span, to });
     const poseAt = (step) => {
         const r = rootOf(rec, step);
-        return relativePose(rec, step, groundHeights(rec.env, new Float32Array([r.x, r.z]))[0], new Float32Array(rec.poseStride));
+        return relativePose(rec, step, groundHeights(rec.env, new Float32Array([r.x, r.z]))[0], new Float32Array(rec.poseStride), 0, turns ? first : null);
     };
     const poses = F.frames.map((f) => poseAt(f.step));
     const before = poseAt(F.before);
@@ -159,7 +165,7 @@ export function watchSheet(rec, { path, view = 'side', frames = WATCH.frames, fr
     const g = S.g;
     rect(g, 0, 0, W, H, '#ecebe6');
     text(g, `${creature.label} · ${rec.scenario.name} · watch · ${view}`, 12, 30, { size: 22, weight: 700 });
-    text(g, `${rec.scenario.about || ''} — ${cyc ? `cycle ${cyc.period.toFixed(3)} s, ` : ''}${rec.tele[k0 + T.SPEED].toFixed(2)} m/s, a frame every ${(1000 * F.every).toFixed(0)} ms; one camera, standing where the creature does at its steady pace`, 12, 52, { size: 14, color: DIM });
+    text(g, `${rec.scenario.about || ''} — ${cyc ? `cycle ${cyc.period.toFixed(3)} s, ` : ''}${rec.tele[k0 + T.SPEED].toFixed(2)} m/s, a frame every ${(1000 * F.every).toFixed(0)} ms; one camera, ${turns ? 'staying where the creature began (it turns on the spot)' : 'standing where the creature does at its steady pace'}`, 12, 52, { size: 14, color: DIM });
     text(g, 'blue outline: the frame before · plumb line: where it stands · level lines: its hips and head at rest · ▼ foot down △ up', 12, 70, { size: 13, color: DIM });
     F.frames.forEach((f, i) => {
         const x0 = 6 + (i % cols) * (cw + GAP), y0 = TM + Math.floor(i / cols) * (ch + LAB);

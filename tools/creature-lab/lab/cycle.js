@@ -54,10 +54,12 @@ export function rootOf(rec, k) {
 
 // Step k's pose in the creature's frame: its root's ground point at the
 // origin, its heading along +Z (`ground` the ground height under the root).
-export function relativePose(rec, k, ground, out, at = 0) {
+// With `ref` (a rootOf of another step) it is put in that step's frame
+// instead, so a run of them shows the creature turn and travel.
+export function relativePose(rec, k, ground, out, at = 0, ref = null) {
     const nb = rec.creature.skel.count;
     const P = rec.pose, o = k * rec.poseStride;
-    const r = rootOf(rec, k);
+    const r = ref || rootOf(rec, k);
     const c = Math.cos(-r.yaw), s = Math.sin(-r.yaw);
     for (let b = 0; b < nb; b++) {
         const i = o + b * ROWS, j = at + b * ROWS;
