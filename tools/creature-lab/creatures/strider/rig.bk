@@ -102,6 +102,8 @@ pub const STATE: i32 = PROBE + PROBE_N;
 @knob const LEAN_ACC: f32 = 0.035;   // rad it leans per m/s^2 of the pace's change
 @knob const HEAD_SPACE: f32 = 0.6;   // share of its gaze in space the head holds
 @knob const BALANCE: f32 = 1.0;      // share of the centre's offset over the feet it corrects, standing
+@knob const VAULT: f32 = 0.012;      // m the hips rise over each stance leg walking, about their mean
+@knob const KNEE_W: f32 = 0.025;     // m the hips ride lower walking, the knees soft
 
 const LEG_B0: array<i32, 2> = [B_THIGHL, B_THIGHR];
 const ARM_B0: array<i32, 2> = [B_SHOULDERL, B_SHOULDERR];
@@ -403,7 +405,7 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
             let gpt = ground_pitch(env, target, fwd);
             // The heel comes down by HEEL_END of the swing (walking) and the
             // foot rocks flat over the rest; running it lands on the ball.
-            let heel_end = mix(0.82, 1.0, rw);
+            let heel_end = mix(0.74, 1.0, rw);
             let e = smooth01(u / heel_end);
             let hip = pos + q_rot(qyaw, HEAD[LEG_B0[l]] - HEAD[B_PELVIS]) + vec3<f32>(0.0, state[s + D_BODY_Y] - pos.y, 0.0);
             var path = swing_arc(hip, qyaw, lifted, target, e);
@@ -418,10 +420,11 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
             // leg folds, the foot drawn toward the hip as far as clears the
             // ground by a share of the swing's lift.
             let need = height(env, path.x, path.z) + (0.006 + 0.6 * lift_h) * bump(u, 0.12, 0.7);
-            if (path.y < need) {
-                let t = (need - path.y) / max(hip.y - path.y, 0.05);
-                path += (hip - path) * min(t, 0.8);
-            }
+            // (A soft max, so the fold comes in without a corner in the knee.)
+            let short = need - path.y;
+            let deficit = select_f(short > 0.2, short, 0.012 * log(1.0 + exp(short / 0.012)));
+            let t = deficit * bump(u, 0.1, 0.9) / max(hip.y - path.y, 0.05);
+            path += (hip - path) * smin(t, 0.8, 0.05);
             // The foot's pitch: off the toes as it left, level through the
             // swing, the toes lifting before the heel comes down, then flat.
             // Running it points its toes down as the foot folds behind, and
@@ -429,10 +432,10 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
             let land = select_f(settle, 0.08, HEEL_LAND);
             let p0 = state[k + L_P0];
             let rock = smooth01((u - heel_end) / max(1.0 - heel_end, 0.05));
-            let walk_pf = mix(mix(mix(p0, -0.08, smooth01(u / 0.4)), -land, smooth01((u - 0.45) / max(heel_end - 0.45, 0.05))), gpt, rock);
+            let walk_pf = mix(mix(mix(p0, -0.08, smooth01(u / 0.6)), -land, smooth01((u - 0.45) / max(heel_end - 0.45, 0.05))), gpt, rock);
             let run_pf = mix(p0, gpt + RUN_BALL, smooth01((u - 0.5) / 0.45)) + 0.4 * bump(u, 0.3, 0.65);
             pf = mix(walk_pf, run_pf, rw);
-            pt = mix(mix(ground_pitch(env, lifted, fwd), pf, smooth01(u / 0.25)), gpt, smooth01((u - 0.75) / 0.25) * rw);
+            pt = mix(mix(ground_pitch(env, lifted, fwd), pf, smooth01(u / 0.5)), gpt, smooth01((u - 0.75) / 0.25) * rw);
             // With the toes up the foot turns about its heel, the heel on its
             // path; with the heel up, about the toes.
             toe = path;
@@ -490,7 +493,11 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
     let half = 0.5 * speed * duty / max(freq, 0.1);
     let rr = REACH * leg_reach(0);
     let run_y = HEAD[B_FOOTL].y + 0.5 * (TAIL[B_FOOTL].z - HEAD[B_FOOTL].z) * sin(RUN_BALL) + sqrt(max(rr * rr - half * half, 0.25 * rr * rr)) - RUN_HIP;
-    let want_y = ground_y + mix(HEAD[B_PELVIS].y, min(run_y, HEAD[B_PELVIS].y - RUN_HIP), rw) - crouch + 0.012 * alert;
+    let want_y = ground_y + mix(HEAD[B_PELVIS].y - KNEE_W * go, min(run_y, HEAD[B_PELVIS].y - RUN_HIP), rw) - crouch + 0.012 * alert;
+    // Walking the hips rise over each stance leg and fall between steps,
+    // a smooth wave of the cycle at twice its rate (a peak at each foot's
+    // mid-stance).
+    let vault = VAULT * go * (1.0 - rw) * cos(2.0 * TAU * (phase - 0.5 * duty));
     let body_y = damp(state[s + D_BODY_Y], want_y, 10.0, dt);
     state[s + D_BODY_Y] = body_y;
     // Standing, the plan keeps the centre of mass over the middle of the feet.
@@ -503,7 +510,7 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
     state[s + D_BAL] = bal.x;
     state[s + D_BAL + 1] = bal.y;
     let sway = q_rot(qyaw, vec3<f32>(SWAY * sway_u, 0.0, 0.0));
-    var plan = vec3<f32>(pos.x + bal.x, body_y + rw * go * run_bounce(phase, duty, freq), pos.z + bal.y) + sway;
+    var plan = vec3<f32>(pos.x + bal.x, body_y + rw * go * run_bounce(phase, duty, freq) + vault, pos.z + bal.y) + sway;
     var drop = (plan.y - under_cap(plan.y, root_cap(state, s, ankles, left_t, plan, qbody))) * (1.0 - rw);
     if (!init) { drop = max(drop, state[s + D_DROP] * exp(-dt / CAP_EASE)); }
     state[s + D_DROP] = drop;

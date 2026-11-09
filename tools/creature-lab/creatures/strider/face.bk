@@ -23,11 +23,11 @@ fn inside(d: f32, w: f32) -> f32 {
 
 // The eye (body.js's eye mass): its centre on the left, seen from the
 // front, and the opening's radius.
-const EYE: vec2<f32> = vec2<f32>(0.042, 1.219);
-const EYE_R: f32 = 0.0168;
+const EYE: vec2<f32> = vec2<f32>(0.038, 1.212);
+const EYE_R: f32 = 0.0145;
 // The nose pad's middle and the mouth's middle.
-const NOSE: vec2<f32> = vec2<f32>(0.0, 1.193);
-const MOUTH_Y: f32 = 1.148;
+const NOSE: vec2<f32> = vec2<f32>(0.0, 1.172);
+const MOUTH_Y: f32 = 1.142;
 
 pub fn face(p: vec3<f32>, foot: f32, s: mesh::Surface) -> mesh::Surface {
     var out = s;
@@ -37,7 +37,7 @@ pub fn face(p: vec3<f32>, foot: f32, s: mesh::Surface) -> mesh::Surface {
     var rough = s.roughness;
     let q = vec2<f32>(ax, p.y);
 
-    if (p.z > 0.098 && abs(p.y - EYE.y) < 0.03 && abs(ax - EYE.x) < 0.03) {
+    if (p.z > 0.088 && abs(p.y - EYE.y) < 0.03 && abs(ax - EYE.x) < 0.03) {
         let r = length(q - EYE);
         let d = r - EYE_R;
         // The pale ring of bare skin, then the dark lid rim.
@@ -56,7 +56,7 @@ pub fn face(p: vec3<f32>, foot: f32, s: mesh::Surface) -> mesh::Surface {
         rough = mix(rough, 0.04, open);
     }
 
-    if (p.z > 0.12) {
+    if (p.z > 0.125) {
         // The nose pad, broader than tall, and its nostrils.
         let pd = length((q - NOSE) / vec2<f32>(0.021, 0.0125)) - 1.0;
         let pad = inside(pd * 0.012, w);
@@ -65,9 +65,9 @@ pub fn face(p: vec3<f32>, foot: f32, s: mesh::Surface) -> mesh::Surface {
         let nost = inside(length((q - vec2<f32>(0.0085, NOSE.y - 0.002)) / vec2<f32>(0.0048, 0.0032)) * 0.004 - 0.004, w);
         c = mix(c, lin(vec3<f32>(0.015, 0.01, 0.01)), nost);
         // The mouth: a line across, curving up at its corners.
-        if (ax < 0.05) {
-            let y = MOUTH_Y + 0.006 * (ax / 0.045) * (ax / 0.045);
-            let m = inside(abs(p.y - y) - 0.0011, w) * inside(ax - 0.045, w);
+        if (ax < 0.04) {
+            let y = MOUTH_Y + 0.005 * (ax / 0.03) * (ax / 0.03);
+            let m = inside(abs(p.y - y) - 0.001, w) * inside(ax - 0.03, w);
             c = mix(c, lin(vec3<f32>(0.10, 0.06, 0.05)), 0.9 * m);
         }
     }
