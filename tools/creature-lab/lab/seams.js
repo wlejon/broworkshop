@@ -26,8 +26,10 @@ import { ROWS } from "./skeleton.js";
 
 export const SEAMS = {
     crease: 25,        // degrees of sharpening past rest before an edge counts
-    cell: 0.04,        // m: the broad phase's grid cell
+    cell: 0.04,        // m: the broad phase's grid cell at most,
+    cellEdges: 4,      //   else this many of the mesh's median edge
     pull: 0.3,         // bone pull: |ratio - 1| past this counts
+    turn: 8,           // degrees the skin must turn sharper than at rest for a line seen in an image to count
 };
 
 const DEG = 180 / Math.PI;
@@ -63,7 +65,17 @@ export function seamTopology(creature) {
     const restN = faceNormals(body.positions, idx);
     const restDihedral = dihedrals(restN, edges);
     const restPull = bonePull(creature, body.positions, mainBone);
-    creature._seams = { nt, nv, triPiece, mainBone, label, edges, restDihedral, restPull, pieces };
+    // The broad phase's cell: a few of the mesh's edges across (a rabbit's
+    // edges are a few mm, and a deer-sized cell would hold its whole head),
+    // at most SEAMS.cell.
+    const R = body.positions, el = new Float32Array(ea.length);
+    for (let e = 0; e < ea.length; e++) {
+        const a = 3 * ea[e], b = 3 * eb[e];
+        el[e] = Math.hypot(R[b] - R[a], R[b + 1] - R[a + 1], R[b + 2] - R[a + 2]);
+    }
+    el.sort();
+    const cell = Math.min(SEAMS.cell, Math.max(0.004, SEAMS.cellEdges * el[el.length >> 1]));
+    creature._seams = { nt, nv, triPiece, mainBone, label, edges, restDihedral, restPull, pieces, cell };
     return creature._seams;
 }
 
@@ -78,6 +90,51 @@ export function faceNormals(X, idx) {
         N[3 * t] = nx / l; N[3 * t + 1] = ny / l; N[3 * t + 2] = nz / l;
     }
     return N;
+}
+
+// How sharply the skin of posed mesh X turns at each vertex: the largest
+// angle (degrees) between vertex normals across an edge, over the vertices
+// within two edges of it.
+function skinTurn(topo, idx, X) {
+    const nv = topo.nv, E = topo.edges, F = faceNormals(X, idx), n = new Float32Array(3 * nv);
+    for (let t = 0; t < topo.nt; t++) for (let e = 0; e < 3; e++) {
+        const v = 3 * idx[3 * t + e];
+        n[v] += F[3 * t]; n[v + 1] += F[3 * t + 1]; n[v + 2] += F[3 * t + 2];
+    }
+    for (let v = 0; v < 3 * nv; v += 3) {
+        const l = Math.hypot(n[v], n[v + 1], n[v + 2]) || 1;
+        n[v] /= l; n[v + 1] /= l; n[v + 2] /= l;
+    }
+    const turn = new Float32Array(nv), out = new Float32Array(nv);
+    for (let e = 0; e < E.a.length; e++) {
+        const a = E.a[e], b = E.b[e];
+        const c = n[3 * a] * n[3 * b] + n[3 * a + 1] * n[3 * b + 1] + n[3 * a + 2] * n[3 * b + 2];
+        const ang = Math.acos(Math.max(-1, Math.min(1, c))) * DEG;
+        if (ang > turn[a]) turn[a] = ang;
+        if (ang > turn[b]) turn[b] = ang;
+    }
+    out.set(turn);
+    for (let e = 0; e < E.a.length; e++) {
+        const a = E.a[e], b = E.b[e];
+        if (turn[b] > out[a]) out[a] = turn[b];
+        if (turn[a] > out[b]) out[b] = turn[a];
+    }
+    return out;
+}
+
+// Per vertex, how much sharper posed mesh X turns there than the body at
+// rest (degrees, 0 where it turns as at rest or less): what the pose did, as
+// against the edges the body is made with (an ear's rim, the cleft between
+// an ear and the crown). Cached for the last X asked.
+export function turnExcess(creature, X) {
+    const topo = seamTopology(creature), idx = creature.body.indices;
+    if (topo.excessOf === X) return topo.excess;
+    if (!topo.restTurn) topo.restTurn = skinTurn(topo, idx, creature.body.positions);
+    const turn = skinTurn(topo, idx, X), rest = topo.restTurn;
+    for (let v = 0; v < turn.length; v++) turn[v] = Math.max(0, turn[v] - rest[v]);
+    topo.excessOf = X;
+    topo.excess = turn;
+    return turn;
 }
 
 // The angle (degrees) between the two faces at each interior edge; -1 on a border.
@@ -188,7 +245,7 @@ export function measureMesh(creature, X, P = null, o = 0) {
     const N = faceNormals(X, idx);
     const sites = new Map();
     // Broad phase: triangles binned into a grid by their bounds.
-    const cs = SEAMS.cell, box = new Float32Array(nt * 6);
+    const cs = topo.cell, box = new Float32Array(nt * 6);
     const grid = new Map();
     for (let t = 0; t < nt; t++) {
         let x0 = Infinity, y0 = Infinity, z0 = Infinity, x1 = -Infinity, y1 = -Infinity, z1 = -Infinity;

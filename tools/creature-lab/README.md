@@ -339,10 +339,13 @@ creatures it holds (`setInstanceCullSpheres`). The nodes' cull box
 (`setCullBounds`) is the field and the run past it.
 
 `finder` scans each named scenario into `finder/scan-<scenario>.json`
-(about 10 to 20 s a scenario), then ranks every scan in that folder, so
+(about 30 to 40 s a scenario for the bunny), then ranks every scan in that folder, so
 scenarios can be scanned a few at a time and ranked together. `--rank` with
 no scenario only ranks; `--top <n>` draws that many close-ups (`0` scans
 without drawing); `--every <steps>` sets how often the mesh is measured (4).
+Any command takes `--profile`: bronze's sampling profiler runs over it and
+prints the functions by self time, the callers of the costliest, and any
+function tier 1 refused to compile (and why).
 `natural` runs walk, trot, gallop, start-stop, gaits, trot-turn and startle
 by default; the steady gaits run for 20 s so there are cycles to compare.
 
@@ -525,8 +528,15 @@ Every output is deterministic. A rerun writes the same bytes.
     jumping between neighbouring pixels by more than it turns either side;
     kinks are inward notches of the outline, skipped where the outline's
     two sides lie more than 8 cm apart in depth (one part in front of
-    another, such as legs crossing in view). Each is measured in cm of line
-    on the body and named by the pieces or masses and bone under it.
+    another, such as legs crossing in view). A crease or kink counts only
+    where the skin turns sharper than at rest (the largest angle between
+    vertex normals within two edges, posed against rest, by 8 degrees or
+    more: `SEAMS.turn`), so the edges a body is made with (an ear's rim,
+    the cleft between an ear and the crown) are not faults of the pose.
+    Each is measured in cm of line on the body and named by the pieces or
+    masses and bone under it. The mesh's broad phase bins triangles in
+    cells of four median edges (at most 4 cm); the images are scanned only
+    over the body's box.
   - `finder.json`: the worst moments (one per site, the view that shows it
     most), every site's worst score per scenario, and the shape without a
     reference: the pieces, the crossings and folds already there at rest,

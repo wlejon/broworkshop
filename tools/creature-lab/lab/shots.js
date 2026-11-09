@@ -9,13 +9,17 @@
 //          pixels where it bends inward (a notch; tips that point outward,
 //          an ear's or a hoof's, are not counted, nor a notch whose two
 //          sides lie at depths OCCLUSION apart: one part in front of another)
+// A crease or a kink counts only where the skin turns sharper than the body
+// at rest does (lab/seams.js turnExcess, by SEAMS.turn): an edge the body is
+// made with (an ear's rim, the cleft between an ear and the crown) is not
+// a fault of the pose.
 // Each is put to a site with the keys lab/seams.js gives (cross A x B,
 // crease <piece> over <bone>, kink <piece> over <bone>) by the nearest
 // vertex on screen at that depth, and measured as the length it draws in
 // centimetres at the pixel's distance, weighted by its angle over 90.
 
 import { capture, project } from "./lit.js";
-import { seamTopology } from "./seams.js";
+import { seamTopology, turnExcess, SEAMS } from "./seams.js";
 
 export const SHOT = {
     step: 2,           // px: the neighbour compared
@@ -31,23 +35,30 @@ const DEG = 180 / Math.PI;
 const toByte = (img) => img.data;
 
 // The three debug captures decoded: per pixel the piece (-1 off the body),
-// the distance from the eye (m) and the unit normal.
+// the distance from the eye (m) and the unit normal (on the body; 0 off it),
+// and the box the body covers (x0, y0, x1, y1 inclusive; x0 > x1 for none).
 export function debugPlanes(view, W, H) {
     const pc = toByte(capture(view, W, H, 'piece'));
     const dp = toByte(capture(view, W, H, 'depth'));
     const nm = toByte(capture(view, W, H, 'normal'));
     const n = W * H, piece = new Int16Array(n), depth = new Float32Array(n), normal = new Float32Array(3 * n);
+    let x0 = W, y0 = H, x1 = -1, y1 = -1;
     for (let i = 0; i < n; i++) {
         const o = 4 * i;
         const id = pc[o + 1] >= 250 ? Math.round((pc[o] - 8) / 16) + 16 * Math.round((pc[o + 2] - 8) / 16) - 1 : -1;
-        const on = id >= 0 && pc[o] < 250;
-        piece[i] = on ? id : -1;
-        depth[i] = on && dp[o + 2] >= 250 ? (Math.round((dp[o] - 2) / 4) * 64 + Math.round((dp[o + 1] - 2) / 4)) / 100 : 0;
-        let x = nm[o] / 127.5 - 1, y = nm[o + 1] / 127.5 - 1, z = nm[o + 2] / 127.5 - 1;
-        const l = Math.hypot(x, y, z) || 1;
+        if (id < 0 || pc[o] >= 250) { piece[i] = -1; continue; }
+        piece[i] = id;
+        const px = i % W, py = (i - px) / W;
+        if (px < x0) x0 = px;
+        if (px > x1) x1 = px;
+        if (py < y0) y0 = py;
+        y1 = py;
+        depth[i] = dp[o + 2] >= 250 ? (Math.round((dp[o] - 2) / 4) * 64 + Math.round((dp[o + 1] - 2) / 4)) / 100 : 0;
+        const x = nm[o] / 127.5 - 1, y = nm[o + 1] / 127.5 - 1, z = nm[o + 2] / 127.5 - 1;
+        const l = Math.sqrt(x * x + y * y + z * z) || 1;
         normal[3 * i] = x / l; normal[3 * i + 1] = y / l; normal[3 * i + 2] = z / l;
     }
-    return { W, H, piece, depth, normal };
+    return { W, H, piece, depth, normal, box: [x0, y0, x1, y1] };
 }
 
 // The vertices on screen, binned, to name what a pixel shows.
@@ -95,6 +106,9 @@ function screenVerts(creature, X, view, W, H) {
 export function imageLines(creature, X, view, W, H, planes = null) {
     const D = planes || debugPlanes(view, W, H);
     const topo = seamTopology(creature);
+    // A crease or a notch where the skin turns no sharper than at rest is
+    // an edge the body is made with, not one the pose made.
+    const excess = turnExcess(creature, X);
     const names = topo.pieces.map((p) => p.name);
     const sv = screenVerts(creature, X, view, W, H);
     const pxm = (d) => (d * 2 * Math.tan((view.fov * Math.PI) / 360)) / H;   // m a pixel at distance d
@@ -107,29 +121,33 @@ export function imageLines(creature, X, view, W, H, planes = null) {
         s.cm += cm; s.score += cm * (angle / 90); s.px++; s.sx += x; s.sy += y; s.angleMax = Math.max(s.angleMax, angle);
         mark[i] = keyIndex.get(key);
     };
-    const ang = (i, j) => {
-        const c = normal[3 * i] * normal[3 * j] + normal[3 * i + 1] * normal[3 * j + 1] + normal[3 * i + 2] * normal[3 * j + 2];
-        return Math.acos(Math.max(-1, Math.min(1, c))) * DEG;
-    };
+    const dot = (i, j) => normal[3 * i] * normal[3 * j] + normal[3 * i + 1] * normal[3 * j + 1] + normal[3 * i + 2] * normal[3 * j + 2];
+    const ang = (i, j) => Math.acos(Math.max(-1, Math.min(1, dot(i, j)))) * DEG;
+    // The thresholds as cosines, so a smooth pixel costs no acos.
+    const cosSeam = Math.cos(SHOT.seamMin / DEG), cosCrease = Math.cos(SHOT.crease / DEG);
     const flat = (i, j) => piece[j] === piece[i] && depth[j] && Math.abs(depth[j] - depth[i]) <= SHOT.sameDepth;
-    for (let y = 1; y + st < H; y++) for (let x = 1; x + st < W; x++) {
+    const steps = [1, W];
+    // Only the body's box is scanned (the planes' box, a pixel round it).
+    const [bx0, by0, bx1, by1] = D.box || [0, 0, W - 1, H - 1];
+    for (let y = Math.max(1, by0 - 1); y + st < H && y <= by1 + 1; y++) for (let x = Math.max(1, bx0 - 1); x + st < W && x <= bx1 + 1; x++) {
         const i = y * W + x, p = piece[i];
         if (p < 0 || !depth[i]) continue;
         let best = null;
-        for (const s of [1, W]) {
+        for (const s of steps) {
             // A seam: two pieces at one depth, compared 2 px apart (the pixel
             // between them is a blend of both).
             const j = i + st * s, q = piece[j];
             if (q >= 0 && q !== p && depth[j] && Math.abs(depth[j] - depth[i]) <= SHOT.sameDepth) {
+                if (dot(i, j) > cosSeam) continue;
                 const a = ang(i, j);
-                if (a >= SHOT.seamMin && (!best || best.kind !== 'cross' || a > best.ang)) best = { kind: 'cross', q, ang: a };
+                if (!best || best.kind !== 'cross' || a > best.ang) best = { kind: 'cross', q, ang: a };
                 continue;
             }
             // A crease: the normal jumping between this pixel and the next by
             // more than it turns in the steps either side (a curved surface
             // turns evenly; a fold or a kink turns at once).
             const k = i + s;
-            if (best || !flat(i, k) || !flat(i, i - s) || !flat(i, i + 2 * s)) continue;
+            if (best || !flat(i, k) || dot(i, k) > cosCrease || !flat(i, i - s) || !flat(i, i + 2 * s)) continue;
             const b = ang(i, k), jump = b - Math.max(ang(i - s, i), ang(k, i + 2 * s));
             if (b >= SHOT.crease && jump >= SHOT.crease / 2) best = { kind: 'crease', q: p, ang: jump };
         }
@@ -142,12 +160,16 @@ export function imageLines(creature, X, view, W, H, planes = null) {
             put(`cross ${a} x ${b}`, 'cross', x, y, cm, best.ang, i);
         } else {
             const v = sv.near(x, y, depth[i], p);
-            if (v >= 0) put(`crease ${topo.label(v)}`, 'crease', x, y, cm, best.ang, i);
+            if (v >= 0 && excess[v] >= SEAMS.turn) put(`crease ${topo.label(v)}`, 'crease', x, y, cm, best.ang, i);
         }
     }
-    const kinks = silhouetteKinks(D);
+    const kinks = silhouetteKinks(D).filter((k) => {
+        k.v = sv.near(k.x, k.y, k.depth);
+        return k.v < 0 || excess[k.v] >= SEAMS.turn;
+    });
     for (const k of kinks) {
-        const v = sv.near(k.x, k.y, k.depth);
+        const v = k.v;
+        delete k.v;
         k.where = v >= 0 ? topo.label(v) : 'body';
         // A notch reads as a short line: 3 cm at its angle.
         put(`kink ${k.where}`, 'kink', k.x, k.y, 3, k.angle, k.y * W + k.x);
@@ -160,6 +182,7 @@ export function imageLines(creature, X, view, W, H, planes = null) {
 // neighbourhood), and its inward notches: where the contour turns by more
 // than KINK degrees between the points KINK_SPAN before and after, and the
 // chord between them runs outside the body.
+const FLOOD = [[2, 0], [-2, 0], [0, 2], [0, -2]];
 export function silhouetteKinks(D) {
     const { W, H, piece, depth } = D;
     const on = (x, y) => x >= 0 && y >= 0 && x < W && y < H && piece[y * W + x] >= 0;
@@ -168,7 +191,8 @@ export function silhouetteKinks(D) {
     let bestArea = 0;
     // The largest region's topmost pixel (regions by a coarse flood over 4 px cells is enough here).
     const seen = new Uint8Array(W * H);
-    for (let y = 0; y < H; y += 2) for (let x = 0; x < W; x += 2) {
+    const [bx0, by0, bx1, by1] = D.box || [0, 0, W - 1, H - 1];
+    for (let y = by0 & ~1; y < H && y <= by1; y += 2) for (let x = bx0 & ~1; x < W && x <= bx1; x += 2) {
         const i = y * W + x;
         if (!on(x, y) || seen[i]) continue;
         const stack = [i];
@@ -179,7 +203,7 @@ export function silhouetteKinks(D) {
             area++;
             if (j < top) top = j;
             const jx = j % W, jy = (j - jx) / W;
-            for (const [dx, dy] of [[2, 0], [-2, 0], [0, 2], [0, -2]]) {
+            for (const [dx, dy] of FLOOD) {
                 const nx = jx + dx, ny = jy + dy, k = ny * W + nx;
                 if (on(nx, ny) && !seen[k]) { seen[k] = 1; stack.push(k); }
             }
