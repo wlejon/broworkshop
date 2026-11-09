@@ -23,11 +23,11 @@ fn inside(d: f32, w: f32) -> f32 {
 
 // The eye (body.js's eye mass): its centre on the left, seen from the
 // front, and the opening's radius.
-const EYE: vec2<f32> = vec2<f32>(0.038, 1.212);
-const EYE_R: f32 = 0.0145;
+const EYE: vec2<f32> = vec2<f32>(0.042, 1.215);
+const EYE_R: f32 = 0.0155;
 // The nose pad's middle and the mouth's middle.
-const NOSE: vec2<f32> = vec2<f32>(0.0, 1.172);
-const MOUTH_Y: f32 = 1.142;
+const NOSE: vec2<f32> = vec2<f32>(0.0, 1.17);
+const MOUTH_Y: f32 = 1.14;
 
 pub fn face(p: vec3<f32>, foot: f32, s: mesh::Surface) -> mesh::Surface {
     var out = s;

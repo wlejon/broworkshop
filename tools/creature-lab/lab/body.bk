@@ -140,7 +140,9 @@ pub fn body_step(st: rw_store<f32, 1>, base: i32, target: vec3<f32>, stiff: f32,
     st[base + 9] = share;
     var a = vec3<f32>(0.0, -G, 0.0);
     if (cap > 1e-4) {
-        let owed = G * (1.0 / max(share, 0.2) - 1.0) * held;
+        // (What a plan led by its own acceleration asks already carries the
+        // flight's weight: the share is owed only for the rest.)
+        let owed = G * (1.0 / max(share, 0.2) - 1.0) * held * (1.0 - clamp(S.lead, 0.0, 1.0));
         let fz = clamp(want.y + G + owed, 0.0, cap);
         // Each leg's share of the push, along its line.
         var hax = vec2<f32>(0.0);

@@ -6,13 +6,16 @@
 // lands on its heel with the toes up, rocks flat, carries the body over
 // it, and rolls off its toes as the heel lifts; the swinging foot is drawn
 // up and through and its toes lifted clear before the heel comes down. The
-// body vaults over the stance leg: its height is the plan's, held no higher
-// than the planted legs reach (so it rides up over a straight leg and dips
-// between steps), and it sways toward the foot that carries it. Faster it
-// runs: each foot down for under half its cycle, landing on the midfoot,
-// the heel kicked up behind early in the swing, a flight between steps;
-// the trunk nearly upright, the elbows near a right angle, each arm
-// swinging back further than it comes forward.
+// stance leg is a strut the body vaults over: the hips are planned above
+// what the planted legs reach and held at what they reach with the knee
+// bent no less than knee_walk gives (so they ride up over a nearly straight
+// leg and dip between steps), and sway toward the foot that carries them.
+// Faster it runs, a spring-mass bounce: each foot down while the body
+// passes over the ground its leg sweeps, a short flight, landing on the
+// midfoot a little ahead of the hip with the knee bent, pushing off its
+// toes; the trunk nearly upright, the elbows near a right angle by the
+// flanks, each arm swinging back further than it comes forward. Its long
+// tail hangs back as a counterweight, swinging against the hips.
 //
 // The pelvis turns with the legs (the hip of the leg ahead forward) and
 // dips on the side that swings; the shoulders turn against it and the arms
@@ -97,7 +100,7 @@ pub const PROBE: i32 = D_SEC + SEC_STATE; // creature::probe's slice
 pub const STATE: i32 = PROBE + PROBE_N;
 
 @knob const LAYERS: f32 = 1.0;       // the motion layers' share (0: the rig's plan as it is)
-@knob const SOFT_REACH: f32 = 0.93;  // share of a leg's reach where its IK eases the reach in
+@knob const SOFT_REACH: f32 = 0.985; // share of a leg's reach where its IK eases the reach in
 @knob const RUN_UP: f32 = 1.6;       // m/s the walk gives way to the run
 @knob const RUN_DOWN: f32 = 1.35;    //   and back
 @knob const LIFT_W: f32 = 0.035;     // m a walking foot is lifted at most
@@ -109,7 +112,7 @@ pub const STATE: i32 = PROBE + PROBE_N;
 @knob const SWAY: f32 = 0.022;       // m the hips sway toward the foot that carries them, walking
 @knob const TWIST: f32 = 0.30;       // rad the pelvis turns per m of the feet's spread along the heading
 @knob const LIST: f32 = 0.07;        // rad the pelvis dips on the swing side per unit sway
-@knob const ARM_W: f32 = 0.75;       // rad an arm swings per m of the feet's spread, walking
+@knob const ARM_W: f32 = 0.5;      // rad an arm swings per m of the feet's spread, walking
 @knob const ARM_R: f32 = 0.9;        //   and running
 @knob const ELBOW_W: f32 = 0.25;     // rad the elbow is bent walking
 @knob const ELBOW_R: f32 = 1.45;     //   and running
@@ -122,8 +125,9 @@ const BREATH_T: f32 = 3.4;       // s of a breath
 const GLANCE_T: f32 = 2.3;       // s between glances about, standing with nothing to look at
 const SCRATCH_T: f32 = 11.0;     // s between scratches of the head, standing idle
 @knob const BALANCE: f32 = 1.0;      // share of the centre's offset over the feet it corrects, standing
-@knob const VAULT: f32 = 0.012;      // m the hips rise over each stance leg walking, about their mean
-@knob const KNEE_W: f32 = 0.025;     // m the hips ride lower walking, the knees soft
+@knob const KNEE_STRUT: f32 = 0.07; // rad a walking stance knee bends at least (knee_walk)
+@knob const KNEE_LOAD: f32 = 0.20;  //   more as the weight comes on
+@knob const KNEE_OFF: f32 = 0.55;   //   and more by lift-off
 @knob const SHIFT_W: f32 = 15.0;     // 1/s the bones follow the body's centre (creature::body)
 
 const LEG_B0: array<i32, 2> = [B_THIGHL, B_THIGHR];
@@ -131,13 +135,17 @@ const ARM_B0: array<i32, 2> = [B_SHOULDERL, B_SHOULDERR];
 const OFFS: array<f32, 2> = [0.0, 0.5];
 const SIDE: array<f32, 2> = [1.0, -1.0];
 const HEEL_BACK: f32 = 0.20;     // m from the toe tip back to the heel's rocker
-@knob const RUN_HIP: f32 = 0.035;    // m the hips ride lower running (the legs' give in landing)
+@knob const LAND_AHEAD: f32 = 0.45;  // share of the sweep a running ankle lands ahead of its hip
+@knob const RUN_SWEEP: f32 = 0.38;   // m of ground a running leg sweeps under the body in a stance
+@knob const RUN_FLIGHT: f32 = 0.1;   // s of each step's flight, running fast
+@knob const RUN_PUSH: f32 = 0.6;    // rad more the heel lifts as a running foot pushes off its toes
+@knob const LAND_KNEE: f32 = 0.35;  // rad a running knee is bent as the foot lands (where it lands ahead)
 const REACH: f32 = 0.97;
-const BODY_REACH: f32 = 0.985;
+@knob const BODY_REACH: f32 = 1.0; // share of a planted leg's reach the body's shift may stretch it to
 const RISE_EASE: f32 = 0.012;
 const CAP_EASE: f32 = 0.10;
-const SOFT_M: f32 = 0.025;
-const PLAN_W: f32 = 16.0;        // rad/s of the spring the plan's height rides
+@knob const SOFT_M: f32 = 0.02;      // m over which the feet's ceilings blend (a soft minimum)
+@knob const PLAN_W: f32 = 40.0;     // rad/s of the spring the plan's height rides
 const LEG_BAND: f32 = 0.12;
 
 // A leg's home: its toe tip under its hip as the rest pose stands it,
@@ -166,6 +174,22 @@ fn select_v2(c: bool, a: vec2<f32>, b: vec2<f32>) -> vec2<f32> {
 
 fn leg_reach(l: i32) -> f32 { return rest_len(LEG_B0[l]) + rest_len(LEG_B0[l] + 1); }
 
+// The share of its length a leg reaches with its knee bent by k (rad).
+fn reach_at(l: i32, k: f32) -> f32 {
+    let a = rest_len(LEG_B0[l]);
+    let b = rest_len(LEG_B0[l] + 1);
+    return sqrt(a * a + b * b + 2.0 * a * b * cos(k)) / (a + b);
+}
+
+// A walking stance leg is a strut: the least its knee bends over its stance
+// s (0 at contact, 1 at lift-off). Nearly straight as the heel lands, a
+// little give as the weight comes on, straight again through mid-stance,
+// then bending as the heel lifts and the other leg takes the body.
+fn knee_walk(s: f32) -> f32 {
+    let load = smooth01(s / 0.14) * (1.0 - smooth01((s - 0.14) / 0.28));
+    return KNEE_STRUT + KNEE_LOAD * load + KNEE_OFF * smooth01((s - 0.6) / 0.4);
+}
+
 // How high the root may be with the body turned to `qbody` for every foot
 // that holds it to have its ankle within REACH of its hip (a soft minimum
 // over the feet). A foot holds the body the more surely the nearer it is
@@ -174,7 +198,8 @@ fn leg_reach(l: i32) -> f32 { return rest_len(LEG_B0[l]) + rest_len(LEG_B0[l] + 
 // CAP_FADE as it goes), so the ceiling moves without a jump as feet come
 // and go.
 const CAP_FADE: f32 = 0.06;
-fn root_cap(st: rw_store<f32, 1>, s: i32, ankles: array<vec3<f32>, 2>, left_t: array<f32, 2>, root: vec3<f32>, qbody: vec4<f32>) -> f32 {
+fn root_cap(st: rw_store<f32, 1>, s: i32, ankles: array<vec3<f32>, 2>, left_t: array<f32, 2>, root: vec3<f32>, qbody: vec4<f32>,
+            reach_k: array<f32, 2>) -> f32 {
     var lo: f32 = 1e3;
     var c: array<f32, 2>;
     for (var l: i32 = 0; l < 2; l += 1) {
@@ -185,7 +210,7 @@ fn root_cap(st: rw_store<f32, 1>, s: i32, ankles: array<vec3<f32>, 2>, left_t: a
         if (st[k + L_KIND] > 0.5 && st[k + L_PLANT] < 0.5) { w = 0.0; }
         if (w <= 0.0) { continue; }
         let off = q_rot(qbody, HEAD[LEG_B0[l]] - HEAD[B_PELVIS]);
-        let r = REACH * leg_reach(l);
+        let r = reach_k[l] * leg_reach(l);
         let h = length(vec2<f32>(root.x + off.x - ankles[l].x, root.z + off.z - ankles[l].z));
         c[l] = ankles[l].y + sqrt(max(r * r - h * h, 0.0)) - off.y + (1.0 - w) * CAP_FADE;
         lo = min(lo, c[l]);
@@ -225,23 +250,40 @@ fn ground_pitch(env: read_store<f32, 1>, toe: vec3<f32>, fwd: vec3<f32>) -> f32 
     return atan2(height(env, b.x, b.z) - height(env, toe.x, toe.z), HEEL_BACK);
 }
 
-// A run's rise and fall of the hips about their mean, as a body with
-// springy legs bounces: in each step's flight a free fall (up at v0 off one
-// foot, down at v0 onto the other), through its stance an even push that
-// turns the fall into the rise (an upward acceleration g Tf / Ts), so the
-// legs push as hard at the end of the stance as at its start and the run
-// keeps its pace. Each foot's stance begins its half of the cycle.
-fn run_bounce(phase: f32, duty: f32, freq: f32) -> f32 {
+// A run's height over its lowest (mid-stance), as a body bounces on springy
+// legs: in each step's flight a free fall (up at v0 off one foot, down at
+// v0 onto the other); through its stance a push that rises and falls as a
+// half sine, A sin(pi t / ts), nothing at contact and at lift-off, so the
+// body's acceleration runs on from the flight's -g without a jump, and the
+// push turns the fall into the rise (A = pi g (ts + tf) / 2 ts). Each
+// foot's stance begins its half of the cycle.
+fn run_lift(phase: f32, duty: f32, freq: f32) -> f32 {
     if (duty >= 0.5) { return 0.0; }
+    let g = 9.81;
     let ts = duty / freq;
     let tf = (0.5 - duty) / freq;
-    let v0 = 0.5 * 9.81 * tf;
+    let v0 = 0.5 * g * tf;
+    let k = 0.5 * g * (ts + tf);   // A ts / pi
+    let w = 3.14159 / ts;
+    let h = 0.5 * ts;
+    let low = -v0 * h - 0.5 * g * h * h + k * (h - sin(w * h) / w);
     let t = fract01(2.0 * phase) * 0.5 / freq;
     var y: f32 = 0.0;
-    if (t < ts) { y = v0 / ts * (t - 0.5 * ts) * (t - 0.5 * ts); }
-    else { let u = t - ts; y = 0.25 * v0 * ts + v0 * u - 4.905 * u * u; }
-    let mean = (ts * (v0 * ts / 12.0) + tf * (0.25 * v0 * ts + 9.81 * tf * tf / 12.0)) / (ts + tf);
-    return y - mean;
+    if (t < ts) { y = -v0 * t - 0.5 * g * t * t + k * (t - sin(w * t) / w); }
+    else { let u = t - ts; y = v0 * u - 0.5 * g * u * u; }
+    return y - low;
+}
+
+// Running, a foot lands with its ankle LAND_AHEAD of the sweep ahead of the
+// hip and the knee bent LAND_KNEE: how far ahead, and the hips' height then
+// over the ankle (the heel up), so the bounce (run_lift) is hung from the
+// contact and the stance's give below it is the physics'.
+fn run_land() -> f32 { return LAND_AHEAD * RUN_SWEEP; }
+fn run_ankle_y() -> f32 { return HEAD[B_FOOTL].y + 0.5 * (TAIL[B_FOOTL].z - HEAD[B_FOOTL].z) * sin(RUN_BALL); }
+fn run_contact_y() -> f32 {
+    let r = reach_at(0, LAND_KNEE) * leg_reach(0);
+    let a = run_land();
+    return run_ankle_y() + sqrt(max(r * r - a * a, 0.0));
 }
 
 fn place(st: rw_store<f32, 1>, env: read_store<f32, 1>, s: i32) {
@@ -489,8 +531,17 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
     if (was_moving) { moving = moving || speed > 0.03 || abs(err) > 0.05; }
     if (lie > 0.001 || flinch > 0.05) { moving = false; }
     let veff = max(speed, 0.35 * abs(omega));
-    let freq = mix(0.85 + 0.35 * veff, 1.55 + 0.2 * veff, rw);
-    let duty = mix(clamp(0.64 - 0.04 * veff, 0.56, 0.64), clamp(0.40 - 0.03 * veff, 0.29, 0.38), rw);
+    // Running, a foot is down for as long as the body takes to pass over the
+    // ground its leg sweeps (a little more slow, RUN_SWEEP fast), and each
+    // step's flight is short jogging, RUN_FLIGHT fast: the steps' rate is
+    // what those two make, so a short leg runs with quick steps rather than
+    // a deep sag through a long flight.
+    let fast_w = smooth01((veff - 1.6) / 1.4);
+    let ts_r = mix(RUN_SWEEP + 0.06, RUN_SWEEP, fast_w) / max(veff, 0.8);
+    let tf_r = mix(0.05, RUN_FLIGHT, fast_w);
+    let freq_r = 0.5 / (ts_r + tf_r);
+    let freq = mix(0.85 + 0.35 * veff, freq_r, rw);
+    let duty = mix(clamp(0.64 - 0.04 * veff, 0.56, 0.64), clamp(ts_r * freq_r, 0.22, 0.45), rw);
     if (moving && !was_moving) { phase = floor(phase) + 1.0 + duty; }
     if (moving) { phase += freq * dt; }
     let go = smooth01(veff / 0.35) * select_f(moving, 1.0, 0.0);
@@ -511,6 +562,7 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
     var pitch_f: array<f32, 2>;
     var left_t: array<f32, 2>;
     var foot_yaw: array<f32, 2>;
+    var reach_k: array<f32, 2>;
     var ground_sum: f32 = 0.0;
     for (var l: i32 = 0; l < 2; l += 1) {
         let k = s + D_LEG + l * LEG_REC;
@@ -521,11 +573,11 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
         // The heel's lift in stance: walking it rolls off the toes over the
         // stance's last part; running the heel stays up.
         let sp = stance_phase(ph, duty);
-        let roll_win = mix(0.34, 0.24, rw);
+        let roll_win = mix(0.34, 0.6 * duty, rw);
         let roll_w = smooth01((sp - (duty - roll_win)) / roll_win) * go;
         // (Squatting, foraging or resting, it sits back on the balls of its
         // feet, the heels up.)
-        let heel = mix(HEEL_OFF * roll_w, RUN_BALL + 0.2 * roll_w, rw) + 0.45 * lie + 0.3 * graze;
+        let heel = mix(HEEL_OFF * roll_w, RUN_BALL + RUN_PUSH * roll_w, rw) + 0.45 * lie + 0.3 * graze;
         if (planted) {
             if (ph < duty) { state[k + L_ARMED] = 1.0; }
             let stray = length(vec2<f32>(toe.x - home.x, toe.z - home.z));
@@ -566,9 +618,13 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
             let settle = state[k + L_KIND] > 0.5;
             // Where it lands: home as it will be by mid-stance, turned on by
             // the turn the stance will make, placed from the body where it is.
+            // Running it lands run_land() ahead of where the hip will be, the
+            // knee bent (run_contact_y), not half the stance's travel: a foot
+            // thrown out ahead on a straight leg brakes.
             let to_mid = (1.0 - u) * state[k + L_DUR] + 0.5 * stance_t;
+            let lead = mix(speed * to_mid, speed * (1.0 - u) * state[k + L_DUR] + min(run_land(), 0.6 * speed * stance_t), rw);
             var target = home;
-            if (!settle) { target = q_rot(q_y(omega * to_mid), home - pos) + pos + fwd * (speed * to_mid) + lag; }
+            if (!settle) { target = q_rot(q_y(omega * to_mid), home - pos) + pos + fwd * lead + lag; }
             target.y = height(env, target.x, target.z);
             st3(state, k + L_TO, target);
             let lifted = ld3(state, k + L_FROM);
@@ -630,6 +686,11 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
             else { lt = (1.0 + duty - ph) / freq; }
         }
         left_t[l] = lt;
+        // How far the leg may reach holding the body: walking, the strut's
+        // knee over its stance (a landing foot's as at contact); standing,
+        // the strut's; running, the run's own height holds it.
+        let s01 = select_f(planted, clamp(sp / max(duty, 0.05), 0.0, 1.0), 0.0);
+        reach_k[l] = mix(reach_at(l, mix(KNEE_STRUT, knee_walk(s01), go)), REACH, rw);
         toes[l] = toe;
         pitch_t[l] = pt;
         pitch_f[l] = pf;
@@ -662,19 +723,11 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
     let tilt = 0.35 * lean;
     let qbody = q_mul(qyaw, q_mul(q_z(list), q_x(tilt)));
     let crouch = graze * (0.22 + 0.04 * forage_down(clock, seed)) + 0.32 * lie + 0.07 * flinch;
-    // A walk is planned at what its feet can hold (the cap, below: it rides
-    // up over the straight stance leg and dips between steps); a run at a
-    // height its stance can hold throughout, the hips lowered to where the
-    // leg still reaches the ankle at the ends of a stance (half the
-    // stance's travel ahead and behind, the heel up).
-    let half = 0.5 * speed * duty / max(freq, 0.1);
-    let rr = REACH * leg_reach(0);
-    let run_y = HEAD[B_FOOTL].y + 0.5 * (TAIL[B_FOOTL].z - HEAD[B_FOOTL].z) * sin(RUN_BALL) + sqrt(max(rr * rr - half * half, 0.25 * rr * rr)) - RUN_HIP;
-    let want_y = ground_y + mix(HEAD[B_PELVIS].y - KNEE_W * go, min(run_y, HEAD[B_PELVIS].y - RUN_HIP), rw) - crouch + 0.012 * alert;
-    // Walking the hips rise over each stance leg and fall between steps,
-    // a smooth wave of the cycle at twice its rate (a peak at each foot's
-    // mid-stance).
-    let vault = VAULT * go * (1.0 - rw) * cos(2.0 * TAU * (phase - 0.5 * duty));
+    // A walk is planned above what its feet can hold: the cap (below) holds
+    // the hips on the stance strut, so they vault over it and dip between
+    // steps. A run is planned from its lowest, mid-stance (run_low), the
+    // bounce (run_lift) over it.
+    let want_y = ground_y + mix(HEAD[B_PELVIS].y + 0.05 * go, mix(HEAD[B_PELVIS].y, run_contact_y() - run_lift(0.0, duty, freq), go), rw) - crouch + 0.012 * alert;
     let body_y = damp(state[s + D_BODY_Y], want_y, 10.0, dt);
     state[s + D_BODY_Y] = body_y;
     // Standing, the plan keeps the centre of mass over the middle of the feet.
@@ -687,9 +740,11 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
     state[s + D_BAL] = bal.x;
     state[s + D_BAL + 1] = bal.y;
     let sway = q_rot(qyaw, vec3<f32>(SWAY * (sway_u + shift_u), 0.0, 0.0));
-    var plan = vec3<f32>(pos.x + bal.x, body_y + rw * go * run_bounce(phase, duty, freq) + vault, pos.z + bal.y) + sway;
-    var drop = (plan.y - under_cap(plan.y, root_cap(state, s, ankles, left_t, plan, qbody))) * (1.0 - rw);
-    if (!init) { drop = max(drop, state[s + D_DROP] * exp(-dt / CAP_EASE)); }
+    var plan = vec3<f32>(pos.x + bal.x, body_y + rw * go * run_lift(phase, duty, freq),pos.z + bal.y) + sway;
+    var drop = (plan.y - under_cap(plan.y, root_cap(state, s, ankles, left_t, plan, qbody, reach_k))) * (1.0 - rw);
+    // (A cap that lets go eases the body up; walking it rises on the strut
+    // at once, the spring below smoothing it.)
+    if (!init) { drop = max(drop, state[s + D_DROP] * exp(-dt / mix(CAP_EASE, 0.015, go * (1.0 - rw)))); }
     state[s + D_DROP] = drop;
     plan.y -= drop;
     // The walk's height is made of arcs over each stance leg meeting at each
@@ -835,7 +890,8 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
         let el = elbow * (1.0 - graze) + mix(0.45, 0.0, rw) * max(-sw, 0.0) - trail + 1.1 * rest_knee
                  + 0.6 * lie + 1.4 * flinch + 0.1 * alert;
         // (The rest pose holds the arm 13 degrees out; it hangs nearer.)
-        let ab = -0.12 + 0.2 * rw + 0.55 * flinch + 0.08 * lie + 0.1 * rest_knee;
+        // (Running, the elbows are kept in by the flanks, not winged out.)
+        let ab = -0.12 + 0.03 * rw + 0.55 * flinch + 0.08 * lie + 0.1 * rest_knee;
         let wr = -0.3 * lie - 0.5 * flinch + 0.25 * rest_knee - 0.15 * rw;
         T = set_arm(T, a, sd, fx, ab, el, wr, 0.2 * flinch);
     }
@@ -851,6 +907,30 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
         let rub = q_rot(qyaw, vec3<f32>(0.0, 0.025, 0.0)) * sin(clock * 22.0) * smooth01((su - 0.05) / 0.02);
         let wrist = spot + q_rot(qyaw, vec3<f32>(0.045, -0.02, 0.09)) + rub;
         T = arm_toward(T, 0, wrist, q_rot(qyaw, vec3<f32>(0.6, -0.2, -0.8)), spot - wrist, scr_w);
+    }
+
+    // --- the tail: out behind, balancing the body ---------------------------------------------
+    // It hangs back from the base of the spine and lifts toward level as
+    // the body runs or leans (a counterweight), higher alert, low resting.
+    // Going, it swings against the hips' sway, the swing reaching each
+    // joint a little later; standing, it sways slowly. creature::secondary
+    // carries it on from there.
+    let tail_lift = 0.45 * rw * go + 0.35 * alert - 0.15 * lie - 0.1 * graze + 0.5 * lean + 0.25 * flinch;
+    let tail_swing = mix(0.16, 0.07, rw) * go;
+    let idle_sway = 0.18 * idle_w * sin(TAU * clock / 4.3 + 3.0 * seed);
+    let share = array<f32, 4>(0.45, 0.25, 0.18, 0.12);
+    var tq = T.q[B_PELVIS];
+    var tb = B_TAIL1;
+    for (var i: i32 = 0; i < 4; i += 1) {
+        let fi = f32(i);
+        let sw = -tail_swing * cos(TAU * (phase - 0.5 * duty - 0.07 * fi)) + idle_sway * (0.6 + 0.2 * fi) - select_f(i == 0, twist, 0.0);
+        let bob = 0.05 * go * (1.0 - 0.5 * rw) * sin(2.0 * TAU * (phase - 0.08 * fi));
+        // (The tip curls up a little more than the rest.)
+        let lx = tail_lift * share[i] + bob + select_f(i == 3, 0.12, 0.0);
+        tq = q_mul(tq, q_xyz(soft_xyz(vec3<f32>(lx, sw * 0.6, 0.0), tb, 0.1)));
+        T.q[tb] = tq;
+        T.p[tb] = head_of(T, tb);
+        tb += 1;
     }
 
     // --- legs: each solved in its plane to the ankle, the foot pitched on -----------------------
@@ -896,6 +976,8 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
     firm[B_SPINE] = 1.0;
     firm[B_CHEST] = 1.0;
     firm[B_NECK] = 0.6;
+    // (The tail is held out running, loose walking.)
+    for (var b: i32 = B_TAIL1; b <= B_TAIL4; b += 1) { firm[b] = 0.2 + 0.5 * rw * go + 0.3 * alert; }
     var A = carry_held(state, env, s + D_SEC, T, hold, firm, LAYERS, init, dt);
     // The eyes steady the head: most of what the trunk's bob swings into it
     // is taken back (its sway on the neck's spring stays, a little).

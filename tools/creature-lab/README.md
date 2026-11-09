@@ -54,7 +54,7 @@ legs' bone):
 | Module | What |
 |--------|------|
 | `creature::pose` (`lab/pose.bk`) | `Pose`: every bone's world rotation and head; points on bones, local rotations, the centre of mass, writing a pose out |
-| `creature::body` (`lab/body.bk`) | the centre of mass as a state of its own, moved only by what the loaded feet can push: each leg along its line from foot to swing joint, push only, more as it flexes, a little across it, within friction; free fall with no foot down. `body_step(plan, stiffness, Support)` steers it toward the rig's plan; a foot loads and unloads over 0.125 of the legs' pendulum time (40 ms for the deer), the body strays at most a quarter leg from its plan, and a gait with flight pushes harder in stance to carry its weight over the stride. `Support.effort` above 1 is an all-out push (each leg pushes that much more, nearly to full reach); `Support.lead` feeds the plan's vertical acceleration forward, for a deliberate move whose push begins when it is asked rather than when the body has fallen behind |
+| `creature::body` (`lab/body.bk`) | the centre of mass as a state of its own, moved only by what the loaded feet can push: each leg along its line from foot to swing joint, push only, more as it flexes, a little across it, within friction; free fall with no foot down. `body_step(plan, stiffness, Support)` steers it toward the rig's plan; a foot loads and unloads over 0.125 of the legs' pendulum time (40 ms for the deer), the body strays at most a quarter leg from its plan, and a gait with flight pushes harder in stance to carry its weight over the stride. `Support.effort` above 1 is an all-out push (each leg pushes that much more, nearly to full reach); `Support.lead` feeds the plan's vertical acceleration forward, for a deliberate move whose push begins when it is asked rather than when the body has fallen behind (that acceleration already carries the flight's weight, so the extra stance push is owed only for the share not led) |
 | `creature::leap` (`lab/leap.bk`) | a leap from a gait: the run-up's strides paced so the hind feet's last stance ends at the take-off spot, a crouch onto the hind legs and an all-out push held long enough to lift the body, a ballistic flight whose height clears an obstacle (or a bound's rise with none), the trunk pitching nose-up to nose-down, and a landing absorbed fore first. `leap_begin`, `leap_hip` and `leap_pitch` give the plan, `leap_leg` each foot's lift and touchdown, `leap_effort` and `leap_follow` the body's Support; times scale with the legs' pendulum time |
 | `creature::spine` (`lab/spine.bk`) | the back's flex, bend and twist from what the legs do: flexed by the feet's spread along the body (most in a gait whose pairs swing together), bent into a turn's curve and toward gathered feet, twisted by sideways acceleration, hollowed by the body's vertical acceleration; each a spring of the trunk's frequency |
 | `creature::secondary` (`lab/secondary.bk`) | every dangling chain (neck, head, ears, tail) carried by its momentum: the subtree's centre of mass on a spring and damper toward where the rig puts it, its frequency from the part's size and its damping from its share of the body's mass (a heavy neck near critical, so a gait's rhythm never rings it into a whip; an ear or a slender tail light, so it swings past and settles), joint limits eased into, and a part swung into the ground resting on it (a part the rig lays there stays there); `hold` keeps part of a bone's world rotation (a head steadied in space but not pinned). `carry` takes the `env`, for the ground |
@@ -148,24 +148,34 @@ its joints' ranges, and a girdle is planned over the ground under a swinging
 foot's home, not under its landing mark (a hop's is well ahead, and on a
 slope well below).
 
-`strider` is an invented upright biped (1.3 m, 38 kg) with long arms and
-no tail, on the same layers as the deer (`creature::body`,
-`creature::secondary`, `LAYERS`; `strider:plan` is its plan alone). Its two
-legs run on a clock half a cycle apart. Walking, it lands on its heel with
-the toes up, rocks flat, and rolls off its toes as the heel lifts; the body
-vaults over the stance leg on a smooth wave of the cycle (`VAULT`, the
-knees soft by `KNEE_W`), held no higher than the planted legs reach,
-and that height rides a critical spring so the arcs meet without a corner
-at each touchdown. Faster it runs (telemetry's gait `run`): each foot down
-for under half its cycle, on the midfoot, the heel kicked up behind early
-in the swing, and a flight between steps, the trunk nearly upright and the
-elbows near a right angle. The run's height is planned as a
-bouncing body moves: free fall in the flight, an even push through the
-stance, fed forward to `creature::body` (`Support.lead`), so the legs push
-as hard late in a stance as early and the run keeps its pace. A swinging
-foot folds toward the hip only as far as clears the ground. The pelvis
-turns with the feet's spread and dips on the swing side, the shoulders turn
-against it, and the arms swing against the legs, the forearm a little late.
+`strider` is an invented upright biped (1.3 m, 38 kg) with long arms and a
+long ringed tail, on the same layers as the deer (`creature::body`,
+`creature::secondary`, `LAYERS`; `strider:plan` is its plan alone). Its
+body is drawn for its silhouette: a large head on a slim neck, sloped
+shoulders, a chest narrowing to a waist, thighs set apart so the legs part
+high, limbs pinched at their joints. Its two legs run on a clock half a
+cycle apart. Walking, each stance leg is a strut: the hips are planned
+above what the legs reach and held at what they reach with the knee bent
+no less than `knee_walk` gives over the stance (`KNEE_STRUT` through
+mid-stance, `KNEE_LOAD` more as the weight comes on, `KNEE_OFF` more by
+lift-off), so they vault over a nearly straight leg and dip between steps;
+the feet's ceilings meet in a soft minimum (`SOFT_M`) and the height rides
+a critical spring (`PLAN_W`). It lands on its heel with the toes up, rocks
+flat, and rolls off its toes as the heel lifts. Faster it runs (telemetry's
+gait `run`): a foot down while the body passes over the ground its leg
+sweeps (`RUN_SWEEP`), a short flight (`RUN_FLIGHT` fast), the steps' rate
+what those make; it lands with its ankle `LAND_AHEAD` of the sweep ahead of
+the hip and the knee bent `LAND_KNEE`, and pushes off its toes
+(`RUN_PUSH`). The run's height hangs from that contact as a bouncing body
+moves: free fall in the flight, a half-sine push through the stance (no
+jump in the body's acceleration at contact), fed forward to
+`creature::body` (`Support.lead`). A swinging foot folds toward the hip
+only as far as clears the ground. The pelvis turns with the feet's spread
+and dips on the swing side, the shoulders turn against it, and the arms
+swing against the legs, the forearm a little late, the elbows in by the
+flanks running. The tail hangs back, lifts toward level running or alert,
+swings against the hips' sway with each joint a little later, and rides
+`creature::secondary` from there.
 Standing, the plan keeps the centre of mass over the feet; idle, it
 breathes, shifts its weight from foot to foot, glances about and now and
 then scratches its belly. Foraging (`graze`), it squats on the balls of its
@@ -332,6 +342,8 @@ $B tools/creature-lab tools/creature-lab/cli.js -- charts deer gaits
 $B tools/creature-lab tools/creature-lab/cli.js -- film deer gallop --from 3 --to 4.5
 $B tools/creature-lab tools/creature-lab/cli.js -- look bunny gallop --phases 0.6,0.7 --views front-left,left --dist 1.8
 $B tools/creature-lab tools/creature-lab/cli.js -- look bunny gallop --rows 4 --pieces
+$B tools/creature-lab tools/creature-lab/cli.js -- look strider walk --rows 3 --dist 2.3 --cell 1.3
+$B tools/creature-lab tools/creature-lab/cli.js -- poses strider walk gallop
 $B tools/creature-lab tools/creature-lab/cli.js -- kinematics deer walk
 $B tools/creature-lab tools/creature-lab/cli.js -- spacing deer walk --fps 24
 $B tools/creature-lab tools/creature-lab/cli.js -- metrics deer all
@@ -534,6 +546,28 @@ Every output is deterministic. A rerun writes the same bytes.
     its middle in view; a body of one piece (a flesh body) is coloured by
     the bone each vertex mostly follows instead, so a ragged patch on the lit
     sheet says whose skin it is
+  - `--cell <scale>` makes each shot that much bigger (360 x 270 at 1)
+- **Poses** (`lab/poses.js`): whether a gait's poses read as the gait they
+  are, and the body as a shape, with no reference (`poses.json`, flags
+  printed; thresholds in `POSES`).
+  - the first foot's key poses (contact, the hips' lowest and highest in
+    its stance, mid-stance, lift-off, mid-swing) lit from the side, the legs
+    traced over the skin (thick: planted), and under each the hips' height,
+    the trunk's lean, and each leg's bend (between its two upper bones) and
+    extension (hip to their end over their length)
+  - a walk (duty 0.5 or more) is an inverted pendulum: its stance leg's
+    bend through the middle of stance (20-70%) against `walkBend`, and the
+    hips' rise from contact to their highest against the rise a rigid leg
+    of the measured length would give from the contact's reach (`vault`,
+    against `walkVault`)
+  - a run is a spring: the leg gives through stance and leaves the ground
+    extended (`pushOff`)
+  - the silhouette: the rest pose rasterized from the front and the side
+    and mid-stance from the front, tails left out of the front: where the
+    legs part against the hip joints' height, the share of the trunk's
+    height with the arms clear of it, and the front width profile's pinches
+    (neck, waist, a leg's joints), each against the widths within 12 cm
+    above and below; no waist pinch is a tube, a weak neck pinch a stalk
 - **Kinematics** (`lab/kinematics.js`): where in a stride the motion jumps.
   - per leg, each bone's flexion, angular velocity and angular acceleration
     over the steady cycle (each cycle thin, the mean bold), the leg's measured

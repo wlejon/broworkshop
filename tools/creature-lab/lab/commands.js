@@ -12,6 +12,7 @@ import { chartsSheet } from "./charts.js";
 import { trajectorySheet } from "./trajectory.js";
 import { filmSheet } from "./film.js";
 import { lookSheet } from "./look.js";
+import { posesSheet } from "./poses.js";
 import { rangeSheet } from "./range.js";
 import { kinematicsSheet, spacingSheet } from "./kinematics.js";
 import { restForm, formInMotion } from "./form.js";
@@ -38,7 +39,11 @@ export const HELP = `creature-lab <command> <creature> [scenario ...] [options]
                                            through a cycle: three-quarter front, side, three-quarter back
                                            (--rows <n> | --phases, --views front-left,left,back-left,front,right,
                                            --dist <body lengths>; --focus <bone>: aimed at that bone as
-                                           it moves; --pieces: coloured and named by body piece)
+                                           it moves; --pieces: coloured and named by body piece;
+                                           --cell <scale>: bigger shots)
+  poses       <creature> [scenario ...]    a gait's key poses large from the side, legs traced; the stance
+                                           leg's bend, the hips' vault against a rigid leg's, a run's
+                                           push-off; the silhouette: crotch, arms clear, waist and neck
   kinematics  <creature> [scenario ...]    per leg, each bone's flexion, velocity and acceleration over
                                            the cycle with contact, lift-off and touchdown; corners in red
   spacing     <creature> [scenario ...]    toes, leg joints and tracked points at 30 fps (--fps): paths
@@ -145,10 +150,11 @@ export function sheet(kind, recs, path, opt = {}) {
         return filmSheet(recs[0], { path, from: opt.from !== undefined ? +opt.from : null, to: opt.to !== undefined ? +opt.to : null,
             frames: opt.frames ? +opt.frames : 14 });
     }
+    if (kind === 'poses') return posesSheet(recs[0], { path });
     if (kind === 'look') {
         return lookSheet(recs[0], { path: opt.pieces ? path.replace(/\.png$/, '-pieces.png') : path, pieces: !!opt.pieces, rows: rows || 6, views: opt.views ? String(opt.views).split(',') : null,
             phases: opt.phases ? String(opt.phases).split(',').map(Number) : null, dist: opt.dist ? +opt.dist : 2.6,
-            focus: opt.focus ? String(opt.focus) : null });
+            focus: opt.focus ? String(opt.focus) : null, cell: opt.cell ? Math.round(360 * +opt.cell) : 360 });
     }
     if (kind === 'charts') return chartsSheet(recs, { path });
     if (kind === 'kinematics') return kinematicsSheet(recs[0], { path });
@@ -293,8 +299,8 @@ export async function runCommand(argv) {
         const path = `${dir}/form.json`;
         writeFile(path, json({ creature: creature.label, rest: form, motion: runs }));
         written.push(path);
-    } else if (cmd === 'metrics' || KINDS.includes(cmd) || cmd === 'look' || cmd === 'sheets') {
-        const kinds = cmd === 'sheets' ? KINDS : KINDS.includes(cmd) || cmd === 'look' ? [cmd] : [];
+    } else if (cmd === 'metrics' || KINDS.includes(cmd) || cmd === 'look' || cmd === 'poses' || cmd === 'sheets') {
+        const kinds = cmd === 'sheets' ? KINDS : KINDS.includes(cmd) || cmd === 'look' || cmd === 'poses' ? [cmd] : [];
         for (const sc of scenarios) {
             const rec = runScenario(creature, sc, { seed });
             if (cmd === 'metrics' || cmd === 'sheets') {
@@ -315,6 +321,7 @@ export async function runCommand(argv) {
                     writeFile(jp, json({ creature: creature.label, scenario: sc, ...s.json }));
                     written.push(jp);
                     for (const p of (s.json.byPlace || []).slice(0, 8)) console.log(`  - ${p.place}: ${p.count}`);
+                    for (const f of (s.json.flags || [])) console.log(`  - ${f}`);
                 }
             }
         }

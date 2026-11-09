@@ -2,7 +2,7 @@
 // from its soles to the crown, with no real animal behind it. It walks and
 // runs on two plantigrade legs (heel, sole, toes), its trunk upright over
 // them, and its long arms hang to its knees and swing as it goes. A round
-// head on a short neck, no tail.
+// head on a short neck, and a long tail that balances it.
 //
 // The rest pose stands tall, the arms held 13 degrees out from the flanks
 // (so the skin of each is its own); the rig lets them hang closer. Facing +Z with +Y up and +X its left, the ground at y = 0, as the
@@ -65,6 +65,17 @@ export const bones = [
     ...arm(R, 'R'),
     ...leg(L, 'L'),
     ...leg(R, 'R'),
+    // The tail: long and bushy, out from the base of the spine, hanging back
+    // and down, its tip curving up. x lifts it (positive: the tip up), y
+    // swings it to the side.
+    { name: 'tail1', parent: 'pelvis', head: [0, 0.665, -0.07], tail: [0, 0.6, -0.17],
+      limits: { x: [-45, 50], y: [-45, 45], z: [-30, 30] }, mass: 0.45 },
+    { name: 'tail2', parent: 'tail1', head: [0, 0.6, -0.17], tail: [0, 0.54, -0.3],
+      limits: { x: [-35, 40], y: [-40, 40], z: [-25, 25] }, mass: 0.35 },
+    { name: 'tail3', parent: 'tail2', head: [0, 0.54, -0.3], tail: [0, 0.515, -0.43],
+      limits: { x: [-35, 40], y: [-40, 40], z: [-25, 25] }, mass: 0.25 },
+    { name: 'tail4', parent: 'tail3', head: [0, 0.515, -0.43], tail: [0, 0.545, -0.56],
+      limits: { x: [-35, 45], y: [-45, 45], z: [-25, 25] }, mass: 0.12 },
 ];
 
 // The feet: `bone` ends at the toe, the point the rig plants.
@@ -78,6 +89,7 @@ export const tracks = [
     { name: 'hips', bone: 'pelvis', at: 0.0 },
     { name: 'head', bone: 'head', at: 0.5 },
     { name: 'hand', bone: 'handL', at: 1.0 },
+    { name: 'tail tip', bone: 'tail4', at: 1.0 },
 ];
 
-export const chartJoints = ['thighL', 'shinL', 'footL', 'toeL', 'spine', 'chest', 'neck', 'head', 'upperarmL', 'forearmL'];
+export const chartJoints = ['thighL', 'shinL', 'footL', 'toeL', 'spine', 'chest', 'neck', 'head', 'upperarmL', 'forearmL', 'tail1', 'tail3'];
