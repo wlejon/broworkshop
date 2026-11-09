@@ -13,6 +13,7 @@ import { trajectorySheet } from "./trajectory.js";
 import { filmSheet } from "./film.js";
 import { lookSheet } from "./look.js";
 import { posesSheet } from "./poses.js";
+import { modelSheet } from "./posing.js";
 import { upperSheet, upperLines } from "./upper.js";
 import { rangeSheet } from "./range.js";
 import { kinematicsSheet, spacingSheet } from "./kinematics.js";
@@ -27,6 +28,10 @@ import { scoreTable, sweepTable, compareTable, kinkReport, traceText } from "./i
 
 export const HELP = `creature-lab <command> <creature> [scenario ...] [options]
 
+  model       <creature> [pose ...]        its poses and cycles as its keys have them, with no rig: each
+                                           pose from four sides with its balance over its feet, each
+                                           cycle's phases from the side and the front
+                                           (--cycles a,b | none, --frames <n>, --cell <scale>, --dist)
   sheets      <creature> [scenario ...]    every sheet and the metrics, per scenario
   turnaround  <creature> [scenario ...]    8 views at 45 degrees by the phases of a cycle
   trajectory  <creature> [scenario ...]    feet, hips, withers, head, tail tip: side, front, top
@@ -207,6 +212,15 @@ export async function runCommand(argv) {
         rest = rest0.slice(1);
     }
     const all = Object.keys(scenariosFor(creature));
+    if (cmd === 'model') {
+        const t0 = Date.now();
+        const path = `${outRoot(opt)}/${safe(creature.label)}/model.png`;
+        const s = modelSheet(creature, { path, poses: rest0.length ? rest0 : null, cycles: opt.cycles ? String(opt.cycles).split(',') : null,
+            cell: opt.cell ? +opt.cell : 1, frames: opt.frames ? +opt.frames : 8, dist: opt.dist ? +opt.dist : 2.1 });
+        report('model', s);
+        for (const f of s.flags) console.log(`  - ${f}`);
+        return { written: [path], summary: `model sheet in ${Date.now() - t0} ms (body ${creature.timing.bodyMs} ms)` };
+    }
     if (cmd === 'scenarios') {
         for (const name of all) console.log(`${name.padEnd(18)} ${scenariosFor(creature)[name].about || ''}`);
         return null;

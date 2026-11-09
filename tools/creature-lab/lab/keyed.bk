@@ -1,0 +1,287 @@
+// creature::keyed — a creature posed from keys: the poses its species
+// draws (creatures/<name>/poses.js, written out as creature::keys by
+// lab/posing.js) sampled, blended and stood on the ground.
+//
+// A Key is a whole pose in the creature's own frame: where the root is from
+// its rest place, every bone's turn from its parent, and for each leg where
+// the ball of its foot is (from its rest place, y over the ground) with the
+// heel's lift, the toes' pitch and the foot's turn. Legs are not keyed by
+// their joints: a leg is solved from its hip to the ball (leg_solve), so a
+// foot a rig has planted stays where it is whatever key is drawn over it,
+// and a key is drawn by saying where the feet are.
+//
+// A cycle is keys at phases of a stride; cycle_at reads it at any phase,
+// carried through the keys with no corner in any bone's speed.
+//
+// Legs are chains of four bones from LEG_TOP: thigh, shin, the foot (to the
+// ball) and the toe.
+module creature::keyed;
+import creature::common::*;
+import creature::skeleton::*;
+import creature::pose::*;
+import creature::limbs::*;
+import creature::keys::*;
+
+// fa: the heel's lift (rad more than at rest), the toes' pitch (rad down
+// from rest) and the foot's turn about the vertical.
+pub struct Key { root: vec3<f32>, q: array<vec4<f32>, NB>, foot: array<vec3<f32>, NLEGS>, fa: array<vec3<f32>, NLEGS> }
+
+pub fn key_get(k: i32) -> Key {
+    var K: Key;
+    K.root = KEY_ROOT[k];
+    for (var b: i32 = 0; b < NB; b += 1) { K.q[b] = KEY_Q[k * NB + b]; }
+    for (var l: i32 = 0; l < NLEGS; l += 1) {
+        K.foot[l] = KEY_FOOT[k * NLEGS + l];
+        K.fa[l] = KEY_FA[k * NLEGS + l];
+    }
+    return K;
+}
+
+// S with w of K added (each of K's turns on R's side of the sphere): the
+// keys of a weighted mean, finished by key_done.
+fn key_acc(S: Key, K: Key, w: f32, R: Key) -> Key {
+    var o = S;
+    o.root += w * K.root;
+    for (var b: i32 = 0; b < NB; b += 1) {
+        var q = K.q[b];
+        if (dot(q, R.q[b]) < 0.0) { q = -q; }
+        o.q[b] += w * q;
+    }
+    for (var l: i32 = 0; l < NLEGS; l += 1) {
+        o.foot[l] += w * K.foot[l];
+        o.fa[l] += w * K.fa[l];
+    }
+    return o;
+}
+
+fn key_zero() -> Key {
+    var K: Key;
+    K.root = vec3<f32>(0.0);
+    for (var b: i32 = 0; b < NB; b += 1) { K.q[b] = vec4<f32>(0.0); }
+    for (var l: i32 = 0; l < NLEGS; l += 1) { K.foot[l] = vec3<f32>(0.0); K.fa[l] = vec3<f32>(0.0); }
+    return K;
+}
+
+fn key_done(S: Key) -> Key {
+    var o = S;
+    for (var b: i32 = 0; b < NB; b += 1) { o.q[b] = q_norm(S.q[b]); }
+    return o;
+}
+
+// From A toward B by t.
+pub fn key_mix(A: Key, B: Key, t: f32) -> Key {
+    return key_done(key_acc(key_acc(key_zero(), A, 1.0 - t, A), B, t, A));
+}
+
+// A with w of (B - C) added: a key's difference from another laid over a
+// third (an arm's gesture over a walk).
+pub fn key_add(A: Key, B: Key, C: Key, w: f32) -> Key {
+    return key_done(key_acc(key_acc(key_acc(key_zero(), A, 1.0, A), B, w, A), C, -w, A));
+}
+
+// Cycle c at `phase` (cycles): through its keys as a Hermite spline whose
+// slope at each key is the chord between its neighbours over their phases,
+// so no bone's speed has a corner at a key however the keys are spaced.
+pub fn cycle_at(c: i32, phase: f32) -> Key {
+    let n = CYC_N[c];
+    let o = CYC_AT[c];
+    let ph = fract01(phase);
+    var i: i32 = n - 1;
+    for (var k: i32 = 0; k + 1 < n; k += 1) {
+        if (ph >= CYC_PH[o + k] && ph < CYC_PH[o + k + 1]) { i = k; }
+    }
+    let im = (i + n - 1) % n;
+    let ip = (i + 1) % n;
+    let iq = (i + 2) % n;
+    let p1 = CYC_PH[o + i];
+    var p0 = CYC_PH[o + im];
+    if (im >= i) { p0 -= 1.0; }
+    var p2 = CYC_PH[o + ip];
+    if (ip <= i) { p2 += 1.0; }
+    var p3 = CYC_PH[o + iq];
+    if (p3 <= p2) { p3 += 1.0; }
+    let h = max(p2 - p1, 1e-5);
+    let t = clamp((ph - p1) / h, 0.0, 1.0);
+    let t2 = t * t;
+    let t3 = t2 * t;
+    let h00 = 2.0 * t3 - 3.0 * t2 + 1.0;
+    let h10 = t3 - 2.0 * t2 + t;
+    let h01 = -2.0 * t3 + 3.0 * t2;
+    let h11 = t3 - t2;
+    let a = h10 * h / max(p2 - p0, 1e-5);
+    let b = h11 * h / max(p3 - p1, 1e-5);
+    let K1 = key_get(CYC_KEY[o + i]);
+    var S = key_acc(key_zero(), K1, h00 - b, K1);
+    S = key_acc(S, key_get(CYC_KEY[o + im]), -a, K1);
+    S = key_acc(S, key_get(CYC_KEY[o + ip]), h01 + a, K1);
+    S = key_acc(S, key_get(CYC_KEY[o + iq]), b, K1);
+    // (The curve through a foot's lift may dip under the ground beside a
+    // key that has it down; a foot does not.)
+    for (var l: i32 = 0; l < NLEGS; l += 1) { S.foot[l].y = max(S.foot[l].y, 0.0); }
+    return key_done(S);
+}
+
+// Whether leg l is in its stance at `phase` of cycle c, and how far through
+// it (0 at touchdown, 1 at lift-off; -1 in its swing).
+pub fn cycle_stance(c: i32, l: i32, phase: f32) -> f32 {
+    let st = CYC_STANCE[c * NLEGS + l];
+    let len = fract01(st.y - st.x);
+    let u = fract01(phase - st.x);
+    if (u < len) { return u / len; }
+    return -1.0;
+}
+
+// How far through its swing leg l is (0 at lift-off, 1 at touchdown).
+pub fn cycle_swing(c: i32, l: i32, phase: f32) -> f32 {
+    let st = CYC_STANCE[c * NLEGS + l];
+    let len = fract01(st.y - st.x);
+    let u = fract01(phase - st.x);
+    return clamp((u - len) / max(1.0 - len, 1e-4), 0.0, 1.0);
+}
+
+// The share of its cycle leg l is down.
+pub fn cycle_duty(c: i32, l: i32) -> f32 {
+    let st = CYC_STANCE[c * NLEGS + l];
+    return fract01(st.y - st.x);
+}
+
+// --- a gait: two cycles on one clock ------------------------------------------
+// Cycles a and b (a walk and a run: both begin at the same foot's touchdown)
+// read at one phase and blended by w, their stances' lengths blended with
+// them, so a creature goes from one to the other through a stride that is
+// some of each.
+
+pub fn gait_at(a: i32, b: i32, w: f32, phase: f32) -> Key {
+    if (w <= 0.0) { return cycle_at(a, phase); }
+    if (w >= 1.0) { return cycle_at(b, phase); }
+    return key_mix(cycle_at(a, phase), cycle_at(b, phase), w);
+}
+
+// Leg l's stance: where in the cycle it begins, and the share it lasts.
+fn gait_window(a: i32, b: i32, w: f32, l: i32) -> vec2<f32> {
+    let sa = CYC_STANCE[a * NLEGS + l];
+    let sb = CYC_STANCE[b * NLEGS + l];
+    return vec2<f32>(mix(sa.x, sb.x, w), mix(fract01(sa.y - sa.x), fract01(sb.y - sb.x), w));
+}
+
+pub fn gait_stance(a: i32, b: i32, w: f32, l: i32, phase: f32) -> f32 {
+    let st = gait_window(a, b, w, l);
+    let u = fract01(phase - st.x);
+    if (u < st.y) { return u / st.y; }
+    return -1.0;
+}
+
+pub fn gait_swing(a: i32, b: i32, w: f32, l: i32, phase: f32) -> f32 {
+    let st = gait_window(a, b, w, l);
+    return clamp((fract01(phase - st.x) - st.y) / max(1.0 - st.y, 1e-4), 0.0, 1.0);
+}
+
+pub fn gait_duty(a: i32, b: i32, w: f32, l: i32) -> f32 { return gait_window(a, b, w, l).y; }
+
+// The ground a stance covers.
+pub fn gait_span(a: i32, b: i32, w: f32) -> f32 { return mix(CYC_SPAN[a], CYC_SPAN[b], w); }
+
+// --- in the air ---------------------------------------------------------------
+// Keys draw a flight's poses; where its mass goes with no foot down is not
+// theirs to say. A rig keeps AIR_STATE floats at `at`, stands its keys
+// air_lift from where they would be (the root and the feet in the air),
+// and after posing hands air_step the pose's centre of mass and whether a
+// foot is down. With none down the mass falls freely from the velocity it
+// left the ground with, and air_step returns how far to move the pose
+// (pose::moved) to have it there; landed, the lift is let go through the
+// stance.
+pub const AIR_STATE: i32 = 9;   // the mass's place (3), its velocity (3), the lift (3)
+
+pub fn air_lift(st: rw_store<f32, 1>, at: i32) -> vec3<f32> { return ld3(st, at + 6); }
+
+pub fn air_step(st: rw_store<f32, 1>, at: i32, com: vec3<f32>, grounded: bool, init: bool, dt: f32) -> vec3<f32> {
+    if (init) {
+        st3(st, at, com);
+        st3(st, at + 3, vec3<f32>(0.0));
+        st3(st, at + 6, vec3<f32>(0.0));
+        return vec3<f32>(0.0);
+    }
+    if (grounded) {
+        st3(st, at + 3, (com - ld3(st, at)) / max(dt, 1e-5));
+        st3(st, at, com);
+        st3(st, at + 6, ld3(st, at + 6) * exp(-9.0 * dt));
+        return vec3<f32>(0.0);
+    }
+    let v = ld3(st, at + 3) - vec3<f32>(0.0, 9.81 * dt, 0.0);
+    let p = ld3(st, at) + v * dt;
+    let d = p - com;
+    st3(st, at, p);
+    st3(st, at + 3, v);
+    st3(st, at + 6, ld3(st, at + 6) + d);
+    return d;
+}
+
+// K with bone b turned a further `e` (x, y, z, rad) from its parent.
+pub fn key_turn(K: Key, b: i32, e: vec3<f32>) -> Key {
+    var o = K;
+    o.q[b] = q_mul(K.q[b], q_xyz(e));
+    return o;
+}
+
+// Where K has leg l's ball, for a creature whose rest root stands over
+// `org` on the ground, turned by qyaw (y is K's height over org's).
+pub fn key_ball(K: Key, l: i32, org: vec3<f32>, qyaw: vec4<f32>) -> vec3<f32> {
+    return org + q_rot(qyaw, HEAD[LEG_TOP[l] + 3] + K.foot[l]);
+}
+
+// Leg l of P solved from its hip (where P's bones above have put it) to
+// `ball`, in the frame qframe (the creature's heading): the foot turned
+// `yaw` from the frame with its heel lifted `heel` and its toes pitched
+// `toe`, the thigh and shin reaching the hock that leaves, the knee turned
+// with the foot. `soft`: the share of the reach where it eases in.
+pub fn leg_solve(T: Pose, l: i32, qframe: vec4<f32>, ball: vec3<f32>, heel: f32, toe: f32, yaw: f32, soft: f32) -> Pose {
+    var P = T;
+    let b0 = LEG_TOP[l];
+    let pa = PARENT[b0];
+    let j = P.p[pa] + q_rot(P.q[pa], HEAD[b0] - HEAD[pa]);
+    let qf = q_mul(qframe, q_y(yaw));
+    let hock = ball - q_rot(qf, q_rot(q_x(heel), TAIL[b0 + 2] - HEAD[b0 + 2]));
+    let d = q_rot(q_conj(qframe), hock - j);
+    let pl = leg_plane(b0, b0 + 1, d);
+    let sol = two_bone_soft(rest_len(b0), rest_len(b0 + 1), vec2<f32>(pl.y, pl.z), 1.0, soft);
+    let qr = q_mul(qframe, q_z(pl.x));
+    let ax = normalize(j - hock);
+    let qknee = vec4<f32>(ax * sin(0.5 * yaw), cos(0.5 * yaw));
+    let a0 = soft_range(-(sol.x - rest_angle(b0)), LIM_LO[b0].x, LIM_HI[b0].x, 0.12);
+    let a1 = soft_range(-(sol.y - rest_angle(b0 + 1)) - a0, LIM_LO[b0 + 1].x, LIM_HI[b0 + 1].x, 0.12);
+    P.q[b0] = q_mul(qknee, q_mul(qr, q_x(a0)));
+    P.p[b0] = j;
+    P.q[b0 + 1] = q_mul(qknee, q_mul(qr, q_x(a0 + a1)));
+    P.p[b0 + 1] = head_of(P, b0 + 1);
+    P.q[b0 + 2] = q_mul(qf, q_x(heel));
+    P.p[b0 + 2] = head_of(P, b0 + 2);
+    P.q[b0 + 3] = q_mul(qf, q_x(toe));
+    P.p[b0 + 3] = head_of(P, b0 + 3);
+    return P;
+}
+
+// K's bones off the legs, stood over `org` and turned by qyaw: the root
+// where K has it, every other bone turned from its parent as K has it (the
+// legs' bones too, to be solved after).
+pub fn key_trunk(K: Key, org: vec3<f32>, qyaw: vec4<f32>) -> Pose {
+    var P: Pose;
+    for (var b: i32 = 0; b < NB; b += 1) {
+        if (PARENT[b] < 0) {
+            P.q[b] = q_mul(qyaw, K.q[b]);
+            P.p[b] = org + q_rot(qyaw, HEAD[b] + K.root);
+        } else {
+            P.q[b] = q_mul(P.q[PARENT[b]], K.q[b]);
+            P.p[b] = head_of(P, b);
+        }
+    }
+    return P;
+}
+
+// K as a pose with its feet where it has them: a key as it is drawn.
+pub fn key_pose(K: Key, org: vec3<f32>, qyaw: vec4<f32>) -> Pose {
+    var P = key_trunk(K, org, qyaw);
+    for (var l: i32 = 0; l < NLEGS; l += 1) {
+        P = leg_solve(P, l, qyaw, key_ball(K, l, org, qyaw), K.fa[l].x, K.fa[l].y, K.fa[l].z, 0.985);
+    }
+    return P;
+}

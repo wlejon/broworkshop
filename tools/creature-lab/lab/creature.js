@@ -9,6 +9,7 @@
 
 import { resolveSkeleton } from "./skeleton.js";
 import { contractModule } from "./contract.js";
+import { resolveKeys } from "./posing.js";
 
 const fs = require('fs');
 
@@ -31,6 +32,8 @@ export function labModules() {
         'creature::limbs': readApp('lab/limbs.bk'),
         'creature::dangle': readApp('lab/dangle.bk'),
         'creature::probe': readApp('lab/probe.bk'),
+        // (For a creature with keys: it reads creature::keys, lab/posing.js.)
+        'creature::keyed': readApp('lab/keyed.bk'),
     };
 }
 
@@ -76,7 +79,9 @@ export async function loadCreature(spec, extraKnobs = null) {
         if (!knobs) throw new Error(`${dir} has no variant '${variant}' (has ${Object.keys(def.variants || {}).join(', ')})`);
     }
     if (extraKnobs && Object.keys(extraKnobs).length) knobs = { ...(knobs || {}), ...extraKnobs };
-    const modules = { ...labModules(), 'creature::skeleton': skel.module, ...rigModules(def, folder) };
+    // Its keys (poses.js: the poses it draws and the cycles made of them).
+    const keys = def.keys ? resolveKeys(skel, def.keys) : null;
+    const modules = { ...labModules(), 'creature::skeleton': skel.module, ...(keys ? { 'creature::keys': keys.module } : {}), ...rigModules(def, folder) };
     const t1 = Date.now();
     const mod = bro.kernel.compile(readApp(`${folder}/${def.rig.file}`), { file: `${folder}/${def.rig.file}`, modules, knobs });
     const t2 = Date.now();
@@ -87,7 +92,7 @@ export async function loadCreature(spec, extraKnobs = null) {
     // of its folder, else the lab's, which draws none.
     const face = readApp(def.face ? `${folder}/${def.face}` : 'lab/face.bk');
     return {
-        face,
+        face, keys,
         spec, dir, variant, knobs: knobs || null, folder, name: def.name,
         label: spec + (extraKnobs && Object.keys(extraKnobs).length ? '+' + Object.entries(extraKnobs).map(([k, v]) => `${k}=${v}`).join(',') : ''), def, skel, mod, rig, body, modules,
         stateStride: mod.consts.STATE,

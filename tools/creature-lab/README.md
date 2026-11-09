@@ -41,6 +41,7 @@ A creature folder (`creatures/<name>/`) has these files, and
 | `skeleton.js` | bones (parent, head, tail, per-axis joint limits in degrees), feet, tracked points, chart joints |
 | `body.js` | the body: masses on bones built with `lab/flesh.js` (the deer splits it into `body.js`, `legs.js` and `coat.js`) |
 | `face.bk` | its face (`creature::face`, named by `creature.js`'s `face`), drawn per pixel over the skin: see below |
+| `poses.js` | its keys, when it is drawn pose by pose (`creature.js`'s `keys`): see Keys below |
 | `rig.bk` | the species' rig. `@knob` constants can be overridden from the command line |
 | `scenarios.js` | the species' own scenarios, added to the lab's |
 
@@ -148,61 +149,70 @@ its joints' ranges, and a girdle is planned over the ground under a swinging
 foot's home, not under its landing mark (a hop's is well ahead, and on a
 slope well below).
 
-`strider` is an invented upright biped (1.3 m, 38 kg) with long arms and a
-long ringed tail, on the same layers as the deer (`creature::body`,
-`creature::secondary`, `LAYERS`; `strider:plan` is its plan alone). Its
-body is drawn for its silhouette: a large head on a slim neck, sloped
-shoulders, a chest narrowing to a waist, thighs set apart so the legs part
-high, limbs pinched at their joints. Its two legs run on a clock half a
-cycle apart. Walking, each stance leg is a strut: the hips are planned
-above what the legs reach and held at what they reach with the knee bent
-no less than `knee_walk` gives over the stance (`KNEE_STRUT` through
-mid-stance, `KNEE_LOAD` more as the weight comes on, `KNEE_OFF` more by
-lift-off), so they vault over a nearly straight leg and dip between steps;
-the feet's ceilings meet in a soft minimum (`SOFT_M`) and the height rides
-a critical spring (`PLAN_W`). It lands on its heel with the toes up, rocks
-flat, and rolls off its toes as the heel lifts. Faster it runs (telemetry's
-gait `run`): a foot down while the body passes over the ground its leg
-sweeps (`RUN_SWEEP`), a short flight (`RUN_FLIGHT` fast), the steps' rate
-what those make; it lands with its ankle `LAND_AHEAD` of the sweep ahead of
-the hip and the knee bent `LAND_KNEE`, and pushes off its toes
-(`RUN_PUSH`). The run's height hangs from that contact as a bouncing body
-moves: free fall in the flight, a half-sine push through the stance (no
-jump in the body's acceleration at contact), fed forward to
-`creature::body` (`Support.lead`). A swinging foot folds toward the hip
-only as far as clears the ground. The pelvis turns with the feet's spread
-along the heading as the gait's phase has it (a smooth swing: the spread
-measured from the toes turns a corner as each foot lifts and lands) and
-dips on the swing side; the chest turns against it and tilts against its
-dip (`CHEST_ROLL` of it in the world) `CHEST_LAG` of a stride later, so the
-shoulders rock over the hips; the arms swing against the legs `ARM_LAG`
-later and the forearms `FORE_LAG` after them, each shoulder coming forward
-with its arm (`SHOULDER_SWING`), the elbows in by the flanks running. The
-trunk leans forward a little walking (`LEAN_W`), more running. The pace ramps to what is asked and the speed follows the ramp
-through a lag (`SPEED_W`), so a start or a stop has no step in its
-acceleration; the reach's hold on the body's shift comes in over
-`HELD_RISE`; a foot's hold on the body comes back no faster than time
-passes, so a foot about to lift that stays down as the body stops takes
-the weight back smoothly; standing, a foot steps back to its place only
-after the weight has gone over onto the other (`SETTLE_SHIFT`), and the
-balance shift rides a critical spring. The tail hangs back, lifts toward level running or alert,
-swings against the hips' sway with each joint a little later, and rides
-`creature::secondary` from there.
-Standing, the plan keeps the centre of mass over the feet; idle, it
-breathes, shifts its weight from foot to foot, glances about and now and
-then scratches its belly. Foraging (`graze`), it squats on the balls of its
-feet and reaches down with its right hand to a spot ahead, picks, brings
-it to its mouth and chews, its eyes on the spot; resting (`lie`), it squats
-on its heels; startled, it flinches down with its arms flung up, then
-stands alert. A reaching arm is solved to its wrist with the elbow's hinge
-as each bone's axis, so it bends as an arm does. The head is set in the
-world and holds its gaze through the trunk's bob (`HEAD_STEADY`). A planted
-foot keeps the heading it landed with through a turn, the leg turning
-above it. Its root is placed from the last step's centre-of-mass offset
-without carrying it on (the legs are a third of its mass, and an offset
-carried on rings from step to step), and follows `creature::body`'s centre
-through a short lag (`SHIFT_W`), so a foot loading eases into the trunk. Its face (`face.bk`) draws large
-forward eyes, a nose pad and a mouth.
+`strider` is an invented biped (1.2 m to its crown, 36 kg) drawn pose by
+pose (see Keys below), not on the deer's layers: a fox-like runner on two
+digitigrade legs (a short thigh held forward, a long shin back to a raised
+hock, a long foot down to the toes it stands on), its trunk leaning forward
+over them and balanced by a long bushy tail; a large head on a short neck in
+a pale ruff, tall ears of two bones each, slim arms carried in front of it.
+Its `poses.js` draws how it stands, four poses of a walking step (contact,
+down, passing, up), four of a running step (contact, down, push, flight)
+and the poses it forages, rests, stands alert and flinches in; its walk and
+run are those poses cycled, mirrored for the other side. Its rig stands the
+keys on the ground. The walk is blended from the stand by how fast it goes
+(`WALK_V`) and goes over to the run between `JOG_V` and `RUN_V` through a
+jog that is some of each, the stance's share of the stride blended with the
+poses (telemetry's gait `run` past halfway). The stride's rate is what
+carries the body one stance's ground in one stance's time. A foot that
+lands is pinned where it landed and its leg solved to it; one that lifts
+leaves from where it was and joins the key's path through its swing; the
+toes lie along the ground under them. With neither foot down its mass falls
+freely (`air_step`). Turning on the spot it steps where it stands, and
+standing with a foot astray it steps home. Foraging (`graze`) it crouches
+with its nose and hands at the ground, nosing about and scrabbling in
+bouts; resting (`lie`) it sits back on its haunches with its tail laid
+round; startled it flinches down and back with its ears flat, then stands
+tall and alert. Standing it breathes, shifts its weight from foot to foot,
+sways its tail, flicks an ear and glances about (`LIFE`). Its head turns to
+the gaze, the ears leading. The tail, ears, arms and head ride
+`creature::secondary` from where the keys put them, the tail firmer as it
+runs (`strider:plan` is the keys with that off). Its face (`face.bk`) draws
+amber eyes in dark rims, a nose pad and a mouth.
+
+### Keys: a creature drawn pose by pose
+
+A species whose whole body makes its gait (a biped: the hips drop, sway and
+turn with each step, the chest turns against them, the arms and tail
+answer) is drawn rather than derived. Its `creature.js` names `keys: {
+poses, cycles }` (its `poses.js`; `lab/posing.js` has the form). A pose
+says where the body is: the root's offset and turn, any bone's turn from
+its parent in degrees, and each foot's ball from where it rests, with the
+heel's lift and the toes' pitch. Legs are never keyed by their joints: a
+leg is solved from its hip to the ball, so a pose is drawn by placing the
+feet, and a rig can pin a foot under any pose. A pose may start from
+another (`base`). A cycle is poses at phases of a stride with each leg's
+stance; with `mirror: true` only the first half is drawn and the second is
+its mirror half a cycle on.
+
+`resolveKeys` writes them out as the brokernel module `creature::keys`
+(`K_<POSE>`, `C_<CYCLE>`, each cycle's stance windows and the ground a
+stance covers, `CYC_SPAN`), and `creature::keyed` (`lab/keyed.bk`) is what
+a rig reads them with:
+
+| Function | What |
+|----------|------|
+| `key_get`, `key_mix`, `key_add`, `key_turn` | a pose; two blended; one's difference from another laid over a third; a bone turned further |
+| `cycle_at` | a cycle at a phase: a spline through its keys with no corner in any bone's speed, and no foot under the ground between keys that have it down |
+| `cycle_stance`, `cycle_swing`, `cycle_duty` | where a leg is in its stance or swing |
+| `gait_at`, `gait_stance`, `gait_swing`, `gait_duty`, `gait_span` | two cycles on one clock blended (a walk into a run), their stances' lengths with them |
+| `key_ball`, `key_trunk`, `leg_solve`, `key_pose` | where a key has a foot; its bones off the legs stood on the ground; a leg solved from its hip to a ball (heel lift, toe pitch, the foot's turn, the knee turning with it, eased into its reach and its joints' ranges); a key as it is drawn |
+| `air_lift`, `air_step` | flight: with no foot down the pose is moved so its centre of mass falls freely from the velocity it left the ground with, and what that leaves it off the keys is let go through the next stance |
+
+`model <creature> [pose ...]` draws the keys with no rig and no motion
+layers: every pose from four sides with where its centre of mass stands
+against its feet (red when it is past them), and every cycle's phases from
+the side and the front with its stances and the ground one covers. It is
+where a pose is drawn and judged, in two seconds, before any of it moves.
 
 `wader` is an invented long-legged wading bird (0.95 m, 2 kg) on the same
 layers (`wader:plan` is its plan alone). Each leg is a bird's Z (femur,
@@ -345,6 +355,8 @@ Run the commands from the broworkshop root:
 ```bash
 B=../bro/build/Release/bro-headless.exe
 $B tools/creature-lab tools/creature-lab/cli.js -- sheets deer walk trot
+$B tools/creature-lab tools/creature-lab/cli.js -- model strider
+$B tools/creature-lab tools/creature-lab/cli.js -- model strider forage rest --cycles run --cell 0.7
 $B tools/creature-lab tools/creature-lab/cli.js -- turnaround deer gallop --rows 12
 $B tools/creature-lab tools/creature-lab/cli.js -- turnaround deer trot --rows 4 --cell 2.5 --views right,front-right
 $B tools/creature-lab tools/creature-lab/cli.js -- form deer walk trot
@@ -784,7 +796,20 @@ Headless runs drive the view through `globalThis.creatureLab`
 
 ## Tests
 
-`scripts/validate.sh tools/creature-lab` runs the smoke test and five tests:
+`scripts/validate.sh tools/creature-lab` runs the smoke test and six tests:
+
+- `tests/test_keys.js`, keys and the strider drawn in them:
+  - a pose puts the feet and the root where it draws them; a mirrored pose
+    is the pose with its sides exchanged
+  - a cycle passes through its keys, its second half the first mirrored,
+    with no foot under the ground between them
+  - the stand is balanced over its feet; the run's flight has neither down
+  - the strider is clean stood, walking, jogging, running, starting and
+    stopping, turning on the spot, on slopes and rough ground, foraging,
+    resting and startled; its feet stay where they landed
+  - it reports a walk and a run, and between a run's steps its mass is in
+    free fall
+  - the model sheet is written
 
 - `tests/test_oracle.js`:
   - the deer's walk and trot are clean
@@ -826,6 +851,9 @@ Headless runs drive the view through `globalThis.creatureLab`
    `creatures/<name>.js`.
 2. Write its skeleton with limits, then its body as masses on those bones
    (`hexa/body.js` is one page), then its rig against `creature::contract`.
+   For a creature drawn in keys, copy `creatures/strider/`: draw how it
+   stands and its poses in `poses.js`, reading `model <name>` after each
+   edit, then its cycles; its rig stands them on the ground.
 3. Name its steady gaits in `cycles` (with references if known) and its
    broken variants.
 4. Run `sheets <name> all` and `metrics <name> all`, and read the sheets.

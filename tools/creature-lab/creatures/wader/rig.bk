@@ -203,7 +203,7 @@ fn ground_pitch(env: read_store<f32, 1>, toe: vec3<f32>, fwd: vec3<f32>) -> f32 
     return atan2(height(env, b.x, b.z) - height(env, toe.x, toe.z), TOE_LEN);
 }
 
-// A run's rise and fall about its mean (the strider's run_bounce): free fall
+// A run's rise and fall about its mean: free fall
 // in each flight, an even push through each stance.
 fn run_bounce(phase: f32, duty: f32, freq: f32) -> f32 {
     if (duty >= 0.5) { return 0.0; }
