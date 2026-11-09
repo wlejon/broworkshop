@@ -72,6 +72,7 @@ pub const STATE: i32 = D_SPINE + SPINE_STATE;
 // as the ripple closes into the tripod three go together and each is down
 // little more than half.
 @knob const DUTY_WALK: f32 = 0.68;@knob const DUTY_RUN: f32 = 0.55;
+@knob const RUN_BOB: f32 = 0.014;    // m the body rises and falls, tripod to tripod, at a run
 @knob const LIFT: f32 = 0.09;
 @knob const SWAY: f32 = 0.07;
 @knob const LAYERS: f32 = 1.0;       // the motion layers' share (0: the rig's plan as it is)
@@ -328,8 +329,13 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
         if (!planted) {
             u = min(state[k + L_U] + dt / max(state[k + L_DUR], 0.05), 1.0);
             state[k + L_U] = u;
-            let e = smooth01(u);
-            at = mix(toe, target, e) + vec3<f32>(0.0, LIFT * (0.6 + 0.4 * go) * sin(PI * u), 0.0);
+            // It leaves the ground and meets it again with no speed and no
+            // change of speed, forward or up (a hoof picked up and set down,
+            // not thrown and dropped): the leg's joints start and stop
+            // without a corner.
+            let e = u * u * u * (10.0 + u * (6.0 * u - 15.0));
+            let arc = 4.0 * u * (1.0 - u);
+            at = mix(toe, target, e) + vec3<f32>(0.0, LIFT * (0.6 + 0.4 * go) * arc * arc * arc, 0.0);
             if (u >= 1.0) {
                 planted = true;
                 state[k + L_PLANT] = 1.0;
@@ -348,7 +354,10 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
         left_t[l] = lt;
         st3(state, k + L_AT, at);
         feet[l] = at;
-        swing[l] = select_f(planted, 0.0, sin(PI * u));
+        // (How far through its swing, as its lift goes: the hoof's curl
+        // comes and goes with it, from nothing and back with no corner.)
+        let bell = 4.0 * u * (1.0 - u);
+        swing[l] = select_f(planted, 0.0, bell * bell * bell);
         let gy = select_f(planted, at.y, height(env, at.x, at.z));
         ground_sum += gy;
         if (l < 2) { front_y += gy * 0.5; }
@@ -380,6 +389,9 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
     let sway = SWAY * go * sin(TAU * phase);
     let bendt = clamp(omega * 0.25, -0.3, 0.3);
     var plan = vec3<f32>(pos.x, body_y, pos.z) + q_rot(qbody, vec3<f32>(0.0, 0.0, HEAD[B_PELVIS].z - MID_Z));
+    // Running on its tripods it bounds a little from one to the next: lowest
+    // in the middle of each one's stance, highest as they change.
+    plan.y -= RUN_BOB * tripod * go * cos(2.0 * TAU * (phase - 0.5 * duty));
     // What the cap takes off the height lets go over CAP_EASE s, so a foot
     // that lifts and frees it lets the body rise rather than jump.
     var drop = 0.0;
@@ -471,8 +483,11 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
     // graze, its two bones swing the head down in front of the forefeet. At
     // each step it gives a little, the upper bone a moment after the lower.
     let hurry = smooth01((speed - 1.0) / 1.4);
-    let nodn = 0.014 * go * sin(2.0 * TAU * phase - 0.6);
-    let nodh = 0.012 * go * sin(2.0 * TAU * phase - 1.5);
+    // (Running, each tripod's landing goes up it as a deeper nod: the neck's
+    // root first, the upper bone and the head after, the head turned back
+    // against them so its gaze stays where it was.)
+    let nodn = (0.014 + 0.05 * hurry) * go * sin(2.0 * TAU * phase - 0.6);
+    let nodh = (0.012 + 0.045 * hurry) * go * sin(2.0 * TAU * phase - 1.7);
     let neck_a = clamp_xyz(vec3<f32>(1.08 * graze - 0.14 * alert + 0.16 * hurry + 0.1 * lie + nodn, 0.3 * look, 0.0), B_NECK);
     T.q[B_NECK] = q_mul(T.q[B_THORAX], q_xyz(neck_a));
     T.p[B_NECK] = head_of(T, B_NECK);
@@ -490,7 +505,11 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
         let ch = 20.0 + 7.0 * f32(e);
         let flick = smooth01(4.0 * noise1(clock * 0.9, seed, ch) - 2.6) * sin(clock * 31.0 + ch);
         let roam = noise1(clock * 0.35, seed, ch + 1.0);
-        let ear_a = vec3<f32>(-0.25 * alert + 0.5 * hurry + 0.12 * roam, side * (0.45 * alert - 0.6 * hurry + 0.3 * roam + 0.25 * flick), side * (0.35 * alert + 0.12 * flick));
+        // Laid back at a run they are not held there: each beat throws them
+        // back and they come forward again after the head has, the two a
+        // little apart.
+        let beat = 0.16 * hurry * go * sin(2.0 * TAU * phase - 2.6 - 0.5 * f32(e));
+        let ear_a = vec3<f32>(-0.25 * alert + 0.5 * hurry + beat + 0.12 * roam, side * (0.45 * alert - 0.6 * hurry + 0.3 * roam + 0.25 * flick), side * (0.35 * alert + 0.12 * flick));
         T.q[b] = q_mul(T.q[B_HEAD], q_xyz(clamp_xyz(ear_a, b)));
         T.p[b] = head_of(T, b);
     }
@@ -509,7 +528,8 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
         let fi = f32(i);
         let wave = -(0.5 + 0.35 * fi) * SWAY * go * sin(TAU * phase - 0.7 * (fi + 1.0)) * LAYERS;
         let swingy = wave - 0.25 * bendt + (0.05 + 0.11 * fi) * swish;
-        let trail = (0.16 + 0.05 * fi) * hurry + 0.012 * (1.0 + fi) * go * sin(2.0 * TAU * phase - 0.8 * fi) * LAYERS;
+        // (Running, the croup's beat runs down it as a wave that grows to the tuft.)
+        let trail = (0.16 + 0.05 * fi) * hurry + (0.012 + 0.035 * hurry) * (1.0 + fi) * go * sin(2.0 * TAU * phase - 2.0 - 0.9 * fi) * LAYERS;
         let a = clamp_xyz(vec3<f32>(-0.03 * (1.0 - lie) + 0.06 * lie - trail, swingy, 0.0), b);
         T.q[b] = q_mul(T.q[PARENT[b]], q_xyz(a));
         T.p[b] = head_of(T, b);
