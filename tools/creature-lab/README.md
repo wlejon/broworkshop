@@ -153,7 +153,8 @@ no tail, on the same layers as the deer (`creature::body`,
 `creature::secondary`, `LAYERS`; `strider:plan` is its plan alone). Its two
 legs run on a clock half a cycle apart. Walking, it lands on its heel with
 the toes up, rocks flat, and rolls off its toes as the heel lifts; the body
-vaults over the stance leg, held no higher than the planted legs reach,
+vaults over the stance leg on a smooth wave of the cycle (`VAULT`, the
+knees soft by `KNEE_W`), held no higher than the planted legs reach,
 and that height rides a critical spring so the arcs meet without a corner
 at each touchdown. Faster it runs (telemetry's gait `run`): each foot down
 for under half its cycle, on the ball of the foot, the swing folded up
