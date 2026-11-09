@@ -62,6 +62,10 @@ export const SIDES = [[1, 'L'], [-1, 'R']];
 
 // Contributions fade out between these multiples of a mass's blend (as flesh.bk).
 const FADE1 = 4.6;
+// A limb's joint rounds in full where its spans turn by BEND_FULL (rad),
+// and by BEND_FLOOR of it where they run on straight.
+const BEND_FULL = 25 * Math.PI / 180;
+const BEND_FLOOR = 0.05;
 
 let kernels = null;
 function fleshKernels() {
@@ -159,14 +163,21 @@ export class Flesh {
         // The bones at sample j: the key points about it, mixed.
         const at = (j) => { const u = j / steps, k = Math.min(points.length - 2, Math.floor(u)); return mixWeights(ws[k], ws[k + 1], u - k); };
         const prims = [];
+        let prevT = null;
         for (let i = 0; i + 1 < C.length; i++) {
             const d = sub(C[i + 1], C[i]), L = Math.hypot(...d);
             if (L < 1e-6) continue;
             const f = frame(d, hint);
+            // The joint's rounding at this span's start, by how far the limb
+            // bends there (full at BEND_FULL): a smooth minimum fills the
+            // crease inside a bend, but between spans running on nearly
+            // straight it would add its bulge all along them.
+            const bend = prevT ? Math.min(1, Math.max(BEND_FLOOR, (1 - dot(prevT, f.t)) / (1 - Math.cos(BEND_FULL)))) : 1;
+            prevT = f.t;
             const r0 = R[i].map((x) => Math.max(x, 1e-4)), r1 = R[i + 1].map((x) => Math.max(x, 1e-4));
             const m0 = Math.max(...r0), m1 = Math.max(...r1);
             prims.push({
-                kind: 1, a: C[i], ...f, L, r: [r0[0], r0[1], r1[0], r1[1]],
+                kind: 1, a: C[i], ...f, L, bend, r: [r0[0], r0[1], r1[0], r1[1]],
                 lo: [0, 1, 2].map((k) => Math.min(C[i][k] - m0, C[i + 1][k] - m1)),
                 hi: [0, 1, 2].map((k) => Math.max(C[i][k] + m0, C[i + 1][k] + m1)),
                 w0: at(i), w1: at(i + 1),
@@ -205,7 +216,7 @@ export class Flesh {
         const prims = this.masses.flatMap((m) => m.prims);
         const P = new Float32Array(prims.length * 32);
         prims.forEach((q, i) => {
-            P.set([q.kind, q.L, 0, 0, ...q.a, 0, ...q.t, 0, ...q.side, 0, ...q.up, 0, ...q.r, ...q.lo, 0, ...q.hi, 0], 32 * i);
+            P.set([q.kind, q.L, q.bend ?? 1, 0, ...q.a, 0, ...q.t, 0, ...q.side, 0, ...q.up, 0, ...q.r, ...q.lo, 0, ...q.hi, 0], 32 * i);
         });
         const M = new Float32Array(this.masses.length * 12);
         let first = 0;
@@ -274,6 +285,7 @@ export class Flesh {
         for (const b of [primBuf, massBuf, startBuf, projBuf, massOut]) b.destroy();
         const t3 = Date.now();
         const { weights, vertexMass, shares } = this.weigh(MD, prims, nv, idx);
+        const swell = this.swell(MD, nv, vertexMass, shares);
         const col = new Float32Array(nv * 4);
         const color = this.opts.color;
         for (let v = 0; v < nv; v++) {
@@ -292,9 +304,31 @@ export class Flesh {
             mesh, skin, vertices: nv, triangles: indices.length / 3, positions: pos, normals: nrm, indices, weights,
             pieces: [{ name: 'body', kind: 'flesh', base: 0, count: nv, start: 0, end: indices.length }], piece: new Float32Array(nv),
             masses: this.masses.map((m) => ({ name: m.name, bone: m.bone, centre: m.centre })), vertexMass,
-            sections: this.sections,
+            sections: this.sections, swell,
             build: { grid: dim, cell, rawTriangles: rawTris, locked, offSurface, ms: { field: t1 - t0, mesh: t2 - t1, place: t3 - t2, total: Date.now() - t0 } },
         };
+    }
+
+    // How far each mass's skin stands off the shape it declares: over the
+    // vertices that are its alone (its share of the field 0.95 or more, so
+    // not the fillets where it blends), the distance from its nearest
+    // primitive, positive outside. A mass's own skin is on its shape but for
+    // the rounding of its span joints, so this is what the rounding adds
+    // (m: the median and the 90th percentile).
+    swell(MD, nv, vertexMass, shares) {
+        const out = [];
+        this.masses.forEach((m, mi) => {
+            if (m.carve) return;
+            const ds = [];
+            for (let v = 0; v < nv; v++) {
+                if (vertexMass[v] !== mi || (shares[v].get(m.name) || 0) < 0.95) continue;
+                ds.push(MD[4 * (mi * nv + v) + 3]);
+            }
+            if (ds.length < 8) return;
+            ds.sort((a, b) => a - b);
+            out.push({ name: m.name, vertices: ds.length, median: ds[ds.length >> 1], p90: ds[Math.floor(0.9 * (ds.length - 1))] });
+        });
+        return out;
     }
 
     // Each vertex's bone weights (the four largest), its main mass and every

@@ -116,10 +116,10 @@ function ear(B, side, t) {
     const bone = (u) => (u >= 0.45 ? `ear${t}2` : `ear${t}1`);
     B.limb(`ear${t}`, [`ear${t}1`, `ear${t}2`],
         EAR_KEYS.map(([u, w, h]) => ({ c: E.at(u), r: [w, h], bone: bone(u) })),
-        { up: E.face, blend: 0.003, steps: 6, keep: true, joint: 0.0025 });
+        { up: E.face, blend: 0.003, steps: 6, keep: true });
     B.limb(`hollow${t}`, [`ear${t}1`, `ear${t}2`],
         HOLLOW_KEYS.map(([u, w, o, h]) => ({ c: E.at(u, o), r: [w, h], bone: bone(u) })),
-        { up: E.face, blend: 0.003, steps: 6, carve: true, joint: 0.001 });
+        { up: E.face, blend: 0.003, steps: 6, carve: true });
 }
 
 // Where form measures the body: across the trunk, the neck and the head.

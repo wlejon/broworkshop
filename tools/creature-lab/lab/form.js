@@ -2,7 +2,8 @@
 // lab/skin.bk places it, then
 //   - at rest, each section's girth, width, depth, length, top and bottom,
 //     each mass's volume and the body's, checked against the creature's
-//     `form.reference` ('section.field': [value, tolerance], metres);
+//     `form.reference` ('section.field': [value, tolerance], metres), and
+//     how far each mass's skin stands off the shape it declares (swell);
 //   - through a run of each scenario, each section's area and girth and each
 //     mass's volume as a share of rest: where the skin loses or gains volume
 //     as the joints move.
@@ -15,6 +16,10 @@
 
 import { ROWS, restPose, bonePoint } from "./skeleton.js";
 import { lastCycle, relativePose } from "./cycle.js";
+
+// mm a mass's skin may stand off its declared shape (median) before it is
+// flagged: the meshing grid's own error is about a fifth of its cell.
+const SWELL_MM = 1.0;
 
 // The unit quaternion [x, y, z, w] of the rotation rows at P[k].
 function quatOf(P, k) {
@@ -235,6 +240,11 @@ export function restForm(creature) {
     const V = massVolumes(creature, X);
     masses.forEach((m, i) => { out.masses[m.name] = { litres: r4(1000 * V.masses[i]) }; });
     out.body = { litres: r4(1000 * V.body), triangles: creature.body.triangles, vertices: creature.body.vertices };
+    // Each mass's skin off its declared shape (lab/flesh.js swell), mm.
+    out.swell = Object.fromEntries((creature.body.swell || []).map((s) => [s.name, { median: r4(1000 * s.median), p90: r4(1000 * s.p90) }]));
+    for (const [name, s] of Object.entries(out.swell)) {
+        if (Math.abs(s.median) > SWELL_MM) out.flags.push(`${name}'s skin stands ${s.median.toFixed(1)} mm off its declared shape (median; 90% within ${s.p90.toFixed(1)})`);
+    }
     // The reference: { 'section.field': [value, tolerance] }.
     const ref = (creature.def.form && creature.def.form.reference) || {};
     out.reference = {};

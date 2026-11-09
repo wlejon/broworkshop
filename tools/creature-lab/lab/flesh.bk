@@ -2,11 +2,13 @@
 // meshing grid, at the mesh's vertices to put them on the surface, and per
 // vertex and mass for the skin weights and the colours.
 //
-// A primitive is 8 vec4: (kind, length, 0, 0), its start a, its axis t, its
-// side and up (a blob's frame, a span's section axes), its radii (a blob's
-// rx, ry, rz; a span's side and up radius at a and at the far end), and its
-// box lo and hi. A mass is 3 vec4: (first primitive, count, blend, joint),
-// (box lo, soft), (box hi, carve: 1 for a mass that cuts the body away). A mass at distance d contributes
+// A primitive is 8 vec4: (kind, length, bend, 0), its start a, its axis t,
+// its side and up (a blob's frame, a span's section axes), its radii (a
+// blob's rx, ry, rz; a span's side and up radius at a and at the far end),
+// and its box lo and hi; `bend` is the share of the mass's joint rounding it
+// joins the primitives before it with (by how far a limb turns there). A
+// mass is 3 vec4: (first primitive, count, blend, joint), (box lo, soft),
+// (box hi, carve: 1 for a mass that cuts the body away). A mass at distance d contributes
 // exp(-d / blend), faded out between FADE0 and FADE1 blends; the field is
 // -log of the contributions' sum, negative inside.
 const FADE0: f32 = 3.5;
@@ -51,8 +53,9 @@ fn outside(p: vec3<f32>, lo: vec3<f32>, hi: vec3<f32>, r: f32) -> bool {
     return p.x < lo.x - r || p.y < lo.y - r || p.z < lo.z - r || p.x > hi.x + r || p.y > hi.y + r || p.z > hi.z + r;
 }
 
-// A mass's distance at p, its nearest primitive and where along it.
-fn mass_dist(prims: read_store<vec4<f32>, 1>, masses: read_store<vec4<f32>, 1>, m: i32, p: vec3<f32>, reach: f32) -> vec3<f32> {
+// A mass's distance at p (its spans joined by `joint`), its nearest
+// primitive, where along it, and the distance to that primitive alone.
+fn mass_dist(prims: read_store<vec4<f32>, 1>, masses: read_store<vec4<f32>, 1>, m: i32, p: vec3<f32>, reach: f32) -> vec4<f32> {
     let h0 = masses[3 * m];
     let first = h0.x as i32;
     let count = h0.y as i32;
@@ -66,9 +69,10 @@ fn mass_dist(prims: read_store<vec4<f32>, 1>, masses: read_store<vec4<f32>, 1>, 
         if (outside(p, prims[8 * i + 6].xyz, prims[8 * i + 7].xyz, reach)) { continue; }
         let e = prim_dist(prims, i, p);
         if (e.x < bd) { bd = e.x; best = i as f32; bh = e.y; }
-        if (d > 1e8) { d = e.x; } else if (joint > 0.0) { d = smin(d, e.x, joint); } else { d = min(d, e.x); }
+        let k = joint * prims[8 * i].z;
+        if (d > 1e8) { d = e.x; } else if (k > 0.0) { d = smin(d, e.x, k); } else { d = min(d, e.x); }
     }
-    return vec3<f32>(d, best, bh);
+    return vec4<f32>(d, best, bh, bd);
 }
 
 fn contribution(d: f32, blend: f32) -> f32 {
@@ -150,7 +154,7 @@ fn k_project(g: grid<1>, prims: read_store<vec4<f32>, 1>, masses: read_store<vec
 }
 
 // Every mass at every vertex: (distance, nearest primitive, where along it,
-// 0); the primitive is -1 where the mass does not reach (and for a carving
+// the distance to that primitive alone); the primitive is -1 where the mass does not reach (and for a carving
 // mass, which weighs and colours nothing).
 @kernel @grid(2)
 fn k_masses(g: grid<2>, prims: read_store<vec4<f32>, 1>, masses: read_store<vec4<f32>, 1>,
@@ -163,7 +167,7 @@ fn k_masses(g: grid<2>, prims: read_store<vec4<f32>, 1>, masses: read_store<vec4
     var r = vec4<f32>(1e9, -1.0, 0.0, 0.0);
     if (!is_carve(masses, m) && !outside(p, masses[3 * m + 1].xyz, masses[3 * m + 2].xyz, reach)) {
         let md = mass_dist(prims, masses, m, p, reach);
-        r = vec4<f32>(md.x, md.y, md.z, 0.0);
+        r = md;
     }
     out[m * g.width() + v] = r;
 }

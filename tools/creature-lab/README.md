@@ -195,9 +195,14 @@ return B.build();
   blend, so the cut keeps a gradient for the vertices to find the surface
   by. A carve weighs and colours nothing.
 - `joint` (a limb's, 1 cm by default) rounds the meeting of its spans by a
-  smooth minimum; a point near several short spans takes it from each, so a
-  thin limb swells by up to a joint's quarter a span. A thin shell (an ear)
-  wants a small one.
+  smooth minimum, in full where the limb turns by 25 degrees or more and
+  by a twentieth of it where its spans run on straight: a smooth minimum
+  fills the crease inside a bend, but between straight spans it would
+  bulge the whole limb (a point near several short spans takes the bulge
+  from each).
+- form reports each mass's swell: over the vertices that are its alone,
+  how far its skin stands off the shape it declares (mm, the median and
+  the 90th percentile), flagged past 1 mm.
 
 `build()` evaluates the field on the GPU (`lab/flesh.bk`): each mass adds
 `exp(-d / blend)` and the skin is where the sum is 1. It meshes the field once
