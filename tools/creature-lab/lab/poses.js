@@ -81,7 +81,7 @@ function frameOf(rec, k) {
 // x across, y up) or x (side: z across).
 // The bones of tails: the root's children that carry neither a leg nor the
 // head (what hangs behind and would fill the gap between the legs).
-function tailBones(skel) {
+export function tailBones(skel) {
     const kids = skel.bones.map((b) => skel.bones.filter((c) => c.parentIndex === b.index).map((c) => c.index));
     const below = (b, out = []) => { out.push(b); for (const c of kids[b]) below(c, out); return out; };
     const legTops = new Set(skel.parts.legs.map((l) => l.top));

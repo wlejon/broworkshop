@@ -171,9 +171,19 @@ moves: free fall in the flight, a half-sine push through the stance (no
 jump in the body's acceleration at contact), fed forward to
 `creature::body` (`Support.lead`). A swinging foot folds toward the hip
 only as far as clears the ground. The pelvis turns with the feet's spread
-and dips on the swing side, the shoulders turn against it, and the arms
-swing against the legs, the forearm a little late, the elbows in by the
-flanks running. The tail hangs back, lifts toward level running or alert,
+along the heading as the gait's phase has it (a smooth swing: the spread
+measured from the toes turns a corner as each foot lifts and lands) and
+dips on the swing side; the chest turns against it and leans off its dip
+`CHEST_LAG` of a stride later, the arms swing against the legs `ARM_LAG`
+later and the forearms `FORE_LAG` after them, the elbows in by the flanks
+running. The pace ramps to what is asked and the speed follows the ramp
+through a lag (`SPEED_W`), so a start or a stop has no step in its
+acceleration; the reach's hold on the body's shift comes in over
+`HELD_RISE`; a foot's hold on the body comes back no faster than time
+passes, so a foot about to lift that stays down as the body stops takes
+the weight back smoothly; standing, a foot steps back to its place only
+after the weight has gone over onto the other (`SETTLE_SHIFT`), and the
+balance shift rides a critical spring. The tail hangs back, lifts toward level running or alert,
 swings against the hips' sway with each joint a little later, and rides
 `creature::secondary` from there.
 Standing, the plan keeps the centre of mass over the feet; idle, it
@@ -344,6 +354,7 @@ $B tools/creature-lab tools/creature-lab/cli.js -- look bunny gallop --phases 0.
 $B tools/creature-lab tools/creature-lab/cli.js -- look bunny gallop --rows 4 --pieces
 $B tools/creature-lab tools/creature-lab/cli.js -- look strider walk --rows 3 --dist 2.3 --cell 1.3
 $B tools/creature-lab tools/creature-lab/cli.js -- poses strider walk gallop
+$B tools/creature-lab tools/creature-lab/cli.js -- upper strider start-stop --from 0.8 --to 2.2
 $B tools/creature-lab tools/creature-lab/cli.js -- kinematics deer walk
 $B tools/creature-lab tools/creature-lab/cli.js -- spacing deer walk --fps 24
 $B tools/creature-lab tools/creature-lab/cli.js -- metrics deer all
@@ -571,6 +582,19 @@ Every output is deterministic. A rerun writes the same bytes.
     and the first leg's own skin side on, the thigh's greatest depth over
     its middle against the shank's (`thighCalf`): a calf deeper than the
     thigh makes the leg top-light
+- **Upper body** (`lab/upper.js`): the trunk, head and arms over the run's
+  time rather than a cycle's mean, so a start or a stop shows as it happens.
+  - each tracked point and each arm's elbow and hand tip: the size of its
+    acceleration in the world, its kinks (red ticks), its jerk and its
+    largest acceleration
+  - each bone off the legs and the tails: its turning speed in the world and
+    the kinks of its turn
+  - every kink tagged with the start, stop or turn it follows within
+    `UPPER.after` s ("start +0.12 s") or else the nearest foot event, and
+    printed worst first a row
+  - each of those bones' own swing against its parent over the steady
+    cycles (amplitude, lag, locked), bones lying across the body left out
+  - `--from` / `--to` narrow the window
 - **Kinematics** (`lab/kinematics.js`): where in a stride the motion jumps.
   - per leg, each bone's flexion, angular velocity and angular acceleration
     over the steady cycle (each cycle thin, the mean bold), the leg's measured
