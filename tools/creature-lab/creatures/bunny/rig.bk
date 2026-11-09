@@ -87,7 +87,9 @@ const L_ARMED: i32 = 12;
 const L_KIND: i32 = 13;       // 0 a gait step, 1 a settling step, 2 a fore paw held up (sitting up)
 const L_SINCE: i32 = 14;      // s since it landed; in a swing, the roll onto its toe it lifted with
 const D_DANGLE: i32 = D_LEG + 4 * LEG_REC;   // the ears' mid points and tips, the scut's tip (creature::dangle)
-pub const PROBE: i32 = D_DANGLE + 5 * DANGLE_REC;   // creature::probe's slice
+const D_AHEAD: i32 = D_DANGLE + 5 * DANGLE_REC;   // how far ahead of the path's point the mass stands before the recoil, slowly smoothed,
+const D_OVER: i32 = D_AHEAD + 1;                  //   and how far over the hips' planned height
+pub const PROBE: i32 = D_AHEAD + 2;   // creature::probe's slice
 pub const STATE: i32 = PROBE + PROBE_N;
 
 const HOP_UP: f32 = 1.5;         // m/s the hop gives way to the bound
@@ -119,6 +121,8 @@ const HOME_BACK_F: f32 = 0.045;  //   and a fore foot's under the shoulder
                                       //   the long bound stride would carry to full stretch
 @knob const TRUNK_SWING: f32 = 0.03;   // m the trunk stretches and gathers by about its rest
 @knob const SURGE_MAX: f32 = 0.7;      // of the pace a girdle surges by at most
+@knob const RECOIL_T: f32 = 0.25;      // s the mass's usual place is a mean over (the recoil is what it is off that)
+@knob const RECOIL_TRUNK: f32 = 0.75;  // the share of the body that goes with the trunk when the legs are solved again
 @knob const FLEX_RUN: f32 = 0.1;       // rad the back is arched by, bounding (its mean)
 @knob const FLEX_SIT: f32 = 0.4;       // rad the back is rounded by, sitting and hopping (its mean)
 @knob const HIP_DROP: f32 = 0.01;      // m the hips sit lower than the rest pose's, sitting and hopping
@@ -779,6 +783,16 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
     T.p[B_TAIL] = head_of(T, B_TAIL);
 
     // --- legs, to the feet from where the body is ---------------------------------------------
+    // Solved twice. A rabbit's hind legs are a large share of it: thrown
+    // forward through a flight and down to land they must send the trunk
+    // back and up, since nothing else can push it then (and on the ground
+    // the feet only push up). So once the legs are solved, the body is
+    // moved by what its mass stands off its usual place over the path's
+    // point and the hips' planned height (a slow mean of it: the mass then
+    // keeps the stride's even pace and the plan's rise and fall), and the
+    // legs are solved again to the same feet.
+    var carried = vec3<f32>(0.0);
+    for (var pass: i32 = 0; pass < 2; pass += 1) {
     for (var l: i32 = 0; l < 4; l += 1) {
         let k = s + D_LEG + l * LEG_REC;
         let hind = LEG_HIND[l] == 1;
@@ -788,9 +802,17 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
         var par = B_THORAX; if (hind) { par = B_PELVIS; }
         let qp = T.q[par];
         let j = T.p[par] + q_rot(qp, HEAD[b0] - HEAD[par]);
-        let toe = toes[l];
-        let d = q_rot(q_conj(qp), toe - j);
         let planted = state[k + L_PLANT] > 0.5;
+        // (A foot in the air is the body's to carry: it goes with the recoil,
+        // most in the middle of its swing and not at all where it leaves
+        // and meets the ground, and no lower than the ground.)
+        var toe = toes[l];
+        if (!planted) {
+            let cu = 4.0 * state[k + L_U] * (1.0 - state[k + L_U]);
+            toe += carried * (cu * cu);
+            toe.y = max(toe.y, height(env, toe.x, toe.z));
+        }
+        let d = q_rot(q_conj(qp), toe - j);
         let held = !planted && state[k + L_KIND] > 1.5;
         let u = state[k + L_U];
         let ph = fract01(phase - offs[l]);
@@ -825,6 +847,33 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
             if (i == 0) { T.p[b] = j; }
             else { T.p[b] = T.p[b - 1] + q_rot(T.q[b - 1], HEAD[b] - HEAD[b - 1]); }
         }
+    }
+    if (pass == 0) {
+        let cm = com_of(T);
+        let ahead = dot(cm - pos, fwd);
+        let over = cm.y - hy;
+        let ahead_m = select_f(init, ahead, mix(state[s + D_AHEAD], ahead, 1.0 - exp(-dt / RECOIL_T)));
+        let over_m = select_f(init, over, mix(state[s + D_OVER], over, 1.0 - exp(-dt / RECOIL_T)));
+        state[s + D_AHEAD] = ahead_m;
+        state[s + D_OVER] = over_m;
+        // (The legs, solved again to feet that stay, take back a share of
+        // the move: the trunk goes that much further.)
+        // The head stays where it is held in space (with its ears and nose),
+        // the neck giving half-way between it and the trunk.
+        // (Not shuffling: there every move is slow and a foot is always down.)
+        let go_by = (fwd * (ahead_m - ahead) + vec3<f32>(0.0, over_m - over, 0.0)) * (mv * (1.0 - shuf) / RECOIL_TRUNK);
+        for (var b: i32 = 0; b < NB; b += 1) {
+            var w: f32 = 1.0;
+            if (b == B_NECK) { w = 0.5; }
+            var a = b;
+            for (var up: i32 = 0; up < 3; up += 1) {
+                if (a == B_HEAD) { w = 0.0; }
+                if (a >= 0) { a = PARENT[a]; }
+            }
+            T.p[b] = T.p[b] + go_by * w;
+        }
+        carried = go_by;
+    }
     }
 
     // --- out --------------------------------------------------------------------------

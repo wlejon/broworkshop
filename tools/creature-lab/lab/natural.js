@@ -270,7 +270,7 @@ export function massPhysics(rec) {
     };
     const down = (k) => { if (lying(k)) return true; for (let i = 0; i < nf; i++) if (S.contact[k * nf + i]) return true; return false; };
     const acc = [], vel = [], flight = new Uint8Array(n), viol = [];
-    let nFlight = 0, nGround = 0, badFlight = 0, pull = 0, slide = 0, worstF = { a: 0, t: 0 }, worstG = { a: 0, t: 0 };
+    let nFlight = 0, nGround = 0, badFlight = 0, pull = 0, slide = 0, worstF = { a: 0, t: 0 }, worstG = { a: 0, t: 0 }, worstP = { a: 0, t: 0 };
     for (let k = 0; k < n; k++) {
         if (k < h || k >= n - h) { acc.push(null); vel.push(null); continue; }
         const a = [0, 1, 2].map((i) => (S.com[k + h][i] - 2 * S.com[k][i] + S.com[k - h][i]) / (H * H));
@@ -289,9 +289,29 @@ export function massPhysics(rec) {
             const p = -g - a[1], s = ah - lim;
             if (p > NATURAL.groundTol) { pull++; viol.push({ k, kind: 'pull', a: r1(p) }); }
             else if (s > NATURAL.groundTol) { slide++; viol.push({ k, kind: 'friction', a: r1(s) }); }
-            const worst = Math.max(p, s);
-            if (worst > worstG.a) worstG = { a: worst, t: k * dt };
+            if (p > worstP.a) worstP = { a: p, t: k * dt };
+            // (The worst push says which way the mass went: along its
+            // travel, across it, and what the feet bore then. A moment the
+            // mass is pulled down is that fault, not this one.)
+            if (p <= NATURAL.groundTol && s > worstG.a) {
+                const worst = s;
+                const vh = Math.hypot(v[0], v[2]) || 1;
+                const along = (a[0] * v[0] + a[2] * v[2]) / vh;
+                worstG = { a: worst, t: k * dt, along, across: Math.sqrt(Math.max(0, ah * ah - along * along)), bore: a[1] + g };
+            }
         }
+    }
+    // What carried the mass down at its worst pull: each bone's share of
+    // the mass's fall past gravity then (its own mass times how its joint
+    // fell), the largest first.
+    let pullBy = [];
+    if (worstP.a > NATURAL.groundTol) {
+        const k = Math.round(worstP.t / dt), nb = skel.count;
+        const jy = (j, b) => S.jointH[j * nb + b];
+        pullBy = skel.bones.filter((b) => b.mass).map((b) => ({
+            bone: b.name,
+            a: r1(-(b.mass / skel.mass) * ((jy(k + h, b.index) - 2 * jy(k, b.index) + jy(k - h, b.index)) / (H * H) + g)),
+        })).sort((x, y) => y.a - x.a).slice(0, 5);
     }
     // Energy (per kg) over each flight.
     const flights = [];
@@ -307,7 +327,9 @@ export function massPhysics(rec) {
     return {
         flightSteps: nFlight, groundSteps: nGround,
         flightOff: r3(badFlight / Math.max(1, nFlight)), worstFlight: { a: r1(worstF.a), t: r2(worstF.t) },
-        pullShare: r3(pull / Math.max(1, nGround)), frictionShare: r3(slide / Math.max(1, nGround)), worstGround: { a: r1(worstG.a), t: r2(worstG.t) },
+        pullShare: r3(pull / Math.max(1, nGround)), frictionShare: r3(slide / Math.max(1, nGround)),
+        worstPull: { a: r1(worstP.a), t: r2(worstP.t), by: pullBy },
+        worstGround: { a: r1(worstG.a), t: r2(worstG.t), along: r1(worstG.along ?? 0), across: r1(worstG.across ?? 0), bore: r1(worstG.bore ?? 0) },
         flights, energyFromNowhere: gained.length, maxGain: r3(Math.max(0, ...flights.map((f) => f.gain))),
         series: {
             height: S.com.filter((_, k) => k % 2 === 0).map((c) => r3(c[1])),
@@ -591,8 +613,8 @@ export function naturalness(rec) {
     if (out.secondary.rigidSkin > 0.5) f.push(`secondary: ${Math.round(100 * out.secondary.rigidSkin)}% of the skin is weighted to one bone alone: no soft mass moves on its own`);
     const M = out.mass;
     if (M.flightOff > 0.1) f.push(`mass: off free fall in ${Math.round(100 * M.flightOff)}% of flight (worst ${M.worstFlight.a} m/s2 at ${M.worstFlight.t} s)`);
-    if (M.pullShare > 0.02) f.push(`mass: pulled down faster than gravity with feet on the ground ${Math.round(100 * M.pullShare)}% of the time`);
-    if (M.frictionShare > 0.02) f.push(`mass: pushed sideways past friction ${Math.round(100 * M.frictionShare)}% of the time on the ground (worst ${M.worstGround.a} m/s2 over at ${M.worstGround.t} s)`);
+    if (M.pullShare > 0.02) f.push(`mass: pulled down faster than gravity with feet on the ground ${Math.round(100 * M.pullShare)}% of the time (worst ${M.worstPull.a} m/s2 past it at ${M.worstPull.t} s; carried down by ${M.worstPull.by.map((p) => `${p.bone} ${p.a}`).join(', ')})`);
+    if (M.frictionShare > 0.02) f.push(`mass: pushed sideways past friction ${Math.round(100 * M.frictionShare)}% of the time on the ground (worst ${M.worstGround.a} m/s2 over at ${M.worstGround.t} s: ${M.worstGround.along} along its travel, ${M.worstGround.across} across, the feet bearing ${M.worstGround.bore})`);
     if (M.energyFromNowhere) f.push(`mass: gains energy in ${M.energyFromNowhere} of ${M.flights.length} flights (most ${M.maxGain} J/kg)`);
     if (out.smoothness.spikesPerSecond > 1) f.push(`smoothness: ${out.smoothness.spikesPerSecond} abrupt velocity changes a second (most in ${out.smoothness.joints.slice(0, 3).map((j) => `${j.bone} ${j.spikes.length}`).join(', ')}; at ${out.smoothness.at.slice(0, 4).map((a) => `${a.event} ${a.count}`).join(', ')})`);
     const rk = out.smoothness.root.filter((r) => r.spikes.length);
