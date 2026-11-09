@@ -149,16 +149,22 @@ its joints' ranges, and a girdle is planned over the ground under a swinging
 foot's home, not under its landing mark (a hop's is well ahead, and on a
 slope well below).
 
-`strider` is an invented biped (1.2 m to its crown, 36 kg) drawn pose by
-pose (see Keys below), not on the deer's layers: a fox-like runner on two
-digitigrade legs (a short thigh held forward, a long shin back to a raised
-hock, a long foot down to the toes it stands on), its trunk leaning forward
-over them and balanced by a long bushy tail; a large head on a short neck in
-a pale ruff, tall ears of two bones each, slim arms carried in front of it.
-Its `poses.js` draws how it stands, four poses of a walking step (contact,
-down, passing, up), four of a running step (contact, down, push, flight)
-and the poses it forages, rests, stands alert and flinches in; its walk and
-run are those poses cycled, mirrored for the other side. Its rig stands the
+`strider` is an invented biped (1.2 m to its crown, 31 kg) given in keys
+(see Keys below), not on the deer's layers: a fox-headed runner that carries
+its body level over two long digitigrade legs, as a running bird does (a
+short thigh held forward along the belly, a long shin back to a raised hock,
+a long slim foot down to the toes it stands on), its compact trunk rising
+forward from the hips and balanced over the feet by a long tail with a
+brush at its end; a large head on a short neck in a pale ruff, tall ears of
+two bones each, small arms folded at its breast. Its `poses.js` draws the
+poses it stands, forages, rests, stands alert and flinches in. Its gaits
+are not drawn pose by pose: `stride(p, G)` makes the pose of any phase of a
+stride from how it goes (where a leg is in its stance or swing, the hips'
+bob, sway and turn, the back turning against them, the tail keeping the
+heading the hips had a moment before, the arms' beat, the neck giving at
+each landing, the ears' nod), so every part keeps time with the one phase;
+`WALK` and `RUN` are the two sets of numbers it is read with, and each
+cycle is that at eight phases a step, mirrored for the other. Its rig stands the
 keys on the ground. The walk is blended from the stand by how fast it goes
 (`WALK_V`) and goes over to the run between `JOG_V` and `RUN_V` through a
 jog that is some of each, the stance's share of the stride blended with the
@@ -178,12 +184,17 @@ the gaze, the ears leading; each ear listens on its own, swivelling to a
 new place every second or two, and its hands are never quite still. Its
 upper body is its own rig's, with no shared layer over it: the head is held
 steady (where the keys would turn it is eased, and the neck and head each
-take half the turn back from the chest, `HEAD_SPACE`), and the ears,
-forearms, hands and tail carry their momentum, each bone's tip on a spring
-from where the keys have it (`creature::dangle`, the rig's `LOOSE` table:
-firmer as it runs). `strider:plan` is the keys with both off. Its skeleton
-rests with the arms held out from the trunk so each is meshed in a skin of
-its own; every pose brings them in (`poses.js` `ARM_IN`). Its face (`face.bk`) draws
+take half the turn back from the chest, `HEAD_SPACE`; what the keys bend
+the neck by beyond that it keeps, the head turned back by as much, so the
+neck gives under a head that does not tip), and the ears, forearms and
+hands carry their momentum, each bone's tip on a spring from where the keys
+have it (`creature::dangle`, the rig's `LOOSE` table: firmer as it runs).
+The tail's bones trail instead (`trail`): each tip follows where the keys
+put it without overshoot, so the tail streams behind a run and swings wide
+of a turn. `strider:plan` is the keys with these off. Its skeleton
+rests with the arms reaching forward and down, clear of the breast, so each
+is meshed in a skin of its own; every pose folds them (`poses.js` `arm`).
+Its face (`face.bk`) draws
 amber eyes in dark rims, a nose pad and a mouth.
 
 ### Keys: a creature drawn pose by pose
@@ -217,7 +228,9 @@ a rig reads them with:
 
 `model <creature> [pose ...]` draws the keys with no rig and no motion
 layers: every pose from four sides with where its centre of mass stands
-against its feet (red when it is past them), and every cycle's phases from
+against its feet (red when a pose it stands in has it past them; a cycle's
+key is a moment of a stride and is not held to that, the cycle is flagged
+when its mass never passes over its feet), and every cycle's phases from
 the side and the front with its stances and the ground one covers. It is
 where a pose is drawn and judged, in two seconds, before any of it moves.
 

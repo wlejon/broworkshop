@@ -31,7 +31,7 @@ const MOUTH_Y: f32 = 1.066;
 // The head as body.js scales it: drawn about HEAD_AT, standing HEAD_S
 // times the size about HEAD_TO.
 const HEAD_AT: vec3<f32> = vec3<f32>(0.0, 1.03, 0.105);
-const HEAD_TO: vec3<f32> = vec3<f32>(0.0, 1.0, 0.104);
+const HEAD_TO: vec3<f32> = vec3<f32>(0.0, 1.0, 0.245);
 const HEAD_S: f32 = 1.24;
 
 pub fn face(p0: vec3<f32>, foot: f32, s: mesh::Surface) -> mesh::Surface {

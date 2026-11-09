@@ -3,184 +3,185 @@
 // pose places the feet (the ball of each from where it rests) and turns the
 // bones off the legs; the legs are solved.
 //
-// Sides: a pose is drawn with the left leg leading; a cycle's second half
-// is its first mirrored.
+// Its gaits are not drawn pose by pose: `stride` makes a pose for any phase
+// of a stride from how the strider moves (below), so every part's timing
+// comes from the one phase and they keep step with each other, and a cycle
+// is that read at eight phases a step. The attitudes (alert, flinching,
+// foraging, resting) are drawn.
+//
+// Sides: phase 0 is the left foot's touchdown; a cycle's second half is its
+// first mirrored.
 
 const TAU = 2 * Math.PI;
+const cos = (turns) => Math.cos(TAU * turns);
+const smooth = (t) => { const x = Math.max(0, Math.min(1, t)); return x * x * (3 - 2 * x); };
+const mix = (a, b, t) => a + (b - a) * t;
 
 // A bone of both sides turned alike: [x, y, z] on the left, mirrored on the right.
 const both = (name, [x, y, z]) => ({ [`${name}L`]: [x, y, z], [`${name}R`]: [x, -y, -z] });
 
-// The arms: each upper arm's swing (deg back), its elbow's bend, and how
-// far the elbows are held in from the rest pose's.
-// (The skeleton rests with its arms held out, for the skin: ARM_IN brings
-// them down to hang by its sides.)
-const ARM_IN = 34;
-// The shoulders go with them: back and a little up as the arm swings back.
-const SHOULDER = 0.3;
-const arms = (backL, backR, bendL, bendR, inn = 9, wrist = 18) => ({
-    shoulderL: [0, SHOULDER * backL, 0.12 * Math.abs(backL)], shoulderR: [0, -SHOULDER * backR, -0.12 * Math.abs(backR)],
-    upperarmL: [backL, 0, -inn - ARM_IN], upperarmR: [backR, 0, inn + ARM_IN],
-    forearmL: [-bendL, 0, 0], forearmR: [-bendR, 0, 0],
-    handL: [wrist, 0, 0], handR: [wrist, 0, 0],
-});
+// The arms, folded at the breast: the skeleton rests with them reaching
+// forward and down (for the skin), ARM_DOWN hangs each upper arm, and the
+// elbow is bent up in front. `back` swings an upper arm back of hanging
+// (deg), `bend` is its elbow's, `wrist` lets the hand droop, `inn` brings
+// the elbow in.
+const ARM_DOWN = 44;
+const arm = (t, back, bend, wrist = 50, inn = 0) => {
+    const s = t === 'L' ? 1 : -1;
+    return {
+        [`shoulder${t}`]: [0, 0.3 * s * back, 0],
+        [`upperarm${t}`]: [ARM_DOWN + back, 0, -s * inn],
+        [`forearm${t}`]: [-bend, 0, 0],
+        [`hand${t}`]: [wrist, 0, 0],
+    };
+};
+const arms = (back = 14, bend = 122, wrist = 50, inn = 6) => ({ ...arm('L', back, bend, wrist, inn), ...arm('R', back, bend, wrist, inn) });
 
-// The tail at phase ph of a stride: lifted by `lift` (deg, shared down its
-// joints), swinging `swing` deg side to side against the hips' turn, each
-// joint a little after the one before and a little further (a whip), and
-// bobbing twice a stride.
-function tail(ph, { lift = 0, swing = 0, bob = 0, lag = 0.09, curl = 0 } = {}) {
-    const out = {};
-    for (let i = 0; i < 5; i++) {
-        const y = swing * (0.6 + 0.2 * i) * Math.cos(TAU * (ph - 0.1 - lag * i));
-        const x = lift * [0.4, 0.25, 0.15, 0.1, 0.1][i] + bob * Math.cos(2 * TAU * (ph - 0.12 * i)) + (i >= 3 ? curl : 0);
-        out[`tail${i + 1}`] = [x, y, 0];
-    }
-    return out;
+// The ears tipped back by `back`, the tips further by `nod`.
+const ears = (back = 0, nod = 0) => ({ ...both('ear1', [-back, 0, 0]), ...both('ear2', [-0.6 * back - nod, 0, 0]) });
+
+// The tail's joints lifted (x, deg each) and swung (y).
+const tail = (lift = [0, 0, 0, 0, 0], swing = [0, 0, 0, 0, 0]) => Object.fromEntries(lift.map((x, i) => [`tail${i + 1}`, [x, swing[i], 0]]));
+
+// --- how it goes ---------------------------------------------------------------
+// It goes as a running bird does: the body carried level and steady over
+// the hips, the tail out behind against it, and the legs doing the work
+// under it. One phase p of a stride (0: the left foot lands) places all of
+// it.
+//
+//   legs    a foot lands ahead on the ball with the hock high, the hock
+//           gives as the weight comes over it and the leg stands near
+//           straight under the hip, then the heel rises and it pushes off
+//           behind; in the air the foot folds up under the thigh, swings
+//           through and reaches, the toes lifted to land
+//   hips    lowest as the weight comes onto a leg, highest over it (a
+//           walk) or in the air (a run); they lean to the standing side,
+//           and turn so the reaching leg's hip leads
+//   back    the spine and chest turn back against the hips, so the
+//           shoulders stay square to where it goes
+//   tail    each joint keeps the heading the hips had a moment before, and
+//           a little more of it down its length: a wave runs out along it
+//           behind each step, and it lifts and settles twice a stride
+//   arms    folded, the elbows giving with each step, a beat behind
+//   ears    nod back at each landing
+function stride(p, G) {
+    // One leg at phase q since its touchdown: the ball from its rest place.
+    const leg = (q) => {
+        if (q < G.duty) {
+            const s = q / G.duty;
+            const heel = s < 0.45 ? mix(G.heelLand, G.heelGive, smooth(s / 0.45)) : mix(G.heelGive, G.heelPush, ((s - 0.45) / 0.55) ** 2);
+            return { z: G.reach * (1 - 2 * s) + G.ahead, y: 0, heel, toe: mix(-10, 0, smooth(s / 0.12)) };
+        }
+        const u = (q - G.duty) / (1 - G.duty);
+        const heel = u < 0.3 ? mix(G.heelPush, G.heelFold, smooth(u / 0.3)) : mix(G.heelFold, G.heelLand, smooth((u - 0.3) / 0.7));
+        const toe = u < 0.3 ? mix(0, 34, smooth(u / 0.3)) : u < 0.8 ? mix(34, -16, smooth((u - 0.3) / 0.5)) : mix(-16, -10, smooth((u - 0.8) / 0.2));
+        // (It reaches a little past where it lands and is drawn back onto the ground.)
+        const fwd = smooth(u / 0.92) + 0.06 * Math.sin(Math.PI * Math.min(1, u / 0.92)) * (u > 0.5 ? 1 : 0) * 0;
+        const z = G.reach * (-1 + 2 * (u < 0.92 ? 1.04 * fwd : mix(1.04, 1, (u - 0.92) / 0.08))) + G.ahead;
+        return { z, y: G.lift * Math.sin(Math.PI * u ** 0.85) ** 1.3, heel, toe };
+    };
+    const l = leg(p), r = leg((p + 0.5) % 1);
+    const yaw = (ph) => -G.yaw * cos(ph - 0.03);
+    const sway = G.sway * cos(p - G.duty / 2);
+    const bob = -G.bob * cos(2 * (p - G.low));
+    const nod = G.nod * cos(2 * (p - G.low - 0.08));
+    const Y = yaw(p), roll = G.roll * cos(p - G.duty / 2);
+    // The tail: joint i heads where the hips did (i + 1) beats ago, and more so.
+    // (`stream` under 1 draws it toward the line it travels along instead.)
+    const head = (i) => (i < 0 ? Y : (G.stream ?? 1) ** (i + 1) * (1 + G.whip * (i + 1)) * yaw(p - G.lag * (i + 1)));
+    const lift = (i) => G.tailLift[i] + G.tailBob * (1 + 0.3 * i) * cos(2 * (p - G.low - 0.1 - 0.05 * i));
+    const beat = cos(2 * (p - G.low - 0.12));
+    // The head rides each step on the neck: the neck gives forward as the
+    // weight lands, and the head lifts against it a moment after.
+    const give = G.headNod * cos(2 * (p - G.low - 0.14)), lift2 = -0.7 * G.headNod * cos(2 * (p - G.low - 0.22));
+    return {
+        root: [sway, G.down + bob, G.fore],
+        turn: [G.pitch + nod, Y, roll],
+        bones: {
+            spine: [0.3 * G.curl - 0.4 * nod, -0.3 * Y, -0.5 * roll],
+            chest: [0.3 * G.curl - 0.3 * nod, -0.42 * Y, -0.5 * roll],
+            neck: [-0.5 * (G.pitch + 0.6 * G.curl) - 0.3 * nod + give, -0.14 * Y, 0],
+            head: [-0.5 * (G.pitch + 0.6 * G.curl) + G.chin + lift2, -0.1 * Y, 0],
+            ...arm('L', G.armBack + G.armSwing * cos(p - 0.06), G.armBend + G.armBeat * beat, 50 + 8 * cos(2 * (p - G.low - 0.2)), 6),
+            ...arm('R', G.armBack - G.armSwing * cos(p - 0.06), G.armBend + G.armBeat * beat, 50 + 8 * cos(2 * (p - G.low - 0.2)), 6),
+            ...tail([0, 1, 2, 3, 4].map(lift), [0, 1, 2, 3, 4].map((i) => head(i) - head(i - 1))),
+            ...ears(G.earBack + G.earNod * (0.5 + 0.5 * cos(2 * (p - G.low - 0.06))), G.earNod * (0.5 + 0.5 * cos(2 * (p - G.low - 0.14)))),
+        },
+        feet: {
+            L: { at: [-G.inset, l.y, l.z], heel: l.heel, toe: l.toe },
+            R: { at: [G.inset, r.y, r.z], heel: r.heel, toe: r.toe },
+        },
+    };
 }
 
-// The ears at phase ph: tipped back by `back`, nodding twice a stride.
-const ears = (ph, back = 0, nod = 0) => ({
-    ...both('ear1', [-back - nod * Math.cos(2 * TAU * (ph - 0.08)), 0, 0]),
-    ...both('ear2', [-0.6 * back - 1.5 * nod * Math.cos(2 * TAU * (ph - 0.2)), 0, 0]),
-});
-
-// --- the walk: a springy strut, the ball of the foot down first ----------------
-// Four poses a step. The hips drop as a foot takes the weight and rise over
-// it, sway toward it and turn with the leg ahead; the chest turns against
-// them; the arms swing against the legs.
-const walk = {
-    // The leading foot touches down, the trailing one on its toes.
-    contact: {
-        root: [-0.008, -0.026, 0.0], turn: [5, -8, -1],
-        bones: {
-            spine: [1, 5, 1], chest: [0, 7, 1], neck: [-3, -2, 0], head: [-2, -2, 0],
-            ...arms(24, -26, 14, 42), ...tail(0, { lift: 8, swing: 9, bob: 2 }), ...ears(0, 4, 3),
-        },
-        feet: { L: { at: [-0.02, 0.0, 0.23], heel: -6, toe: -16 }, R: { at: [0.02, 0.0, -0.205], heel: 36 } },
-    },
-    // The weight comes on: the lowest, the leading leg giving.
-    down: {
-        root: [0.01, -0.036, 0.0], turn: [6, -6, 2],
-        bones: {
-            spine: [2, 4, -1], chest: [1, 6, -1], neck: [-4, -2, 0], head: [-3, -2, 0],
-            ...arms(27, -29, 12, 48), ...tail(0.07, { lift: 8, swing: 9, bob: 2 }), ...ears(0.07, 4, 3),
-        },
-        feet: { L: { at: [-0.02, 0.0, 0.152], heel: -12 }, R: { at: [0.02, 0.016, -0.283], heel: 54, toe: 12 } },
-    },
-    // Passing: tall over the standing leg, the other drawn up and through.
-    pass: {
-        root: [0.032, -0.008, 0.0], turn: [4, 0, 5],
-        bones: {
-            spine: [0, 0, -3], chest: [0, 0, -3], neck: [-2, 0, 1], head: [-1, 0, 1],
-            ...arms(0, 0, 24, 24), ...tail(0.25, { lift: 8, swing: 9, bob: 2 }), ...ears(0.25, 4, 3),
-        },
-        feet: { L: { at: [-0.02, 0.0, 0.012], heel: -4 }, R: { at: [0.01, 0.1, -0.1], heel: 58, toe: 28 } },
-    },
-    // Pushing off: up onto the toes, the free leg reaching ahead.
-    up: {
-        root: [0.024, -0.014, 0.0], turn: [5, 5, 3],
-        bones: {
-            spine: [1, -3, -2], chest: [0, -4, -2], neck: [-3, 1, 1], head: [-2, 1, 0],
-            ...arms(-16, 14, 34, 18), ...tail(0.4, { lift: 8, swing: 9, bob: 2 }), ...ears(0.4, 4, 3),
-        },
-        feet: { L: { at: [-0.02, 0.0, -0.118], heel: 18 }, R: { at: [-0.01, 0.07, 0.19], heel: -2, toe: -26 } },
-    },
+// The walk: a light, level strut. The feet are down for most of a step and
+// land near the body's middle line.
+const WALK = {
+    duty: 0.62, reach: 0.25, ahead: 0.01, lift: 0.09, inset: 0.035,
+    heelLand: -4, heelGive: -13, heelPush: 34, heelFold: 62,
+    down: -0.022, bob: 0.014, low: 0.06, fore: 0, sway: 0.018, yaw: 7, roll: 2.2, pitch: 1.5, nod: 1.2, curl: 0, chin: 0, headNod: 6,
+    whip: 0.14, lag: 0.075, tailLift: [0, 0, 0, 0, 0], tailBob: 0.7,
+    armBack: 14, armSwing: 5, armBend: 122, armBeat: 5, earBack: 2, earNod: 8,
+};
+// The run: stretched out and leaning into it, a long step and a flight
+// after each; the tail streams level behind, the ears are laid back.
+// (Its rise is what its time in the air allows: an eighth of a second off
+// the ground is two centimetres.)
+const RUN = {
+    duty: 0.3, reach: 0.29, ahead: -0.02, lift: 0.17, inset: 0.05,
+    heelLand: 2, heelGive: -16, heelPush: 44, heelFold: 78,
+    down: -0.05, bob: 0.024, low: 0.15, fore: 0.02, sway: 0.008, yaw: 9, roll: 1.5, pitch: 13, nod: 2, curl: 6, chin: 3, headNod: 5,
+    whip: 0.03, lag: 0.06, stream: 0.55, tailLift: [4, 5, 3, -5, -9], tailBob: 1.6,
+    armBack: 26, armSwing: 12, armBend: 128, armBeat: 7, earBack: 34, earNod: 5,
 };
 
-// --- the run: leaning into it, a flight between steps -------------------------
-// Four poses a step: the foot lands near under the hip, the leg gives, pushes
-// off long behind, and the body flies. The tail is carried level behind, the
-// ears laid back, the arms pumping with the elbows bent.
-// (The heights are what its time in the air allows: a tenth of a second off
-// the ground is a centimetre and a half of rise.)
-const RUN_TAIL = { lift: 26, swing: 5, bob: 2 };
-const run = {
-    contact: {
-        root: [-0.004, -0.018, 0.0], turn: [23, -9, -1],
-        bones: {
-            spine: [4, 5, 1], chest: [2, 8, 1], neck: [-14, -2, 0], head: [-13, -2, 0],
-            ...arms(34, -40, 60, 96, 12, 10), ...tail(0, RUN_TAIL), ...ears(0, 30, 4),
-        },
-        feet: { L: { at: [-0.03, 0.0, 0.2], heel: 2, toe: -10 }, R: { at: [0.01, 0.16, -0.22], heel: 62, toe: 30 } },
-    },
-    down: {
-        root: [0.008, -0.05, 0.0], turn: [25, -6, 2],
-        bones: {
-            spine: [5, 3, -1], chest: [3, 5, -1], neck: [-15, -1, 0], head: [-14, -1, 0],
-            ...arms(26, -30, 66, 92, 12, 10), ...tail(0.1, RUN_TAIL), ...ears(0.1, 30, 4),
-        },
-        feet: { L: { at: [-0.03, 0.0, 0.035], heel: -12 }, R: { at: [0.01, 0.13, -0.02], heel: 56, toe: 30 } },
-    },
-    push: {
-        root: [0.012, -0.022, 0.0], turn: [23, 7, 3],
-        bones: {
-            spine: [3, -4, -2], chest: [2, -6, -2], neck: [-14, 1, 0], head: [-12, 1, 0],
-            ...arms(-30, 26, 92, 62, 12, 10), ...tail(0.26, RUN_TAIL), ...ears(0.26, 30, 4),
-        },
-        feet: { L: { at: [-0.02, 0.01, -0.235], heel: 46 }, R: { at: [-0.005, 0.12, 0.26], heel: 18, toe: -10 } },
-    },
-    flight: {
-        root: [0.006, 0.0, 0.0], turn: [22, 9, 1],
-        bones: {
-            spine: [2, -5, -1], chest: [2, -8, -1], neck: [-13, 2, 0], head: [-12, 2, 0],
-            ...arms(-38, 32, 96, 60, 12, 10), ...tail(0.4, RUN_TAIL), ...ears(0.4, 30, 4),
-        },
-        feet: { L: { at: [-0.01, 0.14, -0.31], heel: 62, toe: 26 }, R: { at: [-0.02, 0.08, 0.27], heel: 6, toe: -18 } },
-    },
-};
+// A gait's cycle: `stride` at eight phases a step, the second step mirrored.
+const STEPS = 8;
+function cycleOf(name, G) {
+    const poses = {}, keys = [];
+    for (let i = 0; i < STEPS; i++) {
+        poses[`${name}-${i}`] = stride((0.5 * i) / STEPS, G);
+        keys.push([(0.5 * i) / STEPS, `${name}-${i}`]);
+    }
+    return { poses, cycle: { keys, mirror: true, stance: { L: [0, G.duty] } } };
+}
+const walk = cycleOf('walk', WALK), run = cycleOf('run', RUN);
 
 export const poses = {
-    // Standing: as the skeleton stands it, the arms hanging in.
-    stand: { bones: { ...arms(-6, -6, 26, 26), ...tail(0, { lift: 0 }) } },
-    'walk-contact': walk.contact,
-    'walk-down': walk.down,
-    'walk-pass': walk.pass,
-    'walk-up': walk.up,
-    'run-contact': run.contact,
-    'run-down': run.down,
-    'run-push': run.push,
-    'run-flight': run.flight,
-    // Alert: drawn up tall, the ears up and forward, the hands at its chest.
+    // Standing: as the skeleton stands it, the arms folded.
+    stand: { bones: { ...arms() } },
+    ...walk.poses,
+    ...run.poses,
+    // Alert: drawn up tall on straight legs, the head high, the ears up and
+    // forward, the tail lifted.
     alert: {
-        root: [0, 0.035, -0.01], turn: [-9, 0, 0],
-        bones: { spine: [-3, 0, 0], neck: [-6, 0, 0], head: [4, 0, 0], ...arms(-14, -14, 100, 100, 12, 30), ...tail(0, { lift: 22, curl: 8 }), ...ears(0, -8) },
-        feet: { L: { heel: 8 }, R: { heel: 8 } },
+        root: [0, 0.03, 0.085], turn: [-16, 0, 0],
+        bones: { spine: [-5, 0, 0], neck: [-4, 0, 0], head: [20, 0, 0], ...arms(8, 122, 55), ...tail([8, 8, 4, 0, 0]), ...ears(-8) },
+        feet: { L: { heel: 6 }, R: { heel: 6 } },
     },
     // Flinching: down and back from what startled it, the ears flat.
     flinch: {
-        root: [0, -0.13, -0.04], turn: [14, 0, 0],
-        bones: { spine: [8, 0, 0], neck: [-14, 0, 0], head: [-6, 0, 0], ...arms(-30, -30, 110, 110, -6, 20), ...tail(0, { lift: 40, curl: 10 }), ...ears(0, 52) },
-        feet: { L: { at: [0.02, 0, 0], heel: -16 }, R: { at: [-0.02, 0, 0], heel: -16 } },
+        root: [0, -0.15, 0.035], turn: [8, 0, 0],
+        bones: { spine: [8, 0, 0], chest: [4, 0, 0], neck: [-16, 0, 0], head: [-2, 0, 0], ...arms(26, 134, 30, 10), ...tail([10, 10, 6, 0, -6]), ...ears(52) },
+        feet: { L: { at: [0.02, 0, 0.02], heel: -22 }, R: { at: [-0.02, 0, -0.02], heel: -22 } },
     },
-    // Foraging: crouched low over the ground, the nose and hands down to it,
-    // the tail up behind.
+    // Foraging: tipped down over its feet, the nose and hands to the
+    // ground, the tail lifted behind against it.
     forage: {
-        root: [0, -0.26, -0.07], turn: [54, 0, 0],
-        bones: { spine: [14, 0, 0], chest: [10, 0, 0], neck: [-2, 0, 0], head: [6, 0, 0], ...arms(-62, -52, 16, 30, 4, -10), ...tail(0, { lift: 52, curl: 6 }), ...ears(0, 14) },
-        feet: { L: { at: [0.02, 0, 0.03], heel: -22 }, R: { at: [-0.02, 0, -0.02], heel: -22 } },
+        root: [0, -0.33, 0.03], turn: [50, 0, 0],
+        bones: { spine: [10, 0, 0], chest: [12, 0, 0], neck: [24, 0, 0], head: [4, 0, 0], ...arms(-36, 24, 10, 0), ...tail([-20, -14, -8, -2, 4]), ...ears(10) },
+        feet: { L: { at: [0.02, 0, 0.06], heel: -46 }, R: { at: [-0.02, 0, 0.0], heel: -46 } },
     },
-    // Resting: sat back on its haunches, the hocks on the ground, the hands
-    // on its knees, the tail laid round.
+    // Resting: sat back on its hocks, the body upright, the hands at its
+    // breast, the tail laid round.
     rest: {
-        root: [0, -0.32, -0.1], turn: [-4, 0, 0],
+        root: [0, -0.4, 0.15], turn: [-24, 0, 0],
         bones: {
-            spine: [10, 0, 0], chest: [6, 0, 0], neck: [-8, 0, 0], head: [2, 0, 0], ...arms(-28, -28, 62, 62, 6, 30), ...ears(0, 12),
-            tail1: [34, 18, 0], tail2: [6, 26, 0], tail3: [0, 28, 0], tail4: [-4, 28, 0], tail5: [-6, 22, 0],
+            spine: [4, 0, 0], chest: [4, 0, 0], neck: [0, 0, 0], head: [16, 0, 0], ...arms(10, 118, 50), ...ears(12),
+            tail1: [20, 14, 0], tail2: [4, 24, 0], tail3: [0, 28, 0], tail4: [-4, 28, 0], tail5: [-6, 22, 0],
         },
-        feet: { L: { at: [0.02, 0, 0.04], heel: -54 }, R: { at: [-0.02, 0, 0.04], heel: -54 } },
+        feet: { L: { at: [0.02, 0, 0.05], heel: -58 }, R: { at: [-0.02, 0, 0.05], heel: -58 } },
     },
 };
 
-export const cycles = {
-    walk: {
-        keys: [[0, 'walk-contact'], [0.09, 'walk-down'], [0.25, 'walk-pass'], [0.4, 'walk-up']],
-        mirror: true,
-        stance: { L: [0, 0.62] },
-    },
-    run: {
-        keys: [[0, 'run-contact'], [0.1, 'run-down'], [0.26, 'run-push'], [0.4, 'run-flight']],
-        mirror: true,
-        stance: { L: [0, 0.3] },
-    },
-};
+export const cycles = { walk: walk.cycle, run: run.cycle };

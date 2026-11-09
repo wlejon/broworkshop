@@ -277,19 +277,33 @@ export function modelSheet(creature, { path, poses = null, cycles = null, cell =
     text(g, `its poses and cycles as the keys have them (no rig); the live view's light, ${d.toFixed(2)} m out`, 12, 52, { size: 14, color: DIM });
     VIEWS.forEach((v, c) => text(g, v.name, LM + c * (cw + GAP) + cw / 2, TM - 6, { size: 14, weight: 650, align: 'center' }));
     const flags = [];
+    // A pose it stands in must balance over its feet. A stride's key is a
+    // moment of falling onto a foot or off it, and is not held to that: what
+    // a cycle owes is that the mass passes over the feet in the course of it.
+    const inStride = new Set(K.cycles.flatMap((c) => c.keys.map((k) => k.name)));
+    const fores = {};
     pn.forEach((n, r) => {
         const y = TM + r * (ch + GAP);
         text(g, n, 10, y + 22, { size: 15, weight: 700 });
         const bal = balanceOf(creature.skel, P[r]);
-        const words = bal.text.split(' ');
+        const moving = inStride.has(n);
+        if (moving && bal.down) fores[n] = bal.fore;
+        const off = !moving && (bal.fore || bal.side);
+        const words = (moving ? `in a stride: ${bal.text}` : bal.text).split(' ');
         let line = '', ly = y + 42;
         for (const w of words) {
-            if ((line + ' ' + w).length > 20) { text(g, line, 10, ly, { size: 12, color: bal.fore || bal.side ? '#b03a2e' : DIM }); ly += 15; line = w; } else line = line ? line + ' ' + w : w;
+            if ((line + ' ' + w).length > 20) { text(g, line, 10, ly, { size: 12, color: off ? '#b03a2e' : DIM }); ly += 15; line = w; } else line = line ? line + ' ' + w : w;
         }
-        text(g, line, 10, ly, { size: 12, color: bal.fore || bal.side ? '#b03a2e' : DIM });
-        if (bal.fore || bal.side) flags.push(`${n}: ${bal.text}`);
+        text(g, line, 10, ly, { size: 12, color: off ? '#b03a2e' : DIM });
+        if (off) flags.push(`${n}: ${bal.text}`);
         poseShots[r].forEach((img, c) => g.drawImage(toCanvas(img), LM + c * (cw + GAP), y));
     });
+    for (const c of K.cycles) {
+        const f = c.keys.map((k) => fores[k.name]).filter((v) => v !== undefined);
+        if (!f.length) continue;
+        const lo = Math.min(...f), hi = Math.max(...f);
+        if (lo > 0 || hi < 0) flags.push(`${c.name}: its centre of mass never passes over its feet (${(100 * Math.abs(lo > 0 ? lo : hi)).toFixed(1)} cm ${lo > 0 ? 'ahead of' : 'behind'} them at the nearest)`);
+    }
     let y = TM + pn.length * (ch + GAP);
     cy.forEach((c, ci) => {
         text(g, `${c.name}: ${c.keys.map((k) => `${k.name} ${k.ph.toFixed(2)}`).join(' · ')}`, 12, y + 20, { size: 14, weight: 700 });

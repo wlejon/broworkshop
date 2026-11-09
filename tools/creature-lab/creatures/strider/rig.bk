@@ -75,10 +75,11 @@ pub const STATE: i32 = PROBE + PROBE_N;
 // damping, and the most it turns from where the keys have it (rad).
 const LOOSE: array<i32, NLOOSE> = [B_EAR1L, B_EAR2L, B_EAR1R, B_EAR2R, B_FOREARML, B_HANDL, B_FOREARMR, B_HANDR,
                                    B_TAIL1, B_TAIL2, B_TAIL3, B_TAIL4, B_TAIL5];
-const LOOSE_W: array<f32, NLOOSE> = [52.0, 42.0, 48.0, 39.0, 17.0, 24.0, 17.5, 25.0, 26.0, 24.0, 22.0, 20.0, 19.0];
-const LOOSE_RUN: array<f32, NLOOSE> = [0.0, 0.0, 0.0, 0.0, 16.0, 16.0, 16.0, 16.0, 10.0, 10.0, 10.0, 10.0, 10.0];
-const LOOSE_ZETA: array<f32, NLOOSE> = [0.5, 0.45, 0.5, 0.45, 0.6, 0.6, 0.6, 0.6, 0.55, 0.55, 0.5, 0.5, 0.5];
-const LOOSE_MAX: array<f32, NLOOSE> = [0.4, 0.4, 0.4, 0.4,0.5, 0.6, 0.5, 0.6, 0.3, 0.35, 0.4, 0.4, 0.4];
+// (The tail's are not sprung but trail, `trail`: rad/s each follows at.)
+const LOOSE_W: array<f32, NLOOSE> = [36.0, 28.0, 34.0, 26.0, 26.0, 30.0, 27.0, 31.0, 30.0, 27.0, 24.0, 22.0, 20.0];
+const LOOSE_RUN: array<f32, NLOOSE> = [0.0, 0.0, 0.0, 0.0, 10.0, 10.0, 10.0, 10.0, 0.0, 0.0, 0.0, 0.0, 0.0];
+const LOOSE_ZETA: array<f32, NLOOSE> = [0.5, 0.45, 0.5, 0.45, 0.7, 0.7, 0.7, 0.7, 0.8, 0.8, 0.8, 0.8, 0.8];
+const LOOSE_MAX: array<f32, NLOOSE> = [0.4, 0.4, 0.4, 0.4, 0.22, 0.5, 0.22, 0.5, 0.3, 0.35, 0.4, 0.45, 0.5];
 
 @knob const LAYERS: f32 = 1.0;       // the head's steadying and the loose parts' share (0: the keys as they are)
 @knob const SOFT_REACH: f32 = 0.985; // share of a leg's reach where its IK eases the reach in
@@ -112,6 +113,30 @@ fn loose(st: rw_store<f32, 1>, k: i32, T: Pose, K: Key, b: i32, w: f32, zeta: f3
     let along = TAIL[b] - HEAD[b];
     let tip = dangle_step(st, k, P.p[b] + q_rot(P.q[b], along), w, zeta, 0.0, dt, init);
     P.q[b] = q_blend(P.q[b], aim_at(P.q[b], P.p[b], along, tip, amax), share);
+    return P;
+}
+
+// The tail's bone b, hung again from the one before as K turns it, then
+// turned to its tip, which trails: it follows where that puts it, about
+// `org` (where the creature stands at its pace), without overshoot. So the
+// tail takes up the hips' bounce along its length and streams behind a
+// run instead of being thrown about by it, and swings wide of a turn.
+fn trail(st: rw_store<f32, 1>, k: i32, T: Pose, K: Key, b: i32, org: vec3<f32>, w: f32, amax: f32, share: f32, dt: f32, init: bool) -> Pose {
+    var P = T;
+    P.q[b] = q_mul(P.q[PARENT[b]], K.q[b]);
+    P.p[b] = head_of(P, b);
+    let along = TAIL[b] - HEAD[b];
+    let rest = P.p[b] + q_rot(P.q[b], along) - org;
+    if (init) {
+        st3(st, k, rest);
+        st3(st, k + 3, vec3<f32>(0.0));
+    }
+    let x = crit_step(vec2<f32>(st[k], st[k + 3]), rest.x, w, dt);
+    let y = crit_step(vec2<f32>(st[k + 1], st[k + 4]), rest.y, w, dt);
+    let z = crit_step(vec2<f32>(st[k + 2], st[k + 5]), rest.z, w, dt);
+    st3(st, k, vec3<f32>(x.x, y.x, z.x));
+    st3(st, k + 3, vec3<f32>(x.y, y.y, z.y));
+    P.q[b] = q_blend(P.q[b], aim_at(P.q[b], P.p[b], along, org + vec3<f32>(x.x, y.x, z.x), amax), share);
     return P;
 }
 
@@ -358,7 +383,7 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
     KP = key_turn(KP, B_UPPERARML, vec3<f32>(0.8 * breath, 0.0, -2.0 * breath));
     KP = key_turn(KP, B_UPPERARMR, vec3<f32>(0.8 * breath, 0.0, 2.0 * breath));
     // Its hands are never quite still: each arm shifts on its own, and now
-    // and then a hand is drawn up and let down.
+    // and then a hand is let down from the breast and drawn up again.
     for (var a: i32 = 0; a < 2; a += 1) {
         let side = 1.0 - 2.0 * f32(a);
         let ch = 10.0 + 4.0 * f32(a);
@@ -366,7 +391,7 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
         let up = fid * smooth01(3.0 * noise1(clock * 0.17, seed, ch) - 1.2);
         let ua = select_i(a == 0, B_UPPERARML, B_UPPERARMR);
         KP = key_turn(KP, ua, vec3<f32>(0.1 * fid * noise1(clock * 0.31, seed, ch + 1.0) - 0.25 * up, 0.0, -side * 0.06 * fid * noise1(clock * 0.23, seed, ch + 2.0)));
-        KP = key_turn(KP, ua + 1, vec3<f32>(0.14 * fid * noise1(clock * 0.43, seed, ch + 3.0) - 0.7 * up, 0.0, 0.0));
+        KP = key_turn(KP, ua + 1, vec3<f32>(0.14 * fid * noise1(clock * 0.43, seed, ch + 3.0) + 0.6 * up, 0.0, 0.0));
         KP = key_turn(KP, ua + 2, vec3<f32>(0.2 * fid * noise1(clock * 0.61, seed, ch + 4.0) + 0.4 * up, 0.0, side * 0.15 * fid * noise1(clock * 0.37, seed, ch + 5.0)));
     }
     // Its weight wanders from foot to foot, the hips tipping with it.
@@ -417,7 +442,11 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
     state[s + D_HEADQ + 2] = qe.z;
     state[s + D_HEADQ + 3] = qe.w;
     let qn2 = q_mul(q_conj(qc), q_blend(qk, qe, HEAD_SPACE * LAYERS));
-    let qn = q_blend(q_id(), qn2, 0.5);
+    // (What the keys bend the neck by beyond its half of their own turn, it
+    // keeps: the neck gives under the head at each step, and the head is
+    // turned back by as much, so it travels on the neck without tipping.)
+    let own = q_mul(q_conj(q_blend(q_id(), q_mul(KP.q[B_NECK], KP.q[B_HEAD]), 0.5)), KP.q[B_NECK]);
+    let qn = q_mul(q_blend(q_id(), qn2, 0.5), own);
     KP.q[B_NECK] = qn;
     KP.q[B_HEAD] = q_mul(q_conj(qn), qn2);
     // Over that, it turns to what it looks at.
@@ -454,7 +483,9 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
     // --- the loose parts carry their momentum ---------------------------------------
     var A = T;
     for (var i: i32 = 0; i < NLOOSE; i += 1) {
-        A = loose(state, s + D_LOOSE + i * DANGLE_REC, A, KP, LOOSE[i], LOOSE_W[i] + LOOSE_RUN[i] * rw, LOOSE_ZETA[i], LOOSE_MAX[i], LAYERS, dt, init);
+        let k = s + D_LOOSE + i * DANGLE_REC;
+        if (LOOSE[i] >= B_TAIL1) { A = trail(state, k, A, KP, LOOSE[i], org, LOOSE_W[i], LOOSE_MAX[i], LAYERS, dt, init); }
+        else { A = loose(state, k, A, KP, LOOSE[i], LOOSE_W[i] + LOOSE_RUN[i] * rw, LOOSE_ZETA[i], LOOSE_MAX[i], LAYERS, dt, init); }
     }
 
     // --- in the air ----------------------------------------------------------------------

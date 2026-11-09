@@ -1,7 +1,8 @@
-// The strider: an invented biped of 36 kg, 1.2 m to its crown, on two
-// digitigrade legs, its trunk leaning forward over them and a long heavy
-// tail behind. No reference behind it; it is drawn pose by pose (poses.js)
-// and the lab judges it by the model sheet, the finder, form and natural.
+// The strider: an invented biped of 31 kg, 1.2 m to its crown, carrying its
+// body level over two long digitigrade legs with a long tail out behind.
+// No reference behind it; it is given in keys (poses.js: its attitudes
+// drawn, its gaits made from a stride's phase) and the lab judges it by
+// watching it (watch), the model sheet, skin, parts and the finder.
 //
 // The lab's walk, trot and gallop are its walk, a jog and a run (`speeds`);
 // its gaits report as walk and run.
