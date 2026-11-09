@@ -173,10 +173,12 @@ jump in the body's acceleration at contact), fed forward to
 only as far as clears the ground. The pelvis turns with the feet's spread
 along the heading as the gait's phase has it (a smooth swing: the spread
 measured from the toes turns a corner as each foot lifts and lands) and
-dips on the swing side; the chest turns against it and leans off its dip
-`CHEST_LAG` of a stride later, the arms swing against the legs `ARM_LAG`
-later and the forearms `FORE_LAG` after them, the elbows in by the flanks
-running. The pace ramps to what is asked and the speed follows the ramp
+dips on the swing side; the chest turns against it and tilts against its
+dip (`CHEST_ROLL` of it in the world) `CHEST_LAG` of a stride later, so the
+shoulders rock over the hips; the arms swing against the legs `ARM_LAG`
+later and the forearms `FORE_LAG` after them, each shoulder coming forward
+with its arm (`SHOULDER_SWING`), the elbows in by the flanks running. The
+trunk leans forward a little walking (`LEAN_W`), more running. The pace ramps to what is asked and the speed follows the ramp
 through a lag (`SPEED_W`), so a start or a stop has no step in its
 acceleration; the reach's hold on the body's shift comes in over
 `HELD_RISE`; a foot's hold on the body comes back no faster than time
@@ -594,6 +596,11 @@ Every output is deterministic. A rerun writes the same bytes.
     printed worst first a row
   - each of those bones' own swing against its parent over the steady
     cycles (amplitude, lag, locked), bones lying across the body left out
+  - how much the upper half moves over a stride: the hip and shoulder
+    lines' turn and the shoulders' turn against the hips, the shoulders'
+    roll, each hand's fore-aft swing as a share of the stride, each elbow's
+    flexion range, the head's bob; flagged under `UPPER` (a trunk that
+    reads as carried rather than walked in)
   - `--from` / `--to` narrow the window
 - **Kinematics** (`lab/kinematics.js`): where in a stride the motion jumps.
   - per leg, each bone's flexion, angular velocity and angular acceleration

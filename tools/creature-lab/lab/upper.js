@@ -27,7 +27,13 @@ import { boneAt, boneHead, boneRot } from "./skeleton.js";
 import { T, TELE } from "./contract.js";
 
 const DEG = 180 / Math.PI;
-export const UPPER = { after: 0.8 };
+// after: s a kink counts as following a change. The rest are the least a
+// walking body's upper half moves over a stride, from what people show
+// walking at an easy pace (no reference creature): the shoulder line turning
+// against the hip line (deg, its range), the shoulders' roll (deg), a hand's
+// swing fore and aft as a share of the stride, an elbow's flexion range
+// (deg). Below these the trunk reads as carried, not walked in.
+export const UPPER = { after: 0.8, shoulderTurn: 6, shoulderRoll: 3, handSwing: 0.2, elbowRange: 8 };
 const r1 = (x) => Math.round(x * 10) / 10, r2 = (x) => Math.round(x * 100) / 100;
 
 // The points measured: the skeleton's tracked points, then each arm's elbow
@@ -67,6 +73,59 @@ function armChains(skel) {
         while (p >= 0 && kids[p].length === 1 && !above.has(p)) { ch.unshift(p); p = skel.bones[p].parentIndex; }
         if (ch.length >= 3) out.push(ch);
     }
+    return out;
+}
+
+// How much the upper half moves over a stride, each measure's range per
+// steady cycle averaged over them: the hip line's and the shoulder line's
+// turn in the heading frame and the shoulders' turn against the hips, the
+// shoulders' roll, each hand tip's swing fore and aft against the hips (as a
+// share of the stride), each elbow's flexion range, the head's bob (cm).
+function strideRanges(rec, cyc) {
+    const skel = rec.creature.skel, legs = legChains(skel), arms = armChains(skel);
+    if (!cyc.length || legs.length < 2 || arms.length < 2) return null;
+    const root = chains(skel).root, P = rec.pose;
+    const head = skel.tracks.find((t) => t.name === 'head');
+    const frame = (k) => {
+        const yaw = rec.tele[k * TELE + T.YAW], c = Math.cos(-yaw), s = Math.sin(-yaw), o = k * rec.poseStride;
+        const h = (p) => [c * p[0] + s * p[2], p[1], -s * p[0] + c * p[2]];
+        const at = (b) => h(boneHead(P, o, b));
+        // (Turned to run along +x, so its angles sit about 0 whichever side is first.)
+        const line = (a, b) => { let d = [0, 1, 2].map((i) => b[i] - a[i]); if (d[0] < 0) d = d.map((v) => -v); return { yaw: Math.atan2(d[2], d[0]) * DEG, roll: Math.atan2(d[1], Math.hypot(d[0], d[2])) * DEG }; };
+        const hips = line(at(legs[1][0]), at(legs[0][0])), sh = line(at(arms[1][1]), at(arms[0][1]));
+        const r = at(root);
+        const hands = arms.map((a) => h(boneAt(P, o, skel.bones[a[a.length - 1]], 1))[2] - r[2]);
+        const elbows = arms.map((a) => {
+            const u = [0, 1, 2].map((i) => at(a[2])[i] - at(a[1])[i]), f = [0, 1, 2].map((i) => at(a[3] ?? a[2])[i] - at(a[2])[i]);
+            const d = (u[0] * f[0] + u[1] * f[1] + u[2] * f[2]) / ((Math.hypot(...u) * Math.hypot(...f)) || 1);
+            return Math.acos(Math.max(-1, Math.min(1, d))) * DEG;
+        });
+        const hd = head ? h(boneAt(P, o, skel.bones[head.boneIndex], head.at))[1] : 0;
+        return { hipYaw: hips.yaw, shYaw: sh.yaw, turn: sh.yaw - hips.yaw, roll: sh.roll, hands, elbows, head: hd, x: r[0], z: r[2], wx: P[o + root * 12 + 3], wz: P[o + root * 12 + 11] };
+    };
+    const acc = { hipTurn: 0, shoulderTurn: 0, against: 0, shoulderRoll: 0, hands: arms.map(() => 0), elbows: arms.map(() => 0), headBob: 0, stride: 0 };
+    const rng = (a) => Math.max(...a) - Math.min(...a);
+    for (const c of cyc) {
+        const F = [];
+        for (let k = c.a; k <= c.b; k++) F.push(frame(k));
+        acc.hipTurn += rng(F.map((f) => f.hipYaw)) / cyc.length;
+        acc.shoulderTurn += rng(F.map((f) => f.shYaw)) / cyc.length;
+        acc.against += rng(F.map((f) => f.turn)) / cyc.length;
+        acc.shoulderRoll += rng(F.map((f) => f.roll)) / cyc.length;
+        arms.forEach((_, i) => { acc.hands[i] += rng(F.map((f) => f.hands[i])) / cyc.length; acc.elbows[i] += rng(F.map((f) => f.elbows[i])) / cyc.length; });
+        acc.headBob += 100 * rng(F.map((f) => f.head)) / cyc.length;
+        const a = F[0], b = F[F.length - 1];
+        acc.stride += Math.hypot(b.wx - a.wx, b.wz - a.wz) / cyc.length;
+    }
+    const out = {
+        hipTurn: r1(acc.hipTurn), shoulderTurn: r1(acc.shoulderTurn), turnAgainst: r1(acc.against), shoulderRoll: r1(acc.shoulderRoll),
+        handSwing: acc.hands.map((v) => r2(v / Math.max(acc.stride, 0.05))), handSwingCm: acc.hands.map((v) => r1(100 * v)),
+        elbowRange: acc.elbows.map(r1), headBob: r1(acc.headBob), stride: r2(acc.stride), flags: [],
+    };
+    if (out.turnAgainst < UPPER.shoulderTurn) out.flags.push(`trunk: the shoulders turn against the hips over ${out.turnAgainst}° a stride (want >= ${UPPER.shoulderTurn}°)`);
+    if (out.shoulderRoll < UPPER.shoulderRoll) out.flags.push(`trunk: the shoulders roll over ${out.shoulderRoll}° a stride (want >= ${UPPER.shoulderRoll}°)`);
+    out.handSwing.forEach((v, i) => { if (v < UPPER.handSwing) out.flags.push(`arms: hand ${i} swings ${out.handSwingCm[i]} cm, ${Math.round(100 * v)}% of the ${out.stride} m stride (want >= ${Math.round(100 * UPPER.handSwing)}%)`); });
+    out.elbowRange.forEach((v, i) => { if (v < UPPER.elbowRange) out.flags.push(`arms: elbow ${i} flexes over ${v}° a stride (want >= ${UPPER.elbowRange}°)`); });
     return out;
 }
 
@@ -149,11 +208,13 @@ export function upperSheet(rec, { path, from = null, to = null } = {}) {
     }).map((b) => b.name));
     const ov = cyc.length ? overlap(rec, segmentAngles(rec), cyc).pairs.filter((p) => names.has(p.bone) && !lateral.has(p.bone) && !lateral.has(p.parent)) : [];
     const trunk = ov.map((p) => ({ bone: p.bone, parent: p.parent, which: p.which, own: p.ownAmp, parent_amp: p.parentAmp, lagMs: p.lagMs, corr: p.corr, locked: p.locked }));
+    const ranges = strideRanges(rec, cyc);
+    const flags = ranges ? ranges.flags : [];
 
     // --- draw ---
     const rows = [...pts.map((p) => ({ ...p, kind: 'point', y: p.acc, unit: 'm/s2' })), ...bones.map((b) => ({ ...b, kind: 'bone', y: b.speed, unit: 'deg/s' }))];
     const W = 1500, RH = 92, TM = 64, LW = 250;
-    const tableH = 22 + 16 * (trunk.length + 2);
+    const tableH = 22 + 16 * (trunk.length + 2) + (ranges ? 16 * (4 + flags.length) : 0);
     const H = TM + rows.length * RH + tableH + 20;
     const Sh = beginSheet(W, H);
     const g = Sh.g;
@@ -182,10 +243,17 @@ export function upperSheet(rec, { path, from = null, to = null } = {}) {
     const ty = TM + rows.length * RH + 18;
     text(g, cyc.length ? 'the trunk and arms against their parents over the steady cycles (own: deg of its own swing; lag: ms behind its parent; locked: moving as one)' : 'no steady cycle: no swing against the parents', 12, ty, { size: 13, weight: 700 });
     trunk.forEach((p, i) => text(g, `${p.bone} on ${p.parent} (${p.which}): own ${p.own}° of the parent's ${p.parent_amp}°, lag ${p.lagMs} ms, r ${p.corr}${p.locked ? ' · LOCKED' : ''}`, 24, ty + 18 + 16 * i, { size: 12, color: p.locked ? '#c0392b' : INK }));
+    if (ranges) {
+        const ry = ty + 18 + 16 * trunk.length + 12;
+        text(g, 'over a stride (ranges, steady cycles)', 12, ry, { size: 13, weight: 700 });
+        text(g, `hips turn ${ranges.hipTurn}°, shoulders ${ranges.shoulderTurn}°, against each other ${ranges.turnAgainst}°; shoulders roll ${ranges.shoulderRoll}°; head bobs ${ranges.headBob} cm`, 24, ry + 18, { size: 12 });
+        text(g, `hands swing ${ranges.handSwingCm.join(' / ')} cm (${ranges.handSwing.map((v) => Math.round(100 * v) + '%').join(' / ')} of the ${ranges.stride} m stride); elbows flex over ${ranges.elbowRange.join(' / ')}°`, 24, ry + 34, { size: 12 });
+        flags.forEach((f, i) => text(g, f, 24, ry + 50 + 16 * i, { size: 12, color: '#c0392b' }));
+    }
     const out = saveSheet(path);
     const strip = (r) => ({ name: r.name, kinks: r.spikes.length, perSecond: r.perSecond, jerkRms: r.jerkRms, peakAcc: r.peakAcc, spikes: r.spikes });
     return { path, width: out.width, height: out.height, ms: Date.now() - t0,
-        json: { from: r2(k0 * dt), to: r2(k1 * dt), changes: ch, points: pts.map(strip), bones: bones.map(strip), trunk } };
+        json: { from: r2(k0 * dt), to: r2(k1 * dt), changes: ch, points: pts.map(strip), bones: bones.map(strip), trunk, ranges, flags } };
 }
 
 // One line a row for the terminal: the worst first.
@@ -203,6 +271,11 @@ export function upperLines(json) {
     if (json.trunk.length) {
         lines.push('own swing against the parent (steady cycles):');
         for (const p of json.trunk) lines.push(`  ${p.bone.padEnd(10)} on ${p.parent.padEnd(10)} own ${String(p.own).padStart(5)}° of ${String(p.parent_amp).padStart(5)}°  lag ${String(p.lagMs).padStart(4)} ms  r ${p.corr}${p.locked ? '  LOCKED' : ''}`);
+    }
+    const R = json.ranges;
+    if (R) {
+        lines.push(`over a stride: hips turn ${R.hipTurn}°, shoulders ${R.shoulderTurn}°, against ${R.turnAgainst}°; shoulders roll ${R.shoulderRoll}°; head bob ${R.headBob} cm`);
+        lines.push(`  hands ${R.handSwingCm.join(' / ')} cm (${R.handSwing.map((v) => Math.round(100 * v) + '%').join(' / ')} of ${R.stride} m); elbows ${R.elbowRange.join(' / ')}°`);
     }
     return lines;
 }

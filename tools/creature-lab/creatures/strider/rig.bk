@@ -119,14 +119,17 @@ pub const STATE: i32 = D_BAL_V + 2;
 @knob const SETTLE_SHIFT: f32 = 0.15; // s the weight goes over before a settling step lifts
 @knob const SPEED_W: f32 = 8.0;    // 1/s the speed follows its ramp at
 @knob const HELD_RISE: f32 = 0.04;  // s the reach's hold on the body's shift takes to come in
-@knob const CHEST_LAG: f32 = 0.04;  // of a stride the chest's turn and lean follow the pelvis's
+@knob const CHEST_ROLL: f32 = 0.6;  // of the pelvis's dip the chest tilts against it, in the world
+@knob const CHEST_LAG: f32 = 0.04; // of a stride the chest's turn and lean follow the pelvis's
 @knob const ARM_LAG: f32 = 0.06;     //   an arm's swing the legs'
 @knob const FORE_LAG: f32 = 0.08;    //   and a forearm's the upper arm's
 @knob const ARM_W: f32 = 0.5;     // rad an arm swings per m of the feet's spread, walking
 @knob const ARM_R: f32 = 0.9;        //   and running
 @knob const ELBOW_W: f32 = 0.25;     // rad the elbow is bent walking
 @knob const ELBOW_R: f32 = 1.45;     //   and running
-@knob const LEAN_R: f32 = 0.08;      // rad the trunk leans forward running
+@knob const LEAN_W: f32 = 0.07;      // rad the trunk leans forward walking
+@knob const LEAN_R: f32 = 0.08;      //   and running
+@knob const SHOULDER_SWING: f32 = 0.35; // of an arm's swing its shoulder comes with it
 @knob const LEAN_ACC: f32 = 0.035;   // rad it leans per m/s^2 of the pace's change
 @knob const HEAD_SPACE: f32 = 0.9;   // share of its gaze in space the head holds
 @knob const HEAD_STEADY: f32 = 0.7;  // share of the head's swing on its spring the eyes take back
@@ -324,12 +327,13 @@ fn place(st: rw_store<f32, 1>, env: read_store<f32, 1>, s: i32) {
 }
 
 // An arm's bones (shoulder, upper arm, forearm, hand) set from the chest:
-// the upper arm swung forward by -fx and out by ab, the elbow bent by el,
-// the wrist by wr.
-fn set_arm(T: Pose, a: i32, side: f32, fx: f32, ab: f32, el: f32, wr: f32, shrug: f32) -> Pose {
+// the shoulder brought forward by prot (the collarbone turned about the
+// vertical), the upper arm swung forward by -fx and out by ab, the elbow
+// bent by el, the wrist by wr.
+fn set_arm(T: Pose, a: i32, side: f32, fx: f32, ab: f32, el: f32, wr: f32, shrug: f32, prot: f32) -> Pose {
     var P = T;
     let b0 = ARM_B0[a];
-    P.q[b0] = q_mul(P.q[B_CHEST], q_xyz(soft_xyz(vec3<f32>(0.0, 0.0, side * shrug), b0, 0.1)));
+    P.q[b0] = q_mul(P.q[B_CHEST], q_xyz(soft_xyz(vec3<f32>(0.0, side * prot, side * shrug), b0, 0.1)));
     P.p[b0] = head_of(P, b0);
     let ua = soft_xyz(vec3<f32>(fx, 0.0, side * ab), b0 + 1, 0.15);
     P.q[b0 + 1] = q_mul(P.q[b0], q_mul(q_z(ua.z), q_x(ua.x)));
@@ -753,7 +757,7 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
     // an arm hanging from the shoulder, a forearm from the elbow.
     let spread_at = step_len * vec3<f32>(cos(gp - TAU * CHEST_LAG), cos(gp - TAU * ARM_LAG), cos(gp - TAU * (ARM_LAG + FORE_LAG)));
     let sway_u = cos(TAU * (phase - 0.5 * duty)) * go * (1.0 - rw);
-    let lean_want = LEAN_R * rw * smooth01(speed / 2.5) + LEAN_ACC * clamp(pace_a, -3.0, 3.0) + graze * (0.55 + 0.45 * forage_down(clock, seed)) + 0.35 * lie
+    let lean_want = mix(LEAN_W * go, LEAN_R * smooth01(speed / 2.5), rw) + LEAN_ACC * clamp(pace_a, -3.0, 3.0) + graze * (0.55 + 0.45 * forage_down(clock, seed)) + 0.35 * lie
                     - 0.12 * flinch;
     let ls = crit_step(vec2<f32>(state[s + D_LEAN], state[s + D_LEAN_V]), lean_want, 9.0, dt);
     let lean = select_f(init, lean_want, ls.x);
@@ -891,10 +895,12 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
     let breath = (0.012 + 0.012 * alert) * (1.0 - 0.7 * go) * sin(TAU * clock / BREATH_T + seed);
     T.q[B_SPINE] = q_mul(T.q[B_PELVIS], q_xyz(soft_xyz(vec3<f32>(0.55 * lean_s - 0.5 * breath, -0.75 * twist, -0.6 * list), B_SPINE, 0.1)));
     T.p[B_SPINE] = head_of(T, B_SPINE);
-    // (The chest turns against the pelvis and leans off its dip a little
-    // after it, CHEST_LAG of a stride: the trunk twists through, not as one.)
+    // (The chest turns against the pelvis and tilts against its dip, by
+    // CHEST_ROLL of it in the world, a little after it, CHEST_LAG of a
+    // stride: the shoulders rock over the hips, the trunk twisting through,
+    // not carried as one.)
     let list_c = LIST * (sway_c + shift_u);
-    T.q[B_CHEST] = q_mul(T.q[B_SPINE], q_xyz(soft_xyz(vec3<f32>(0.45 * lean_s - 0.05 * alert - breath, -0.5 * twist_c - 0.25 * twist, 0.1 * list_c - 0.4 * list), B_CHEST, 0.1)));
+    T.q[B_CHEST] = q_mul(T.q[B_SPINE], q_xyz(soft_xyz(vec3<f32>(0.45 * lean_s - 0.05 * alert - breath, -0.5 * twist_c - 0.25 * twist, -CHEST_ROLL * list_c - 0.4 * list), B_CHEST, 0.1)));
     T.p[B_CHEST] = head_of(T, B_CHEST);
 
     // --- neck and head: up over the lean, turned to the gaze ------------------------------------
@@ -966,7 +972,9 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
         // (Running, the elbows are kept in by the flanks, not winged out.)
         let ab = -0.12 + 0.03 * rw + 0.55 * flinch + 0.08 * lie + 0.1 * rest_knee;
         let wr = -0.3 * lie - 0.5 * flinch + 0.25 * rest_knee - 0.15 * rw;
-        T = set_arm(T, a, sd, fx, ab, el, wr, 0.2 * flinch);
+        // (The shoulder goes with the arm: forward as it swings forward.)
+        let prot = SHOULDER_SWING * sw * (1.0 - graze) * (1.0 - lie);
+        T = set_arm(T, a, sd, fx, ab, el, wr, 0.2 * flinch, prot);
     }
     // Foraging, the right hand reaches, picks and feeds (forage, above).
     if (graze > 0.001) {
