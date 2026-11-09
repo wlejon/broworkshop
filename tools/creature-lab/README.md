@@ -99,7 +99,10 @@ head, ears and tail. Its gaits are walk, trot and gallop, and its actions are
 idle, graze, startle, lie down and bound; from a gallop it leaps a log in its
 path (`creature::leap`). Turning on the spot it steps round in diagonal
 pairs, and lying down its lower joints fold ahead of the rest
-(`FOLD_AHEAD`). `hexa` is an invented one with no
+(`FOLD_AHEAD`). Galloping, its body may rise `GALLOP_FREE` past what its
+planted hooves hold, and a hoof the posed leg hung short of last step
+(`SHORT_LET`) steps, so a leg that runs out of length lets go of its mark
+rather than dragging its hoof off it. `hexa` is an invented one with no
 reference behind it: a slender six-legged browser of the plain, a long back
 on three pairs of long legs, an arched neck of two bones, lyre horns, long
 ears and a thin tufted tail. Walking, its legs go in a ripple up each side
@@ -600,7 +603,9 @@ Every output is deterministic. A rerun writes the same bytes.
   from one view in at most six consecutive frames, shaped to the creature
   so it fills each (five to six hundred pixels tall), and refuses more: it
   is run again per view (`side`, `front`, `back`, `front-quarter`,
-  `back-quarter`, `top`) and per part of a cycle (`--from 0.4 --span 0.25`).
+  `back-quarter`, `top`) and per part of a cycle (`--from 0.4 --span 0.25`),
+  or per stretch of time (`--from 10.25 --to 10.6`, seconds: a moment of a
+  run of several gaits, which is not in its last cycle).
   - One camera for all the frames, standing where the creature does at its
     steady pace, not on its hips: its rise and fall, sway and lean are in
     the picture. A run that turns where it stands (`turn-in-place`) is

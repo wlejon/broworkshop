@@ -87,7 +87,8 @@ const D_BODY: i32 = 116;      // creature::body (BODY_STATE)
 const D_SPINE: i32 = 130;     // creature::spine (SPINE_STATE)
 const D_SEC: i32 = 136;       // creature::secondary (SEC_STATE)
 const D_LEAP: i32 = D_SEC + SEC_STATE;   // creature::leap (LEAP_STATE)
-pub const STATE: i32 = D_LEAP + LEAP_STATE;
+const D_SHORT: i32 = D_LEAP + LEAP_STATE;   // per leg, how far short of its toe the posed leg hung last step
+pub const STATE: i32 = D_SHORT + 4;
 
 const WALK_UP: f32 = 1.9;
 const TROT_DOWN: f32 = 1.5;
@@ -102,6 +103,7 @@ const SETTLE_T: f32 = 0.34;
 @knob const HEAD_SPACE: f32 = 0.6;     // share of its gaze in space the head holds (the rest it is carried)
 @knob const NECK_LEVER: f32 = 0.35;    // m the head rises per radian of neck extension
 @knob const REACH_FORE: f32 = 0.90;    // m from that pivot to the toe the fore leg can hold
+@knob const SHORT_LET: f32 = 0.004;    // m the posed leg may hang short of a planted hoof before it steps
 @knob const REACH_FORE_TOP: f32 = 0.965; // m from the blade's top to the toe, the fore leg near straight
 @knob const LIE_HIP: f32 = 0.36;     // m the hips rest over the ground, lying
 @knob const LIE_WITHERS: f32 = 0.53;   // m the withers rest over the ground, lying
@@ -450,9 +452,11 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
             let stray = length(vec2<f32>(toe.x - home.x, toe.z - home.z));
             // A hoof the leg no longer reaches from its girdle (as it stood
             // last step: a long stance up a slope) steps too, rather than the
-            // leg hanging short of it.
-            let top = leg_top(l, bpos, qyaw, state[s + D_HY_O], state[s + D_FY_O]);
-            let over = length(toe - top) > select_f(hind, REACH_HIND, REACH_FORE);
+            // leg hanging short of it. (The girdle with the body's rise on
+            // it: a galloping body lifts off a hoof its legs still reach
+            // from where the plan has them.)
+            let top = leg_top(l, bpos, qyaw, state[s + D_HY_O], state[s + D_FY_O]) + vec3<f32>(0.0, max(state[s + D_LAG + 1], 0.0) * LAYERS, 0.0);
+            let over = length(toe - top) > select_f(hind, REACH_HIND, REACH_FORE) || (state[s + D_SHORT + l] > SHORT_LET && !init);
             let lev = leap_leg(lp, hind, side01);
             if (in_leap && ((hind && lp.tau >= lp.tc - 0.02) || lp.tau >= lev.z)) {
                 // In a leap the hind feet stay down from their last landing
@@ -950,6 +954,9 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
             if (i == 0) { T.p[b] = j; }
             else { T.p[b] = T.p[b - 1] + q_rot(T.q[b - 1], HEAD[b] - HEAD[b - 1]); }
         }
+        // How far short of its toe the leg hangs, kept for the next step.
+        let e = b0 + nb - 1;
+        state[s + D_SHORT + l] = length(T.p[e] + q_rot(T.q[e], TAIL[e] - HEAD[e]) - toe);
     }
 
     // --- the parts that hang carry their momentum (creature::secondary) ----------------------

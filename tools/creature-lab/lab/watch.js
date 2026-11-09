@@ -107,7 +107,9 @@ export function watchSheet(rec, { path, view = 'side', frames = WATCH.frames, fr
     const first = rootOf(rec, 0), last = rootOf(rec, rec.steps - 1);
     const turned = Math.abs(Math.atan2(Math.sin(last.yaw - first.yaw), Math.cos(last.yaw - first.yaw)));
     const turns = turned > 0.6 && rec.scenario.track.every((key) => !key.speed);
-    const cyc = turns ? null : lastCycle(rec);
+    // (Asked for a stretch of time, `to` given, it is cut by time too: a
+    // moment of a run of several gaits is not in its last cycle.)
+    const cyc = turns || to != null ? null : lastCycle(rec);
     const F = framesOf(rec, cyc, frames, { from, span, to });
     const poseAt = (step) => {
         const r = rootOf(rec, step);
