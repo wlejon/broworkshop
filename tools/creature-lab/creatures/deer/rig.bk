@@ -121,7 +121,8 @@ const SETTLE_T: f32 = 0.34;
 @knob const LAYERS: f32 = 1.0;       // the motion layers' share (0: the rig's plan as it is)
 const BREAKOVER: f32 = 0.55;     // rad the hoof rolls onto its toe before lift
 const WITHERS_Z: f32 = 0.69;     // hips (pelvis head) to withers, along the back
-const RISE_EASE: f32 = 0.015;    // m over which the body's rise eases into the legs' reach
+@knob const RISE_IN: f32 = 0.002;     // m of the ceiling's height over the plan it takes hold over
+const RISE_EASE: f32 = 0.015;   // m over which the body's rise eases into the legs' reach
 @knob const LAND_REACH: f32 = 0.8;   // share of the leg's reach along the ground a swing's landing mark may lie from where its girdle will be
 @knob const LAND_WALK: f32 = 0.9;  //   and walking (at all of it the fore hoof landed on a straight leg, and the body was drawn on to it)
 @knob const TROT_SPRING: f32 = 0.7; // how much of a spring the legs are under a trot's landing (creature::body's Support.spring)
@@ -964,7 +965,13 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
     // ceiling all stride, is not above it and keeps the floor as it was.)
     let ceil_y = smin(ch - hy, cf - fy, CAP_SOFT);
     let above = clamp(shift.y - GALLOP_FREE * gw.z, 0.0, 0.03);
-    let rise = -smin(-ceil_y, 0.0, max(above * above / 0.03, 1e-4)) + GALLOP_FREE * gw.z;
+    // (What the ceiling gives over the plan comes in from nothing, with no
+    // slope at first: the ceiling comes up through the plan at half a metre
+    // a second as the legs come under a trotting body already above it, and
+    // the root, let go from the plan, went up 3 mm in that step.)
+    let r0 = -smin(-ceil_y, 0.0, max(above * above / 0.03, 1e-4));
+    let rp = max(r0, 0.0);
+    let rise = min(r0, 0.0) + rp * rp / (rp + RISE_IN) + GALLOP_FREE * gw.z;
     if (!lp.on) {
         let over = shift.y - rise;
         let free_y = shift.y;
