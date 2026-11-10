@@ -308,6 +308,28 @@ corners under heavy lashed lids, and a brow over each that the lid bone's z
 moves (inner ends up in a flinch and as the eyes go to something new, down
 when it is intent).
 
+`puff` is the same legs under a ball: 17 kg, 1.15 m to its crown, a round
+feathered body with a round head sunk in the top of it and no neck (the
+head bone turns about its own middle, ±135°, so it swivels inside the
+outline), an owl's flat face, a tuft over each brow, a stub wing down each
+side (a piece of its own each) and a short fan of a tail; its weight is in
+the ball, not the legs. Walking, it waddles: the whole ball rocks over the
+standing foot under a head that stays level, and each wing lifts while its
+own foot is in the air; running, it tips forward with its wings held out
+behind and its tufts flat. Its rig swivels the head to a new place in a
+third of a second and holds it, tipped over to one side one time in three,
+bounces it on its legs, shakes its feathers out, wags its tail; pecking,
+the ball tips over on its hips until it looks straight down, dips to its
+toes, and comes up every few seconds to look about; lying down it sits on
+its folded legs, eyes half shut. Its face draws two great gold eyes that
+barely turn (the head does the looking), a pupil that widens when it is
+alert, a lid that comes down from the top, and a wink of one eye (the lid
+bone's z: over 0 the left, under 0 the right).
+
+In a leap these four keep a foot that is lifted over the log at least
+`LEAP_FOLD` from its hip, carried out ahead or behind: nearer than the leg
+folds, the leg's solution turned over for a frame.
+
 ### Keys: a creature drawn pose by pose
 
 A species whose whole body makes its gait (a biped: the hips drop, sway and
