@@ -1,0 +1,115 @@
+// creature::face — the hexa's face, drawn per pixel over the head's skin
+// (lab/face.bk has how), in the rest pose's coordinates (body.js: x to its
+// left, y up, z forward, metres). `foot` is a pixel's size there; every
+// edge is softened over it.
+//
+// A grazer's eye, set on the side of its head and seen from the side: large
+// and dark, an almond lying along the head's line with its fore corner the
+// lower. What it shows:
+//   eye     a wet dark ball; an amber-brown iris about a pupil that is a
+//           level bar, as a grazer's is, thinner as it stares; the sky's
+//           light in it; its white only at the corners, and only when the
+//           lids are drawn wide (look.z under 0)
+//   lids    the upper comes down over it to blink or doze (look.z), the
+//           lower up a little to meet it; a dark rim, and dark lashes over
+//           the upper, longest toward the hind corner; look.w tilts the
+//           upper lid (over 0: its fore corner down)
+//   gaze    look.x swings the ball about its upright (to its left, so the
+//           left eye's pupil goes back and the right's forward), look.y
+//           rolls it up and down
+//   tear    a dark stripe from the eye's fore corner down the cheek toward
+//           the mouth
+module creature::face;
+import mesh;
+
+fn lin(c: vec3<f32>) -> vec3<f32> {
+    return vec3<f32>(pow(c.x, 2.2), pow(c.y, 2.2), pow(c.z, 2.2));
+}
+
+// 1 inside (d < 0), 0 outside, over w either side of the edge.
+fn inside(d: f32, w: f32) -> f32 {
+    return clamp(0.5 - d / (2.0 * w), 0.0, 1.0);
+}
+
+// The eye's middle (body.js's eye mass), as (y, z).
+const EYE: vec2<f32> = vec2<f32>(1.436, 1.15);
+// The head's line there, skull to muzzle, falling forward: a unit (y, z).
+const ALONG: vec2<f32> = vec2<f32>(-0.279, 0.960);
+const LEN: f32 = 0.020;    // the opening's half length along it
+const UP: f32 = 0.012;     // its height over its middle line, and under
+const LOW: f32 = 0.008;
+const IRIS: f32 = 0.014;
+
+pub fn face(p: vec3<f32>, foot: f32, look: vec4<f32>, s: mesh::Surface) -> mesh::Surface {
+    var out = s;
+    let w = max(foot, 0.0003);
+    var c = s.base_color;
+    var rough = s.roughness;
+    if (abs(p.x) > 0.03 && p.z > 1.09 && p.z < 1.34 && p.y > 1.31 && p.y < 1.48) {
+        let side = sign(p.x);
+        let dq = vec2<f32>(p.y, p.z) - EYE;
+        let sa = dot(dq, ALONG);                          // forward along the head
+        let ta = dq.x * ALONG.y - dq.y * ALONG.x;         // up across it
+        let dark = lin(vec3<f32>(0.07, 0.05, 0.04));
+
+        // The tear stripe, thinning as it runs down the cheek.
+        let run = (sa - 0.8 * LEN) / 0.11;
+        if (run > 0.0 && run < 1.0) {
+            let mid = -0.004 - 0.22 * (sa - LEN) - 0.02 * run * run;
+            let tear = inside(abs(ta - mid) - mix(0.0055, 0.0015, run), w) * smoothstep(0.0, 0.12, run) * (1.0 - smoothstep(0.7, 1.0, run));
+            c = mix(c, dark, 0.8 * tear);
+        }
+
+        // The opening between the lids: two arcs meeting at the corners.
+        let wide = clamp(-look.z, 0.0, 1.0);
+        let shut = clamp(look.z, 0.0, 1.0);
+        let k = max(1.0 - (sa / LEN) * (sa / LEN), 0.0);
+        let tt = ta + 0.10 * sa;
+        let upe = UP * (1.0 + 0.3 * wide) * pow(k, 0.75);
+        let loe = -LOW * (1.0 + 0.12 * wide) * k;
+        var m = min(upe - tt, tt - loe);
+        if (abs(sa) > LEN) { m = min(m, LEN - abs(sa)); }
+        let open = inside(-m, w);
+        // Its rim, and the lashes over it.
+        let lash = inside(tt - upe - 0.004, w) * inside(upe - 0.0005 - tt, w) * smoothstep(0.0, 0.5, k) * mix(1.0, 0.45, smoothstep(-0.6, 0.8, sa / LEN));
+        c = mix(c, dark, 0.75 * lash);
+        c = mix(c, dark, 0.9 * inside(abs(m) - 0.0013, w));
+        // The lids' own skin over the ball, a little in its shade.
+        c = mix(c, s.base_color * 0.78, open);
+
+        // The lids' edges: the upper down, the lower up, to meet low in the eye.
+        let meet = loe + 0.26 * (upe - loe);
+        let ul = mix(upe, meet, shut) - 0.35 * look.w * sa * k;
+        let ll = mix(loe, meet, shut);
+        let seen = open * inside(tt - ul, w) * inside(ll - tt, w);
+
+        // The ball.
+        let pc = vec2<f32>(-side * look.x * 0.0075, look.y * 0.0055);
+        let e = vec2<f32>(sa, tt) - pc;
+        let r = length(e);
+        var ball = lin(vec3<f32>(0.16, 0.10, 0.06));
+        ball = mix(ball, lin(vec3<f32>(0.86, 0.82, 0.76)), 0.85 * wide * smoothstep(IRIS, IRIS + 0.003, r));
+        let ring = mix(lin(vec3<f32>(0.46, 0.27, 0.10)), lin(vec3<f32>(0.13, 0.07, 0.03)), smoothstep(0.4, 1.0, r / IRIS));
+        ball = mix(ball, ring, inside(r - IRIS, w));
+        // (The pupil: a bar level with the ground as the head is carried.)
+        let bs = e.x * ALONG.y + e.y * -ALONG.x;
+        let bt = -e.x * -ALONG.x + e.y * ALONG.y;
+        let ph = mix(0.0035, 0.0021, wide) + 0.0008 * shut;
+        let pq = abs(vec2<f32>(bs, bt)) - vec2<f32>(0.0078 - ph, 0.0);
+        let pd = length(max(pq, vec2<f32>(0.0))) + min(max(pq.x, pq.y), 0.0) - ph;
+        ball = mix(ball, vec3<f32>(0.003), inside(pd, w));
+        // The upper lid's shade on it, and the sky's light.
+        ball = ball * mix(0.5, 1.0, smoothstep(0.0, 0.006, ul - tt));
+        ball = mix(ball, vec3<f32>(1.0), 0.85 * inside(length(vec2<f32>((sa - 0.005) / 1.5, tt - 0.0052)) - 0.0021, w));
+        ball = mix(ball, vec3<f32>(1.0), 0.2 * inside(length(vec2<f32>((sa + 0.006) / 2.0, tt + 0.003)) - 0.0012, w));
+        c = mix(c, ball, seen);
+        rough = mix(rough, 0.05, seen);
+        // The lids' margins on it.
+        let edge = open * max(inside(abs(tt - ul) - 0.0012, w), 0.7 * inside(abs(tt - ll) - 0.0006, w));
+        c = mix(c, dark, 0.9 * edge);
+        rough = mix(rough, s.roughness, edge);
+    }
+    out.base_color = c;
+    out.roughness = rough;
+    return out;
+}

@@ -40,7 +40,8 @@ function coat(p, n, share) {
     c = mix(c, DARK, hoof);
     // The head: a white muzzle and chin, a ring about each eye, dark from
     // the brow down the nose.
-    const head = share('skull') + share('muzzle') + share('jaw');
+    // (The eyes' masses are the head's skin, the lids': face.bk draws the eye.)
+    const head = share('skull') + share('muzzle') + share('jaw') + LR('eye');
     c = mix(c, WHITE, 0.95 * (share('jaw') + share('muzzle') * sstep(0.0, -0.5, n[1])));
     c = mix(c, BACK, 0.8 * head * sstep(0.5, 0.9, n[1]) * sstep(0.03, 0.015, Math.abs(p[0])));
     c = mix(c, WHITE, 0.55 * head * sstep(0.036, 0.024, Math.hypot(Math.abs(p[0]) - 0.066, p[1] - 1.436, p[2] - 1.15)) * sstep(0.03, 0.05, Math.abs(p[0])));
@@ -50,7 +51,7 @@ function coat(p, n, share) {
     c = mix(c, DARK, er * sstep(0.16, 0.19, Math.abs(p[0])));
     c = mix(c, HORN, LR('horn'));
     c = mix(c, DARK, share('tuft') + 0.6 * share('tail') * sstep(0.62, 0.5, p[1]));
-    return mix(c, DARK, LR('eye') + share('nose'));
+    return mix(c, DARK, share('nose'));
 }
 
 // `detail` overrides the meshing (Flesh's cell, triangles, simplifyError) for a coarser

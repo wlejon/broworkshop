@@ -11,6 +11,7 @@ export default {
     name: 'hexa',
     skeleton: { bones, feet, tracks, chartJoints },
     body,
+    face: 'face.bk',
     rig: { file: 'rig.bk', kernel: 'k_rig' },
     scale: { height: 1.5, length: 2.6 },
     speeds: { walk: 1.2, trot: 1.9, gallop: 2.6, circle: 1.0 },

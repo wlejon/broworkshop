@@ -525,7 +525,12 @@ second and lead its head, blink, widen, squeeze shut in a flinch and grow
 heavy lying down; the deer's and the bunny's roll and show their whites in
 alarm; the birds' do not turn, blink with a third eyelid drawn across from
 the front (`look.w`) and shut from below when they doze; the wader's swing
-down to look along the bill, the pupils pinned. The measures of how a body
+down to look along the bill, the pupils pinned; the hexa's, a grazer's on
+the sides of its head, swing together (the left's pupil back as the right's
+goes forward), a level bar for a pupil in an amber iris, under lashed upper
+lids that blink, hang half down as it grazes, sink shut as it dozes lying,
+and are drawn wide with the white at the corners when it is alert and
+through a leap, a dark tear stripe running from each down the cheek. The measures of how a body
 moves leave the face bones out (an eye is meant to jump); their ranges are
 checked as any joint's. `watch --view face` (or `face-side`, for eyes on
 the sides of a head) draws them close. The marks ride the

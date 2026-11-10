@@ -714,7 +714,8 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
         let gl = q_rot(q_conj(T.q[B_THORAX]), gz);
         look = intent[ii + I_GAZE_W] * atan2(gl.x, gl.z);
     }
-    look = damp(state[s + D_LOOK], look + omega * 0.5 - 0.4 * sway, 4.0, dt);
+    let look_to = look + omega * 0.5;
+    look = damp(state[s + D_LOOK], look_to - 0.4 * sway, 4.0, dt);
     state[s + D_LOOK] = look;
     // The neck: it reaches forward as it hurries and is drawn up alert; to
     // graze, its two bones swing the head down in front of the forefeet. At
@@ -750,6 +751,32 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
         T.q[b] = q_mul(T.q[B_HEAD], q_xyz(clamp_xyz(ear_a, b)));
         T.p[b] = head_of(T, b);
     }
+    // The eyes: a grazer's watch. They rest on a place and jump to another
+    // every second or so, a little way, and go ahead of the head to where
+    // it is turning; down to the grass as it grazes. The lids: an unhurried
+    // blink at its own uneven times; half down grazing, heavier lying, where
+    // it dozes, the lids sinking shut and coming open again; drawn wide,
+    // the white showing, when it is alert and through a leap.
+    let gt = clock * 0.85 + 3.1 * seed;
+    let gi = floor(gt);
+    let hop = smooth01((gt - gi) / 0.06);
+    let gx = mix(hash01(gi * 3.17 + seed * 5.3), hash01((gi + 1.0) * 3.17 + seed * 5.3), hop) * 2.0 - 1.0;
+    let gy = mix(hash01(gi * 5.71 + seed * 2.9), hash01((gi + 1.0) * 5.71 + seed * 2.9), hop) * 2.0 - 1.0;
+    let calm = 1.0 - 0.6 * lie;
+    let eye_a = vec3<f32>(0.1 * gy * calm + 0.22 * graze - 0.08 * alert, 0.3 * gx * calm + clamp(1.2 * (look_to - look), -0.45, 0.45), 0.0);
+    T.q[B_GAZE] = q_mul(T.q[B_HEAD], q_xyz(clamp_xyz(eye_a, B_GAZE)));
+    T.p[B_GAZE] = head_of(T, B_GAZE);
+    let bc = clock / 3.4 + 0.37 * seed;
+    let bi = floor(bc);
+    let bu = (bc - bi) * 3.4 - 0.3 - 2.4 * hash01(bi * 2.3 + seed * 7.7);
+    var blink: f32 = 0.0;
+    if (bu > 0.0 && bu < 0.32) { blink = smooth01(bu / 0.08) * (1.0 - smooth01((bu - 0.11) / 0.2)); }
+    let doze = lie * smooth01(2.2 * noise1(clock * 0.13, seed, 45.0) - 0.2);
+    let lid_rest = 0.1 + 0.28 * graze + 0.4 * lie + 0.5 * doze - 0.7 * alert - 0.45 * lw;
+    let lid_shut = clamp(mix(lid_rest, 1.0, blink), -0.75, 1.0);
+    let lid_tilt = clamp(0.2 * alert - 0.25 * lie - 0.1 * graze, -0.4, 0.4);
+    T.q[B_LID] = q_mul(T.q[B_HEAD], q_mul(q_x(asin(lid_shut)), q_z(asin(lid_tilt))));
+    T.p[B_LID] = head_of(T, B_LID);
     let chew = graze * (0.08 + 0.08 * sin(clock * 7.0));
     T.q[B_JAW] = q_mul(T.q[B_HEAD], q_x(chew + 0.05 * alert));
     T.p[B_JAW] = head_of(T, B_JAW);

@@ -58,6 +58,13 @@ export const bones = [
     { name: 'tail4', parent: 'tail3', head: [0, 0.57, -1.14], tail: [0, 0.38, -1.20],
       limits: { x: [-40, 40], y: [-45, 45], z: [-10, 10] }, mass: 0.4 },
     ...LEGS.flatMap(([n, parent, z]) => [...leg(1, 'L', n, parent, z), ...leg(-1, 'R', n, parent, z)]),
+    // The face (lab/skeleton.js). `gaze`: its eyes, one on each side of the
+    // head, swing together (y to its left) and roll (x down). `lid`: x
+    // brings the upper lid down, under 0 the lids are drawn wide; z tilts it.
+    { name: 'gaze', parent: 'head', face: 'gaze', head: [0, 1.436, 1.15], tail: [0, 1.436, 1.18],
+      limits: { x: [-25, 25], y: [-35, 35], z: [-1, 1] } },
+    { name: 'lid', parent: 'head', face: 'lid', head: [0, 1.455, 1.15], tail: [0, 1.455, 1.17],
+      limits: { x: [-60, 90], y: [-1, 1], z: [-30, 30] } },
 ];
 
 // The feet, front to back on each side; `bone` ends at the toe.
