@@ -168,7 +168,7 @@ function stride(p, G) {
 const WALK = {
     duty: 0.62, reach: 0.42, ahead: -0.055, lift: 0.04, inset: 0.035,
     heelLand: -20, flat: 0.16, peel: 0.54, heelPush: 66, heelFold: 44,
-    vault: 0.987, down: 0, low: 0.04, fore: 0.02, sway: 0.02, yaw: 5, roll: 3.5, pitch: 2.5, nod: 0.8, curl: 3, chin: 0,
+    vault: 0.987, down: 0, low: 0.04, fore: 0.02, sway: 0.02, yaw: 5, roll: 3.5, pitch: 2.5, nod: 0.8, curl: 3, chin: 3,
     counter: 0.5, armBack: 2, armFore: 13, armAft: 10, armBend: 22, armPump: 8, wrist: 8, wristSwing: 5, armOut: 3, armTwist: 4, shrug: 0.8,
 };
 // The run: leaning in, landing nearly flat under itself, a flight after
@@ -176,7 +176,7 @@ const WALK = {
 const RUN = {
     duty: 0.3, reach: 0.38, ahead: -0.075, lift: 0.12, inset: 0.05, speed: 4.0,
     heelLand: -4, flat: 0.12, peel: 0.42, heelPush: 84, heelFold: 105,
-    down: -0.035, rise: 0.01, fold: 0.022, low: 0.15, fore: 0.03, sway: 0.006, yaw: 9, roll: 2.5, pitch: 11, nod: 1.2, curl: 3, chin: -3,
+    down: -0.035, rise: 0.01, fold: 0.022, low: 0.15, fore: 0.03, sway: 0.006, yaw: 9, roll: 2.5, pitch: 11, nod: 1.2, curl: 3, chin: 7,
     counter: 0.7, armBack: 8, armFore: 40, armAft: 42, armBend: 92, armPump: 14, wrist: 14, wristSwing: 5, armOut: 6, armTwist: 22, shrug: 1.5,
 };
 // The jog: the run taken easy. Shorter steps with the foot down for more of
@@ -186,7 +186,7 @@ const JOG = {
     ...RUN,
     duty: 0.38, reach: 0.33, ahead: -0.1, lift: 0.07, inset: 0.045, speed: 2.4,
     heelLand: -8, heelPush: 72, heelFold: 78,
-    down: -0.035, rise: 0.01, fold: 0.012, low: 0.19, yaw: 7, pitch: 7, nod: 1.0, chin: -1,
+    down: -0.035, rise: 0.01, fold: 0.012, low: 0.19, yaw: 7, pitch: 7, nod: 1.0, chin: 5,
     counter: 0.7, armBack: 6, armFore: 26, armAft: 28, armBend: 80, armPump: 10, armTwist: 16, shrug: 1.2,
 };
 
@@ -237,18 +237,18 @@ export const poses = {
     // the other back, as a hurdler's. (The legs are the stride's own:
     // rig.bk.)
     leap: {
-        turn: [8, 0, 0],
+        turn: [12, 0, 0],
         bones: {
-            spine: [-2, 0, 0], chest: [-5, 0, 0], neck: [-3, 0, 0], head: [2, 0, 0],
-            ...arm('L', -96, 62, 8, 10, 8, 16), ...arm('R', 38, 68, 10, 12, 4, 10),
+            spine: [0, 0, 0], chest: [-2, 0, 0], neck: [-4, 0, 0], head: [-2, 0, 0],
+            ...arm('L', -62, 58, 8, 10, 6, 14), ...arm('R', 40, 72, 10, 10, 4, 10),
         },
     },
     // Lying: sat down on the ground behind its feet, the knees up, leaning
     // back a little on its hands.
     lie: {
-        root: [0, -0.8, -0.36], turn: [-14, 0, 0],
-        bones: { spine: [10, 0, 0], chest: [8, 0, 0], neck: [2, 0, 0], head: [2, 0, 0], ...arms(34, 6, -62, 10, 6) },
-        feet: { L: { at: [0.03, 0, 0.0] }, R: { at: [-0.03, 0, 0.0] } },
+        root: [0, -0.81, -0.36], turn: [-30, 0, 0],
+        bones: { spine: [6, 0, 0], chest: [4, 0, 0], neck: [10, 0, 0], head: [8, 0, 0], ...arms(34, 3, -70, 10, 8) },
+        feet: { L: { at: [0.03, 0, 0.2] }, R: { at: [-0.03, 0, 0.2] } },
     },
     // Squatting: down over its heels with its elbows on its knees, on its
     // way down to sitting and on its way up.

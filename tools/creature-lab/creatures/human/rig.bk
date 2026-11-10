@@ -108,12 +108,14 @@ const SETTLE_T: f32 = 5.5;           // s it stands on one leg before it may set
 const SCRATCH_T: f32 = 8.0;          // s between its chances to scratch
 // A leap (over a log in its way, at a run): a hurdler's, off one foot.
 @knob const LEAP_PUSH_T: f32 = 0.2;  // s the last stance is held for the push
-@knob const LEAP_DIP: f32 = 0.09;    // m the hips sink into it
-@knob const LEAP_RISE: f32 = 0.09;   // m over the stride's own they are at as the foot leaves
+@knob const LEAP_DIP: f32 = 0.05;    // m the hips sink into it
+@knob const LEAP_RISE: f32 = 0.08;   // m over the stride's own they are at as the foot leaves
 const LEAP_FOLD: f32 = 0.44;         // m from its hip a foot is kept in a leap: as far as the leg folds
-const LEAP_FLIGHT: f32 = 0.6;       // s of flight it plans its take-off spot for
+const LEAP_RAMP: f32 = 0.9;          // m a metre a foot rises toward a log it is coming to
+const LEAP_FLIGHT: f32 = 0.44;     // s of flight it plans its take-off spot for
 @knob const LEAP_LATE: f32 = 0.07;   // s after the hips cross the log that the flight tops
 @knob const LEAP_TUCK: f32 = 0.2;   // m the feet are drawn up under it in the air
+@knob const LEAP_LEAD: f32 = 0.3;   // m the leading foot reaches ahead of its stride's place over the log
 
 // How far over the ground the ball of a foot is whose toes are pitched up
 // by `heel` (rad, under 0) with the sole's back end on the ground: the
@@ -462,6 +464,19 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
             // swing's, with no corner in its path or in the legs' turning.)
             ball = ball_on(env, mix(lead_at + lift * vec3<f32>(1.0, 0.0, 1.0), ld3(state, k + L_OFF), join), l, max(K.foot[l].y + hop + clear + max(lift.y, -0.5 * (K.foot[l].y + hop + clear)), on_heel(K.fa[l].x)));
             fyaw = yaw + wrap_pi(fyaw - yaw) * join;
+            if (leap > 0.5) {
+                // From the push on, a foot in the air is over what it is
+                // coming to and has just left, less LEAP_RAMP a metre: it
+                // rises to the log's top before its toes reach the log's
+                // side, and comes down after it, not in the one step its
+                // place crosses the edge.
+                var over = height(env, ball.x, ball.z);
+                for (var i: i32 = -4; i <= 6; i += 1) {
+                    let d = 0.1 * f32(i);
+                    over = max(over, height(env, ball.x + fwd.x * d, ball.z + fwd.z * d) - LEAP_RAMP * max(abs(d) - 0.1, 0.0));
+                }
+                ball.y = max(ball.y, over + HEAD[LEG_TOP[l] + 3].y + 0.05);
+            }
             if (leap_w > 0.0) {
                 // In a leap a foot's height is from the ground the body
                 // stands over, not from what passes under the foot: it is
@@ -472,6 +487,12 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
                 if (l == leap_leg) {
                     let under = org + lift + vec3<f32>(0.0, HEAD[LEG_TOP[l] + 3].y + 0.16, 0.0) + q_rot(qyaw, vec3<f32>(HEAD[LEG_TOP[l]].x, 0.0, -0.1));
                     ball = mix(ball, under, 0.7 * smooth01(leap_w));
+                } else {
+                    // The leading leg reaches out over the log, shin
+                    // forward, and is drawn back under the hips to land.
+                    let reach = LEAP_LEAD * smooth01(leap_w) * smooth01(leap_left / 0.22);
+                    ball.x += fwd.x * reach;
+                    ball.z += fwd.z * reach;
                 }
                 let own = height(env, ball.x, ball.z);
                 ball.y = max(ball.y + smooth01(leap_w) * (ground_now - own), own + HEAD[LEG_TOP[l] + 3].y + 0.05);
@@ -684,6 +705,10 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
         if (state[s + D_LEG + l * LEG_REC + L_PLANT] > 0.5 || state[s + D_LEG + l * LEG_REC + L_HOME] > 0.0) { grounded = true; }
     }
     var A = moved(T, air_step(state, s + D_AIR, com_of(T), grounded, init, dt));
+    // (A leap leaves the ground at the speed its flight was planned for,
+    // which the push's rise is drawn to reach: what one step's change in
+    // the pose says is that and the swing leg's and the arms' throw besides.)
+    if (grounded && leap > 0.5) { state[s + D_AIR + 4] = 0.5 * 9.81 * LEAP_FLIGHT; }
 
     // --- the loose parts carry their momentum ---------------------------------------
     for (var i: i32 = 0; i < NLOOSE; i += 1) {

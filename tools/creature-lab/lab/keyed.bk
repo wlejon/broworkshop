@@ -249,7 +249,11 @@ pub fn leg_solve(T: Pose, l: i32, qframe: vec4<f32>, ball: vec3<f32>, heel: f32,
     let qr = q_mul(qframe, q_z(pl.x));
     let ax = normalize(j - hock);
     let qknee = vec4<f32>(ax * sin(0.5 * yaw), cos(0.5 * yaw));
-    let a0 = soft_range(-(sol.x - rest_angle(b0)), LIM_LO[b0].x, LIM_HI[b0].x, 0.12);
+    // (The thigh's range is its joint's, from the bone it hangs from: a
+    // pelvis leaned back, sitting, leaves the thigh that much more to rise.)
+    let up = q_rot(q_mul(q_conj(qframe), P.q[pa]), vec3<f32>(0.0, 1.0, 0.0));
+    let lean = atan2(up.z, up.y);
+    let a0 = lean + soft_range(-(sol.x - rest_angle(b0)) - lean, LIM_LO[b0].x, LIM_HI[b0].x, 0.12);
     let a1 = soft_range(-(sol.y - rest_angle(b0 + 1)) - a0, LIM_LO[b0 + 1].x, LIM_HI[b0 + 1].x, 0.12);
     P.q[b0] = q_mul(qknee, q_mul(qr, q_x(a0)));
     P.p[b0] = j;
