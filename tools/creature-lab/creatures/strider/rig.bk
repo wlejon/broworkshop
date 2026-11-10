@@ -181,7 +181,9 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
     let alert = approach(state[s + D_ALERT], select_f(alert_want, 1.0, 0.0), select_f(alert_want, 4.0, 0.8), dt);
     // The flinch: down and back at once, let go over half a second.
     var flinch: f32 = 0.0;
-    if (st_t >= 0.0) { flinch = smooth01(st_t / 0.1) * (1.0 - smooth01((st_t - 0.22) / 0.6)); }
+    // (Down over a quarter of a second: in a tenth it dropped 15 cm, four
+    // times as far as a body falls in that time, with its feet on the ground.)
+    if (st_t >= 0.0) { flinch = smooth01(st_t / 0.26) * (1.0 - smooth01((st_t - 0.36) / 0.6)); }
     state[s + D_GRAZE] = graze;
     state[s + D_LIE] = lie;
     state[s + D_ALERT] = alert;

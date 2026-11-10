@@ -423,7 +423,10 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
         // (Running, over the last quarter of the cycle and not its last
         // eighth: at two strides a second that was 60 ms, the heel snapped
         // up and the knee with it, then stood still until the swing began.)
-        let roll_w = mix(0.12, 0.26, rw);
+        // (And never in less than a ninth of a second: at a quick walk an
+        // eighth of the cycle was 60 ms, and the heel went up fifty degrees
+        // in it.)
+        let roll_w = min(max(mix(0.12, 0.26, rw), 0.11 * freq), 0.7 * duty);
         let roll = smooth01((stance_phase(ph, duty) - (duty - roll_w)) / roll_w) * go;
         var a = flat - ground_pitch(env, toe, fwd) - mix(ROLL, 0.6 * ROLL, rw) * roll;
         if (planted) {
