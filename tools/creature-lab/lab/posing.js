@@ -26,7 +26,7 @@
 // and every cycle as the keys alone have them (no rig, no motion layers):
 // what a species looks like in each pose, before any of it moves.
 
-import { ROWS, centreOfMass, boneTail, boneHead } from "./skeleton.js";
+import { ROWS, centreOfMass, boneTail, boneHead, bonePoint } from "./skeleton.js";
 import { restExtent } from "./turnaround.js";
 import { setPose, capture, orbitView, showGround } from "./lit.js";
 import { beginSheet, saveSheet, text, rect, DIM } from "./page.js";
@@ -138,6 +138,9 @@ export function resolveKeys(skel, keys) {
     const arr = (t, xs) => `array<${t}, ${xs.length}> = [${xs.join(', ')}]`;
     let s = 'module creature::keys;\n';
     s += `pub const NKEY: i32 = ${nk};\n`;
+    // (The share of a leg's reach where a key's leg eases straight: 0.985
+    // unless the keys say, as a creature that stands on straight legs does.)
+    s += `pub const KEY_SOFT: f32 = ${f(keys.soft ?? 0.985)};\n`;
     s += `pub const KEY_ROOT: ${arr('vec3<f32>', list.map((K) => v3(K.root)))};\n`;
     s += `pub const KEY_Q: ${arr('vec4<f32>', list.flatMap((K) => K.q.map(v4)))};\n`;
     s += `pub const KEY_FOOT: ${arr('vec3<f32>', list.flatMap((K) => K.foot.map(v3)))};\n`;
@@ -212,13 +215,19 @@ export function keyPoses(creature, sel) {
 // Where a pose's centre of mass stands against its feet: along the body,
 // from the rearmost ball on the ground to the foremost toe tip, and across
 // it, between the outermost feet (cm past the span's ends; 0 within it).
+// A foot that stands on its whole sole names its `heel` (the sole's back
+// end at rest, carried by the bone the toes hang from): on the ground, it
+// is the foot's rear end.
 export function balanceOf(skel, P) {
     const com = centreOfMass(P, 0, skel);
     let z0 = Infinity, z1 = -Infinity, x0 = Infinity, x1 = -Infinity, down = 0;
     for (const ft of skel.feet) {
         const toe = skel.bones[ft.boneIndex];
         const ball = boneHead(P, 0, toe.index), tip = boneTail(P, 0, toe);
-        if (Math.min(ball[1], tip[1]) > 0.03) continue;
+        const sole = skel.bones[toe.parentIndex];
+        const heel = ft.heel ? bonePoint(P, 0, sole.index, sole.head, ft.heel) : null;
+        if (Math.min(ball[1], tip[1], heel ? heel[1] : Infinity) > 0.03) continue;
+        if (heel && heel[1] <= 0.03) { z0 = Math.min(z0, heel[2]); z1 = Math.max(z1, heel[2]); x0 = Math.min(x0, heel[0]); x1 = Math.max(x1, heel[0]); }
         down++;
         z0 = Math.min(z0, ball[2], tip[2]); z1 = Math.max(z1, ball[2], tip[2]);
         x0 = Math.min(x0, ball[0], tip[0]); x1 = Math.max(x1, ball[0], tip[0]);

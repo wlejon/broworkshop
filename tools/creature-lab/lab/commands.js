@@ -15,6 +15,7 @@ import { lookSheet } from "./look.js";
 import { posesSheet } from "./poses.js";
 import { modelSheet } from "./posing.js";
 import { upperSheet, upperLines } from "./upper.js";
+import { gaitSheet, gaitLines } from "./gait.js";
 import { skinSheet, boundFlags } from "./skinsee.js";
 import { partsSheet } from "./parts.js";
 import { watchSheet, WATCH, WATCH_VIEWS } from "./watch.js";
@@ -65,6 +66,12 @@ export const HELP = `creature-lab <command> <creature> [scenario ...] [options]
                                            bones (world turning speed), kinks tagged with the start/stop
                                            they follow; each bone's own swing against its parent
                                            (--from <s> --to <s>: the window)
+  gait        <creature> [scenario ...]    one stride of a two-legged walk or run, whole: eight phases from
+                                           the side and the front, the left side's joint paths, the leg's,
+                                           trunk's and arm's angles over the cycle, and a table (cadence,
+                                           stride, stance share, rise, sway, turns, arm swing and its timing,
+                                           knee and foot at landing and leaving); for a creature standing
+                                           on whole soles, against what people walk and run like
   parts       <creature> [scenario ...]    each part of the body (an ear, an arm, the head, the tail) close
                                            through the cycle, and every frame laid over the others, going
                                            along with the creature and with the part's carrier held still;
@@ -137,7 +144,7 @@ export function parseArgs(argv) {
 }
 
 // The sheets asked for by name only (`sheets` draws KINDS).
-const CLOSE = ['look', 'poses', 'upper', 'skin', 'parts'];
+const CLOSE = ['look', 'poses', 'upper', 'gait', 'skin', 'parts'];
 
 const safe = (label) => label.replace(/[:@+=,]/g, '_');
 export function outRoot(opt) {
@@ -185,6 +192,7 @@ export function sheet(kind, recs, path, opt = {}) {
     }
     if (kind === 'poses') return posesSheet(recs[0], { path });
     if (kind === 'upper') return upperSheet(recs[0], { path, from: opt.from !== undefined ? +opt.from : null, to: opt.to !== undefined ? +opt.to : null });
+    if (kind === 'gait') return gaitSheet(recs[0], { path });
     if (kind === 'look') {
         return lookSheet(recs[0], { path: opt.pieces ? path.replace(/\.png$/, '-pieces.png') : path, pieces: !!opt.pieces, rows: rows || 6, views: opt.views ? String(opt.views).split(',') : null,
             phases: opt.phases ? String(opt.phases).split(',').map(Number) : null, dist: opt.dist ? +opt.dist : 2.6,
@@ -397,6 +405,7 @@ export async function runCommand(argv) {
                     for (const p of (s.json.byPlace || []).slice(0, 8)) console.log(`  - ${p.place}: ${p.count}`);
                     for (const f of (s.json.flags || [])) console.log(`  - ${f}`);
                     if (kind === 'upper') for (const l of upperLines(s.json)) console.log(`  ${l}`);
+                    if (kind === 'gait') for (const l of gaitLines(s.json)) console.log(`  ${l}`);
                 }
             }
         }

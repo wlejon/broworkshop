@@ -326,6 +326,40 @@ barely turn (the head does the looking), a pupil that widens when it is
 alert, a lid that comes down from the top, and a wink of one eye (the lid
 bone's z: over 0 the left, under 0 the right).
 
+`human` is a person: 70 kg, 1.75 m, upright on flat feet, in keys and a rig
+of its own. Its legs are four bones in a row (thigh, shin, foot, toes) and
+it stands on the whole sole: each of its `feet` names a `heel`, the sole's
+back end at rest, which the lab counts as part of the foot's support (the
+balance of a pose) and of its contact (a foot is down on any point of its
+sole, and its slip is measured at each sole point while that point is on
+the ground, so a foot rolling from heel to toe is not a slide). `poses.js`
+does not draw its gaits pose by pose: `stride(p, G)` makes the pose for any
+phase of a stride from how a person moves, and a cycle is that read at
+eight phases a step.
+- Walking, the foot lands on its heel with the toes up, rolls flat, peels
+  off its heel and pushes from its toes; the hips vault over the standing
+  leg (their height is the highest that leg allows with its knee `vault`
+  short of straight, the corner where the weight changes feet rounded), the
+  hip line turns with the reaching leg and drops on the swinging side, the
+  chest turns back against it, and the arms swing whole from the shoulder
+  against the legs, further forward than back, the elbow giving as it comes
+  forward.
+- Jogging and running (cycles of their own: `jog` at 2.4 m/s, `run` at
+  4 m/s; the rig's pace goes walk, jog, run, between two of them at a time)
+  the body is thrown: the hips' height through a flight is the free fall the
+  flight's time allows, less what the legs folding up under it take
+  (`fold`), and the stance is the dip that turns the landing's speed into
+  the take-off's, leaving `rise` higher than it lands; the keys' flight and
+  the rig's free fall (creature::keyed's air) then agree, and it lands at
+  the height its knee was drawn for.
+- `keys.soft` (a creature's `soft` export, 0.985 when it has none) is the
+  share of a leg's reach where a key's leg eases straight: a person stands
+  and lands on a nearly straight knee.
+- Its clothes and hair are drawn per pixel in `face.bk` from where a point
+  of the skin is at rest (the hem, the cuffs, the belt and its buckle, the
+  neck's opening, the boot tops, the hairline), so every edge of cloth is a
+  line and not the mesh's.
+
 In a leap these four keep a foot that is lifted over the log at least
 `LEAP_FOLD` from its hip, carried out ahead or behind: nearer than the leg
 folds, the leg's solution turned over for a frame.
@@ -644,6 +678,7 @@ $B tools/creature-lab tools/creature-lab/cli.js -- look bunny gallop --rows 4 --
 $B tools/creature-lab tools/creature-lab/cli.js -- look strider walk --rows 3 --dist 2.3 --cell 1.3
 $B tools/creature-lab tools/creature-lab/cli.js -- poses strider walk gallop
 $B tools/creature-lab tools/creature-lab/cli.js -- upper strider start-stop --from 0.8 --to 2.2
+$B tools/creature-lab tools/creature-lab/cli.js -- gait human walk trot gallop
 $B tools/creature-lab tools/creature-lab/cli.js -- watch strider walk --view side
 $B tools/creature-lab tools/creature-lab/cli.js -- watch strider walk --view front --from 0.4 --span 0.25
 $B tools/creature-lab tools/creature-lab/cli.js -- skin strider walk trot --rows 2
@@ -992,6 +1027,31 @@ Every output is deterministic. A rerun writes the same bytes.
     flexion range, the head's bob; flagged under `UPPER` (a trunk that
     reads as carried rather than walked in)
   - `--from` / `--to` narrow the window
+- **Gait** (`gait`, `lab/gait.js`): one stride of a two-legged walk or run,
+  whole, on one sheet.
+  - the last steady cycle at eight even phases (0: the left foot landing)
+    from the side and from the front, lit, one still camera a row
+  - the left side's joints over the cycle in the creature's own frame
+    (head, shoulder, elbow, wrist, hip, knee, ankle, toe), a dot every
+    eighth, the body as sticks at phase 0 and half a cycle on
+  - over the cycle's phase, the mean of the steady cycles read between the
+    steps, left red and right blue, each foot's stance a bar under every
+    chart: the thigh from plumb, the knee's and ankle's flexion, the foot
+    against the ground, the toe tip's height; the hip line's yaw and roll;
+    the shoulder line's yaw and its turn against the hips; the upper arm
+    from plumb, the elbow; the hips' and head's heights and the hips' sway
+  - a table: cadence, stride over height, stance share (by measured
+    contact), the share on both feet or in flight, the hips' rise and sway,
+    the hip line's turn and roll, shoulders against hips, the trunk's lean,
+    the head's bob, each hand's swing and when it is furthest forward
+    against the other side's foot landing, the elbows' range, the thigh's
+    swing, the knee at landing / deepest in stance / deepest in swing, the
+    foot's angle landing and leaving, the step's width, the toe's clearance
+  - for a creature that stands on whole soles (its feet name a `heel`) the
+    leg's and arm's curves carry what a person's do walking, grey and
+    dashed, and the table what people's measures span walking or running
+    (`PEOPLE`): a measure outside is red, and `!` in the terminal. Other
+    bipeds are drawn without them.
 - **Kinematics** (`lab/kinematics.js`): where in a stride the motion jumps.
   - per leg, each bone's flexion, angular velocity and angular acceleration
     over the steady cycle (each cycle thin, the mean bold), the leg's measured

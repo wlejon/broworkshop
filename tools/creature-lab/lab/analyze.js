@@ -41,12 +41,20 @@ function circMean(xs) {
 }
 const circDiff = (a, b) => { let d = (b - a) % 1; if (d > 0.5) d -= 1; if (d < -0.5) d += 1; return d; };
 
-const SOLE_NAMES = ['toe', 'heel'];
+const SOLE_NAMES = ['toe', 'heel', 'sole\'s heel'];
 // s a set of feet must stay down, unchanged, to be a stance it is balanced on.
 const SUPPORT_HELD = 0.06;
 // Sole points of a foot in its bone's rest frame: the toe, and a heel under the fetlock.
-function solePoints(bone) {
-    return [bone.tail, [bone.head[0], bone.tail[1] + 0.006, bone.head[2] + 0.35 * (bone.tail[2] - bone.head[2])]];
+// A foot that stands on its whole sole (its `heel` named, skeleton.js) has a
+// third: the sole's back end, carried by the bone the toes hang from.
+function solePoints(skel, foot) {
+    const bone = skel.bones[foot.boneIndex];
+    const pts = [
+        { bone, pt: bone.tail },
+        { bone, pt: [bone.head[0], bone.tail[1] + 0.006, bone.head[2] + 0.35 * (bone.tail[2] - bone.head[2])] },
+    ];
+    if (foot.heel) pts.push({ bone: skel.bones[bone.parentIndex], pt: foot.heel });
+    return pts;
 }
 
 // Signed distance from p to a convex polygon (positive inside); for one or
@@ -98,15 +106,15 @@ export function contactHeight(skel) {
 export function series(rec) {
     if (rec._series) return rec._series;
     const skel = rec.creature.skel, n = rec.steps, nf = skel.feet.length;
-    const soles = skel.feet.map((f) => solePoints(skel.bones[f.boneIndex]));
+    const soles = skel.feet.map((f) => solePoints(skel, f));
     const ns = soles[0].length;
     const sole = new Float32Array(n * nf * ns * 3);
     const xz = new Float32Array(n * (nf * ns + skel.count) * 2);
     let q = 0;
     for (let k = 0; k < n; k++) {
         const o = k * rec.poseStride;
-        skel.feet.forEach((f, i) => soles[i].forEach((pt, j) => {
-            const p = bonePoint(rec.pose, o, f.boneIndex, skel.bones[f.boneIndex].head, pt);
+        skel.feet.forEach((f, i) => soles[i].forEach((sp, j) => {
+            const p = bonePoint(rec.pose, o, sp.bone.index, sp.bone.head, sp.pt);
             sole.set(p, ((k * nf + i) * ns + j) * 3);
             xz[q++] = p[0]; xz[q++] = p[2];
         }));
@@ -166,9 +174,22 @@ export function analyze(rec, opts = {}) {
                 if (k - start >= 3) {
                     const p0 = S.sole.subarray(((start * nf + i) * S.ns) * 3, ((start * nf + i) * S.ns) * 3 + 3);
                     let slide = 0, path = 0, miss = 0, prev = p0;
+                    // A foot that rolls over its sole (heel, then flat, then
+                    // toes) slips where a point of it moves while it is
+                    // on the ground, from where it came down.
+                    const rolls = !!f.heel, near = contactHeight(skel);
+                    const came = rolls ? Array.from({ length: S.ns }, () => null) : null;
                     for (let m = start + 1; m < k; m++) {
                         const p = S.sole.subarray(((m * nf + i) * S.ns) * 3, ((m * nf + i) * S.ns) * 3 + 3);
-                        slide = Math.max(slide, Math.hypot(p[0] - p0[0], p[2] - p0[2]));
+                        if (rolls) {
+                            for (let j = 0; j < S.ns; j++) {
+                                const s = (m * nf + i) * S.ns + j;
+                                if (S.soleH[s] >= near) { came[j] = null; continue; }
+                                const pj = [S.sole[s * 3], S.sole[s * 3 + 2]];
+                                if (!came[j]) came[j] = pj;
+                                slide = Math.max(slide, Math.hypot(pj[0] - came[j][0], pj[1] - came[j][1]));
+                            }
+                        } else slide = Math.max(slide, Math.hypot(p[0] - p0[0], p[2] - p0[2]));
                         path += Math.hypot(p[0] - prev[0], p[2] - prev[2]);
                         const o = m * TELE + T.FOOT + 4 * i;
                         miss = Math.max(miss, Math.hypot(p[0] - rec.tele[o + 1], p[1] - rec.tele[o + 2], p[2] - rec.tele[o + 3]));

@@ -283,7 +283,7 @@ pub fn key_trunk(K: Key, org: vec3<f32>, qyaw: vec4<f32>) -> Pose {
 pub fn key_pose(K: Key, org: vec3<f32>, qyaw: vec4<f32>) -> Pose {
     var P = key_trunk(K, org, qyaw);
     for (var l: i32 = 0; l < NLEGS; l += 1) {
-        P = leg_solve(P, l, qyaw, key_ball(K, l, org, qyaw), K.fa[l].x, K.fa[l].y, K.fa[l].z, 0.985);
+        P = leg_solve(P, l, qyaw, key_ball(K, l, org, qyaw), K.fa[l].x, K.fa[l].y, K.fa[l].z, KEY_SOFT);
     }
     return P;
 }

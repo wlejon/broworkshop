@@ -58,7 +58,7 @@ function upperBones(skel) {
 
 // Chains that end in a bone with no children, leave a bone with several
 // children, and carry no leg, tail or head: the arms (shoulder to hand).
-function armChains(skel) {
+export function armChains(skel) {
     const { kids } = chains(skel);
     const legs = new Set(legChains(skel).flat()), tails = tailBones(skel);
     const head = skel.bones.find((b) => b.name === 'head');

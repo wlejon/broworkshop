@@ -1,0 +1,724 @@
+// The human's rig: one invocation per person, its state in `state`, its
+// bones out to `pose` (the creature contract, lab/contract.js).
+//
+// It moves as its keys draw it (poses.js, creature::keyed). Standing is a
+// pose; the walk, the jog and the run are cycles of poses read at the
+// stride's phase, the walk blended from the stand by how fast it goes, the
+// jog from the walk and the run from the jog as it speeds up; picking
+// something up, sitting, standing alert and
+// flinching are poses blended over those. The rig's own work is the ground
+// and the life:
+//
+//   feet    a foot that lands is pinned where it landed (its ball over the
+//           ground by what the keys have it while it stands on its heel)
+//           and its leg solved to it from wherever the keys carry the
+//           hips, so no foot slides; the stride's rate is what carries the
+//           body one stance's ground in one stance's time; a foot that
+//           lifts leaves from where it really was and joins the key's path
+//           through its swing. Stopping, a foot in the air finishes its
+//           step, and a foot left away from where it stands steps home.
+//   life    standing it breathes with its shoulders, settles its weight on
+//           one leg and then the other with the hips tipped and the
+//           shoulders tipped back against them, lets its arms hang and
+//           sway, lifts a hand to scratch at its chest, and glances
+//           about; picking something up, its hand feels about on the
+//           ground and comes up for it to look at what it holds; its head
+//           turns to what it is given to look at.
+//
+//   head    held steady: the keys turn the trunk under it every step, and the
+//           neck and head turn back against that, so the head keeps the
+//           heading it has had rather than riding the chest.
+//   loose   the forearms and hands are the keys' with their own momentum:
+//           each bone's tip on a spring (creature::dangle) from where the
+//           keys have it, so a forearm and hand trail the elbow.
+import creature::common::*;
+import creature::contract::*;
+import creature::skeleton::*;
+import creature::pose::*;
+import creature::dangle::*;
+import creature::limbs::*;
+import creature::keys::*;
+import creature::keyed::*;
+import creature::probe::*;
+from creature::ground import height, obstacle_ahead;
+
+const D_SPEED: i32 = 5;
+const D_OMEGA: i32 = 6;
+const D_PHASE: i32 = 7;
+const D_MOVING: i32 = 8;
+const D_CLOCK: i32 = 9;
+const D_GO: i32 = 10;        // the walk's share over the stand (0..1)
+const D_VRAMP: i32 = 11;     // the pace's ramp the speed follows
+const D_GROUND: i32 = 12;    // the ground's height under it, eased
+const D_LOOK: i32 = 13;      // the gaze's turn and pitch, and their speeds
+const D_LOOK_V: i32 = 14;
+const D_LOOK_P: i32 = 15;
+const D_LOOK_PV: i32 = 16;
+const D_RUN: i32 = 17;       // the run's share over the walk (0..1)
+const D_GRAZE: i32 = 18;     // foraging, resting, alert (0..1 each)
+const D_LIE: i32 = 19;
+const D_ALERT: i32 = 20;
+const D_STARTLE_T: i32 = 21; // s since it was startled (-1: not)
+const D_PREV_ACT: i32 = 22;
+const D_AIR: i32 = 23;       // creature::keyed's flight (AIR_STATE)
+const D_LEG: i32 = D_AIR + AIR_STATE;
+const LEG_REC: i32 = 14;
+const L_PLANT: i32 = 0;
+const L_PIN: i32 = 1;        // the ball: pinned, or where the swing has it (3)
+const L_OFF: i32 = 4;        // where on the ground it lifted from (3)
+const L_YAW: i32 = 7;        // the foot's heading
+const L_ARMED: i32 = 8;      // set in stance, so a leg lifts once a cycle
+const L_HOME: i32 = 9;       // a step home: its progress (0: none), and where from (3)
+const L_FROM: i32 = 10;
+const D_HEADQ: i32 = D_LEG + 2 * LEG_REC;   // the head's turn in the creature's frame, eased (4)
+const D_LOOSE: i32 = D_HEADQ + 4;           // the loose bones' tips (creature::dangle), in LOOSE's order
+const NLOOSE: i32 = 4;
+const D_LEAP: i32 = D_LOOSE + NLOOSE * DANGLE_REC;   // a leap: 0 none, 1 the push, 2 the flight; the leg it pushes with;
+                                                     //   s of the flight left; its share in the pose (0..1)
+pub const PROBE: i32 = D_LEAP + 4;                   // creature::probe's slice
+pub const STATE: i32 = PROBE + PROBE_N;
+
+// The loose bones, each after the one it hangs from, and each one's spring:
+// rad/s walking, rad/s more running (a part is held firmer at speed), its
+// damping, and the most it turns from where the keys have it (rad).
+const LOOSE: array<i32, NLOOSE> = [B_FOREARML, B_HANDL, B_FOREARMR, B_HANDR];
+const LOOSE_W: array<f32, NLOOSE> = [17.0, 22.0, 18.0, 23.0];
+const LOOSE_RUN: array<f32, NLOOSE> = [16.0, 14.0, 16.0, 14.0];
+const LOOSE_ZETA: array<f32, NLOOSE> = [0.7, 0.6, 0.7, 0.6];
+const LOOSE_MAX: array<f32, NLOOSE> = [0.16, 0.4, 0.16, 0.4];
+
+@knob const LAYERS: f32 = 1.0;       // the head's steadying and the loose parts' share (0: the keys as they are)
+@knob const SOFT_REACH: f32 = 0.995; // share of a leg's reach where its IK eases the reach in
+@knob const WALK_V: f32 = 1.35;      // m/s the walk's keys are drawn for: slower, it is blended toward the stand
+@knob const JOG_V: f32 = 1.9;        // m/s the walk begins to go over to the run
+@knob const JOIN_U: f32 = 0.6;      // share of a swing over which the foot goes from the ground it left to the keys' path
+@knob const JOIN_RUN: f32 = 0.07;   // the same share at a run
+@knob const LIFT_DRAWN: f32 = 0.012; // m off the ground the keys draw a standing foot before it has left it
+@knob const RUN_V: f32 = 2.4;      // m/s it is all the jog's keys: a person walks or runs, and is between only in changing
+@knob const RUN_DRAWN: f32 = 4.0;  // m/s it is all the run's keys; between, the jog's strides lengthen into the run's
+@knob const HEAD_SPACE: f32 = 0.8;   // share of the trunk's turning under it the head is held against
+const HEAD_RATE: f32 = 3.0;          // 1/s the head's heading follows where the keys would have it
+@knob const LIFE: f32 = 1.0;         // the idle life's share (breath, sway, flicks, glances)
+const HOME_T: f32 = 0.32;            // s a step home takes
+const BREATH_T: f32 = 3.2;           // s of a breath
+const GLANCE_T: f32 = 3.1;           // s between glances about
+const EYE_T: f32 = 1.5;              // s the eyes hold a place they look
+const BLINK_T: f32 = 3.9;            // s to a blink, about
+const SETTLE_T: f32 = 5.5;           // s it stands on one leg before it may settle on the other
+const SCRATCH_T: f32 = 8.0;          // s between its chances to scratch
+// A leap (over a log in its way, at a run): a hurdler's, off one foot.
+@knob const LEAP_PUSH_T: f32 = 0.2;  // s the last stance is held for the push
+@knob const LEAP_DIP: f32 = 0.09;    // m the hips sink into it
+@knob const LEAP_RISE: f32 = 0.09;   // m over the stride's own they are at as the foot leaves
+const LEAP_FOLD: f32 = 0.44;         // m from its hip a foot is kept in a leap: as far as the leg folds
+const LEAP_FLIGHT: f32 = 0.6;       // s of flight it plans its take-off spot for
+@knob const LEAP_LATE: f32 = 0.07;   // s after the hips cross the log that the flight tops
+@knob const LEAP_TUCK: f32 = 0.2;   // m the feet are drawn up under it in the air
+
+// How far over the ground the ball of a foot is whose toes are pitched up
+// by `heel` (rad, under 0) with the sole's back end on the ground: the
+// keys' own height for it blends from gait to gait, and this does not.
+const SOLE: f32 = 0.185;             // m from the ball back to the sole's end
+fn on_heel(heel: f32) -> f32 { return SOLE * sin(max(-heel, 0.0)); }
+// And how far back of where it stands flat that ball is.
+fn heel_back(heel: f32) -> f32 { return SOLE * (1.0 - cos(min(heel, 0.0))); }
+
+fn select_i(c: bool, a: i32, b: i32) -> i32 {
+    if (c) { return a; }
+    return b;
+}
+
+// Where leg l's ball rests on the ground at p, `lift` over it.
+fn ball_on(env: read_store<f32, 1>, p: vec3<f32>, l: i32, lift: f32) -> vec3<f32> {
+    return vec3<f32>(p.x, height(env, p.x, p.z) + HEAD[LEG_TOP[l] + 3].y + lift, p.z);
+}
+
+// Bone b of T hung again from its parent as K turns it, then turned to its
+// tip, which is on a spring at st[k..] from where that puts it.
+// A bone's turn from its parent, turned a further `e` (x, y, z, rad).
+fn turned(q: vec4<f32>, e: vec3<f32>) -> vec4<f32> { return q_mul(q, q_xyz(e)); }
+
+// q, on r's side of the sphere (to blend the two).
+fn same_way(q: vec4<f32>, r: vec4<f32>) -> vec4<f32> {
+    if (dot(q, r) < 0.0) { return -q; }
+    return q;
+}
+
+fn loose(st: rw_store<f32, 1>, k: i32, T: Pose, K: Key, b: i32, w: f32, zeta: f32, amax: f32, share: f32, dt: f32, init: bool) -> Pose {
+    var P = T;
+    P.q[b] = q_mul(P.q[PARENT[b]], K.q[b]);
+    P.p[b] = head_of(P, b);
+    let along = TAIL[b] - HEAD[b];
+    let tip = dangle_step(st, k, P.p[b] + q_rot(P.q[b], along), w, zeta, 0.0, dt, init);
+    P.q[b] = q_blend(P.q[b], aim_at(P.q[b], P.p[b], along, tip, amax), share);
+    return P;
+}
+
+@kernel @grid(1)
+fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state: rw_store<f32, 1>,
+         pose: write_store<vec4<f32>, 1>, tele: write_store<f32, 1>, dt: f32) {
+    let c = g.x();
+    let s = c * STATE;
+    let ii = c * INTENT;
+    let init = state[s + S_PLACED] < 0.5;
+    let KS = key_get(K_STAND);
+    if (init) {
+        let p = ld3(state, s + S_POS);
+        let q = q_y(state[s + S_YAW]);
+        let o = vec3<f32>(p.x, height(env, p.x, p.z), p.z);
+        state[s + D_GROUND] = o.y;
+        state[s + D_STARTLE_T] = -1.0;
+        for (var l: i32 = 0; l < NLEGS; l += 1) {
+            let k = s + D_LEG + l * LEG_REC;
+            st3(state, k + L_PIN, ball_on(env, key_ball(KS, l, o, q), l, 0.0));
+            state[k + L_PLANT] = 1.0;
+            state[k + L_ARMED] = 1.0;
+            state[k + L_YAW] = state[s + S_YAW];
+        }
+        state[s + S_PLACED] = 1.0;
+    }
+
+    // --- intent and actions -----------------------------------------------------------
+    let act = intent[ii + I_ACTION] as i32;
+    let seed = intent[ii + I_SEED];
+    let clock = state[s + D_CLOCK] + dt;
+    state[s + D_CLOCK] = clock;
+    let graze = approach(state[s + D_GRAZE], select_f(act == ACT_GRAZE, 1.0, 0.0), 1.1, dt);
+    let lie = approach(state[s + D_LIE], select_f(act == ACT_LIE, 1.0, 0.0), 0.7, dt);
+    var st_t = state[s + D_STARTLE_T];
+    if (act == ACT_STARTLE && (state[s + D_PREV_ACT] as i32) != ACT_STARTLE) { st_t = 0.0; }
+    if (st_t >= 0.0) { st_t += dt; }
+    if (st_t > 2.0) { st_t = -1.0; }
+    let alert_want = act == ACT_ALERT || act == ACT_STARTLE;
+    let alert = approach(state[s + D_ALERT], select_f(alert_want, 1.0, 0.0), select_f(alert_want, 4.0, 0.8), dt);
+    // The flinch: down and back at once, let go over half a second.
+    var flinch: f32 = 0.0;
+    // (Down over a quarter of a second: in a tenth it dropped 15 cm, four
+    // times as far as a body falls in that time, with its feet on the ground.)
+    if (st_t >= 0.0) { flinch = smooth01(st_t / 0.26) * (1.0 - smooth01((st_t - 0.36) / 0.6)); }
+    state[s + D_GRAZE] = graze;
+    state[s + D_LIE] = lie;
+    state[s + D_ALERT] = alert;
+    state[s + D_STARTLE_T] = st_t;
+    state[s + D_PREV_ACT] = act as f32;
+
+    // --- heading and speed ------------------------------------------------------------
+    var vdes = vec2<f32>(intent[ii + I_VEL_X], intent[ii + I_VEL_Z]);
+    if (act == ACT_BOUND) { vdes = vdes * max(1.0, 3.2 / max(length(vdes), 0.1)); }
+    // (It gets up before it goes anywhere.)
+    if (act == ACT_LIE || act == ACT_GRAZE || lie > 0.02 || graze > 0.3) { vdes = vec2<f32>(0.0); }
+    var yaw = state[s + S_YAW];
+    var speed = state[s + D_SPEED];
+    var want = yaw;
+    let vd = length(vdes);
+    if (intent[ii + I_HEADING_MODE] > 0.5) { want = intent[ii + I_HEADING]; }
+    else if (vd > 0.05) { want = atan2(vdes.x, vdes.y); }
+    if (lie > 0.02) { want = yaw; }
+    let rate = mix(1.6, 2.6 / (1.0 + 0.25 * speed), smooth01(speed / 0.5));
+    let omega = approach(state[s + D_OMEGA], clamp(4.0 * wrap_pi(want - yaw), -rate, rate), 8.0, dt);
+    yaw = wrap_pi(yaw + omega * dt);
+    let err = wrap_pi(want - yaw);
+    let vt = vd * clamp(cos(err), 0.2, 1.0);
+    // The pace ramps to what is asked and the speed follows the ramp through
+    // a lag, so a start or a stop has no step in its acceleration.
+    let ramp = approach(state[s + D_VRAMP], vt, select_f(vt > state[s + D_VRAMP], 1.6 + 0.4 * speed, 3.0), dt);
+    state[s + D_VRAMP] = ramp;
+    speed = damp(speed, ramp, 8.0, dt);
+    let qyaw = q_y(yaw);
+    let fwd = q_rot(qyaw, vec3<f32>(0.0, 0.0, 1.0));
+    var pos = ld3(state, s + S_POS);
+    pos += fwd * (speed * dt);
+
+    // --- the stride's clock -------------------------------------------------------------
+    let was_moving = state[s + D_MOVING] > 0.5;
+    var moving = vd > 0.05 || speed > 0.05 || abs(err) > 0.12;
+    if (was_moving) { moving = moving || speed > 0.03 || abs(err) > 0.05; }
+    let veff = max(speed, 0.35 * abs(omega));
+    var air = false;
+    for (var l: i32 = 0; l < NLEGS; l += 1) {
+        let k = s + D_LEG + l * LEG_REC;
+        if (state[k + L_PLANT] < 0.5 && state[k + L_HOME] <= 0.0) { air = true; }
+    }
+    // Slower than the keys are drawn for, the walk is blended toward the
+    // stand: shorter steps, less of everything. Faster, it breaks into a jog
+    // (a cycle of its own: short steps, a short flight) over a narrow band
+    // of speeds, and the jog lengthens into the run as it speeds up.
+    // (Turning on the spot it has none of the walk: it steps where it stands.)
+    let go_want = select_f(moving, clamp(pow(speed / WALK_V, 0.6), 0.0, 1.0), 0.0);
+    let go = approach(state[s + D_GO], go_want, 2.5, dt);
+    state[s + D_GO] = go;
+    // (Its pace: 0 the walk, 1 the jog, 2 the run. The keys are of the two
+    // cycles it is between.)
+    let pace = approach(state[s + D_RUN], clamp((speed - JOG_V) / (RUN_V - JOG_V), 0.0, 1.0) + clamp((speed - RUN_V) / (RUN_DRAWN - RUN_V), 0.0, 1.0), 2.5, dt);
+    state[s + D_RUN] = pace;
+    let run_u = min(pace, 1.0);
+    let rw = smooth01(run_u);
+    let ga = select_i(pace > 1.0, C_JOG, C_WALK);
+    let gb = select_i(pace > 1.0, C_RUN, C_JOG);
+    let gt = select_f(pace > 1.0, smooth01(pace - 1.0), rw);
+    // The rate that carries the body a stance's ground (as the keys cover
+    // it, blended) in a stance's time; turning, a step for each half
+    // radian or so.
+    let gw = smooth01(go);
+    let duty = gait_duty(ga, gb, gt, 0);
+    let freq = clamp(max(speed * duty / max(gw * gait_span(ga, gb, gt), 0.02), 0.9 * abs(omega)), 0.6, 3.2);
+    var phase = state[s + D_PHASE];
+    // (Setting off, the left foot lifts at once.)
+    if (moving && !was_moving && !air) {
+        phase = floor(phase) + CYC_STANCE[C_WALK * NLEGS].y + 0.001;
+        for (var l: i32 = 0; l < NLEGS; l += 1) { state[s + D_LEG + l * LEG_REC + L_ARMED] = 1.0; }
+    }
+    // --- a leap --------------------------------------------------------------------------
+    // At a run, a log in its way is cleared as a hurdler clears one: the
+    // stance that comes nearest the take-off spot (the flight's top over
+    // the log) is held longer, the hips sinking into it and driven up out
+    // of it, and the clock is slowed through the flight that push gives so
+    // the other foot comes down as the body does. In between it is the
+    // run's own stride, stretched: one leg reaching, the other trailing.
+    var leap = state[s + D_LEAP];
+    var leap_leg = state[s + D_LEAP + 1] as i32;
+    var leap_left = state[s + D_LEAP + 2];
+    var cfreq = freq;
+    var push_u: f32 = -1.0;
+    var begun = false;
+    if (leap < 0.5 && rw > 0.6 && moving && !init) {
+        let ob = obstacle_ahead(env, pos.x, pos.z, vec2<f32>(fwd.x, fwd.z));
+        // (The flight's top a little short of the log: the trailing foot,
+        // lowest, crosses it a moment after the hips.)
+        let spot = speed * (LEAP_PUSH_T + 0.5 * LEAP_FLIGHT - LEAP_LATE);
+        if (ob.y > 0.02 && ob.x < spot + 0.3 * speed / freq) {
+            for (var l: i32 = 0; l < NLEGS; l += 1) {
+                // (The foot that has just come down pushes.)
+                if (gait_stance(ga, gb, gt, l, phase) < 0.0 && gait_stance(ga, gb, gt, l, phase + freq * dt) >= 0.0 && leap < 0.5) {
+                    leap = 1.0;
+                    leap_leg = l;
+                    begun = true;
+                }
+            }
+        }
+    }
+    if (leap > 0.5 && leap < 1.5) {
+        push_u = select_f(begun, 0.0, gait_stance(ga, gb, gt, leap_leg, phase));
+        cfreq = select_f(begun, freq, duty / LEAP_PUSH_T);
+        if (push_u < 0.0) {
+            // Off the ground: the flight is what the push gave it.
+            leap = 2.0;
+            leap_left = clamp(2.0 * state[s + D_AIR + 4] / 9.81, 0.2, 0.9);
+        }
+    }
+    if (leap > 1.5) {
+        let u = gait_swing(ga, gb, gt, 1 - leap_leg, phase);
+        cfreq = clamp((1.0 - u) * (1.0 - duty) / max(leap_left, 0.02), 0.25, 2.0 * freq);
+        leap_left -= dt;
+        if (gait_stance(ga, gb, gt, 1 - leap_leg, phase) >= 0.0 && state[s + D_LEG + (1 - leap_leg) * LEG_REC + L_PLANT] > 0.5) { leap = 0.0; }
+        if (leap_left < -0.3) { leap = 0.0; }
+    }
+    let leap_w = approach(state[s + D_LEAP + 3], select_f(leap > 1.5, 1.0, 0.0), select_f(leap > 1.5, 9.0, 5.0), dt);
+    state[s + D_LEAP] = leap;
+    state[s + D_LEAP + 1] = leap_leg as f32;
+    state[s + D_LEAP + 2] = leap_left;
+    state[s + D_LEAP + 3] = leap_w;
+    if (moving || air) { phase += cfreq * dt; }
+    var K = key_mix(KS, gait_at(ga, gb, gt, phase), gw);
+    if (push_u >= 0.0) {
+        // The push: down into the leg, then up out of it faster and faster.
+        let up = max(push_u - 0.4, 0.0) / 0.6;
+        K.root.y += -LEAP_DIP * smooth01(push_u / 0.4) + (LEAP_DIP + LEAP_RISE) * up * up;
+    }
+    if (leap_w > 0.0) {
+        // In the air: the chest lifted, one arm thrown forward and up and
+        // the other back; the legs keep the stride's split, drawn up under it.
+        let L = key_get(K_LEAP);
+        let w = smooth01(leap_w);
+        for (var b: i32 = 0; b < NB; b += 1) { K.q[b] = q_norm(mix(K.q[b], same_way(L.q[b], K.q[b]), 0.85 * w)); }
+        // (A foot the clock has down is on the ground: only one in its swing is drawn up.)
+        for (var l: i32 = 0; l < NLEGS; l += 1) {
+            // (The trailing one, which pushed, more: the leading leg is high already.)
+            if (gait_stance(ga, gb, gt, l, phase) < 0.0) { K.foot[l].y += LEAP_TUCK * w * select_f(l == leap_leg, 1.0, 0.2); }
+        }
+    }
+
+    // --- the poses over it ------------------------------------------------------------
+    let still = 1.0 - gw;
+    let wg = smooth01(graze);
+    let wl = smooth01(lie);
+    if (wg > 0.0) { K = key_mix(K, key_get(K_FORAGE), wg); }
+    // It sits down through a squat: down over its heels first, then back
+    // onto the ground behind them; up again the other way.
+    if (wl > 0.0) {
+        let sit = smooth01(lie / 0.55);
+        let down = smooth01((lie - 0.4) / 0.6);
+        K = key_mix(K, key_mix(key_get(K_REST), key_get(K_LIE), down), sit);
+    }
+    let wa = smooth01(alert) * (1.0 - 0.6 * gw) * (1.0 - wl);
+    if (wa > 0.0) { K = key_mix(K, key_get(K_ALERT), wa); }
+    if (flinch > 0.0) { K = key_mix(K, key_get(K_FLINCH), flinch * (1.0 - wl)); }
+
+    // --- the ground under it ----------------------------------------------------------
+    var gsum: f32 = 0.0;
+    for (var l: i32 = 0; l < NLEGS; l += 1) {
+        let p = ld3(state, s + D_LEG + l * LEG_REC + L_PIN);
+        gsum += height(env, p.x, p.z);
+    }
+    let ground_y = damp(state[s + D_GROUND], gsum / f32(NLEGS), 10.0, dt);
+    state[s + D_GROUND] = ground_y;
+    let org = vec3<f32>(pos.x, ground_y, pos.z);
+    let ground_now = max(ground_y, height(env, pos.x, pos.z));
+    // (What its last flight left it off the keys' place, creature::keyed's air.)
+    let lift = air_lift(state, s + D_AIR, dt);
+
+    // --- feet ---------------------------------------------------------------------------
+    // Standing, a foot left away from its place steps home, the one further
+    // off first, one at a time.
+    var stepping = air;
+    var stray: array<f32, NLEGS>;
+    for (var l: i32 = 0; l < NLEGS; l += 1) {
+        let k = s + D_LEG + l * LEG_REC;
+        if (state[k + L_HOME] > 0.0) { stepping = true; }
+        let d = key_ball(KS, l, org, qyaw) - ld3(state, k + L_PIN);
+        stray[l] = length(vec2<f32>(d.x, d.z)) + 0.15 * abs(wrap_pi(state[k + L_YAW] - yaw));
+    }
+    let settled = !moving && go < 0.05 && lie < 0.02 && graze < 0.02;
+    var balls: array<vec3<f32>, NLEGS>;
+    var dyaw: array<f32, NLEGS>;
+    var tilt: array<f32, NLEGS>;
+    for (var l: i32 = 0; l < NLEGS; l += 1) {
+        let k = s + D_LEG + l * LEG_REC;
+        let sp = gait_stance(ga, gb, gt, l, phase);
+        var planted = state[k + L_PLANT] > 0.5;
+        var home_u = state[k + L_HOME];
+        var ball = ld3(state, k + L_PIN);
+        var fyaw = state[k + L_YAW];
+        if (planted) {
+            if (sp >= 0.0) { state[k + L_ARMED] = 1.0; }
+            // Between the walk and the run the clock's stance outlasts the
+            // drawn one: the keys have the foot leaving the ground while the
+            // clock still holds it down. It leaves when it is drawn to (a
+            // foot held down in the air would carry a body that should be
+            // falling), and waits armed at -1 for the clock's own lift.
+            // (Late in its stance only: early, the ball is drawn over the
+            // ground because the foot stands on its heel.)
+            let drawn_off = moving && sp >= 0.5 && state[k + L_ARMED] > 0.5 && K.foot[l].y > LIFT_DRAWN;
+            if ((moving && sp < 0.0 && state[k + L_ARMED] > 0.5) || drawn_off) {
+                // Lift-off: from where it stands.
+                planted = false;
+                state[k + L_ARMED] = select_f(drawn_off, -1.0, 0.0);
+                st3(state, k + L_OFF, ball);
+            } else if (settled && !stepping && stray[l] > 0.04 && stray[l] >= stray[1 - l]) {
+                planted = false;
+                stepping = true;
+                home_u = 0.0001;
+                st3(state, k + L_FROM, ball);
+            }
+        }
+        if (planted) {
+            // Pinned: only its height is the key's (the ball lifts as the
+            // foot rolls onto its toes).
+            ball = ball_on(env, ball, l, max(K.foot[l].y, on_heel(K.fa[l].x)));
+        } else if (home_u > 0.0) {
+            // A step home: an arc from where it stood to where it stands.
+            home_u = min(home_u + dt / HOME_T, 1.0);
+            let e = smooth01(home_u);
+            let p0 = ld3(state, k + L_FROM);
+            let to = ball_on(env, key_ball(KS, l, org, qyaw), l, 0.0);
+            ball = mix(p0, to, e) + vec3<f32>(0.0, 0.04 * bump(home_u, 0.4, 0.6), 0.0);
+            fyaw = fyaw + wrap_pi(yaw - fyaw) * e;
+            if (home_u >= 1.0) { planted = true; home_u = 0.0; ball = to; fyaw = yaw; }
+        } else {
+            // The swing: the key's path, joined from where the foot left.
+            // (L_ARMED below zero: -1 and the time since it left early, while
+            // it waits for the clock's lift; -50 and that time once it has
+            // come.)
+            var arm = state[k + L_ARMED];
+            let early = arm < -0.5 && arm > -40.0;
+            if (early) { arm -= dt; if (sp < 0.0) { arm -= 49.0; } state[k + L_ARMED] = arm; }
+            let u = select_f(early, 0.0, select_f(sp >= 0.0, 1.0, gait_swing(ga, gb, gt, l, phase)));
+            // Left early, the toes come clear of the ground at once: the
+            // keys, between the walk's foot down and the run's foot up,
+            // draw it a centimetre off for a tenth of a second.
+            let since = select_f(arm < -40.0, -arm - 50.0, -arm - 1.0);
+            let clear = select_f(arm < -0.5, 0.022 * smooth01(since / 0.06) * (1.0 - smooth01(u / 0.6)), 0.0);
+            // (In a leap's push the clock runs slow and the body goes on at
+            // its pace: the swinging foot leaves the ground it lifted from by
+            // the push's time, not the clock's, or it would be dragged out
+            // behind.)
+            // (Running, the place it left is at once far behind and the leg
+            // leaves it at its full stretch: a foot still held toward it
+            // trails straight-kneed and snaps in when it is let go. The run's
+            // share of the join is JOIN_RUN of the swing, a few steps.)
+            let join_u = mix(JOIN_U, JOIN_RUN, rw);
+            let join = (1.0 - smooth01(u / join_u)) * (1.0 - select_f(leap > 1.5, 1.0, smooth01(max(push_u, 0.0) / 0.5)));
+            // (A step on the spot, which the stand's key has no lift for, is
+            // lifted here.)
+            let hop = 0.045 * (1.0 - gw) * bump(u, 0.4, 0.6);
+            // Turning, it lands where the key will have it halfway through
+            // its stance: pinned where the key has it now, the body turns on
+            // over it and the leg is carried across under the hips.
+            let lead_at = key_ball(K, l, org, q_y(yaw + omega * 0.5 * duty / freq * smooth01(u)));
+            // (A foot in the air comes down with the body's flight, but
+            // gives the dip of a landing no more than half its clearance.)
+            // (Joined from the ground it left, not from an offset carried
+            // with the body: it leaves at the ground's speed and gathers the
+            // swing's, with no corner in its path or in the legs' turning.)
+            ball = ball_on(env, mix(lead_at + lift * vec3<f32>(1.0, 0.0, 1.0), ld3(state, k + L_OFF), join), l, max(K.foot[l].y + hop + clear + max(lift.y, -0.5 * (K.foot[l].y + hop + clear)), on_heel(K.fa[l].x)));
+            fyaw = yaw + wrap_pi(fyaw - yaw) * join;
+            if (leap_w > 0.0) {
+                // In a leap a foot's height is from the ground the body
+                // stands over, not from what passes under the foot: it is
+                // carried over the log with the body, and does not step up
+                // its side.
+                // The leg that pushed is drawn through under the hips as a
+                // hurdler's trailing leg is, not left hanging out behind.
+                if (l == leap_leg) {
+                    let under = org + lift + vec3<f32>(0.0, HEAD[LEG_TOP[l] + 3].y + 0.16, 0.0) + q_rot(qyaw, vec3<f32>(HEAD[LEG_TOP[l]].x, 0.0, -0.1));
+                    ball = mix(ball, under, 0.7 * smooth01(leap_w));
+                }
+                let own = height(env, ball.x, ball.z);
+                ball.y = max(ball.y + smooth01(leap_w) * (ground_now - own), own + HEAD[LEG_TOP[l] + 3].y + 0.05);
+                // (Over the log a foot is lifted toward the hip it hangs
+                // from; nearer than the leg can fold, it is carried out
+                // ahead or behind instead, where it is already going.)
+                let hip = org + lift + vec3<f32>(0.0, HEAD[LEG_TOP[l]].y + K.root.y, 0.0) + q_rot(qyaw, vec3<f32>(HEAD[LEG_TOP[l]].x, 0.0, K.root.z));
+                let dh = vec2<f32>(ball.x - hip.x, ball.z - hip.z);
+                let need = sqrt(max(LEAP_FOLD * LEAP_FOLD - (ball.y - hip.y) * (ball.y - hip.y), 0.0));
+                let have = length(dh);
+                if (have < need) {
+                    let way = select_f(dot(dh, vec2<f32>(fwd.x, fwd.z)) >= 0.0, 1.0, -1.0);
+                    let out = mix(vec2<f32>(fwd.x, fwd.z) * way, dh / max(have, 0.0001), smooth01(have / 0.1));
+                    let to = out / max(length(out), 0.0001) * need;
+                    ball.x = hip.x + to.x;
+                    ball.z = hip.z + to.y;
+                }
+            }
+            if (sp >= 0.0 && !early) {
+                // (It lands on its heel: the ball is where the keys have
+                // it over the ground, and comes down as the foot rolls flat.)
+                // What is pinned is where the ball will stand once the foot
+                // is flat: the heel stays where it lands and the ball comes
+                // forward that little as it comes down (heel_back).
+                planted = true;
+                ball = ball_on(env, ball + q_rot(q_y(yaw), vec3<f32>(0.0, 0.0, heel_back(K.fa[l].x))), l, max(K.foot[l].y, on_heel(K.fa[l].x)));
+                fyaw = yaw;
+            }
+        }
+        state[k + L_PLANT] = select_f(planted, 1.0, 0.0);
+        state[k + L_HOME] = home_u;
+        state[k + L_YAW] = fyaw;
+        st3(state, k + L_PIN, ball);
+        balls[l] = ball;
+        if (planted) { balls[l] = ball - q_rot(q_y(fyaw), vec3<f32>(0.0, 0.0, heel_back(K.fa[l].x))); }
+        dyaw[l] = wrap_pi(fyaw - yaw);
+        // The toes lie along the ground they are on.
+        let ahead = ball + q_rot(q_y(fyaw), vec3<f32>(0.0, 0.0, 0.07));
+        let near = 1.0 - smooth01((ball.y - ball_on(env, ball, l, 0.0).y) / 0.05);
+        tilt[l] = near * atan2(height(env, ahead.x, ahead.z) - height(env, ball.x, ball.z), 0.07);
+    }
+
+    // --- the head: turned to the gaze, or glancing about ------------------------------
+    var look = 0.0;
+    var look_p = 0.0;
+    let gaze_w = intent[ii + I_GAZE_W];
+    if (gaze_w > 0.0) {
+        let gz = vec3<f32>(intent[ii + I_GAZE_X], intent[ii + I_GAZE_Y], intent[ii + I_GAZE_Z]) - (org + vec3<f32>(0.0, HEAD[B_HEAD].y + K.root.y, 0.0));
+        let gl = q_rot(q_conj(qyaw), gz);
+        look = gaze_w * clamp(atan2(gl.x, gl.z), -1.4, 1.4);
+        look_p = gaze_w * clamp(-atan2(gl.y, length(vec2<f32>(gl.x, gl.z))), -0.7, 0.7);
+    }
+    // With nothing to look at, standing, a new place every few seconds
+    // (some of them straight ahead).
+    let idle = LIFE * still;
+    let gk = floor(clock / GLANCE_T + seed);
+    let glance_w = idle * (1.0 - gaze_w) * (1.0 - 0.7 * wg) * select_f(hash01(gk * 5.3 + seed * 3.1) > 0.35, 1.0, 0.0);
+    look += glance_w * 1.5 * (hash01(gk * 9.7 + seed) - 0.5);
+    look_p += glance_w * 0.3 * (hash01(gk * 4.1 + seed * 7.0) - 0.4);
+    let lk = crit_step(vec2<f32>(state[s + D_LOOK], state[s + D_LOOK_V]), look + 0.3 * omega, 11.0, dt);
+    let lp = crit_step(vec2<f32>(state[s + D_LOOK_P], state[s + D_LOOK_PV]), look_p, 11.0, dt);
+    state[s + D_LOOK] = lk.x;
+    state[s + D_LOOK_V] = lk.y;
+    state[s + D_LOOK_P] = lp.x;
+    state[s + D_LOOK_PV] = lp.y;
+    var KP = K;
+
+    // --- life ---------------------------------------------------------------------------
+    // Breathing: the chest lifts, the shoulders rise and the arms ride out
+    // on it; harder after a run.
+    let breath = LIFE * (0.022 + 0.01 * wl + 0.014 * alert + 0.02 * rw) * (1.0 - 0.6 * gw) * sin(TAU * clock / BREATH_T + seed);
+    KP.q[B_SPINE] = turned(KP.q[B_SPINE], vec3<f32>(-0.4 * breath, 0.0, 0.0));
+    KP.q[B_CHEST] = turned(KP.q[B_CHEST], vec3<f32>(-breath, 0.0, 0.0));
+    KP.q[B_SHOULDERL] = turned(KP.q[B_SHOULDERL], vec3<f32>(0.0, 0.0, 2.5 * breath));
+    KP.q[B_SHOULDERR] = turned(KP.q[B_SHOULDERR], vec3<f32>(0.0, 0.0, -2.5 * breath));
+    // Its weight is on one leg, and every few seconds it may settle onto
+    // the other: the hips go over that foot and tip (the free side's hip
+    // low), the waist and chest tip back against them, and the head stays
+    // level over it all.
+    let wt = clock / SETTLE_T + seed * 0.7;
+    let wk = floor(wt);
+    let wu = smooth01((wt - wk) * SETTLE_T / 1.4);
+    let side0 = select_f(hash01((wk - 1.0) * 3.3 + seed) > 0.5, 1.0, -1.0) * (0.55 + 0.45 * hash01((wk - 1.0) * 8.1 + seed));
+    let side1 = select_f(hash01(wk * 3.3 + seed) > 0.5, 1.0, -1.0) * (0.55 + 0.45 * hash01(wk * 8.1 + seed));
+    let shift = idle * (1.0 - wl) * (1.0 - wg) * mix(side0, side1, wu);
+    KP.root.x += 0.03 * shift;
+    KP.root.y -= 0.007 * abs(shift);
+    KP.q[B_PELVIS] = turned(KP.q[B_PELVIS], vec3<f32>(0.0, 0.0, 0.07 * shift));
+    KP.q[B_SPINE] = turned(KP.q[B_SPINE], vec3<f32>(0.0, 0.0, -0.06 * shift));
+    KP.q[B_CHEST] = turned(KP.q[B_CHEST], vec3<f32>(0.0, 0.0, -0.045 * shift));
+    KP.q[B_NECK] = turned(KP.q[B_NECK], vec3<f32>(0.0, 0.0, 0.035 * shift));
+    // Its arms hang and are never quite still: each sways from the shoulder
+    // on its own, its elbow and fingers giving. And now and then a hand
+    // comes up to scratch at its chest: up in two thirds of a second, a
+    // few quick strokes, and let down again.
+    let fid = idle * (1.0 - wl) * (1.0 - wg);
+    let st = clock / SCRATCH_T + seed * 2.1;
+    let sk = floor(st);
+    let su = (st - sk) * SCRATCH_T / 2.4;
+    var scratch: f32 = 0.0;
+    if (su < 1.0 && hash01(sk * 6.7 + seed) > 0.45) { scratch = fid * bump(su, 0.28, 0.72); }
+    let which = select_i(hash01(sk * 2.3 + seed * 5.0) > 0.5, 0, 1);
+    let strokes = scratch * sin(TAU * 4.0 * su);
+    for (var a: i32 = 0; a < 2; a += 1) {
+        let side = 1.0 - 2.0 * f32(a);
+        let ch = 10.0 + 4.0 * f32(a);
+        let up = select_f(a == which, scratch, 0.0);
+        let rub = select_f(a == which, strokes, 0.0);
+        let ua = select_i(a == 0, B_UPPERARML, B_UPPERARMR);
+        KP.q[ua] = turned(KP.q[ua], vec3<f32>(0.05 * fid * noise1(clock * 0.23, seed, ch) - 0.62 * up, 0.0,
+                                               side * (0.035 * shift + 1.5 * breath + 0.03 * fid * noise1(clock * 0.19, seed, ch + 1.0)) - side * 0.2 * up));
+        KP.q[ua + 1] = turned(KP.q[ua + 1], vec3<f32>(-0.05 * fid * (1.0 + noise1(clock * 0.31, seed, ch + 2.0)) - 2.05 * up - 0.1 * rub, side * 0.5 * up, 0.0));
+        KP.q[ua + 2] = turned(KP.q[ua + 2], vec3<f32>(0.12 * fid * noise1(clock * 0.47, seed, ch + 3.0) - 0.35 * up + 0.3 * rub, 0.0, 0.0));
+    }
+
+    // --- the eyes -----------------------------------------------------------------------
+    // They look about on their own: to a new place every second and a half,
+    // there in a sixteenth of a second, and held; hardly at all at a run,
+    // when it looks where it is going. They go first to where the head is
+    // turning, and down to its hand when it scratches or picks.
+    let et = clock / EYE_T + seed * 3.1;
+    let ek = floor(et);
+    let eu = smooth01((et - ek) * EYE_T / 0.06);
+    let roam = LIFE * (1.0 - 0.85 * rw * gw) * (1.0 - 0.8 * scratch);
+    let ex = mix(hash01((ek - 1.0) * 7.3 + seed), hash01(ek * 7.3 + seed), eu) - 0.5;
+    let ey = mix(hash01((ek - 1.0) * 9.1 + 5.0 + seed), hash01(ek * 9.1 + 5.0 + seed), eu) - 0.5;
+    let lying = wl * smooth01((lie - 0.4) / 0.6);
+    let gaze_y = 0.5 * roam * ex + clamp(0.9 * (look - lk.x), -0.45, 0.45);
+    let gaze_x = 0.24 * roam * ey + clamp(0.9 * (look_p - lp.x), -0.3, 0.3) + 0.12 * lying + 0.3 * scratch + 0.2 * wg;
+    KP.q[B_GAZE] = q_xyz(vec3<f32>(gaze_x, gaze_y, 0.0));
+    // It blinks every few seconds, never evenly (slowly, sat down). Its
+    // lids and brows say how it is: the eyes wide and the brows drawn down
+    // in the middle, intent, when alert and a little at a run; the eyes
+    // squeezed shut in a flinch with the brows' inner ends thrown up; the
+    // lids half down when it sits or a hand is scratching; the brows'
+    // inner ends lifted as its eyes go to something new.
+    let bt = clock / BLINK_T + seed * 5.7;
+    let bk = floor(bt);
+    let bu = ((bt - bk) - 0.1 - 0.7 * hash01(bk * 4.3 + seed)) * BLINK_T / (1.0 + 1.5 * lying);
+    var blink: f32 = 0.0;
+    if (bu > 0.0 && bu < 0.22) { blink = smooth01(bu / 0.06) * (1.0 - smooth01((bu - 0.08) / 0.12)); }
+    let wide = smooth01(alert) * (1.0 - wl) * (1.0 - flinch);
+    let rest_lid = 0.12 - 0.55 * wide + 0.1 * rw * gw + 0.15 * wg + 0.4 * lying + 0.4 * scratch;
+    let shut = clamp(max(mix(rest_lid, 1.0, LIFE * blink), 0.95 * flinch), -0.6, 1.0);
+    let newly = roam * (1.0 - smooth01((et - ek) * EYE_T / 0.5)) * min(2.0 * abs(ex), 1.0);
+    let brow = 0.55 * flinch - 0.18 * rw * gw - 0.28 * wide + 0.24 * newly + 0.15 * scratch;
+    KP.q[B_LID] = q_xyz(vec3<f32>(asin(shut), 0.0, clamp(brow, -0.6, 0.6)));
+
+    // --- the head, held steady ---------------------------------------------------------
+    // Where the keys would turn the head, in the creature's frame, is eased;
+    // the neck and the head each take half of the turn from the chest to
+    // that, so the trunk works under a head that looks where it is going.
+    let qc = q_mul(q_mul(KP.q[B_PELVIS], KP.q[B_SPINE]), KP.q[B_CHEST]);
+    let qk = q_mul(qc, q_mul(KP.q[B_NECK], KP.q[B_HEAD]));
+    var qe = vec4<f32>(state[s + D_HEADQ], state[s + D_HEADQ + 1], state[s + D_HEADQ + 2], state[s + D_HEADQ + 3]);
+    if (init) { qe = qk; }
+    qe = q_blend(qe, qk, 1.0 - exp(-(HEAD_RATE + 12.0 * flinch) * dt));
+    state[s + D_HEADQ] = qe.x;
+    state[s + D_HEADQ + 1] = qe.y;
+    state[s + D_HEADQ + 2] = qe.z;
+    state[s + D_HEADQ + 3] = qe.w;
+    let qn2 = q_mul(q_conj(qc), q_blend(qk, qe, HEAD_SPACE * LAYERS));
+    // (What the keys bend the neck by beyond its half of their own turn, it
+    // keeps: the neck gives under the head at each step, and the head is
+    // turned back by as much, so it travels on the neck without tipping.)
+    let own = q_mul(q_conj(q_blend(q_id(), q_mul(KP.q[B_NECK], KP.q[B_HEAD]), 0.5)), KP.q[B_NECK]);
+    let qn = q_mul(q_blend(q_id(), qn2, 0.5), own);
+    KP.q[B_NECK] = qn;
+    KP.q[B_HEAD] = q_mul(q_conj(qn), qn2);
+    // Over that, it turns to what it looks at.
+    let turn = vec3<f32>(0.5 * lp.x, 0.5 * lk.x, 0.0);
+    KP.q[B_NECK] = turned(KP.q[B_NECK], turn);
+    KP.q[B_HEAD] = turned(KP.q[B_HEAD], turn);
+
+    // Gathering: its left hand picks about on the ground, and every few
+    // seconds comes up before its face, the head dipping to look at it.
+    if (wg > 0.0) {
+        let ct = clock / 3.1 + seed;
+        let cu = ct - floor(ct);
+        let eat = wg * bump(clamp((cu - 0.5) / 0.5, 0.0, 1.0), 0.35, 0.6);
+        let pick = wg * (1.0 - eat);
+        KP.q[B_UPPERARML] = turned(KP.q[B_UPPERARML], vec3<f32>(0.14 * pick * noise1(clock * 0.9, seed, 3.0) - 0.95 * eat, 0.0, 0.2 * pick * noise1(clock * 0.7, seed, 4.0) - 0.12 * eat));
+        KP.q[B_FOREARML] = turned(KP.q[B_FOREARML], vec3<f32>(-0.12 * pick * (1.0 + noise1(clock * 1.3, seed, 5.0)) - 2.15 * eat, 0.3 * eat, 0.0));
+        KP.q[B_HANDL] = turned(KP.q[B_HANDL], vec3<f32>(-0.25 * pick * (1.0 + sin(TAU * clock / 0.5)) - 0.5 * eat, 0.0, 0.0));
+        KP.q[B_NECK] = turned(KP.q[B_NECK], vec3<f32>(0.16 * eat, 0.1 * pick * noise1(clock * 0.5, seed, 6.0), 0.0));
+        KP.q[B_HEAD] = turned(KP.q[B_HEAD], vec3<f32>(0.2 * eat, 0.06 * pick * noise1(clock * 0.5, seed, 6.0), 0.0));
+    }
+
+    // --- the pose: the keys' trunk, the legs solved to the feet ------------------------
+    var T = key_trunk(KP, org + lift, qyaw);
+    for (var l: i32 = 0; l < NLEGS; l += 1) {
+        T = leg_solve(T, l, qyaw, balls[l], K.fa[l].x, K.fa[l].y - tilt[l], dyaw[l], SOFT_REACH);
+    }
+
+    // (trace's p0..: the stride's phase, the walk's and the run's shares, the
+    // left ball and hip in the creature's frame.)
+    probe(state, s + PROBE, 0, fract01(phase));
+    probe(state, s + PROBE, 1, gw);
+    probe(state, s + PROBE, 2, rw);
+    probe3(state, s + PROBE, 3, q_rot(q_conj(qyaw), balls[0] - org));
+    probe3(state, s + PROBE, 6, q_rot(q_conj(qyaw), T.p[LEG_TOP[0]] - org));
+
+    // --- in the air ----------------------------------------------------------------------
+    // With no foot down its mass is in free fall (creature::keyed's air):
+    // the whole of it is moved to where that has it. (Before the loose
+    // parts, which swing from where the body is: hung from the keys' place
+    // and moved after, they felt none of the fall and a jolt at each end of it.)
+    var grounded = false;
+    for (var l: i32 = 0; l < NLEGS; l += 1) {
+        if (state[s + D_LEG + l * LEG_REC + L_PLANT] > 0.5 || state[s + D_LEG + l * LEG_REC + L_HOME] > 0.0) { grounded = true; }
+    }
+    var A = moved(T, air_step(state, s + D_AIR, com_of(T), grounded, init, dt));
+
+    // --- the loose parts carry their momentum ---------------------------------------
+    for (var i: i32 = 0; i < NLOOSE; i += 1) {
+        let k = s + D_LOOSE + i * DANGLE_REC;
+        A = loose(state, k, A, KP, LOOSE[i], LOOSE_W[i] + LOOSE_RUN[i] * rw, LOOSE_ZETA[i], LOOSE_MAX[i], LAYERS, dt, init);
+    }
+
+    // --- out -------------------------------------------------------------------------------
+    put(pose, c, A);
+    st3(state, s + S_POS, pos);
+    state[s + S_YAW] = yaw;
+    state[s + D_SPEED] = speed;
+    state[s + D_OMEGA] = omega;
+    state[s + D_PHASE] = phase;
+    state[s + D_MOVING] = select_f(moving, 1.0, 0.0);
+
+    let t0 = c * TELE;
+    tele[t0 + T_POS] = pos.x;
+    tele[t0 + T_POS + 1] = T.p[ROOT].y;
+    tele[t0 + T_POS + 2] = pos.z;
+    tele[t0 + T_YAW] = yaw;
+    tele[t0 + T_SPEED] = speed;
+    tele[t0 + T_GAIT] = select_i(moving, select_i(run_u > 0.5, GAIT_RUN, GAIT_WALK), GAIT_STAND) as f32;
+    tele[t0 + T_PHASE] = fract01(phase);
+    tele[t0 + T_ACTION] = act as f32;
+    tele[t0 + T_HEIGHT] = T.p[ROOT].y - ground_y;
+    tele[t0 + T_PITCH] = 0.0;
+    tele[t0 + T_ROLL] = 0.0;
+    tele[t0 + T_FREQ] = freq * select_f(moving, 1.0, 0.0);
+    for (var l: i32 = 0; l < NLEGS; l += 1) {
+        let k = s + D_LEG + l * LEG_REC;
+        let f0 = t0 + T_FOOT + 4 * l;
+        tele[f0] = state[k + L_PLANT];
+        tele[f0 + 1] = balls[l].x;
+        tele[f0 + 2] = balls[l].y;
+        tele[f0 + 3] = balls[l].z;
+    }
+}
