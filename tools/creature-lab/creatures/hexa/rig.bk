@@ -31,6 +31,7 @@ import creature::skeleton::*;
 import creature::pose::*;
 import creature::body::*;
 import creature::spine::*;
+import creature::probe::*;
 from creature::secondary import lift_to;
 from creature::ground import height;
 
@@ -66,7 +67,8 @@ const D_COFF1: i32 = D_COFF + 3;          //   last step's (3)
 const D_COFF2: i32 = D_COFF + 6;          //   and the step's before (3)
 const D_BODY: i32 = D_COFF + 9;           // creature::body (BODY_STATE)
 const D_SPINE: i32 = D_BODY + BODY_STATE; // creature::spine (SPINE_STATE)
-pub const STATE: i32 = D_SPINE + SPINE_STATE;
+pub const PROBE: i32 = D_SPINE + SPINE_STATE; // creature::probe's slice
+pub const STATE: i32 = PROBE + PROBE_N;
 
 // The part of a cycle a foot is down. Walking, the six go one after another
 // a sixth of a cycle apart, and at 0.68 never more than two are in the air;
@@ -243,9 +245,14 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
     // Long and narrow, it turns on the spot slowly: its end feet go sideways
     // under it half a metre from the middle, and a quick turn carries one
     // across the other. Walking, its feet go forward and it turns freely.
-    let tw = turn_toward(yaw, want, mix(0.6, 0.9, smooth01(speed / 0.6)), dt);
-    yaw = tw.x;
-    let omega = mix(state[s + D_OMEGA], tw.y, 1.0 - exp(-8.0 * dt));
+    // (The turn's rate comes on and goes off through a lag, toward a rate
+    // that falls with what is left to turn: begun and ended at its full
+    // rate in one step, the hips, half the body from the middle it turns
+    // about, were thrown 3 mm sideways in that step.)
+    let rate = mix(0.6, 0.9, smooth01(speed / 0.6));
+    let w_t = clamp(2.5 * wrap_pi(want - yaw), -rate, rate);
+    let omega = select_f(init, 0.0, mix(state[s + D_OMEGA], w_t, 1.0 - exp(-8.0 * dt)));
+    yaw = wrap_pi(yaw + omega * dt);
     let err = wrap_pi(want - yaw);
     speed = approach(speed, vd * clamp(cos(err), 0.2, 1.0), 1.2, dt);
     let qyaw = q_y(yaw);
@@ -313,9 +320,26 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
         if (planted) {
             if (ph < duty) { state[k + L_ARMED] = 1.0; }
             let stray = length(vec2<f32>(toe.x - home.x, toe.z - home.z));
-            var lift = moving && state[k + L_ARMED] > 0.5 && ph >= duty && up < up_max - 0.5;
-            if (lift) { up += 1.0; }
+            // (A foot whose turn has come and whose leg is at its reach does
+            // not wait: in a turn, kept down for another to land, a hind leg
+            // ran out of length and the body was drawn down 24 mm to it in
+            // three steps.)
+            let b0 = LEG_B0[l];
+            let hip_l = vec3<f32>(pos.x, state[s + D_BODY_Y] - state[s + D_DROP], pos.z) + ld3(state, s + D_LAG) + q_rot(qyaw, HEAD[b0] - HEAD[B_PELVIS] + vec3<f32>(0.0, 0.0, HEAD[B_PELVIS].z - MID_Z));
+            let ankle_l = toe - q_rot(qyaw, TAIL[b0 + 2] - HEAD[b0 + 2]);
+            let spent = !init && length(hip_l - ankle_l) > 0.94 * (rest_len(b0) + rest_len(b0 + 1));
+            var lift = moving && state[k + L_ARMED] > 0.5 && ph >= duty && (up < up_max - 0.5 || spent);
             var dur = clamp((1.0 - ph) / freq, 0.15, 0.8);
+            // (Nor one left behind its hip at its leg's reach before its
+            // turn, three others down: as the walk became the run the clock
+            // put three feet back at the start of their stance, far behind
+            // the body, and it was drawn down 9 cm to them. Such a foot
+            // steps on as a stride's swing.)
+            if (!lift && moving && spent && up < 2.5 && state[k + L_SINCE] > 0.1 && dot(ankle_l - hip_l, fwd) < 0.0) {
+                lift = true;
+                dur = clamp((1.0 - duty) / freq, 0.15, 0.4);
+            }
+            if (lift) { up += 1.0; }
             // Standing: a foot strayed from home steps back, one at a time.
             if (!moving && !busy && stray > 0.05 && lie < 0.01) { lift = true; dur = 0.45; busy = true; }
             if (lift) {
@@ -455,6 +479,14 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
     shift = shift * (1.0 - held);
     st3(state, s + D_LAG, shift);
     let root = plan + shift;
+    // (For `trace`: the cap's drop, the share held, the body's centre from
+    // the plan's in the heading's frame, the feet's load.)
+    let pr = s + PROBE;
+    probe(state, pr, 0, drop);
+    probe(state, pr, 1, held);
+    probe3(state, pr, 2, q_rot(q_conj(qyaw), bd.com - coff_p - plan));
+    probe(state, pr, 5, bd.load);
+    probe3(state, pr, 6, q_rot(q_conj(qyaw), coff_p - coff_m));
 
     // --- spine (creature::spine): flexed and bent by the feet's spread, into the turn --------
     var rel: array<vec3<f32>, NFEET>;

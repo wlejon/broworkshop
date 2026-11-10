@@ -93,7 +93,9 @@ await test('the text tools: score, sweep, kinks, trace', async () => {
     const { runScenario, PROBE_N } = await import('/app/lab/run.js');
     const rec = runScenario(await loadCreature('bunny'), 'idle');
     eq(rec.probe && rec.probe.length, rec.steps * PROBE_N, 'the probe slice recorded every step');
-    eq(runScenario(await loadCreature('hexa'), 'idle').probe, null, 'a rig without one records none');
+    // (Every creature's rig reserves one now, the hexa's the last.)
+    const hx = runScenario(await loadCreature('hexa'), 'idle');
+    eq(hx.probe && hx.probe.length, hx.steps * PROBE_N, 'and the hexa\'s');
 });
 
 test('edit -> sheet in seconds', () => {
