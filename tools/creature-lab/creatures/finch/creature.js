@@ -2,7 +2,7 @@
 // tail's tip, brown with a chestnut cap, a grey cheek and a buff breast.
 // It hops with both feet together and a flight between hops, glances about
 // in quick turns of the head, pecks at the ground, settles onto its belly
-// to rest, and flutters its wings when startled. No reference behind it;
+// to rest, and flicks its folded wings and tail when startled. No reference behind it;
 // the lab judges it by the finder, form and natural.
 //
 // The lab's walk, trot and gallop are its slow, quick and fast hopping

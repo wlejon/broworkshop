@@ -347,8 +347,10 @@ falling freely. The folded wings are held to the body outside the startle;
 sprung, a landing flings them open. Its head glances: quick turns to a new
 side every so often, held between, toward the gaze when there is one. The
 tail cocks up as it lands and settles through the flight after. Foraging, it leans over and pecks in quick jabs.
-Resting, it settles onto its belly. Startled, it crouches and flutters its
-wings, then stands alert. Its face draws a black eye in a pale ring and a
+Resting, it settles onto its belly. Startled, it crouches and flicks its
+folded wings and its tail (`WING_FLICK`, `TAIL_FLICK`), then stands alert.
+Its hops are quick and low (`HOP_F` 5.5 a second and more with speed: about
+0.1 s in the air, the body rising 2 cm). Its face draws a black eye in a pale ring and a
 stripe from the bill through the eye.
 
 A creature can carry its own motion oracle: its def's `motion(rec, series,

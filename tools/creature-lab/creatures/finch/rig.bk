@@ -19,7 +19,7 @@
 //
 // Foraging it leans forward and pecks at the ground in quick jabs; resting
 // (the lab's `lie`) it settles onto its belly, the legs folded under, the
-// head drawn in; startled it crouches and flutters its wings, then stands
+// head drawn in; startled it crouches and flicks its folded wings, then stands
 // alert, the head up.
 import creature::common::*;
 import creature::contract::*;
@@ -75,8 +75,10 @@ pub const STATE: i32 = PROBE + PROBE_N;
 
 @knob const LAYERS: f32 = 1.0;       // the motion layers' share (0: the rig's plan as it is)
 @knob const SOFT_REACH: f32 = 0.95;  // share of a leg's reach where its IK eases the reach in
-@knob const HOP_F: f32 = 3.2;       // hops a second barely moving
-@knob const HOP_FV: f32 = 1.2;       //   and more per m/s
+// (Quick and low, as a bird this small hops: at 3 a second it was 0.18 s in
+// the air and rose 5 cm, a bouncing ball's hop.)
+@knob const HOP_F: f32 = 5.5;       // hops a second barely moving
+@knob const HOP_FV: f32 = 1.5;       //   and more per m/s
 @knob const TUCK: f32 = 0.3;       // share of the hip's height the feet are drawn up in a flight
 @knob const ROLL: f32 = 0.8;         // rad the toes stand up as the feet leave them
 @knob const CURL: f32 = 0.3;         // the toes' limb angle curled under in a flight (0: hanging)
