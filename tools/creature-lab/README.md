@@ -105,7 +105,8 @@ planted hooves hold, and a hoof the posed leg hung short of last step
 rather than dragging its hoof off it. Trotting, its legs are springs
 (`TROT_SPRING`), and a swinging hoof's mark is no further ahead than the leg
 will reach from where its girdle will be when it lands (`LAND_REACH`,
-`LAND_WALK`). A leap or a bound is planned at the hips: the crouch and the
+`LAND_WALK`; never nearer than `LAND_MIN` of the leg, for ground that falls
+away ahead). A leap or a bound is planned at the hips: the crouch and the
 landing start from where the body is, the body's centre follows the plan by
 the offset its pose has (turned by the leap's pitch, `COFF_W`), the path
 takes the body's own speed at the take-off, and the legs' flexion is taken

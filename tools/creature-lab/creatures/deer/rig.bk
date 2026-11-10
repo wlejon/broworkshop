@@ -126,7 +126,8 @@ const CAP_SOFT: f32 = 0.01;      // m over which one reach limit hands over to a
 @knob const TUCK_FORE: f32 = 0.24;
 const GUARD_RATE: f32 = 20.0;  // /s the reach guard's hold eases at
 @knob const LEAP_AHEAD: f32 = 0.5;  // share of the hind feet's last stance before a leap they land ahead of the hips by
-@knob const SPENT: f32 = 1.5;      // steps of the take-off's rise before its full length a pushing hind leg lets go
+@knob const LAND_MIN: f32 = 0.3;   // of its length a landing hoof's mark may always be ahead of its girdle
+@knob const SPENT: f32 = 1.5;     // steps of the take-off's rise before its full length a pushing hind leg lets go
 @knob const COFF_W: f32 = 20.0;    // 1/s the leap's centre follows its pose's own offset
 @knob const LAND_LEAD: f32 = 0.17; // leg times from a leap's touchdown to the hoof's mid-stance
 
@@ -558,7 +559,7 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
                 // not outrun it.)
                 // (Never nearer than half its length: down a slope the ground
                 // ahead lies further below the girdle than the leg is long.)
-                let hml = max(mix(LAND_REACH, LAND_WALK, gw.x) * sqrt(max(rl * rl - dyl * dyl, 0.0)), 0.5 * rl);
+                let hml = max(mix(LAND_REACH, LAND_WALK, gw.x) * sqrt(max(rl * rl - dyl * dyl, 0.0)), LAND_MIN * rl);
                 let tv = vec2<f32>(target.x - top_l.x, target.z - top_l.z);
                 let tl = length(tv);
                 if (tl > hml && tl > 1e-4) {
