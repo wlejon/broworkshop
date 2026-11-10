@@ -101,10 +101,11 @@ const SETTLE_T: f32 = 0.16;
 const WITHERS_Z: f32 = 0.18;     // hips (pelvis head) to withers, along the back
 const CAP_FADE: f32 = 0.06;      // m a coming or going foot's reach limit is slackened by
 const CAP_SOFT: f32 = 0.003;     // m over which one reach limit hands over to another
-@knob const SWING_FOLD_F: f32 = 0.6;   // of its reach a swinging fore foot stays from its girdle at least
+@knob const FORE_CARRY: f32 = 0.97;   // of its reach a swinging fore foot is carried from its girdle at most
+@knob const SWING_FOLD_F: f32 = 0.6;  // of its reach a swinging fore foot stays from its girdle at least
 @knob const SWING_FOLD_H: f32 = 0.45;  //   and a hind foot (sitting, 0.57)
 @knob const LEG_BAND: f32 = 0.15;    // rad a leg's joint eases into the ends of its range over
-const SWING_FOLD_BAND: f32 = 0.015;  // m over which that floor eases in
+@knob const SWING_FOLD_BAND: f32 = 0.015;  // m over which that floor eases in
 @knob const HOP_ARC: f32 = 0.045;     // m the hips vault over a hop's hind swing
 @knob const SHUFFLE_FULL: f32 = 0.2;  // m/s at and under which it shuffles
 @knob const SHUFFLE_TOP: f32 = 0.7;   //   and by which it hops
@@ -374,7 +375,11 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
                 // the same as one whose lift falls on one).
                 lift = true;
                 lift_t = clamp((1.0 - duty) / max(freq, 0.1), 0.07, 0.5);
-                u0 = clamp(((ph - duty) / max(freq, 0.1) - dt) / lift_t, 0.0, 0.5);
+                // (No further in than a step is long: setting off, the clock
+                // stood well past three feet's lifts, and they began their
+                // swings half way through them, 15 mm off the ground in one
+                // step.)
+                u0 = clamp(((ph - duty) / max(freq, 0.1) - dt) / lift_t, 0.0, dt / lift_t);
                 kind = 0.0;
             } else if (moving && (stray > REACH_TRIG || over)) {
                 // Out of reach early: step now, landing on the clock's beat.
@@ -391,7 +396,8 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
                 state[k + L_U] = u0;
                 state[k + L_T] = lift_t;
                 state[k + L_KIND] = kind;
-                state[k + L_SINCE] = select_f(moving, toe_roll(ph, duty), 0.0);
+                let lift_w = mix(0.12, min(max(0.12, 0.1 * freq), 0.6 * duty), hw);
+                state[k + L_SINCE] = select_f(moving, smooth01((stance_phase(ph, duty) - (duty - lift_w)) / lift_w), 0.0);
             }
         }
         var u: f32 = 0.0;
@@ -445,7 +451,14 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
             // has no corner.
             let rmax = reach_of(l);
             let dy = top.y - toe.y;
-            let hmax = sqrt(max(rmax * rmax - dy * dy, 0.0));
+            // (A fore foot short of all of it: carried out to its leg's whole
+            // length it landed on a straight leg, and the elbow, which takes
+            // up the first of the body's travel over it, turned forty degrees
+            // in the two steps after.)
+            // (Up to an easy bound: flat out, the fore legs take the landing
+            // at their length.)
+            let rcar = rmax * select_f(hind, 1.0, mix(FORE_CARRY, 1.0, smooth01((veff - 2.2) / 1.5)));
+            let hmax = sqrt(max(rcar * rcar - dy * dy, 0.0));
             let hv2 = vec2<f32>(toe.x - top.x, toe.z - top.z);
             let hl = length(hv2);
             if (hl > 1e-4 && !held) {
@@ -824,7 +837,12 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
         let par_pitch = atan2(fw.y, length(vec2<f32>(fw.x, fw.z)));
         var ah = rest_angle(b0 + nb - 1) + slope - par_pitch;
         let roll_k = select_f(hind, 0.35, 0.5);
-        if (planted && moving) { ah -= roll_k * toe_roll(ph, duty); }
+        // (Over a tenth of a second at least: a hop's stance is short, and
+        // in an eighth of its cycle the paw turned twenty degrees in three
+        // steps, against the way the leg was carrying it.)
+        // (Hopping: a bound's stance is four steps long and has no room for it.)
+        let roll_w = mix(0.12, min(max(0.12, 0.1 * freq), 0.6 * duty), hw);
+        if (planted && moving) { ah -= roll_k * smooth01((stance_phase(ph, duty) - (duty - roll_w)) / roll_w); }
         var fold: f32 = 0.0;
         if (!planted) {
             if (state[k + L_KIND] < 0.5) { ah -= roll_k * state[k + L_SINCE] * (1.0 - smooth01(u / 0.3)); }
