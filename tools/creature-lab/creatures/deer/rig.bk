@@ -702,7 +702,10 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
                 // ground at the end of its leg's reach, inside the cap's
                 // band, and capped from its first step in the air it jumped
                 // 7 mm forward in that step, at every hind lift.)
-                let cap_n = soft_cap(hl, hmax, select_f(in_leap, 0.01, CAP_BAND));
+                // (Half as wide again off a walk: a galloping hind hoof
+                // swung out to its leg's reach at 4 cm a step and stopped
+                // there in two, the hock with it.)
+                let cap_n = soft_cap(hl, hmax, select_f(in_leap, 0.01, CAP_BAND * mix(1.5, 1.0, gw.x)));
                 // (At a walk's pace: faster, it is capped from the first,
                 // for there the body outruns a hoof left a moment longer,
                 // shuts its leg's joints and draws it through the ground.)
