@@ -29,7 +29,7 @@ const EYE_R: f32 = 0.0052;
 const BILL_Y: f32 = 0.904;
 const BILL_Z: f32 = 0.258;
 
-pub fn face(p: vec3<f32>, foot: f32, s: mesh::Surface) -> mesh::Surface {
+pub fn face(p: vec3<f32>, foot: f32, look: vec4<f32>, s: mesh::Surface) -> mesh::Surface {
     var out = s;
     let w = max(foot, 0.0002);
     let ax = abs(p.x);
@@ -37,7 +37,7 @@ pub fn face(p: vec3<f32>, foot: f32, s: mesh::Surface) -> mesh::Surface {
     var rough = s.roughness;
     let q = vec2<f32>(p.y, p.z);
 
-    if (ax > EYE_X - 0.006 && p.z > 0.19 && p.z < 0.28 && abs(p.y - EYE.y) < 0.025) {
+    if (ax > EYE_X - 0.006 && p.z > 0.19 && p.z < 0.28 && abs(p.y - EYE.x) < 0.025) {
         // (EYE is (y, z).) The lores: a strip from the eye's front down to
         // the bill's base.
         let t = clamp((p.z - EYE.y) / (BILL_Z - EYE.y), 0.0, 1.0);
@@ -56,9 +56,24 @@ pub fn face(p: vec3<f32>, foot: f32, s: mesh::Surface) -> mesh::Surface {
         let open = inside(d, w);
         let k = r / EYE_R;
         var iris = mix(lin(vec3<f32>(0.95, 0.85, 0.25)), lin(vec3<f32>(0.80, 0.62, 0.12)), smoothstep(0.5, 1.0, k));
-        iris = mix(iris, lin(vec3<f32>(0.01, 0.01, 0.01)), inside(r - 0.45 * EYE_R, w));
+        // The pupil: forward and down in the eye as it looks along the bill
+        // (look.y under 0), and small when it stares (look.z under 0).
+        let pc = EYE + vec2<f32>(look.y, -look.y) * 0.7 * EYE_R;
+        let pr = EYE_R * mix(0.45, 0.27, clamp(-look.z / 0.8, 0.0, 1.0));
+        iris = mix(iris, lin(vec3<f32>(0.01, 0.01, 0.01)), inside(length(q - pc) - pr, w));
+        // The sky's light, high and forward.
+        iris = mix(iris, vec3<f32>(1.0), 0.9 * inside(length(q - EYE - vec2<f32>(0.42, 0.3) * EYE_R) - 0.16 * EYE_R, w));
+        // The third eyelid (look.w): pale and half clear, across from the front.
+        let front = (p.z - EYE.y) / EYE_R;
+        let mem = inside((1.0 - 2.0 * look.w - front) * EYE_R, w) * step(0.001, look.w);
+        iris = mix(iris, lin(vec3<f32>(0.70, 0.72, 0.74)), 0.75 * mem);
         c = mix(c, iris, open);
-        rough = mix(rough, 0.05, open);
+        rough = mix(rough, mix(0.05, 0.3, mem), open);
+        // The lower lid (look.z over 0): the face's feathers, up over the eye.
+        let shut = clamp(look.z, 0.0, 1.0);
+        let lid = open * inside(((p.y - EYE.x) / EYE_R - (2.0 * shut - 1.0)) * EYE_R, w) * step(0.001, shut);
+        c = mix(c, s.base_color * 0.9, lid);
+        rough = mix(rough, s.roughness, lid);
     }
     out.base_color = c;
     out.roughness = rough;

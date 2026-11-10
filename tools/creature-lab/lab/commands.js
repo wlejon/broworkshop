@@ -44,7 +44,7 @@ export const HELP = `creature-lab <command> <creature> [scenario ...] [options]
                                            view, slit-scans through head, withers and tail tip
                                            (--from <s> --to <s>: the window, 1.5 s mid-run by default;
                                            --frames <n>)
-  watch       <creature> <scenario> --view side|front|back|front-quarter|back-quarter|top
+  watch       <creature> <scenario> --view side|front|back|front-quarter|back-quarter|top|face|face-side
                                            the sheet a motion is judged by eye in: one run from one view in
                                            at most 6 consecutive frames, the creature filling each; one
                                            still camera, the frame before outlined in each, a plumb line

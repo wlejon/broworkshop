@@ -45,6 +45,12 @@ export const WATCH_VIEWS = {
     'front-quarter': { yaw: 40, pitch: 10 },
     'back-quarter': { yaw: 140, pitch: 10 },
     top: { yaw: 0, pitch: 89 },
+    // The face, close: each frame's camera is on the head where it is in
+    // that frame (so no outline of the frame before, and no lines), a little
+    // to its left of ahead of where the creature heads.
+    // (`face-side` for eyes set on the sides of a head.)
+    face: { yaw: 22, pitch: 4, face: true },
+    'face-side': { yaw: 62, pitch: 4, face: true },
 };
 
 const GHOST = [31, 111, 208];
@@ -148,8 +154,13 @@ export function watchSheet(rec, { path, view = 'side', frames = WATCH.frames, fr
     }
     const mid = lo.map((v, k) => (v + hi[k]) / 2);
     const yw =(V.yaw * Math.PI) / 180, top = V.pitch > 60;
-    const across = (Math.abs(Math.cos(yw)) * (hi[0] - lo[0]) + Math.abs(Math.sin(yw)) * (hi[2] - lo[2])) / 2;
-    const up = top ? (Math.abs(Math.sin(yw)) * (hi[0] - lo[0]) + Math.abs(Math.cos(yw)) * (hi[2] - lo[2])) / 2 : (hi[1] - lo[1]) / 2;
+    // (The head: the bone its face bones hang from, or the one its head is tracked on.)
+    const faceBone = skel.bones.find((b) => b.face), headTrack = skel.tracks.find((t) => t.name === 'head');
+    const hb = V.face ? skel.bones[faceBone ? faceBone.parentIndex : headTrack ? headTrack.boneIndex : 0] : null;
+    const headAt = (P) => { const a = boneHead(P, 0, hb.index), b = boneTail(P, 0, hb); return a.map((v, k) => 0.5 * (v + b[k])); };
+    let across = (Math.abs(Math.cos(yw)) * (hi[0] - lo[0]) + Math.abs(Math.sin(yw)) * (hi[2] - lo[2])) / 2;
+    let up = top ? (Math.abs(Math.sin(yw)) * (hi[0] - lo[0]) + Math.abs(Math.cos(yw)) * (hi[2] - lo[2])) / 2 : (hi[1] - lo[1]) / 2;
+    if (hb) { up = Math.max(0.62 * hb.length, 0.05 * (hi[1] - lo[1])); across = 1.25 * up; }
     // The frames are shaped to what they hold (a tall creature from the
     // front gets tall frames) and laid out in the columns that draw it
     // largest. (The skin stands off the bones: a tenth more, and no frame
@@ -173,6 +184,7 @@ export function watchSheet(rec, { path, view = 'side', frames = WATCH.frames, fr
     let prev = maskOf(cam, cw, ch);
     const shots = poses.map((P) => {
         setPose(creature, P);
+        if (hb) return capture(orbitView(headAt(P), V.yaw, V.pitch, dist, fov), cw, ch);
         const img = capture(cam, cw, ch);
         const m = maskOf(cam, cw, ch);
         outline(img, prev, cw, ch, GHOST);
@@ -194,11 +206,11 @@ export function watchSheet(rec, { path, view = 'side', frames = WATCH.frames, fr
     rect(g, 0, 0, W, H, '#ecebe6');
     text(g, `${creature.label} · ${rec.scenario.name} · watch · ${view}`, 12, 30, { size: 22, weight: 700 });
     text(g, `${rec.scenario.about || ''} — ${cyc ? `cycle ${cyc.period.toFixed(3)} s, ` : ''}${speed}, a frame every ${(1000 * F.every).toFixed(0)} ms; one camera, ${turns ? 'staying where the creature began (it turns on the spot)' : 'standing where the creature does at its steady pace'}`, 12, 52, { size: 14, color: DIM });
-    text(g, 'blue outline: the frame before · plumb line: where it stands · level lines: its hips and head at rest · ▼ foot down △ up', 12, 70, { size: 13, color: DIM });
+    text(g, hb ? 'each frame from a camera on the head where it is then: the eyes, the lids, the ears' : 'blue outline: the frame before · plumb line: where it stands · level lines: its hips and head at rest · ▼ foot down △ up', 12, 70, { size: 13, color: DIM });
     F.frames.forEach((f, i) => {
         const x0 = 6 + (i % cols) * (cw + GAP), y0 = TM + Math.floor(i / cols) * (ch + LAB);
         g.drawImage(toCanvas(shots[i]), x0, y0);
-        const lg = !top && logAt(f.step);
+        const lg = !top && !hb && logAt(f.step);
         if (lg) {
             // The log, end on (a side view) as the circle it is.
             const m = project(cam, cw, ch, lg.mid), t = project(cam, cw, ch, lg.top);
@@ -209,7 +221,7 @@ export function watchSheet(rec, { path, view = 'side', frames = WATCH.frames, fr
             g.strokeStyle = 'rgba(80,55,30,0.9)'; g.lineWidth = 2; g.stroke();
             g.restore();
         }
-        if (!top) {
+        if (!top && !hb) {
             const a = project(cam, cw, ch, [0, 0, 0]), b = project(cam, cw, ch, [0, hi[1] * 1.05, 0]);
             line(g, x0 + a.x, y0 + a.y, x0 + b.x, y0 + b.y, 'rgba(20,20,20,0.55)', 1, [5, 5]);
             // (Two lines close together, as a low creature's are: the lower

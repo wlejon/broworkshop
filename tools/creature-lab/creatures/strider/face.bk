@@ -3,6 +3,10 @@
 // left, y up, z forward, metres). `foot` is a pixel's size there; every
 // edge is softened over it.
 //
+// `look` is what its face bones say (lab/skin.bk's look_of): where the eyes
+// look (x to its left, y up), how far the lids are shut (under 0: wide) and
+// their tilt. The rig moves them (rig.bk, "the eyes").
+//
 // What it shows, looking ahead:
 //   eyes    large and set forward on the eyeball masses: an amber iris
 //           about a wide black pupil, glossy, a catch-light high on each,
@@ -34,7 +38,7 @@ const HEAD_AT: vec3<f32> = vec3<f32>(0.0, 1.03, 0.105);
 const HEAD_TO: vec3<f32> = vec3<f32>(0.0, 1.0, 0.245);
 const HEAD_S: f32 = 1.24;
 
-pub fn face(p0: vec3<f32>, foot: f32, s: mesh::Surface) -> mesh::Surface {
+pub fn face(p0: vec3<f32>, foot: f32, look: vec4<f32>, s: mesh::Surface) -> mesh::Surface {
     var out = s;
     let p = HEAD_AT + (p0 - HEAD_TO) / HEAD_S;
     let w = max(foot / HEAD_S, 0.0003);
@@ -44,25 +48,45 @@ pub fn face(p0: vec3<f32>, foot: f32, s: mesh::Surface) -> mesh::Surface {
     let q = vec2<f32>(ax, p.y);
 
     if (p.z > 0.15 && abs(p.y - EYE.y) < 0.045 && abs(ax - EYE.x) < 0.045) {
-        let e = (q - EYE) / EYE_R;
+        // The opening: a little larger with the eyes wide.
+        let shut = clamp(look.z, 0.0, 1.0);
+        let R = EYE_R * (1.0 + 0.12 * max(-look.z, 0.0));
+        let e = (q - EYE) / R;
         let k = length(e);
-        let d = (k - 1.0) * EYE_R.x;
+        let d = (k - 1.0) * R.x;
         // The dark rim, drawn out to a point at the outer corner.
         let corner = length((q - EYE - vec2<f32>(0.021, 0.006)) / vec2<f32>(0.012, 0.0045)) - 1.0;
         let rim = max(inside(d - 0.0028, w), inside(corner * 0.0045, w));
         c = mix(c, lin(vec3<f32>(0.07, 0.045, 0.035)), rim);
         rough = mix(rough, 0.5, rim);
-        let open = inside(d, w);
-        var iris = mix(lin(vec3<f32>(0.80, 0.50, 0.12)), lin(vec3<f32>(0.42, 0.20, 0.05)), smoothstep(0.5, 0.98, k));
-        iris = mix(iris, lin(vec3<f32>(0.012, 0.008, 0.008)), inside((k - 0.62) * EYE_R.x, w));
-        iris = mix(iris, lin(vec3<f32>(0.06, 0.03, 0.02)), smoothstep(0.88, 1.0, k));
+        // The lids: the upper comes down and the lower a little up, to
+        // meet below the eye's middle in a line that droops at its ends;
+        // tilted, the inner corners come down (e.x is outward).
+        let yu = mix(1.25, -0.42, shut) + 0.9 * look.w * e.x - 0.16 * shut * e.x * e.x;
+        let yl = mix(-1.25, -0.42, shut * shut) - 0.16 * shut * e.x * e.x;
+        let between = inside((e.y - yu) * R.y, w) * inside((yl - e.y) * R.y, w);
+        let open = inside(d, w) * between;
+        // The eye turns in its opening: the iris and pupil go with where it
+        // looks, and what they leave of the eyeball is dark.
+        let ei = e - 0.8 * vec2<f32>(sign(p.x) * look.x, look.y);
+        let ki = length(ei);
+        var iris = mix(lin(vec3<f32>(0.80, 0.50, 0.12)), lin(vec3<f32>(0.42, 0.20, 0.05)), smoothstep(0.5, 0.98, ki));
+        iris = mix(iris, lin(vec3<f32>(0.012, 0.008, 0.008)), inside((ki - 0.62) * R.x, w));
+        iris = mix(iris, lin(vec3<f32>(0.06, 0.03, 0.02)), smoothstep(0.88, 1.0, max(k, ki)));
         // The upper lid's shade.
-        iris = iris * mix(1.0, 0.45, smoothstep(0.2, 1.0, e.y));
-        // The catch-light: on the same side of both eyes, high.
+        iris = iris * mix(1.0, 0.45, smoothstep(-0.8, 0.0, e.y - min(yu, 1.0)));
+        // The catch-light: on the same side of both eyes, high (it is the
+        // sky's, and stays where it is as the eye turns under it).
         let hl = length(vec2<f32>(p.x, p.y) - vec2<f32>(sign(p.x) * EYE.x + 0.006, EYE.y + 0.008)) - 0.0042;
         iris = mix(iris, vec3<f32>(1.0), 0.95 * inside(hl, w));
         c = mix(c, iris, open);
         rough = mix(rough, 0.05, open);
+        // A lid is the coat's colour, shaded, behind a dark edge where it
+        // meets the eye.
+        let over = inside(d, w) * (1.0 - inside((e.y - yu - 0.13) * R.y, w) * inside((yl - 0.09 - e.y) * R.y, w));
+        let fur = lin(vec3<f32>(0.74, 0.34, 0.10)) * mix(0.78, 1.0, smoothstep(-1.0, 1.0, e.y));
+        c = mix(c, fur, over);
+        rough = mix(rough, s.roughness, over);
     }
 
     if (p.z > 0.2) {

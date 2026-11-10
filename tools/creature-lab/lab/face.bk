@@ -6,6 +6,6 @@
 module creature::face;
 import mesh;
 
-pub fn face(p: vec3<f32>, foot: f32, s: mesh::Surface) -> mesh::Surface {
+pub fn face(p: vec3<f32>, foot: f32, look: vec4<f32>, s: mesh::Surface) -> mesh::Surface {
     return s;
 }

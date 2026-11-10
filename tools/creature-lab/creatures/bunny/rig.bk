@@ -692,6 +692,25 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
     let hl = q_to_xyz(q_mul(q_conj(T.q[B_NECK]), qh)) + vec3<f32>(chew, 0.0, 0.0);
     T.q[B_HEAD] = q_mul(T.q[B_NECK], q_xyz(soft_xyz(hl, B_HEAD, 0.3)));
     T.p[B_HEAD] = head_of(T, B_HEAD);
+    // The eyes: a rabbit sees nearly all round without moving them and
+    // hardly blinks (once in ten seconds or so, quickly). It squints when it
+    // is at ease, eating or lying; startled the eye bulges and rolls back
+    // toward what it fears, and its white shows.
+    {
+        let fear = select_f(st_t >= 0.0, 1.0 - smooth01((st_t - 1.0) / 1.5), 0.0);
+        let roll = clamp(0.6 * (gyaw - gyaw_s), -0.25, 0.25) + 0.05 * noise1(clock * 0.23, seed, 41.0);
+        T.q[B_GAZE] = q_mul(T.q[B_HEAD], q_xyz(clamp_xyz(vec3<f32>(0.03 * noise1(clock * 0.17, seed, 42.0), roll - 0.22 * fear, 0.0), B_GAZE)));
+        T.p[B_GAZE] = head_of(T, B_GAZE);
+        let bt = clock / 10.5 + seed * 2.3;
+        let bk = floor(bt);
+        let bu = ((bt - bk) - 0.1 - 0.7 * hash01(bk * 3.1 + seed)) * 10.5;
+        var blink: f32 = 0.0;
+        if (bu > 0.0 && bu < 0.16) { blink = smooth01(bu / 0.05) * (1.0 - smooth01((bu - 0.06) / 0.1)); }
+        let ease = max(0.45 * graze, 0.7 * lie) * (1.0 - alert);
+        let shut = clamp(mix(0.04 + ease - 0.8 * max(alert, fear), 1.0, blink), -0.8, 1.0);
+        T.q[B_LID] = q_mul(T.q[B_HEAD], q_xyz(vec3<f32>(asin(shut), 0.0, 0.0)));
+        T.p[B_LID] = head_of(T, B_LID);
+    }
     // The nose twitches in bursts (faster while it eats or is alert).
     let burst = smooth01(2.0 * noise1(clock / 1.7, seed, 7.0) + 0.4 + 0.6 * graze + 0.5 * alert);
     let tw = sin(TAU * mix(5.0, 7.0, alert) * clock);

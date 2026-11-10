@@ -8,7 +8,7 @@
 module hook;
 import mesh;
 import scene;
-from creature::skeleton import NB;
+from creature::skeleton import NB, FACE_GAZE, FACE_LID, FACE_HEAD;
 from creature::face import face;
 
 @binding(4, 14) var dq: read_buffer<vec4<f32>>;
@@ -22,7 +22,29 @@ fn rotate(q: vec4<f32>, v: vec3<f32>) -> vec3<f32> {
 
 pub fn fragment(v: mesh::Vertex, s: mesh::Surface) -> mesh::Surface {
     let rest = v.v0.xyz;
-    return face(rest, max(length(dpdx(rest)), length(dpdy(rest))), s);
+    return face(rest, max(length(dpdx(rest)), length(dpdy(rest))), v.v1, s);
+}
+
+fn conj(q: vec4<f32>) -> vec4<f32> { return vec4<f32>(-q.xyz, q.w); }
+
+fn qmul(a: vec4<f32>, b: vec4<f32>) -> vec4<f32> {
+    return vec4<f32>(a.w * b.xyz + b.w * a.xyz + cross(a.xyz, b.xyz), a.w * b.w - dot(a.xyz, b.xyz));
+}
+
+// What the face's bones say, as lab/skin.bk's look_of.
+fn look_of(base: i32) -> vec4<f32> {
+    var look = vec4<f32>(0.0);
+    if (FACE_GAZE >= 0) {
+        let g = rotate(qmul(conj(dq[2 * (base + FACE_HEAD)]), dq[2 * (base + FACE_GAZE)]), vec3<f32>(0.0, 0.0, 1.0));
+        look.x = g.x;
+        look.y = g.y;
+    }
+    if (FACE_LID >= 0) {
+        let ql = qmul(conj(dq[2 * (base + FACE_HEAD)]), dq[2 * (base + FACE_LID)]);
+        look.z = -rotate(ql, vec3<f32>(0.0, 0.0, 1.0)).y;
+        look.w = rotate(ql, vec3<f32>(1.0, 0.0, 0.0)).y;
+    }
+    return look;
 }
 
 pub fn vertex(v_in: mesh::Vertex) -> mesh::Vertex {
@@ -32,6 +54,7 @@ pub fn vertex(v_in: mesh::Vertex) -> mesh::Vertex {
     let wt = skin[2 * k];
     let ix = skin[2 * k + 1];
     let base = order[v.instance_index] * NB;
+    v.v1 = look_of(base);
     var qr = vec4<f32>(0.0);
     var qd = vec4<f32>(0.0);
     var q0 = vec4<f32>(0.0);

@@ -41,7 +41,7 @@ const EYE: vec3<f32> = vec3<f32>(0.050, 1.313, 0.790);
 const EYE_HALF: vec2<f32> = vec2<f32>(0.019, 0.0115);
 const EYE_SLANT: f32 = 0.16;
 
-pub fn face(p: vec3<f32>, foot: f32, s: mesh::Surface) -> mesh::Surface {
+pub fn face(p: vec3<f32>, foot: f32, look: vec4<f32>, s: mesh::Surface) -> mesh::Surface {
     var out = s;
     let w = max(foot, 0.0003);
     let ax = abs(p.x);
@@ -56,10 +56,17 @@ pub fn face(p: vec3<f32>, foot: f32, s: mesh::Surface) -> mesh::Surface {
         let u = p.z - EYE.z;
         let v = p.y - EYE.y + EYE_SLANT * u;
         // The almond: an ellipse whose ends are drawn to points.
+        // (Wide, it opens a quarter taller.)
+        let shut = clamp(look.z, 0.0, 1.0);
+        let wide = max(-look.z, 0.0);
         let a = u / EYE_HALF.x;
-        let h = EYE_HALF.y * sqrt(max(0.0, 1.0 - a * a)) * (1.0 - 0.18 * a * a);
+        let h = EYE_HALF.y * (1.0 + 0.3 * wide) * sqrt(max(0.0, 1.0 - a * a)) * (1.0 - 0.18 * a * a);
         let d = abs(v) - h;
-        let open = inside(max(d, abs(u) - EYE_HALF.x), w) * step(0.04, ax - 0.0);
+        // The lids: the upper comes down over the eye, the lower a little
+        // up to meet it under the middle.
+        let lids = inside(v - h * (1.0 - 1.6 * shut), w) * inside(-h * (1.0 - 0.4 * shut) - v, w);
+        let almond = inside(max(d, abs(u) - EYE_HALF.x), w) * step(0.04, ax - 0.0);
+        let open = almond * lids;
         // Pale ring, then the black rim, then the eye itself.
         let ring = inside(d - 0.006, 0.004 + w) * inside(abs(u) - EYE_HALF.x - 0.007, 0.004 + w);
         c = mix(c, mix(c, white, 0.55), ring);
@@ -67,11 +74,25 @@ pub fn face(p: vec3<f32>, foot: f32, s: mesh::Surface) -> mesh::Surface {
         c = mix(c, black, rim);
         rough = mix(rough, 0.45, rim);
         // The iris, nearly black-brown, a darker pupil across its middle.
+        // (The eye turns under the lids: a turn to the deer's left rolls the
+        // left eye back and the right eye forward. Calm, the iris fills the
+        // opening; wide, or rolled far, the white shows at a corner.)
+        let g = vec2<f32>(-sign(p.x) * look.x, look.y) * 0.02;
+        let ui = u - g.x;
+        let vi = v - g.y;
         var iris = lin(vec3<f32>(0.10, 0.065, 0.04));
-        let pupil = inside(abs(v) - 0.0035, w) * inside(abs(u) - 0.0075, w);
+        let pupil = inside(abs(vi) - 0.0035, w) * inside(abs(ui) - 0.0075, w);
         iris = mix(iris, lin(vec3<f32>(0.012, 0.01, 0.01)), pupil);
+        let ball = length(vec2<f32>(ui, vi) / vec2<f32>(EYE_HALF.x * (1.06 - 0.22 * wide), 0.02)) - 1.0;
+        iris = mix(lin(vec3<f32>(0.62, 0.58, 0.52)), iris, inside(ball * 0.01, w));
+        // The sky's light on it, high and forward.
+        iris = mix(iris, vec3<f32>(1.0), 0.85 * inside(length(vec2<f32>(u - 0.005, v - 0.0045)) - 0.0021, w));
         c = mix(c, iris, open);
         rough = mix(rough, 0.04, open);
+        // A lid: the coat about the eye, darker, behind its black edge.
+        let lid_over = almond * (1.0 - inside(v - h * (1.0 - 1.6 * shut) - 0.0022, w) * inside(-h * (1.0 - 0.4 * shut) - 0.0016 - v, w));
+        c = mix(c, mix(s.base_color, black, 0.45), lid_over);
+        rough = mix(rough, s.roughness, lid_over);
         // The preorbital gland: a dark slit forward and down from the front corner.
         let g = segment(vec2<f32>(p.z, p.y), vec2<f32>(EYE.z + EYE_HALF.x + 0.002, EYE.y - 0.0045),
             vec2<f32>(EYE.z + EYE_HALF.x + 0.014, EYE.y - 0.013));

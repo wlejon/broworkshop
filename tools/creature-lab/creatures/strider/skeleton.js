@@ -83,6 +83,12 @@ export const bones = [
       limits: { x: [-50, 50], y: [-60, 60], z: [-30, 30] }, mass: 2.2 },
     ...ear(L, 'L'),
     ...ear(R, 'R'),
+    // The face (lab/skeleton.js): where the eyes look, and the lids' hinge
+    // (x shuts them, under 0 opens them wide; z tilts them).
+    { name: 'gaze', parent: 'head', face: 'gaze', head: [0, 1.14, 0.33], tail: [0, 1.14, 0.36],
+      limits: { x: [-35, 35], y: [-40, 40], z: [-1, 1] } },
+    { name: 'lid', parent: 'head', face: 'lid', head: [0, 1.16, 0.33], tail: [0, 1.16, 0.35],
+      limits: { x: [-60, 90], y: [-1, 1], z: [-30, 30] } },
     ...arm(L, 'L'),
     ...arm(R, 'R'),
     ...leg(L, 'L'),

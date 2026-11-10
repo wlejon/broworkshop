@@ -37,7 +37,7 @@ const EYE_HALF: vec2<f32> = vec2<f32>(0.0102, 0.0094);
 // The nose pad's middle (x 0) and its tip.
 const NOSE: vec2<f32> = vec2<f32>(0.1365, 0.229);
 
-pub fn face(p: vec3<f32>, foot: f32, s: mesh::Surface) -> mesh::Surface {
+pub fn face(p: vec3<f32>, foot: f32, look: vec4<f32>, s: mesh::Surface) -> mesh::Surface {
     var out = s;
     let w = max(foot, 0.0002);
     let ax = abs(p.x);
@@ -48,8 +48,11 @@ pub fn face(p: vec3<f32>, foot: f32, s: mesh::Surface) -> mesh::Surface {
 
     // The eye: an ellipse on the head's side (u along the head, v up).
     if (ax > 0.024 && abs(p.z - EYE.z) < 0.022 && abs(p.y - EYE.y) < 0.022) {
-        let u = (p.z - EYE.z) / EYE_HALF.x;
-        let v = (p.y - EYE.y) / EYE_HALF.y;
+        // (Wide, the eye bulges: its opening a seventh larger.)
+        let shut = clamp(look.z, 0.0, 1.0);
+        let wide = max(-look.z, 0.0);
+        let u = (p.z - EYE.z) / (EYE_HALF.x * (1.0 + 0.14 * wide));
+        let v = (p.y - EYE.y) / (EYE_HALF.y * (1.0 + 0.14 * wide));
         let r = sqrt(u * u + v * v);
         // r - 1 in metres, roughly: the edge's distance.
         let d = (r - 1.0) * EYE_HALF.y;
@@ -58,12 +61,29 @@ pub fn face(p: vec3<f32>, foot: f32, s: mesh::Surface) -> mesh::Surface {
         let rim = inside(d - 0.0009, w);
         c = mix(c, dark, rim);
         rough = mix(rough, 0.5, rim);
-        let open = inside(d, w);
+        // The lids close from above and below alike, to a line across the
+        // eye's middle: a squint narrows it to a slot.
+        let gap = 1.05 * (1.0 - shut);
+        let lids = inside((abs(v + 0.1 * shut) - gap) * EYE_HALF.y, w);
+        let open = inside(d, w) * lids;
+        // The eye rolls under them (a turn to its left takes the left eye
+        // back and the right forward); rolled, or wide, its white shows as
+        // a crescent at the edge it leaves.
+        let ui = u + sign(p.x) * look.x;
+        let vi = v - look.y;
+        let ri = sqrt(ui * ui + vi * vi);
         // The iris near black with a deep brown edge, the pupil black.
-        var iris = mix(lin(vec3<f32>(0.16, 0.09, 0.05)), lin(vec3<f32>(0.04, 0.025, 0.02)), inside(r - 0.8, 0.12));
-        iris = mix(iris, lin(vec3<f32>(0.006, 0.005, 0.005)), inside(r - 0.55, 0.06 + w / EYE_HALF.y));
+        var iris = mix(lin(vec3<f32>(0.16, 0.09, 0.05)), lin(vec3<f32>(0.04, 0.025, 0.02)), inside(ri - 0.8, 0.12));
+        iris = mix(iris, lin(vec3<f32>(0.006, 0.005, 0.005)), inside(ri - 0.55, 0.06 + w / EYE_HALF.y));
+        iris = mix(lin(vec3<f32>(0.80, 0.76, 0.70)), iris, inside((ri - 1.06 + 0.16 * wide) * EYE_HALF.y, w));
+        // The sky's light on it, high and forward.
+        iris = mix(iris, vec3<f32>(1.0), 0.9 * inside(length(vec2<f32>(u - 0.3, v - 0.38)) - 0.17, w / EYE_HALF.y));
         c = mix(c, iris, open);
         rough = mix(rough, 0.05, open);
+        // A lid: the coat, behind its dark edge.
+        let over = inside(d, w) * (1.0 - inside((abs(v + 0.1 * shut) - gap - 0.14) * EYE_HALF.y, w));
+        c = mix(c, s.base_color * 0.85, over);
+        rough = mix(rough, s.roughness, over);
     }
 
     // The nose and mouth, on the muzzle's front.

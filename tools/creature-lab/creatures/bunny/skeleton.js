@@ -87,6 +87,12 @@ export const bones = [
     ...frontLeg(R, 'R'),
     ...hindLeg(L, 'L'),
     ...hindLeg(R, 'R'),
+    // The face (lab/skeleton.js): where the eyes look, and the lids' hinge
+    // (x shuts them, under 0 opens them wide).
+    { name: 'gaze', parent: 'head', face: 'gaze', head: [0, 0.164, 0.178], tail: [0, 0.164, 0.186],
+      limits: { x: [-20, 20], y: [-25, 25], z: [-1, 1] } },
+    { name: 'lid', parent: 'head', face: 'lid', head: [0, 0.170, 0.178], tail: [0, 0.170, 0.184],
+      limits: { x: [-60, 90], y: [-1, 1], z: [-20, 20] } },
 ];
 
 // The feet in the order the lab reports them (Hildebrand: hind and fore of

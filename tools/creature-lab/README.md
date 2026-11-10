@@ -428,11 +428,26 @@ crowd's full level) pass each point's rest position to the fragment, and
 call the creature's `creature::face`:
 
 ```
-pub fn face(p: vec3<f32>, foot: f32, s: mesh::Surface) -> mesh::Surface
+pub fn face(p: vec3<f32>, foot: f32, look: vec4<f32>, s: mesh::Surface) -> mesh::Surface
 ```
 
 `p` is the point at rest and `foot` a pixel's size there (from its screen
-derivatives), so each edge is softened over one pixel. The marks ride the
+derivatives), so each edge is softened over one pixel. `look` is the face's
+state, from its **face bones**: a skeleton may give the head a `gaze` bone
+and a `lid` bone (`face: 'gaze' | 'lid'`, no mass, no flesh), which the rig
+turns as it turns any bone and the skin hooks read back as the turn from the
+head (`look_of`): `look.xy` where the eyes look (x to its left, y up, the
+sines of the turns), `look.z` how far the lids' hinge is turned shut (1
+shut, under 0 wide), `look.w` its tilt. What those mean is each creature's
+own, in its rig and its face: the strider's eyes dart to a new place every
+second and lead its head, blink, widen, squeeze shut in a flinch and grow
+heavy lying down; the deer's and the bunny's roll and show their whites in
+alarm; the birds' do not turn, blink with a third eyelid drawn across from
+the front (`look.w`) and shut from below when they doze; the wader's swing
+down to look along the bill, the pupils pinned. The measures of how a body
+moves leave the face bones out (an eye is meant to jump); their ranges are
+checked as any joint's. `watch --view face` (or `face-side`, for eyes on
+the sides of a head) draws them close. The marks ride the
 head however it moves, and stay sharp however coarse the mesh under them is.
 A creature without a face gets `lab/face.bk`, which leaves the skin as its
 coat paints it, and so do the crowd's coarser levels. The deer's
@@ -662,7 +677,8 @@ Every output is deterministic. A rerun writes the same bytes.
   from one view in at most six consecutive frames, shaped to the creature
   so it fills each (five to six hundred pixels tall), and refuses more: it
   is run again per view (`side`, `front`, `back`, `front-quarter`,
-  `back-quarter`, `top`) and per part of a cycle (`--from 0.4 --span 0.25`),
+  `back-quarter`, `top`; `face` and `face-side`, close on the head from a
+  camera that goes with it) and per part of a cycle (`--from 0.4 --span 0.25`),
   or per stretch of time (`--from 10.25 --to 10.6`, seconds: a moment of a
   run of several gaits, which is not in its last cycle).
   - It draws the run `kinks` and `trace` read (a steady gait for 20 s), so

@@ -54,6 +54,11 @@ export const bones = [
     ...wing(R, 'R'),
     ...leg(L, 'L'),
     ...leg(R, 'R'),
+    // The face (lab/skeleton.js): a bird's eye does not turn in its head, so
+    // there is only the lids' hinge. x raises the lower lid to shut the eye
+    // (as a bird's shuts); z draws the third eyelid across from the front.
+    { name: 'lid', parent: 'head', face: 'lid', head: [0, 0.08, 0.045], tail: [0, 0.08, 0.048],
+      limits: { x: [-10, 90], y: [-1, 1], z: [-1, 90] } },
 ];
 
 export const feet = [

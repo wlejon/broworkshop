@@ -39,10 +39,11 @@ const cross3 = (a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], 
 // The skeleton's limbs: from each leaf up while the bones carry nothing else.
 export function limbsOf(skel) {
     const kids = skel.bones.map(() => []);
-    for (const b of skel.bones) if (b.parentIndex >= 0) kids[b.parentIndex].push(b.index);
+    // (The face's bones carry no skin: a head is a limb's end with or without them.)
+    for (const b of skel.bones) if (b.parentIndex >= 0 && !b.face) kids[b.parentIndex].push(b.index);
     const out = [];
     for (const b of skel.bones) {
-        if (kids[b.index].length) continue;
+        if (kids[b.index].length || b.face) continue;
         const chain = [];
         let i = b.index;
         while (i >= 0 && skel.bones[i].parentIndex >= 0) {

@@ -95,6 +95,8 @@ const HOME_T: f32 = 0.32;            // s a step home takes
 const BREATH_T: f32 = 3.2;           // s of a breath
 const GLANCE_T: f32 = 2.6;           // s between glances about
 const FLICK_T: f32 = 2.3;            // s between an ear's chances to flick
+const EYE_T: f32 = 1.1;              // s the eyes hold a place they look
+const BLINK_T: f32 = 3.4;            // s to a blink, about
 
 fn select_i(c: bool, a: i32, b: i32) -> i32 {
     if (c) { return a; }
@@ -465,6 +467,34 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
         KP.q[b] = turned(KP.q[b], vec3<f32>(-0.12 * fl - 0.12 * abs(listen), 0.9 * listen + lead, 0.25 * listen));
         KP.q[b + 1] = turned(KP.q[b + 1], vec3<f32>(0.1 * fl, -side * 0.36 * fl + 0.15 * listen, 0.0));
     }
+
+    // --- the eyes -----------------------------------------------------------------------
+    // They look about on their own: to a new place every second or so, there
+    // in a twentieth of a second, and held; less so at a run, when it looks
+    // where it is going. And they go first to where the head is turning.
+    let et = clock / EYE_T + seed * 3.1;
+    let ek = floor(et);
+    let eu = smooth01((et - ek) * EYE_T / 0.05);
+    let roam = LIFE * (1.0 - 0.75 * rw * gw);
+    let ex = mix(hash01((ek - 1.0) * 7.3 + seed), hash01(ek * 7.3 + seed), eu) - 0.5;
+    let ey = mix(hash01((ek - 1.0) * 9.1 + 5.0 + seed), hash01(ek * 9.1 + 5.0 + seed), eu) - 0.5;
+    let lying = wl * smooth01((lie - 0.4) / 0.6);
+    let gaze_y = 0.55 * roam * ex + clamp(0.9 * (look - lk.x), -0.45, 0.45);
+    let gaze_x = 0.3 * roam * ey + clamp(0.9 * (look_p - lp.x), -0.3, 0.3) + 0.1 * lying;
+    KP.q[B_GAZE] = q_xyz(vec3<f32>(gaze_x, gaze_y, 0.0));
+    // It blinks every few seconds, never evenly: shut in a twentieth of a
+    // second and open in a tenth (slowly, lying down). Its lids say how it
+    // is: wide when alert, narrowed into the wind at a run, squeezed shut
+    // in a flinch, heavy when it lies resting.
+    let bt = clock / BLINK_T + seed * 5.7;
+    let bk = floor(bt);
+    let bu = ((bt - bk) - 0.1 - 0.7 * hash01(bk * 4.3 + seed)) * BLINK_T / (1.0 + 1.5 * lying);
+    var blink: f32 = 0.0;
+    if (bu > 0.0 && bu < 0.2) { blink = smooth01(bu / 0.05) * (1.0 - smooth01((bu - 0.07) / 0.11)); }
+    let wide = smooth01(alert) * (1.0 - wl) * (1.0 - flinch);
+    let rest_lid = 0.14 - 0.6 * wide + 0.14 * rw * gw + 0.22 * wg + 0.45 * lying;
+    let shut = clamp(max(mix(rest_lid, 1.0, LIFE * blink), 0.95 * flinch), -0.6, 1.0);
+    KP.q[B_LID] = q_xyz(vec3<f32>(asin(shut), 0.0, 0.14 * rw * gw - 0.12 * wide - 0.2 * flinch));
 
     // --- the head, held steady ---------------------------------------------------------
     // Where the keys would turn the head, in the creature's frame, is eased;

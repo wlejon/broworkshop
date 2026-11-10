@@ -61,6 +61,14 @@ export const bones = [
     ...wing(R, 'R'),
     ...leg(L, 'L'),
     ...leg(R, 'R'),
+    // The face (lab/skeleton.js). `gaze`: its eyes swing forward and down
+    // to look along the bill at what it hunts (x down). `lid`: x raises the
+    // lower lid to shut the eye, under 0 it stares; z draws the third
+    // eyelid across from the front.
+    { name: 'gaze', parent: 'head', face: 'gaze', head: [0, 0.912, 0.237], tail: [0, 0.912, 0.25],
+      limits: { x: [-20, 35], y: [-1, 1], z: [-1, 1] } },
+    { name: 'lid', parent: 'head', face: 'lid', head: [0, 0.92, 0.237], tail: [0, 0.92, 0.247],
+      limits: { x: [-60, 90], y: [-1, 1], z: [-1, 90] } },
 ];
 
 export const feet = [

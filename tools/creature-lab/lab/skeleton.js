@@ -5,6 +5,12 @@
 // A pose is, per bone, three vec4 rows [R | p]: the bone's world rotation
 // from rest and the world position of its head. A rest point q of the bone
 // is at R (q - head) + p.
+//
+// A bone marked `face` carries no flesh and no mass: its turn from the head
+// is a part of the face's state (`gaze`: where the eyes look; `lid`: the
+// eyelids' hinge, x closing them and z tilting them), written by the rig as
+// any bone's is and drawn by the creature's face (lab/skin.bk). The
+// measures of how the body moves leave them out: an eye is meant to jump.
 
 export const ROWS = 12;   // floats per bone in a pose
 
@@ -81,6 +87,8 @@ function skeletonParts(bones, feet) {
     const hasLeg = bones.map(() => false);
     for (const l of legs) for (let b = l.top; b >= 0; b = bones[b].parentIndex) hasLeg[b] = true;
     const root = bones.findIndex((b) => b.parentIndex < 0);
+    // (A face bone is among them: with no mass it is carried exactly as its
+    // parent goes, which is what keeps the eyes in a head that swings.)
     const dangle = bones.map((b) => (!inLeg.has(b.index) && b.index !== root && !hasLeg[b.index] ? 1 : 0));
     // The spine: from the carrier of the front-most leg back to the root.
     let front = legs[0];
@@ -126,6 +134,13 @@ function skeletonModule(bones, feet, tracks, parts) {
     s += `pub const NSPINE: i32 = ${parts.spine.length};\n`;
     s += `pub const SPINE: ${arr('i32', parts.spine.length ? parts.spine : [parts.root])};\n`;
     s += `pub const TRACK_HEAD: i32 = ${track('head')};\n`;
+    // The face's bones (`face: 'gaze' | 'lid'`, children of the head): the
+    // skin hooks read their turns from the head and hand them to the face.
+    const faceBone = (kind) => { const b = bones.find((x) => x.face === kind); return b ? b.index : -1; };
+    const gaze = faceBone('gaze'), lid = faceBone('lid');
+    s += `pub const FACE_GAZE: i32 = ${gaze};\n`;
+    s += `pub const FACE_LID: i32 = ${lid};\n`;
+    s += `pub const FACE_HEAD: i32 = ${gaze >= 0 ? bones[gaze].parentIndex : lid >= 0 ? bones[lid].parentIndex : Math.max(0, track('head'))};\n`;
     for (const b of bones) s += `pub const B_${b.name.toUpperCase()}: i32 = ${b.index};\n`;
     for (const ft of feet) s += `pub const FOOT_${ft.name.toUpperCase()}: i32 = ${ft.index};\n`;
     return s;

@@ -55,7 +55,7 @@ const DEG = 180 / Math.PI;
 export function partsOf(skel) {
     const B = skel.bones;
     const kids = B.map(() => []);
-    for (const b of B) if (b.parentIndex >= 0) kids[b.parentIndex].push(b.index);
+    for (const b of B) if (b.parentIndex >= 0 && !b.face) kids[b.parentIndex].push(b.index);
     const twin = (i) => B.find((o) => Math.abs(o.head[0] + B[i].head[0]) < 1e-4 && Math.abs(o.head[1] - B[i].head[1]) < 1e-4 && Math.abs(o.head[2] - B[i].head[2]) < 1e-4 && o.index !== i);
     const branchAbove = (i) => { let p = B[i].parentIndex; while (p >= 0 && B[p].parentIndex >= 0 && kids[p].length < 2) p = B[p].parentIndex; return p; };
     const out = [];

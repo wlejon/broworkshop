@@ -675,6 +675,25 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
     // The bill level, down foraging (further at a strike), up alert.
     let pitch = 1.05 * graze + 0.3 * strike * graze - 0.12 * alert + 0.5 * look_p * (1.0 - graze) + 0.15 * flinch;
     T.q[B_HEAD] = q_mul(qyaw, q_mul(q_y(look), q_x(pitch)));
+    // The eyes: a hunter's. Stalking, they swing forward and down to look
+    // along the bill, and fix there before a strike; it stares when alert,
+    // the pupils pinned. The third eyelid crosses slowly every few seconds
+    // and over the eye as the bill goes in; at rest the lower lids come up.
+    {
+        let aim = 0.5 * graze + 0.1 * strike * graze;
+        T.q[B_GAZE] = q_mul(T.q[B_HEAD], q_xyz(clamp_xyz(vec3<f32>(aim + 0.04 * noise1(clock * 0.3, seed, 51.0) * (1.0 - graze), 0.0, 0.0), B_GAZE)));
+        T.p[B_GAZE] = head_of(T, B_GAZE);
+        let bt = clock / 4.1 + seed * 3.3;
+        let bk = floor(bt);
+        let bu = ((bt - bk) - 0.1 - 0.7 * hash01(bk * 8.3 + seed)) * 4.1;
+        var sweep: f32 = 0.0;
+        if (bu > 0.0 && bu < 0.28) { sweep = sin(PI * bu / 0.28); }
+        let mem = max(sweep, strike * graze);
+        let doze = 0.9 * smooth01((lie - 0.55) / 0.4) * (1.0 - alert);
+        let shut = clamp(doze - 0.8 * max(alert, 0.6 * graze) * (1.0 - doze), -0.8, 1.0);
+        T.q[B_LID] = q_mul(T.q[B_HEAD], q_xyz(vec3<f32>(asin(shut), 0.0, asin(0.98 * mem))));
+        T.p[B_LID] = head_of(T, B_LID);
+    }
 
     // --- tail and wings ---------------------------------------------------------------------
     let flick = 0.5 * max(noise1(clock / 0.6, seed, 5.0) - 0.55, 0.0) / 0.45;

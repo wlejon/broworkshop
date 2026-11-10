@@ -1120,6 +1120,26 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
         T.q[b] = q_mul(T.q[B_HEAD], q_xyz(clamp_xyz(a, b)));
         T.p[b] = head_of(T, b);
     }
+    // Eyes: a deer's are dark and on the sides of its head, and it turns its
+    // head and ears to a thing before its eyes; they drift a little, and
+    // roll toward what it turns to. Its lids say more: an unhurried blink
+    // every several seconds, half shut grazing and heavier lying, and wide
+    // in alarm, when the white shows.
+    {
+        let drift = vec2<f32>(noise1(clock * 0.19, seed, 31.0), noise1(clock * 0.16, seed, 32.0));
+        let lead = clamp(0.7 * (gyaw - gyaw_s), -0.3, 0.3);
+        T.q[B_GAZE] = q_mul(T.q[B_HEAD], q_xyz(clamp_xyz(vec3<f32>(0.1 * drift.y + 0.12 * graze, 0.16 * drift.x + lead, 0.0), B_GAZE)));
+        T.p[B_GAZE] = head_of(T, B_GAZE);
+        let bt = clock / 5.3 + seed * 3.9;
+        let bk = floor(bt);
+        let bu = ((bt - bk) - 0.1 - 0.7 * hash01(bk * 5.9 + seed)) * 5.3 / (1.0 + lie);
+        var blink: f32 = 0.0;
+        if (bu > 0.0 && bu < 0.3) { blink = smooth01(bu / 0.09) * (1.0 - smooth01((bu - 0.12) / 0.18)); }
+        let rest_lid = 0.08 + 0.3 * graze + 0.5 * lie - 0.75 * alert;
+        let shut = clamp(mix(rest_lid, 1.0, blink), -0.7, 1.0);
+        T.q[B_LID] = q_mul(T.q[B_HEAD], q_xyz(vec3<f32>(asin(shut), 0.0, 0.0)));
+        T.p[B_LID] = head_of(T, B_LID);
+    }
     // Tail: a swish with the stride, raised in the gallop, flagged in alarm.
     // (In the gallop, held up, it carries a wave behind the pelvis's rock.)
     let swish = (gw.x + gw.y) * 0.22 * sin(TAU * (phase + 0.25)) * gom;

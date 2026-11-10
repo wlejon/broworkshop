@@ -547,6 +547,22 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
     // The head: the bill level, down at the ground foraging, turned to the look.
     let pitch = (0.9 + 0.35 * peck) * graze + 0.4 * look_p * (1.0 - graze) - 0.08 * alert + 0.2 * lie;
     T.q[B_HEAD] = q_mul(qyaw, q_mul(q_y(look), q_x(pitch)));
+    // The eyes: it blinks with the third eyelid, a pale flick across from
+    // the front, often and too quick to follow, and at each peck as the
+    // bill goes down; settled to rest, the lower lids come up and it dozes,
+    // opening one now and then.
+    {
+        let bt = clock / 1.7 + seed * 4.3;
+        let bk = floor(bt);
+        let bu = ((bt - bk) - 0.1 - 0.7 * hash01(bk * 6.7 + seed)) * 1.7;
+        var flick_m: f32 = 0.0;
+        if (bu > 0.0 && bu < 0.09) { flick_m = sin(PI * bu / 0.09); }
+        let mem = max(flick_m, peck * graze);
+        let peek = smooth01(3.0 * noise1(clock * 0.21, seed, 23.0) - 1.6);
+        let doze = 0.95 * smooth01((lie - 0.5) / 0.4) * (1.0 - 0.8 * peek) * (1.0 - alert);
+        T.q[B_LID] = q_mul(T.q[B_HEAD], q_xyz(vec3<f32>(asin(doze), 0.0, asin(0.98 * mem))));
+        T.p[B_LID] = head_of(T, B_LID);
+    }
 
     // --- tail and wings ---------------------------------------------------------------------
     let flick = 0.25 * max(noise1(clock / 0.35, seed, 5.0) - 0.5, 0.0) / 0.5;

@@ -72,7 +72,7 @@ const wrap = (a) => { while (a > 180) a -= 360; while (a < -180) a += 360; retur
 // carries only that chain, and the bone the leg hangs from's child.
 export function chains(skel) {
     const kids = skel.bones.map(() => []);
-    for (const b of skel.bones) if (b.parentIndex >= 0) kids[b.parentIndex].push(b.index);
+    for (const b of skel.bones) if (b.parentIndex >= 0 && !b.face) kids[b.parentIndex].push(b.index);
     const limb = new Set();
     for (const f of skel.feet) {
         let b = f.boneIndex;
@@ -84,7 +84,7 @@ export function chains(skel) {
         }
     }
     const root = skel.bones.find((b) => b.parentIndex < 0).index;
-    const free = skel.bones.filter((b) => !limb.has(b.index) && b.index !== root).map((b) => b.index);
+    const free = skel.bones.filter((b) => !limb.has(b.index) && b.index !== root && !b.face).map((b) => b.index);
     return { limb, free, root, kids };
 }
 
@@ -158,7 +158,7 @@ export function overlap(rec, A, cyc) {
     const period = cyc.reduce((s, c) => s + c.period, 0) / cyc.length;
     const pairs = [];
     for (const b of skel.bones) {
-        if (b.parentIndex < 0) continue;
+        if (b.parentIndex < 0 || b.face) continue;
         const comps = ['sag', 'lat'].map((which) => {
             const pa = cycleMean(A[which], A.nb, b.parentIndex, cyc), ca = cycleMean(A[which], A.nb, b.index, cyc);
             const rel = ca.map((v, i) => v - pa[i]);
@@ -468,7 +468,7 @@ export function smoothness(rec) {
     const kinks = (th, d, nr, spike = NATURAL.spike, more = null) => { const e = kinksOf(th, d, nr, spike, more); e.spikes = e.spikes.filter((s) => s.t >= NATURAL.settle); return e; };
     const joints = [];
     for (const b of skel.bones) {
-        if (b.parentIndex < 0) continue;
+        if (b.parentIndex < 0 || b.face) continue;
         let worst = null;
         for (let c = 0; c < 3; c++) {
             const th = new Float64Array(n);
@@ -566,6 +566,7 @@ export function seen(rec) {
     const hits = [];
     const p = new Float64Array(3 * n);
     for (const b of skel.bones) {
+        if (b.face) continue;
         for (let k = 0; k < n; k++) {
             const q = b.parentIndex < 0 ? boneHead(P, k * st, b.index) : boneTail(P, k * st, b);
             p[3 * k] = q[0]; p[3 * k + 1] = q[1]; p[3 * k + 2] = q[2];
@@ -621,7 +622,7 @@ export function variety(rec, cyc) {
     const periodCv = Math.sqrt(periods.reduce((s, v) => s + (v - pm) ** 2, 0) / periods.length) / pm;
     const joints = [];
     for (const b of skel.bones) {
-        if (b.parentIndex < 0) continue;
+        if (b.parentIndex < 0 || b.face) continue;
         const curves = cyc.map((c) => {
             const out = new Float64Array(m);
             // Between steps by interpolation: a short cycle (a small creature's,

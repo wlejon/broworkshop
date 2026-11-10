@@ -13,7 +13,8 @@
 // same way on the CPU.
 //
 // The creature's face (creature::face, lab/face.bk) is drawn per pixel
-// from each point's rest position, passed to the fragment in v0.
+// from each point's rest position, passed to the fragment in v0, and from
+// what its face bones say (look_of), passed in v1.
 //
 // Three debug views (SceneGraph.setDebugView) show what lab/shots.js reads
 // off an image: `normal` (the world normal, n * 0.5 + 0.5), `depth` (the
@@ -27,7 +28,7 @@
 module hook;
 import mesh;
 import scene;
-from creature::skeleton import NB, HEAD;
+from creature::skeleton import NB, HEAD, FACE_GAZE, FACE_LID, FACE_HEAD;
 from creature::face import face;
 
 @binding(4, 14) var pose: read_buffer<vec4<f32>>;
@@ -45,7 +46,7 @@ fn level(b: f32) -> f32 { return b / 255.0; }
 pub fn fragment(v: mesh::Vertex, s: mesh::Surface) -> mesh::Surface {
     // The face, by the point's rest position (v0) and a pixel's size there.
     let rest = v.v0.xyz;
-    var out = face(rest, max(length(dpdx(rest)), length(dpdy(rest))), s);
+    var out = face(rest, max(length(dpdx(rest)), length(dpdy(rest))), v.v1, s);
     if (SCENE_DEBUG(normal)) { out.debug = vec4<f32>(lin(normalize(s.normal) * 0.5 + vec3<f32>(0.5)), 1.0); }
     if (SCENE_DEBUG(depth)) {
         let cm = clamp(floor(length(v.world_pos) * 100.0 + 0.5), 0.0, 4095.0);
@@ -89,6 +90,37 @@ fn rotate(q: vec4<f32>, v: vec3<f32>) -> vec3<f32> {
     return v + q.w * u + cross(q.xyz, u);
 }
 
+// Bone b of the creature at `base`, as a quaternion.
+fn bone_q(base: i32, b: i32) -> vec4<f32> {
+    let r = 3 * (base + b);
+    return quat_of(pose[r], pose[r + 1], pose[r + 2]);
+}
+
+fn conj(q: vec4<f32>) -> vec4<f32> { return vec4<f32>(-q.xyz, q.w); }
+
+fn qmul(a: vec4<f32>, b: vec4<f32>) -> vec4<f32> {
+    return vec4<f32>(a.w * b.xyz + b.w * a.xyz + cross(a.xyz, b.xyz), a.w * b.w - dot(a.xyz, b.xyz));
+}
+
+// What the face's bones say (creature::skeleton's FACE_*), the same for
+// every vertex of a creature: where the eyes look off straight ahead (x to
+// its left, y up: the sines of the turns), how far the lids are closed (1
+// shut, under 0 wide) and how they tilt (over 0: the inner corners down).
+fn look_of(base: i32) -> vec4<f32> {
+    var look = vec4<f32>(0.0);
+    if (FACE_GAZE >= 0) {
+        let g = rotate(qmul(conj(bone_q(base, FACE_HEAD)), bone_q(base, FACE_GAZE)), vec3<f32>(0.0, 0.0, 1.0));
+        look.x = g.x;
+        look.y = g.y;
+    }
+    if (FACE_LID >= 0) {
+        let ql = qmul(conj(bone_q(base, FACE_HEAD)), bone_q(base, FACE_LID));
+        look.z = -rotate(ql, vec3<f32>(0.0, 0.0, 1.0)).y;
+        look.w = rotate(ql, vec3<f32>(1.0, 0.0, 0.0)).y;
+    }
+    return look;
+}
+
 pub fn vertex(v_in: mesh::Vertex) -> mesh::Vertex {
     var v = v_in;
     v.v0 = vec4<f32>(v_in.pos, 0.0);
@@ -96,6 +128,7 @@ pub fn vertex(v_in: mesh::Vertex) -> mesh::Vertex {
     let wt = skin[2 * k];
     let ix = skin[2 * k + 1];
     let base = v.instance_index * NB;
+    v.v1 = look_of(base);
     var qr = vec4<f32>(0.0);
     var qd = vec4<f32>(0.0);
     var q0 = vec4<f32>(0.0);

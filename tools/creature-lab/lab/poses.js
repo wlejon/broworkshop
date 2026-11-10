@@ -67,7 +67,7 @@ function frameOf(rec, k) {
     // nearest ancestor that branches: the bone the neck and the arms hang
     // from), forward positive.
     const root = boneHead(P, 0, skel.parts.root);
-    const kids = skel.bones.map((b) => skel.bones.filter((c) => c.parentIndex === b.index).length);
+    const kids = skel.bones.map((b) => skel.bones.filter((c) => c.parentIndex === b.index && !c.face).length);
     let top = skel.bones.find((b) => b.name === 'head');
     while (top && top.parentIndex >= 0 && kids[top.index] < 2) top = skel.bones[top.parentIndex];
     let lean = 0;
