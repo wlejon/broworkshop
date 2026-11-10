@@ -267,6 +267,26 @@ is meshed in a skin of its own; every pose folds them (`poses.js` `arm`).
 Its face (`face.bk`) draws
 amber eyes in dark rims, a nose pad and a mouth.
 
+`courser` is the strider's legs under another animal, in keys of its own: a
+running bird of 24 kg, a level egg of a body, a slim neck of three bones in
+an S to a small head with a hooked bill, a crest of five quills, a small
+wing folded on each flank (one bone, a piece of its own, so it lifts clear
+of the body) and a long flat fan of a tail. Its `poses.js` `neck` carries
+the head on the S: `reach` bends the neck's foot forward and its top back
+by as much, which moves the head fore and aft without tipping it, and the
+head's own pitch is given in the world whatever is under it. Walking, the
+head is thrown forward once a step and left where it is while the body
+walks up under it; running, the neck is stretched out low and the wings
+are held off the flanks and flicked at each landing; leaping, they are
+thrown open. Its rig turns the head as a bird's is turned: to a new place
+in a tenth of a second, dead still between, cocked on some, the crest
+stirred by each and lifted when it is cocked; it blinks with a third
+eyelid, always as the head snaps round; it shuffles its wings and wags its
+fan; pecking, the bill is held a hand over the ground and stabbed down in
+runs, the head lifted to look about between. Its face draws a bare orange
+patch about a pale gold eye under a black brow, the nostril on a yellow
+cere and the gape's line.
+
 ### Keys: a creature drawn pose by pose
 
 A species whose whole body makes its gait (a biped: the hips drop, sway and

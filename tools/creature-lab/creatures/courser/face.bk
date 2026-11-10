@@ -1,0 +1,97 @@
+// creature::face — the courser's face, drawn per pixel over the head's skin
+// (lab/face.bk has how), in the rest pose's coordinates (body.js: x to its
+// left, y up, z forward, metres). `foot` is a pixel's size there; every
+// edge is softened over it.
+//
+// `look` is what its face bones say (lab/skin.bk's look_of): where the eye
+// has turned (x to its left, y up; a little, a bird's), how far the lids
+// are shut (z; under 0: wide) and the third eyelid drawn across (w).
+//
+// What it shows, from the side:
+//   skin    a bare orange patch from the cere back round the eye, to a
+//           point behind it
+//   eye     pale gold about a black pupil, in a dark rim, glossy, under
+//           the brow's black line
+//   bill    the nostril on the cere, and the gape's line back from the hook
+module creature::face;
+import mesh;
+
+fn lin(c: vec3<f32>) -> vec3<f32> {
+    return vec3<f32>(pow(c.x, 2.2), pow(c.y, 2.2), pow(c.z, 2.2));
+}
+
+// 1 inside (d < 0), 0 outside, over w either side of the edge.
+fn inside(d: f32, w: f32) -> f32 {
+    return clamp(0.5 - d / (2.0 * w), 0.0, 1.0);
+}
+
+// The eye (body.js's eye mass) seen from the side: (y, z) of its middle and
+// the opening's radius.
+const EYE: vec2<f32> = vec2<f32>(1.19, 0.452);
+const EYE_R: f32 = 0.0098;
+
+pub fn face(p: vec3<f32>, foot: f32, look: vec4<f32>, s: mesh::Surface) -> mesh::Surface {
+    var out = s;
+    let w = max(foot, 0.0002);
+    let ax = abs(p.x);
+    var c = s.base_color;
+    var rough = s.roughness;
+    let q = vec2<f32>(p.y, p.z);
+
+    if (p.y > 1.12 && p.z > 0.39 && p.z < 0.58 && ax > 0.006) {
+        // The bare skin: an egg about the eye, pointed behind, running
+        // forward to the cere.
+        let e = q - EYE;
+        let back = max(-e.y, 0.0);
+        let patch = length(vec2<f32>(e.x / (0.019 - 0.25 * back), (e.y - 0.006) / 0.036)) - 1.0;
+        let skin = inside(patch * 0.019, w) * inside(0.011 - ax, w);
+        c = mix(c, lin(vec3<f32>(0.93, 0.42, 0.10)) * mix(0.8, 1.0, smoothstep(-0.02, 0.02, e.x)), skin);
+        rough = mix(rough, 0.45, skin);
+        // The brow's line: black, over the eye, lowest in front.
+        let by = EYE.x + 0.0125 - 0.22 * e.y;
+        let taper = 1.0 - smoothstep(0.012, 0.03, abs(e.y - 0.004));
+        let brow = inside(abs(p.y - by) - 0.0017 * taper, w) * inside(abs(e.y - 0.004) - 0.03, w) * inside(0.011 - ax, w);
+        c = mix(c, lin(vec3<f32>(0.05, 0.045, 0.05)), brow);
+        // The eye: a little larger when wide.
+        let R = EYE_R * (1.0 + 0.1 * max(-look.z, 0.0));
+        let r = length(e);
+        let d = r - R;
+        c = mix(c, lin(vec3<f32>(0.10, 0.06, 0.05)), inside(d - 0.0016, w) * inside(0.011 - ax, w));
+        let open = inside(d, w);
+        // (It turns a little in its opening: z forward is the face's x.)
+        let ei = (e - 0.35 * R * vec2<f32>(look.y, 0.0)) / R;
+        let ki = length(ei);
+        var eye = mix(lin(vec3<f32>(0.86, 0.70, 0.32)), lin(vec3<f32>(0.40, 0.26, 0.10)), smoothstep(0.6, 1.0, ki));
+        // The pupil: pinned small when it is wide-eyed.
+        eye = mix(eye, lin(vec3<f32>(0.012, 0.01, 0.01)), inside((ki - 0.52 - 0.14 * min(look.z, 0.0)) * R, w));
+        // The brow's shade on its top.
+        eye = eye * mix(1.0, 0.5, smoothstep(0.2, 1.0, e.x / R));
+        // The sky's light on it, high and forward.
+        eye = mix(eye, vec3<f32>(1.0), 0.95 * inside(length(e - vec2<f32>(0.32, 0.36) * R) - 0.2 * R, w));
+        // The third eyelid (look.w): pale and half clear, across from the
+        // front corner.
+        let front = e.y / R;
+        let mem = inside((1.0 - 2.0 * look.w - front) * R, w) * step(0.001, look.w);
+        eye = mix(eye, lin(vec3<f32>(0.66, 0.68, 0.70)), 0.82 * mem);
+        c = mix(c, eye, open);
+        rough = mix(rough, mix(0.04, 0.3, mem), open);
+        // The lids (look.z): the lower comes up as a bird's does, the upper
+        // a little down to meet it, the bare skin's colour.
+        let shut = clamp(look.z, 0.0, 1.0);
+        let lid = open * max(inside((e.x / R - (1.7 * shut - 1.0)) * R, w), inside(((1.0 - 0.45 * shut) - e.x / R) * R, w)) * step(0.001, shut);
+        c = mix(c, lin(vec3<f32>(0.86, 0.50, 0.22)), lid);
+        rough = mix(rough, 0.5, lid);
+        // The nostril, on the cere.
+        let nost = inside(length((q - vec2<f32>(1.187, 0.494)) / vec2<f32>(0.0028, 0.0046)) * 0.003 - 0.003, w) * inside(0.006 - ax, w);
+        c = mix(c, lin(vec3<f32>(0.10, 0.07, 0.04)), nost);
+        // The gape: from under the eye forward along the bill, turning down
+        // with the hook.
+        let t = clamp((p.z - 0.455) / 0.09, 0.0, 1.0);
+        let gy = 1.171 - 0.004 * t - 0.022 * t * t * t;
+        let gape = inside(abs(p.y - gy) - 0.0009, w) * inside(abs(p.z - 0.5) - 0.046, w);
+        c = mix(c, lin(vec3<f32>(0.08, 0.07, 0.07)), 0.85 * gape);
+    }
+    out.base_color = c;
+    out.roughness = rough;
+    return out;
+}
