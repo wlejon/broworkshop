@@ -17,7 +17,7 @@ import { loadCreature } from "./creature.js";
 import { runScenario, groundHeights, PROBE_N } from "./run.js";
 import { TELE, T } from "./contract.js";
 import { jointAngles, boneHead, boneTail } from "./skeleton.js";
-import { naturalness, smoothness, kinks, turnSpike, footEvents } from "./natural.js";
+import { naturalness, smoothness, seen, NATURAL, kinks, turnSpike, footEvents } from "./natural.js";
 import { naturalRun } from "./natural-out.js";
 
 const DEG = 180 / Math.PI;
@@ -41,6 +41,7 @@ export function scoreRun(rec, analyzeRun) {
         kinks: sm.spikesPerSecond,
         at: sm.at.slice(0, 2).map((a) => a.event).join(', '),
         root: sm.root.reduce((s, r) => s + r.spikes.length, 0),
+        seen: seen(rec).count,
         friction: n.mass.frictionShare,
         pull: n.mass.pullShare,
         // Of its steps in the air, those not falling as a body falls; null
@@ -55,7 +56,7 @@ export function scoreRun(rec, analyzeRun) {
 
 const COLS = [
     ['flags', 6, (r) => r.flags], ['natural', 8, (r) => r.natural], ['kinks/s', 8, (r) => r.kinks.toFixed(1)],
-    ['root', 5, (r) => r.root], ['friction', 9, (r) => pct(r.friction)], ['pull', 5, (r) => pct(r.pull)],
+    ['root', 5, (r) => r.root], ['seen', 5, (r) => r.seen], ['friction', 9, (r) => pct(r.friction)], ['pull', 5, (r) => pct(r.pull)],
     ['flight', 7, (r) => (r.flightOff == null ? '-' : pct(r.flightOff))], ['corners', 8, (r) => r.corners], ['jitter', 7, (r) => r.jitter],
 ];
 
@@ -141,6 +142,10 @@ export function kinkReport(rec, { bone = null, at = null, top = 6 } = {}) {
     // (a scenario of several parts kinks in some of them, not all).
     const half = (spikes) => { const c = new Array(Math.ceil(rec.steps * rec.dt * 2)).fill(0); for (const s of spikes) c[Math.min(c.length - 1, Math.floor(s.t * 2))]++; return c; };
     const jc = half(sm.joints.flatMap((j) => j.spikes)), rc = half(sm.root.flatMap((r) => r.spikes));
+    // What of it can be seen (natural.js seen): the jolts, largest first.
+    const sn = seen(rec);
+    L.push(sn.count ? `  seen: ${sn.count} jolts (a point over ${NATURAL.seen} thousandths of its ${sn.height} m off its path in a step):` : `  seen: none (no point over ${NATURAL.seen} thousandths of its ${sn.height} m off its path in a step)`);
+    for (const m of sn.moments.slice(0, 8)) L.push(`    ${m.t.toFixed(3)} s  ${pad(m.size.toFixed(1), 5)}  ${padR(m.at, 8)}  ${m.bones.join(', ')}`);
     L.push(`  by half second, joints: ${jc.join(' ')}`);
     L.push(`  by half second, root:   ${rc.join(' ')}`);
     // The moments: kinks within two steps of each other are one event of the

@@ -570,7 +570,12 @@ text under the creature's folder; `score`, `sweep` and `kinks` run what
 
 - `score` (`score.txt`): a line a scenario: the metrics' flags, natural's
   flags, kinks a second and the two foot events most fall at, the root's
-  kinks, the share of ground time pushed past friction and pulled down
+  kinks, the jolts that can be seen (`seen`: moments at which the far end of
+  some bone is over a thousandth of the creature's height off the smooth
+  path through its neighbours two steps either side, in one step; a kink
+  counts a corner in a joint's speed whatever its size, this counts what
+  the eye gets of it; a foot's own landing, and the step it lifts in, are
+  not jolts), the share of ground time pushed past friction and pulled down
   faster than gravity, the share of flight off free fall, the corners the
   swing feet and tracked points turn, and the joints that jitter; then the
   metrics' flags in full. `--vs <creature>` (a `snapshot` taken before an
@@ -582,7 +587,9 @@ text under the creature's folder; `score`, `sweep` and `kinks` run what
 - `kinks` (`kinks.txt`): per scenario, the foot events the kinks gather at,
   with the bones kinking at each and their median size; the root's, each
   channel with its worst kink, the limit that one was held to and when; the
-  joints' and the root's kinks in each half second of the run (a scenario of
+  largest jolts that can be seen, each with when, its size in thousandths of
+  the creature's height, and its bones largest first (the one nearest the
+  root is where it comes from); the joints' and the root's kinks in each half second of the run (a scenario of
   several parts kinks in some of them: a gallop gathering speed, not the
   bound after it); and the moments most bones kink at together (kinks
   within two steps of each other are one event of the rig's, `+root` where

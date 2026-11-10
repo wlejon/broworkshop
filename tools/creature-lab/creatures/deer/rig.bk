@@ -95,7 +95,8 @@ const D_COFFR: i32 = D_SHORT + 4;   // how far the pose's centre stands over the
 const D_TOPO: i32 = D_COFFR + 2;    // per leg, where its girdle stood last step (3)
 const D_LEAN_S: i32 = D_TOPO + 12;  // how much it leans over its carrying hooves (going slowly), through a spring, and its speed
 pub const PROBE: i32 = D_LEAN_S + 2; // creature::probe's slice
-pub const STATE: i32 = PROBE + PROBE_N;
+const D_CAPOFF: i32 = PROBE + PROBE_N; // per leg, how far past the swing's reach cap its hoof lifted
+pub const STATE: i32 = D_CAPOFF + 4;
 
 const WALK_UP: f32 = 1.9;
 const TROT_DOWN: f32 = 1.5;
@@ -133,7 +134,8 @@ const CAP_SOFT: f32 = 0.01;      // m over which one reach limit hands over to a
 @knob const TUCK_FORE: f32 = 0.24;
 const GUARD_RATE: f32 = 20.0;  // /s the reach guard's hold eases at
 @knob const LEAP_AHEAD: f32 = 0.5;  // share of the hind feet's last stance before a leap they land ahead of the hips by
-@knob const LAND_MIN: f32 = 0.3;   // of its length a landing hoof's mark may always be ahead of its girdle
+@knob const SLOW_DUTY: f32 = 0.1;  // of the stride a hoof stays down longer, slower than a walk (at 0.2 a first step's swing was a fifth of a second, the hoof snatched up 85 mm and dropped in 50 ms)
+@knob const LAND_MIN: f32 = 0.3;  // of its length a landing hoof's mark may always be ahead of its girdle
 @knob const SPENT: f32 = 1.5;     // steps of the take-off's rise before its full length a pushing hind leg lets go
 @knob const FOLD_EXT: f32 = 0.97;  // of the fore leg's whole length: stretched that far its knee does not fold in a swing,
 @knob const FOLD_BAND: f32 = 0.35; //   and this much shorter it folds as far as the gait asks
@@ -387,7 +389,7 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
     // shorter.
     // Slower than a walk (a turn on the spot, a first step) the hooves stay
     // down longer, so three bear the body at every moment.
-    let duty = gw.x * (clamp(0.67 - 0.05 * veff, 0.57, 0.67) + 0.2 * (1.0 - smooth01(veff / 1.1))) + gw.y * 0.39 + gw.z * 0.22;
+    let duty = gw.x * (clamp(0.67 - 0.05 * veff, 0.57, 0.67) + SLOW_DUTY * (1.0 - smooth01(veff / 1.1))) + gw.y * 0.39 + gw.z * 0.22;
     let lift_h = gw.x * vec2<f32>(0.065, 0.085) + gw.y * vec2<f32>(0.10, 0.14) + gw.z * vec2<f32>(0.14, 0.18);
     let carpus = gw.x * 1.3 + gw.y * 1.75 + gw.z * 2.0;
     let roll_w = gw.x * 0.12 + gw.y * 0.2 + gw.z * 0.12;
@@ -710,7 +712,13 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
                 // (At a walk's pace: faster, it is capped from the first,
                 // for there the body outruns a hoof left a moment longer,
                 // shuts its leg's joints and draws it through the ground.)
-                let hn = mix(hl, cap_n, select_f(leap_step, 1.0, max(smooth01(u / 0.2), smooth01((speed - 1.5) / 1.5))));
+                // (What the cap would take from it in its first step in the
+                // air is taken over the swing's first quarter instead: a hoof
+                // lifting at speed from the end of its reach was drawn 30 mm
+                // in under the cap in that step.)
+                if (state[k + L_U] <= 0.0) { state[s + D_CAPOFF + l] = max(hl - cap_n, 0.0); }
+                let cap_e = min(hl, cap_n + state[s + D_CAPOFF + l] * (1.0 - smooth01(u / 0.25)));
+                let hn = mix(hl, cap_e, select_f(leap_step, 1.0, max(smooth01(u / 0.2), smooth01((speed - 1.5) / 1.5))));
                 toe.x = top.x + hv2.x * (hn / hl);
                 toe.z = top.z + hv2.y * (hn / hl);
             }
@@ -964,7 +972,11 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
     // one step where the ceiling met a hard floor. A walk's body, on the
     // ceiling all stride, is not above it and keeps the floor as it was.)
     let ceil_y = smin(ch - hy, cf - fy, CAP_SOFT);
-    let above = clamp(shift.y - GALLOP_FREE * gw.z, 0.0, 0.03);
+    // (Levelling off at 3 cm without a corner: clamped there, the room it
+    // gives stopped growing in the step the body passed 3 cm, and the hips,
+    // rising under it at 3 mm a step, stopped with it.)
+    let above0 = max(shift.y - GALLOP_FREE * gw.z, 0.0);
+    let above = soft_limit(above0, 0.02, 0.03);
     // (What the ceiling gives over the plan comes in from nothing, with no
     // slope at first: the ceiling comes up through the plan at half a metre
     // a second as the legs come under a trotting body already above it, and

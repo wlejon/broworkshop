@@ -34,7 +34,7 @@
 //               the share of a path that runs straight.
 
 import { T, TELE, I, INTENT } from "./contract.js";
-import { ROWS } from "./skeleton.js";
+import { ROWS, boneHead, boneTail } from "./skeleton.js";
 import { series } from "./analyze.js";
 import { cycles } from "./cycle.js";
 
@@ -52,6 +52,7 @@ export const NATURAL = {
     spikeRel: 8,          // ... or this many times the joint's median jump, the larger
     spikeOwn: 1.0,        // ... or this many times the strongest tenth of its own accelerations then
     settle: 0.5,         // s at a run's start that kinks are not counted in
+    seen: 1.0,           // thousandths of the creature's height a point is off its smooth path in a step: a jolt that can be seen
     push: 2.5,           // the peak of a stance's push over its mean (a half sine is 1.6): the root's height may turn that hard
     variety: [0.01, 0.12],// variety as a share of the joint's range: below repeats, above wanders
     jitter: 0.015,        // jitter as a share of range
@@ -527,6 +528,76 @@ export function smoothness(rec) {
     for (const j of joints) for (const s of j.spikes) by.set(s.at, (by.get(s.at) || 0) + 1);
     const at = [...by].sort((a, b) => b[1] - a[1]).map(([event, count]) => ({ event, count }));
     return { spikesPerSecond: r2(total / (n * dt)), at, joints, root };
+}
+
+// --- what of it can be seen ---------------------------------------------------------------
+
+// A kink is a corner in a joint's speed; what the eye gets of it is a point
+// of the body off the smooth path it was on. Per bone, its far end (the
+// root's own place too) against the curve through its two neighbours either
+// side (a cubic: a swing, however fast, is off it by its fourth derivative
+// over 8 ms, hundredths of a millimetre; a speed that turns a corner is off
+// it by a third of the change times the step), in thousandths of the
+// creature's height: 1 is a pixel of a creature a thousand pixels tall.
+// Those over NATURAL.seen are jolts, joined into moments (within two steps
+// of each other). A foot's own landing is not one: the ground stops it, and
+// its leg with it, in a step, as it does a real one.
+export function seen(rec) {
+    const skel = rec.creature.skel, n = rec.steps, dt = rec.dt, P = rec.pose, st = rec.poseStride;
+    let lo = Infinity, hi = -Infinity;
+    for (const b of skel.bones) for (const p of [b.head, b.tail]) { lo = Math.min(lo, p[1]); hi = Math.max(hi, p[1]); }
+    const H = Math.max(hi - lo, 1e-3);
+    const legOf = new Map();
+    skel.parts.legs.forEach((l, i) => { for (const b of l.chain) legOf.set(b, i); });
+    const landing = skel.parts.legs.map(() => new Uint8Array(n));
+    skel.parts.legs.forEach((l, i) => {
+        for (let k = 1; k < n; k++) {
+            const was = rec.tele[(k - 1) * TELE + T.FOOT + 4 * l.foot] > 0.5, is = rec.tele[k * TELE + T.FOOT + 4 * l.foot] > 0.5;
+            if (was === is) continue;
+            // (And the step it leaves the ground in, either side: a leg at
+            // its length takes its foot off at the body's speed, from still,
+            // and a galloper's does it in a step. What a rig does wrong at a
+            // lift lasts longer than that, and the joints' kinks count it.)
+            const w = is ? 3 : 1;
+            for (let j = Math.max(0, k - w); j <= Math.min(n - 1, k + w); j++) landing[i][j] = 1;
+        }
+    });
+    const k0 = Math.max(2, Math.ceil(NATURAL.settle / dt));
+    const hits = [];
+    const p = new Float64Array(3 * n);
+    for (const b of skel.bones) {
+        for (let k = 0; k < n; k++) {
+            const q = b.parentIndex < 0 ? boneHead(P, k * st, b.index) : boneTail(P, k * st, b);
+            p[3 * k] = q[0]; p[3 * k + 1] = q[1]; p[3 * k + 2] = q[2];
+        }
+        const land = legOf.has(b.index) ? landing[legOf.get(b.index)] : null;
+        for (let k = k0; k < n - 2; k++) {
+            if (land && land[k]) continue;
+            let d2 = 0;
+            for (let c = 0; c < 3; c++) {
+                const e = p[3 * k + c] - (4 * (p[3 * (k - 1) + c] + p[3 * (k + 1) + c]) - p[3 * (k - 2) + c] - p[3 * (k + 2) + c]) / 6;
+                d2 += e * e;
+            }
+            const size = 1000 * Math.sqrt(d2) / H;
+            if (size > NATURAL.seen) hits.push({ k, bone: b.parentIndex < 0 ? 'root' : b.name, size });
+        }
+    }
+    hits.sort((a, b) => a.k - b.k);
+    const moments = [];
+    for (const h of hits) {
+        const m = moments[moments.length - 1];
+        if (m && h.k - m.k1 <= 2) {
+            m.k1 = h.k;
+            m.bones.set(h.bone, Math.max(m.bones.get(h.bone) || 0, h.size));
+            if (h.size > m.size) { m.size = h.size; m.bone = h.bone; m.k = h.k; }
+        } else moments.push({ k0: h.k, k1: h.k, k: h.k, size: h.size, bone: h.bone, bones: new Map([[h.bone, h.size]]) });
+    }
+    const near = footEvents(rec);
+    // (Its bones largest first, each with its size: the one nearest the
+    // root among them is where the jolt comes from.)
+    const out = moments.map((m) => ({ t: r3(m.k * dt), size: r2(m.size), bone: m.bone, bones: [...m.bones].sort((a, b) => b[1] - a[1]).map(([b, s]) => `${b} ${s.toFixed(1)}`), at: near[m.k] || 'between' }));
+    out.sort((a, b) => b.size - a.size);
+    return { height: r3(H), count: out.length, perSecond: r2(out.length / (n * dt)), moments: out };
 }
 
 // --- variety ----------------------------------------------------------------------------
