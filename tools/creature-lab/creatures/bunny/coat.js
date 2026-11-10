@@ -2,9 +2,11 @@
 // rufous nape and a darker line down the back, cream to white underneath,
 // the scut white beneath and dark above, the ears' backs edged dark at the
 // tips and their insides pale pink, pale rings about the eyes, the paws
-// pale. Colours are display (sRGB) values; each region is found by its
+// tan. Colours are display (sRGB) values; each region is found by its
 // masses' share of the skin (lab/flesh.js), and face.bk draws the eyes,
-// nose and lip sharp per pixel over the head.
+// nose and lip sharp per pixel over the head. The legs are the coat's colour
+// and the paws a warm tan, the soles cream: dark enough to read against
+// pale ground.
 
 import { earAxis, hollowWidth } from "./ear.js";
 
@@ -15,7 +17,7 @@ export const CREAM = [0.86, 0.81, 0.72];
 export const WHITE = [0.95, 0.94, 0.91];
 export const EAR_IN = [0.86, 0.70, 0.66];
 export const EAR_TIP = [0.18, 0.15, 0.13];
-export const PAW = [0.78, 0.72, 0.62];
+export const PAW = [0.63, 0.52, 0.38];
 export const DARK = [0.05, 0.04, 0.04];
 
 const EAR_L = earAxis(1), EAR_R = earAxis(-1);
@@ -65,8 +67,8 @@ export function coat(p, n, share) {
     // The haunches: the coat, cream inside and on the hind feet's soles;
     // the fore legs and paws pale.
     c = mix(c, mix(c, CREAM, sstep(0.2, 0.7, -Math.sign(p[0]) * n[0])), sum(share, LR('haunch')));
-    c = mix(c, mix(PAW, CREAM, sstep(0.0, -0.6, n[1])), sum(share, LR('foot')));
-    c = mix(c, mix(PAW, COAT, sstep(0.06, 0.10, p[1])), sum(share, LR('fore')));
+    c = mix(c, mix(PAW, CREAM, sstep(-0.3, -0.8, n[1])), sum(share, LR('foot')));
+    c = mix(c, mix(PAW, COAT, sstep(0.025, 0.06, p[1])), sum(share, LR('fore')));
     // The scut: white beneath and behind, dark grey-brown on top.
     c = mix(c, mix(WHITE, BACK, sstep(0.3, 0.8, n[1]) * sstep(-0.5, 0.0, n[2])), share('tail'));
     c = mix(c, DARK, sstep(0.35, 0.6, sum(share, LR('eye'))));
