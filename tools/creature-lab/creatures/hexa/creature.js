@@ -20,5 +20,12 @@ export default {
     form: { reference: {} },
     // `plan`: the motion layers off, the rig's plan as it draws it.
     variants: { plan: { LAYERS: 0 } },
-    scenarios: {},
+    scenarios: {
+        leap: {
+            about: 'trotting at 1.9 m/s, a leap over a 0.2 m log, trotting on',
+            duration: 6,
+            ground: { log: { at: [0, 5], yaw: 90, height: 0.2, length: 3 } },
+            track: [{ t: 0, speed: 1.9 }],
+        },
+    },
 };

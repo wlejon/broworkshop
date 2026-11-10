@@ -136,7 +136,18 @@ with each tripod (`RUN_BOB`) and its head, ears and tail beat with the
 stride, more the more it hurries. A swinging foot leaves and lands with no
 speed (a quintic ease along its path, its lift and the hoof's curl one bell),
 so a footfall is no corner in any joint. Turning on the spot it steps round
-at a rate its legs can follow. The body rides low enough that a leg reaches
+at a rate its legs can follow. A log across its way it leaps (scenario
+`leap`), the leap its rig's own: it gathers, sinking (`LEAP_DIP`) and
+lunging to `LEAP_V`, no foot lifted for a step, and springs `LEAP_SHORT`
+short of the log with its forequarters thrown up (`LEAP_PITCH`), each foot
+leaving the ground as its hip is carried out of its leg's reach; the body
+goes over on a free arc long enough to carry all six past the log
+(`LEAP_SPAN`), the fore and middle legs tucked and the hind trailed, each
+kept from its own hip, the tail flown out behind; it turns nose-down and
+the legs reach down and swing back to meet the ground still, fore, middle,
+hind, one tripod reaching well ahead and the other down under its hips,
+which lifts first as the stride takes up again; the body gives on a spring
+as they take it. The body rides low enough that a leg reaches
 only `STEP_REACH` of its length at a step's ends, short of where its reach
 begins to ease in (`SOFT_REACH`), so no footfall falls inside that easing; a stance travels less
 than the pairs stand apart, and the body rides as much lower as the legs
