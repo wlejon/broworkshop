@@ -17,7 +17,7 @@ import { loadCreature } from "./creature.js";
 import { runScenario, groundHeights, PROBE_N } from "./run.js";
 import { TELE, T } from "./contract.js";
 import { jointAngles, boneHead, boneTail } from "./skeleton.js";
-import { naturalness, smoothness, kinks, footEvents } from "./natural.js";
+import { naturalness, smoothness, kinks, turnSpike, footEvents } from "./natural.js";
 import { naturalRun } from "./natural-out.js";
 
 const DEG = 180 / Math.PI;
@@ -182,7 +182,7 @@ export function traceText(rec, { leg = null, bones = null, root = false, from = 
         const ja = jointAngles(rec.pose, k * rec.poseStride, skel);
         chain.forEach((b, i) => { ang[i][k] = ja[b][0] * DEG; });
     }
-    const kinked = ang.map((a) => new Set(kinks(a, dt, near).spikes.map((s) => Math.round(s.t / dt))));
+    const kinked = ang.map((a) => new Set(kinks(a, dt, near, turnSpike(skel)).spikes.map((s) => Math.round(s.t / dt))));
     const near1 = (set, k) => set.has(k) || set.has(k - 1) || set.has(k + 1);
     // The probe slots written in the window.
     const P = rec.probe;
@@ -191,7 +191,7 @@ export function traceText(rec, { leg = null, bones = null, root = false, from = 
     const fx = (v, w = 7) => pad(v.toFixed(3), w);
     const head = ['t', 'feet'];
     if (foot) head.push('   h', '  reach', '  ahead', ' below', '   miss');
-    if (root) head.push(' across', '     up', '  ahead', ' off line');
+    if (root) head.push(' across', '     up', ' over', '  ahead', ' off line');
     head.push(...chain.map((b) => pad(skel.bones[b].name.slice(0, 8), 9)), ...slots.map((i) => pad(`p${i}`, 8)), '  event');
     const lines = [`${rec.creature.label} ${rec.scenario.name}: ${leg ? `leg ${leg} (top ${skel.bones[top].name})` : ''}${bones ? ` bones ${bones.join(', ')}` : ''}; angles are each bone's flexion (deg, local x), * where it kinks`,
         head.join('  ')];
@@ -213,7 +213,7 @@ export function traceText(rec, { leg = null, bones = null, root = false, from = 
         if (root) {
             const b = rootAt(k);
             const w = [-1, 0, 1].map((j) => boneHead(rec.pose, (k + j) * rec.poseStride, r0));
-            row.push(pad(b[0].toFixed(1), 7), pad((1000 * w[1][1]).toFixed(1), 7), pad(b[2].toFixed(1), 7),
+            row.push(pad(b[0].toFixed(1), 7), pad((1000 * w[1][1]).toFixed(1), 7), pad(b[1].toFixed(0), 5), pad(b[2].toFixed(1), 7),
                 pad((1000 * Math.hypot(w[1][0] - (w[0][0] + w[2][0]) / 2, w[1][1] - (w[0][1] + w[2][1]) / 2, w[1][2] - (w[0][2] + w[2][2]) / 2)).toFixed(2), 9));
         }
         chain.forEach((b, i) => row.push(pad(ang[i][k].toFixed(1) + (near1(kinked[i], k) ? '*' : ' '), 9)));
@@ -223,6 +223,6 @@ export function traceText(rec, { leg = null, bones = null, root = false, from = 
     }
     lines.push('feet: a name where it is down (the rig\'s claim); h: the toe over the ground; reach: toe from the leg\'s top; ahead/below: along the heading and down;');
     lines.push('miss: the toe from the place the rig\'s telemetry gives (its target while it swings)');
-    if (root) lines.push('across/ahead: the root bone from the plan\'s place, mm, in the heading\'s frame; up: its height in the world, mm; off line: mm its place in the world is from the line through the steps either side');
+    if (root) lines.push('across/ahead: the root bone from the plan\'s place, mm, in the heading\'s frame; up: its height in the world, mm; over: mm it is above the plan\'s height; off line: mm its place in the world is from the line through the steps either side');
     return { lines };
 }

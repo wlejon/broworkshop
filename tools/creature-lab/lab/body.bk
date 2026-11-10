@@ -51,7 +51,11 @@ pub struct Foot { at: vec3<f32>, pivot: vec3<f32>, reach: f32, since: f32, left:
 // a gait, whose body answers its plan through the legs' spring and lags
 // it; 1 through a deliberate move such as a leap, whose push is begun when
 // it is asked, not when the body has fallen behind it).
-pub struct Support { f: array<Foot, NFEET>, effort: f32, lead: f32 }
+// `spring`: how much of a spring the legs are under a landing, 0 to 1: at 0
+// the body is brought to its plan with no overshoot (its fall stopped in a
+// few hundredths of a second), toward 1 it sinks on through the stance and
+// is thrown back up, as a trotting or galloping body is.
+pub struct Support { f: array<Foot, NFEET>, effort: f32, lead: f32, spring: f32 }
 // The body's centre, velocity and acceleration, the plan's velocity, and
 // the feet's total load.
 pub struct Body { com: vec3<f32>, vel: vec3<f32>, acc: vec3<f32>, tvel: vec3<f32>, load: f32 }
@@ -120,7 +124,7 @@ pub fn body_step(st: rw_store<f32, 1>, base: i32, target: vec3<f32>, stiff: f32,
     let wh = H_RATIO * body_omega(1.0);
     let e = target - com;
     let ev = vt - vel;
-    let want = vec3<f32>(wh * wh * e.x + 2.0 * wh * ev.x, wv * wv * e.y + 2.0 * wv * ev.y + S.lead * at_y, wh * wh * e.z + 2.0 * wh * ev.z);
+    let want = vec3<f32>(wh * wh * e.x + 2.0 * wh * ev.x, wv * wv * e.y + 2.0 * wv * (1.0 - clamp(S.spring, 0.0, 1.0)) * ev.y + S.lead * at_y, wh * wh * e.z + 2.0 * wh * ev.z);
     // What the loaded feet can do.
     let fade = reach_fade(S);
     var cap: f32 = 0.0;

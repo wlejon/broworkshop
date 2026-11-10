@@ -48,24 +48,28 @@ pub const LEAP_STATE: i32 = 19;
 // [15] the hind feet's last landing (tau)           [16] the clock's rate before it
 // [17] the clock's rate from it to the take-off     [18] the crouch's start (tau)
 const G: f32 = 9.81;
-pub const CLEAR: f32 = 0.6;      // leg lengths the hips pass over an obstacle's top
-pub const PUSH_ASK: f32 = 1.0;     // the take-off speed asked over what the rise needs
+@knob pub const CLEAR: f32 = 0.5;    // leg lengths the hips pass over an obstacle's top
+@knob pub const PUSH_ASK: f32 = 1.0;    // the take-off speed asked over what the rise needs
 pub const EFFORT: f32 = 1.6;     // the take-off's push over a gait's (an all-out effort)
 pub const BOUND_RISE: f32 = 0.42;  // leg lengths the hips rise in a bound with nothing to clear
 pub const PITCH_UP: f32 = 0.22;    // rad the trunk is nose-up at take-off
 pub const PITCH_DOWN: f32 = 0.28; // rad it is nose-down at the fore touchdown
 pub const STRIDE_MIN: f32 = 0.8;   // the clock's rate a run-up may take, at least
 pub const STRIDE_MAX: f32 = 1.25;  //   and at most
-pub const DEPTH: f32 = 0.22;       // leg lengths below the take-off height the hips go at most (the legs' fold)
-pub const FALL: f32 = 0.5;        // the hips' fall into the bounce, as a share of a free fall's speed
+@knob pub const DEPTH: f32 = 0.3;   // leg lengths below the take-off height the hips go at most (the legs' fold)
+@knob pub const FALL: f32 = 1.0;      // the hips' fall into the bounce, as a share of a free fall's speed
 pub const PUSH_T: f32 = 0.5;       // leg times the hind feet's last stance lasts, at least
-pub const UNLOAD_T: f32 = 0.01;    // s before the take-off the push ends (the hind feet unloading)
+pub const UNLOAD: f32 = 0.125;     // leg times before the take-off the push ends: the hind feet unload over them (creature::body T_LOAD)
 pub const BOTTOM: f32 = 0.3;       // share of the hind feet's last stance the hips still sink through
 pub const BOTTOM_ACC: f32 = 1.0;   // g the hips are pushed up at the stroke's bottom
 
 // The legs' pendulum time (s).
 pub fn leg_time() -> f32 { return sqrt(max(MEAN_LEG, 0.05) / G); }
-fn absorb_t() -> f32 { return 1.1 * leg_time(); }
+@knob pub const ABSORB: f32 = 0.5;     // leg times the landing takes the hips' fall up over
+fn absorb_t() -> f32 { return ABSORB * leg_time(); }
+// (A push still asked while the feet's load fades is not given: the body
+// left the ground that much slower than the leap needed.)
+fn unload_t() -> f32 { return UNLOAD * leg_time(); }
 
 pub struct Leap { on: bool, tau: f32, tf: f32, vy: f32, h_take: f32, h0: f32, v0: f32, h_stand: f32,
                   ground: f32, since: f32, fl: f32, hl: f32, legs_back: bool, obst: f32, spin: f32,
@@ -94,17 +98,26 @@ pub fn leap_store(st: rw_store<f32, 1>, b: i32, o: Leap) {
 // The hind feet's last stance is a bounce: from their landing (tc) the hips
 // sink on through the first BOTTOM of it to the stroke's bottom, turning
 // there with no speed, and are pushed up from it to the take-off speed by
-// UNLOAD_T before the take-off. The bottom is as low as a push at a steady
+// UNLOAD before the take-off. The bottom is as low as a push at a steady
 // acceleration needs, no lower than DEPTH: the hips' lowest point is the
 // bottom itself, so the hind legs are never asked to fold past it.
-pub fn push_time(o: Leap) -> f32 { return max(-o.tc - UNLOAD_T, 0.06); }
+pub fn push_time(o: Leap) -> f32 { return max(-o.tc - unload_t(), 0.06); }
 fn bottom_tau(o: Leap) -> f32 { return o.tc + BOTTOM * push_time(o); }
-fn stroke_time(o: Leap) -> f32 { return (1.0 - BOTTOM) * push_time(o); }
+fn stroke_full(o: Leap) -> f32 { return (1.0 - BOTTOM) * push_time(o); }
+// The stroke's time: from the bottom to the push's end, or, where the
+// bottom is held up at DEPTH, as long as a steady push takes over the room
+// that leaves (the hips wait at the bottom until then: a stroke given
+// longer than its room dipped under the bottom first and pushed late).
+fn stroke_time(o: Leap) -> f32 {
+    let v1 = o.vy + G * unload_t();
+    let room = flight_hip(o, -unload_t()) - (o.h_take - DEPTH * MEAN_LEG);
+    return min(stroke_full(o), 2.0 * max(room, 0.02) / max(v1, 0.5));
+}
 // The bottom's height and the hips' upward acceleration there.
 pub fn push_bottom(o: Leap) -> vec2<f32> {
-    let T = stroke_time(o);
-    let v1 = o.vy + G * UNLOAD_T;
-    let hb = max(flight_hip(o, -UNLOAD_T) - 0.5 * v1 * T, o.h_take - DEPTH * MEAN_LEG);
+    let T = stroke_full(o);
+    let v1 = o.vy + G * unload_t();
+    let hb = max(flight_hip(o, -unload_t()) - 0.5 * v1 * T, o.h_take - DEPTH * MEAN_LEG);
     return vec2<f32>(hb, BOTTOM_ACC * G);
 }
 // The crouch: from its start (tcr) down to the bottom, about as long as a
@@ -252,18 +265,22 @@ pub fn leap_end(o: Leap) -> f32 { return max(fore_down(o) + absorb_t(), legs_don
 pub fn leap_hip(o: Leap, land_ground: f32) -> vec2<f32> {
     if (o.tau < 0.0) {
         // The crouch down to the stroke's bottom, then the push up it.
-        // The push ends UNLOAD_T before the take-off: the hind feet unload
+        // The push ends UNLOAD before the take-off: the hind feet unload
         // over it (creature::body T_LOAD), the hips already on the arc.
-        let tu = UNLOAD_T;
+        let tu = unload_t();
         if (o.tau >= -tu) { return vec2<f32>(flight_hip(o, o.tau), o.vy - G * o.tau); }
         let b = push_bottom(o);
         let tb = bottom_tau(o);
         if (o.tau < tb) { return hermite5(o.h0, o.v0, 0.0, b.x, 0.0, b.y, tb - o.tcr, o.tau - o.tcr); }
-        return hermite5(b.x, 0.0, b.y, flight_hip(o, -tu), o.vy + G * tu, -G, stroke_time(o), o.tau - tb);
+        let ts = -tu - stroke_time(o);
+        if (o.tau < ts) { return vec2<f32>(b.x, 0.0); }
+        return hermite5(b.x, 0.0, b.y, flight_hip(o, -tu), o.vy + G * tu, -G, stroke_time(o), o.tau - ts);
     }
     let fd = fore_down(o);
     if (o.tau < fd) { return vec2<f32>(flight_hip(o, o.tau), o.vy - G * o.tau); }
-    return hermite5(flight_hip(o, fd), o.vy - G * fd, -G, land_ground + o.h_stand, 0.0, 0.0, absorb_t(), o.tau - fd);
+    // (From the hips' own height and speed at the touchdown, which the rig
+    // puts in h0 and v0 then.)
+    return hermite5(o.h0, o.v0, -G, land_ground + o.h_stand, 0.0, 0.0, absorb_t(), o.tau - fd);
 }
 
 // The trunk's planned pitch (rad, nose up) and its rate at tau.

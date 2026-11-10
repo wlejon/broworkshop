@@ -88,6 +88,8 @@ const LEG_B0: array<i32, 2> = [B_FEMURL, B_FEMURR];
 const WING_B0: array<i32, 2> = [B_HUMERUSL, B_HUMERUSR];
 const SIDE: array<f32, 2> = [1.0, -1.0];
 const BODY_REACH: f32 = 0.985;
+@knob const TRAIL_T: f32 = 0.045;    // s after a hop's take-off the feet trail where they stood
+@knob const REACH_OUT: f32 = 0.85;  // share of the leg and toes' length a foot reaching out to land may be from its hip
 const CAP_EASE: f32 = 0.06;
 const SOFT_M: f32 = 0.004;
 const LEG_BAND: f32 = 0.12;
@@ -289,6 +291,7 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
     }
     boff = crit_step(boff, 0.0, 25.0, dt * let_go);
     let bounce = raw + boff.x;
+    let bounce_v = select_f(init, 0.0, (bounce - state[s + D_BPREV]) / max(dt, 1e-5));
     state[s + D_BOFF] = boff.x;
     state[s + D_BOFF_V] = boff.y;
     state[s + D_BPREV] = bounce;
@@ -315,12 +318,20 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
         let hip = pos + q_rot(qyaw, HEAD[b0] - HEAD[B_BODY]) + vec3<f32>(0.0, state[s + D_BODY_Y] - pos.y + bounce, 0.0);
         // In stance the toes lie on the ground; as the feet leave they stand
         // up onto their tips.
-        let roll = smooth01((ph - (duty - 0.1)) / 0.1) * select_f(ph < duty, 1.0, 0.0) * go;
+        // (Up on them until it has left: armed, a foot past its stance's
+        // end on the clock is one about to lift, not one just landed.)
+        // (Through the push, from the bottom of the crouch on: a stance is
+        // a few hundredths of a second, and a roll kept to its end is a snap.)
+        let roll = smooth01((ph - 0.45 * duty) / (0.55 * duty)) * select_f(ph < duty || state[k + L_ARMED] > 0.5, 1.0, 0.0) * go;
         var a = flat - ground_pitch(env, toe, fwd) - ROLL * roll;
         if (planted) {
             if (ph < duty) { state[k + L_ARMED] = 1.0; }
             let stray = length(vec2<f32>(toe.x - home.x, toe.z - home.z));
-            var lift = moving && state[k + L_ARMED] > 0.5 && ph >= duty;
+            // It leaves on the clock, or sooner if the push has run the leg
+            // out (a first hop from a stand, begun on legs near straight):
+            // held down past that it is stretched past its length.
+            let out = length(toe - hip) > REACH_OUT * (leg_reach(l) + length(toe_vec(l, flat)));
+            var lift = moving && state[k + L_ARMED] > 0.5 && (ph >= duty || (out && bounce_v > 0.0));
             var dur = clamp((1.0 - ph) / freq, 0.06, 0.4);
             var kind: f32 = 0.0;
             // Standing: a foot strayed from home shuffles back, one at a time.
@@ -356,13 +367,29 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
             } else {
                 // In the flight the feet go with the body as they left it, are
                 // drawn up under the belly, and reach out to land.
-                let carried = hip + q_rot(qyaw, lifted);
+                // (For TRAIL_T after they leave they trail where they stood,
+                // the leg still lengthening as it eases off: carried from
+                // the step they left, its lengthening stopped dead.)
+                let t_air = u * state[k + L_DUR];
+                let v_off = fwd * speed + vec3<f32>(0.0, bounce_v + 9.81 * t_air, 0.0);
+                let carried = hip + q_rot(qyaw, lifted) - v_off * (t_air * (1.0 - smooth01(t_air / TRAIL_T)));
                 let tucked = hip + q_rot(qyaw, vec3<f32>(0.0, -(1.0 - TUCK) * hip_h, 0.004));
                 // (Eased with no acceleration at the ends: the legs are a
                 // seventh of the mass, and a quick tuck jerks the body in
                 // what should be a free fall.)
                 path = mix(mix(carried, tucked, ease5(u / 0.55)), target, ease5((u - 0.4) / 0.6));
+                // Reaching out to land, no further from the hip than the
+                // leg is long: the ground is further than that until the
+                // body has fallen to it, and a leg sent there early bends
+                // back on itself until it lands.
+                let hv = path - hip;
+                let hl = length(hv);
+                let cap = REACH_OUT * (leg_reach(l) + length(toe_vec(l, flat)));
+                if (hl > 1e-5) { path = hip + hv * (soft_cap(hl, cap, 0.15) / hl); }
             }
+            // (It lands when it has come to its place, not on the clock with
+            // the body still too high for the leg to be there.)
+            let there = length(path - target) < 0.002;
             let need = height(env, path.x, path.z) + 0.001 * bump(u, 0.1, 0.8);
             if (path.y < need) {
                 let t = (need - path.y) / max(hip.y - path.y, 0.01);
@@ -373,7 +400,7 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
             let curl = select_f(settle, mix(state[k + L_A0], flat, 0.5), CURL);
             a = mix(mix(state[k + L_A0], curl, smooth01(u / 0.3)), flat - gpt, smooth01((u - 0.55) / 0.35));
             toe = path;
-            if (u >= 1.0) {
+            if (u >= 1.0 && there) {
                 planted = true;
                 state[k + L_PLANT] = 1.0;
                 state[k + L_SINCE] = 0.0;
@@ -388,9 +415,13 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
         ground_sum += select_f(planted, toe.y, height(env, toe.x, toe.z));
     }
     let ground_y = 0.5 * ground_sum;
-    let since = state[s + D_LEG + L_SINCE];
-    let landed = select_f(state[s + D_LEG + L_PLANT] > 0.5 && state[s + D_LEG + L_KIND] < 0.5, 1.0, 0.0)
-                 * smooth01(since / 0.04) * (1.0 - smooth01((since - 0.06) / 0.25));
+    // The time since it landed, running on through the flight after (the
+    // tail cocked at a landing comes down in its own time, not at the step
+    // the feet leave the ground).
+    var since = state[s + D_LEG + L_SINCE];
+    if (state[s + D_LEG + L_PLANT] < 0.5) { since += state[s + D_LEG + L_U] * state[s + D_LEG + L_DUR]; }
+    let landed = select_f(state[s + D_LEG + L_KIND] < 0.5, 1.0, 0.0)
+                 * smooth01(since / 0.06) * (1.0 - smooth01((since - 0.06) / 0.18));
 
     // --- the body's plan ---------------------------------------------------------------------
     // Foraging, a peck at the ground every half second or so.

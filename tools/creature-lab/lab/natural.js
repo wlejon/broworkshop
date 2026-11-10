@@ -48,6 +48,7 @@ export const NATURAL = {
     mu: 1.0,              // friction
     energy: 0.15,         // J/kg gained in one flight
     spike: 10000,         // deg/s^2 off the line through its neighbours: the velocity kinking by ~80 deg/s in a step
+    spikeLeg: 0.85,       // m of leg that is sized for: a shorter-legged creature's joints are allowed more (turnSpike)
     spikeRel: 8,          // ... or this many times the joint's median jump, the larger
     variety: [0.01, 0.12],// variety as a share of the joint's range: below repeats, above wanders
     jitter: 0.015,        // jitter as a share of range
@@ -377,7 +378,21 @@ export function footEvents(rec, win = 3) {
 // (a smooth swing, however fast, leaves almost nothing, its fourth
 // derivative over 17 ms; a corner in the velocity leaves a spike), each
 // spike tagged with the foot event nearest it (`near`).
-export function kinks(th, dt, near) {
+// The spike a joint of `skel` may turn with: NATURAL.spike for legs of
+// NATURAL.spikeLeg, and more for shorter ones. Moving alike at their own
+// sizes (the same strides of their own legs, the same share of a stride in
+// the air), a creature's times go as the root of its leg length and its
+// joints' angular accelerations as g over it: a finch on 5 cm legs turns
+// its joints seventeen times as hard as a deer on 85 cm ones doing the
+// same thing. (A place's spike, in m/s^2, is the same at every size.)
+export function turnSpike(skel) {
+    const legs = skel.parts.legs;
+    if (!legs.length) return NATURAL.spike;
+    const mean = legs.reduce((s, l) => s + l.length, 0) / legs.length;
+    return NATURAL.spike * Math.max(1, NATURAL.spikeLeg / Math.max(mean, 0.01));
+}
+
+export function kinks(th, dt, near, spike = NATURAL.spike) {
     const n = th.length;
     const al = new Float64Array(n), jk = new Float64Array(n);
     for (let k = 1; k < n - 1; k++) al[k] = (th[k + 1] - 2 * th[k] + th[k - 1]) / (dt * dt);
@@ -385,7 +400,7 @@ export function kinks(th, dt, near) {
     const res = new Float64Array(n);
     for (let k = 3; k < n - 3; k++) res[k] = Math.abs(al[k] - (al[k - 2] + al[k + 2]) / 2);
     const med = median(res.subarray(3, n - 3));
-    const lim = Math.max(NATURAL.spike, NATURAL.spikeRel * med);
+    const lim = Math.max(spike, NATURAL.spikeRel * med);
     const spikes = [];
     // One kink leaves half of itself two steps either side: the peak within three steps counts.
     for (let k = 3; k < n - 3; k++) {
@@ -410,6 +425,7 @@ const worse = (e, w) => !w || e.spikes.length > w.spikes.length || (e.spikes.len
 export function smoothness(rec) {
     const S = series(rec), skel = rec.creature.skel, n = rec.steps, dt = rec.dt;
     const near = footEvents(rec);
+    const turn = turnSpike(skel);
     const joints = [];
     for (const b of skel.bones) {
         if (b.parentIndex < 0) continue;
@@ -418,7 +434,7 @@ export function smoothness(rec) {
             const th = new Float64Array(n);
             for (let k = 0; k < n; k++) th[k] = S.angles[k][b.index][c] * DEG;
             for (let k = 1; k < n; k++) th[k] = th[k - 1] + wrap(th[k] - th[k - 1]);
-            const e = { axis: 'xyz'[c], ...kinks(th, dt, near) };
+            const e = { axis: 'xyz'[c], ...kinks(th, dt, near, turn) };
             if (e.range > 0.5 && worse(e, worst)) worst = e;
         }
         if (worst) joints.push({ bone: b.name, ...worst, perSecond: r2(worst.spikes.length / (n * dt)) });
@@ -434,7 +450,7 @@ export function smoothness(rec) {
         const p = new Float64Array(n), a = new Float64Array(n);
         for (let k = 0; k < n; k++) { p[k] = 1000 * rec.pose[k * rec.poseStride + r0 * ROWS + 4 * c + 3]; a[k] = S.angles[k][r0][c] * DEG; }
         for (let k = 1; k < n; k++) a[k] = a[k - 1] + wrap(a[k] - a[k - 1]);
-        root.push({ channel: `place ${'xyz'[c]}`, ...kinks(p, dt, near) }, { channel: `turn ${'xyz'[c]}`, ...kinks(a, dt, near) });
+        root.push({ channel: `place ${'xyz'[c]}`, ...kinks(p, dt, near) }, { channel: `turn ${'xyz'[c]}`, ...kinks(a, dt, near, turn) });
     }
     root.sort((x, y) => y.spikes.length - x.spikes.length);
     // Where they fall: the foot events the spikes gather at, most first.

@@ -55,8 +55,8 @@ legs' bone):
 | Module | What |
 |--------|------|
 | `creature::pose` (`lab/pose.bk`) | `Pose`: every bone's world rotation and head; points on bones, local rotations, the centre of mass, writing a pose out |
-| `creature::body` (`lab/body.bk`) | the centre of mass as a state of its own, moved only by what the loaded feet can push: each leg along its line from foot to swing joint, push only, more as it flexes, a little across it, within friction; free fall with no foot down. `body_step(plan, stiffness, Support)` steers it toward the rig's plan; a foot loads and unloads over 0.125 of the legs' pendulum time (40 ms for the deer), the body strays at most a quarter leg from its plan, and a gait with flight pushes harder in stance to carry its weight over the stride. `Support.effort` above 1 is an all-out push (each leg pushes that much more, nearly to full reach); `Support.lead` feeds the plan's vertical acceleration forward, for a deliberate move whose push begins when it is asked rather than when the body has fallen behind (that acceleration already carries the flight's weight, so the extra stance push is owed only for the share not led) |
-| `creature::leap` (`lab/leap.bk`) | a leap from a gait: the run-up's strides paced so the hind feet's last stance ends at the take-off spot, a crouch onto the hind legs and an all-out push held long enough to lift the body, a ballistic flight whose height clears an obstacle (or a bound's rise with none), the trunk pitching nose-up to nose-down, and a landing absorbed fore first. `leap_begin`, `leap_hip` and `leap_pitch` give the plan, `leap_leg` each foot's lift and touchdown, `leap_effort` and `leap_follow` the body's Support; times scale with the legs' pendulum time |
+| `creature::body` (`lab/body.bk`) | the centre of mass as a state of its own, moved only by what the loaded feet can push: each leg along its line from foot to swing joint, push only, more as it flexes, a little across it, within friction; free fall with no foot down. `body_step(plan, stiffness, Support)` steers it toward the rig's plan; a foot loads and unloads over 0.125 of the legs' pendulum time (40 ms for the deer), the body strays at most a quarter leg from its plan, and a gait with flight pushes harder in stance to carry its weight over the stride. `Support.effort` above 1 is an all-out push (each leg pushes that much more, nearly to full reach); `Support.lead` feeds the plan's vertical acceleration forward, for a deliberate move whose push begins when it is asked rather than when the body has fallen behind (that acceleration already carries the flight's weight, so the extra stance push is owed only for the share not led); `Support.spring` (0 to 1) makes the legs springs under a landing: at 0 the body is brought to its plan with no overshoot, toward 1 it sinks on through the stance and is thrown back up |
+| `creature::leap` (`lab/leap.bk`) | a leap from a gait: the run-up's strides paced so the hind feet's last stance ends at the take-off spot, a crouch onto the hind legs and an all-out push held long enough to lift the body, a ballistic flight whose height clears an obstacle (or a bound's rise with none), the trunk pitching nose-up to nose-down, and a landing absorbed fore first. `leap_begin`, `leap_hip` and `leap_pitch` give the plan, `leap_leg` each foot's lift and touchdown, `leap_effort` and `leap_follow` the body's Support; times scale with the legs' pendulum time. The crouch falls at free fall's pace (`FALL`) no deeper than `DEPTH` leg lengths under the take-off height; where that depth limits the stroke the hips wait at the bottom and push over the room there is at a steady rate, and the push ends `UNLOAD` leg times before the take-off, as the feet unload (a push asked while their load fades is not given). The landing takes the fall up over `ABSORB` leg times, the time the landing feet are down, from the hips' own height and speed at the fore touchdown (the rig puts them in `h0`, `v0`); `CLEAR` is the leg lengths the hips pass over an obstacle |
 | `creature::spine` (`lab/spine.bk`) | the back's flex, bend and twist from what the legs do: flexed by the feet's spread along the body (most in a gait whose pairs swing together), bent into a turn's curve and toward gathered feet, twisted by sideways acceleration, hollowed by the body's vertical acceleration; each a spring of the trunk's frequency |
 | `creature::secondary` (`lab/secondary.bk`) | every dangling chain (neck, head, ears, tail) carried by its momentum: the subtree's centre of mass on a spring and damper toward where the rig puts it, its frequency from the part's size and its damping from its share of the body's mass (a heavy neck near critical, so a gait's rhythm never rings it into a whip; an ear or a slender tail light, so it swings past and settles), joint limits eased into, and a part swung into the ground resting on it (a part the rig lays there stays there); `hold` keeps part of a bone's world rotation (a head steadied in space but not pinned). `carry` takes the `env`, for the ground |
 
@@ -102,7 +102,19 @@ pairs, and lying down its lower joints fold ahead of the rest
 (`FOLD_AHEAD`). Galloping, its body may rise `GALLOP_FREE` past what its
 planted hooves hold, and a hoof the posed leg hung short of last step
 (`SHORT_LET`) steps, so a leg that runs out of length lets go of its mark
-rather than dragging its hoof off it. `hexa` is an invented one with no
+rather than dragging its hoof off it. Trotting, its legs are springs
+(`TROT_SPRING`), and a swinging hoof's mark is no further ahead than the leg
+will reach from where its girdle will be when it lands (`LAND_REACH`,
+`LAND_WALK`). A leap or a bound is planned at the hips: the crouch and the
+landing start from where the body is, the body's centre follows the plan by
+the offset its pose has (turned by the leap's pitch, `COFF_W`), the path
+takes the body's own speed at the take-off, and the legs' flexion is taken
+from where the body has the girdles. The hind feet stay down from their last
+landing to the take-off and let go a step before their full length
+(`SPENT`); the flight's hooves fold to `TUCK_HIND` and `TUCK_FORE` of their
+reach, come down `LAND_LEAD` leg times ahead of their mid-stance, bear the
+landing until the gait takes the legs back, and the gait takes them back
+only once the hind feet are down. `hexa` is an invented one with no
 reference behind it: a slender six-legged browser of the plain, a long back
 on three pairs of long legs, an arched neck of two bones, lyre horns, long
 ears and a thin tufted tail. Walking, its legs go in a ripple up each side
@@ -311,14 +323,18 @@ and not `creature::body`, whose feet are too slow for a stance this short;
 in the air the whole bird is put back on its mass's usual place over the
 root, which the tucking legs carry it off. It starts and stops hopping at the bottom of a stance, where the
 body is still, and a spring lets go of whatever bounce is left across the
-switch. A foot leaving the ground is carried up with the body from where
-it left the hip, then tucked under the belly, then reaches out to land flat.
+switch. A foot leaving the ground trails for a moment where it stood
+(`TRAIL_T`), is carried up with the body from where it left the hip, then
+tucked under the belly, then reaches out to land flat, no further than
+`REACH_OUT` of the leg's reach, and is down only once it is on its mark. Out
+of a stand it lifts as soon as the body is rising. The toes roll through the
+last half of the stance.
 Those moves are eased with no acceleration at their ends, because the legs
 are a seventh of the mass and a quick tuck would jerk a body that should be
 falling freely. The folded wings are held to the body outside the startle;
 sprung, a landing flings them open. Its head glances: quick turns to a new
 side every so often, held between, toward the gaze when there is one. The
-tail cocks up as it lands. Foraging, it leans over and pecks in quick jabs.
+tail cocks up as it lands and settles through the flight after. Foraging, it leans over and pecks in quick jabs.
 Resting, it settles onto its belly. Startled, it crouches and flutters its
 wings, then stands alert. Its face draws a black eye in a pale ring and a
 stripe from the bill through the eye.
@@ -559,7 +575,8 @@ text under the creature's folder; `score`, `sweep` and `kinks` run what
   leg's top bone and that offset along the heading and down, and its miss
   from where the rig's telemetry says it is (its target while it swings),
   for `--root` the root bone's place across and ahead of the plan's, its
-  height, and how far each step is off the line through the steps either
+  height in the world and over the plan's (a body fallen under its plan
+  reads negative), and how far each step is off the line through the steps either
   side (mm: a pop in the body is one large value, which a sheet cannot show),
   then each bone of the leg and of `--bones` by its flexion (local x, deg)
   with `*` within a step of a kink, the rig's probe slots that are not zero,
@@ -856,7 +873,11 @@ Every output is deterministic. A rerun writes the same bytes.
     `between`, and the flag names where they gather. The root is tested the
     same way, apart from the joints: its place (mm, so a kink of 80 mm/s in
     a step counts as a joint's 80 deg/s) and its turn in the world, since a
-    kink there shows in every leg on the ground at once.
+    kink there shows in every leg on the ground at once. A turn's spike is
+    measured against the creature's size (`turnSpike`: `NATURAL.spike` for a
+    creature whose mean leg is `NATURAL.spikeLeg` or longer, more in
+    proportion for a smaller one, whose joints turn faster through the same
+    motion); the root's place is not.
   - **Variety**: each steady cycle's deviation from the mean cycle, split
     into slow change (variety: `repeats` under 1% of the range, `wanders`
     over 12%) and step-to-step noise (`jitters` over 1.5%).
