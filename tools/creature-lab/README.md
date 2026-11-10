@@ -588,9 +588,9 @@ text under the creature's folder; `score`, `sweep` and `kinks` run what
   within two steps of each other are one event of the rig's, `+root` where
   the root's place kinks too), which are the ones to `trace`. (A kink is a
   spike over the larger of the joint's limit and eight times its own median
-  through the run, so a run all at one fast pace counts fewer of the same
-  motion's kinks than a run of several paces does: compare a rate with the
-  same scenario's before, not one scenario's with another's.)
+  in the second it is in and the one either side, so the same stride counts
+  the same in a steady run, in a run of several paces and in one that starts
+  from a stand.)
   `--bone <name>` lists that bone's every kink (time, size, event); `--at
   "<foot> <down|lift>"` every bone kinking there.
 - `trace <scenario>` (`<scenario>-trace.txt`): a row a step from `--from` to
@@ -896,7 +896,10 @@ Every output is deterministic. A rerun writes the same bytes.
     free fall), and the friction flag gives the push along the creature's
     travel and across it, with what the feet bore then.
   - **Smoothness**: each joint's angular acceleration against its
-    neighbours two steps off; a spike is a corner in the joint's speed.
+    neighbours two steps off; a spike is a corner in the joint's speed: an
+    acceleration standing out from both neighbours. One that goes from the
+    one's value to the other's is a force coming on or off (a hoof landing,
+    a push beginning), which leaves the speed whole, and is not counted.
     Kinks a second, per joint and overall, with jerk. Each spike carries the
     foot event (`LF down`, `RH lift`) within three steps of it, or
     `between`, and the flag names where they gather. The root is tested the

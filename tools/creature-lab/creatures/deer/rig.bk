@@ -677,7 +677,15 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
             let hv2 = vec2<f32>(toe.x - top.x, toe.z - top.z);
             let hl = length(hv2);
             if (hl > 1e-4) {
-                let hn = soft_cap(hl, hmax, select_f(in_leap, 0.01, CAP_BAND));
+                // (Taken up over the swing's first fifth: a hoof leaves the
+                // ground at the end of its leg's reach, inside the cap's
+                // band, and capped from its first step in the air it jumped
+                // 7 mm forward in that step, at every hind lift.)
+                let cap_n = soft_cap(hl, hmax, select_f(in_leap, 0.01, CAP_BAND));
+                // (At a walk's pace: faster, it is capped from the first,
+                // for there the body outruns a hoof left a moment longer,
+                // shuts its leg's joints and draws it through the ground.)
+                let hn = mix(hl, cap_n, select_f(leap_step, 1.0, max(smooth01(u / 0.2), smooth01((speed - 1.5) / 1.5))));
                 toe.x = top.x + hv2.x * (hn / hl);
                 toe.z = top.z + hv2.y * (hn / hl);
             }
@@ -757,7 +765,10 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
         var w = smooth01((state[k + L_U] - 0.5) / 0.4);
         if (state[k + L_PLANT] > 0.5) { w = smooth01(left_t[l] / 0.12); }
         if (w <= 0.0) { continue; }
-        let slack = (1.0 - w) * CAP_FADE;
+        // (Its last sixth runs out without bound: a body the fading limit
+        // still held as its hoof left, the last one down before a flight,
+        // sprang 3 mm up in the step it was let go.)
+        let slack = (1.0 - w) * CAP_FADE + CAP_FADE * max(0.15 / max(w, 1e-3) - 1.0, 0.0);
         let hind = LEG_HIND[l] == 1;
         // The fore leg swings about the middle of its shoulder blade (the
         // blade turns with it), the hind about the femur head.
@@ -908,7 +919,14 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
     // each stride was cut short and the body drawn down faster than it
     // could fall. The reach guard below still keeps the hooves' legs within
     // their length.)
-    let rise = max(smin(ch - hy, cf - fy, CAP_SOFT), 0.0) + GALLOP_FREE * gw.z;
+    // (Its floor at the plan is eased for a body coming down onto it from
+    // above, by as much as it is above: riding the ceiling down as a
+    // stretched hind leg left, out of a gallop into a trot, it stopped in
+    // one step where the ceiling met a hard floor. A walk's body, on the
+    // ceiling all stride, is not above it and keeps the floor as it was.)
+    let ceil_y = smin(ch - hy, cf - fy, CAP_SOFT);
+    let above = clamp(shift.y - GALLOP_FREE * gw.z, 0.0, 0.03);
+    let rise = -smin(-ceil_y, 0.0, max(above * above / 0.03, 1e-4)) + GALLOP_FREE * gw.z;
     if (!lp.on) {
         let over = shift.y - rise;
         let free_y = shift.y;
@@ -1085,7 +1103,10 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
         if (!planted) {
             // The toe-off roll the hoof lifted with carries into the lift,
             // then the hoof folds.
-            if (state[k + L_KIND] < 0.5) { roll = BREAKOVER * state[k + L_SINCE] * (1.0 - smooth01(u / 0.3)); }
+            // (A hoof that leaves before the clock's stance ends is still
+            // rolling: the roll runs on to its end in the air. Held at what
+            // it had come to, the hoof stopped turning in the step it lifted.)
+            if (state[k + L_KIND] < 0.5) { roll = BREAKOVER * max(state[k + L_SINCE], select_f(moving, toe_roll(ph, duty), 0.0)) * (1.0 - smooth01(u / 0.3)); }
             roll += hoof_flex * swing_fold(state, k);
         }
         let ah = rest_angle(b0 + nb - 1) + slope - par_pitch - roll;

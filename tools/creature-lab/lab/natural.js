@@ -402,13 +402,31 @@ function kinksOf(th, dt, near, spike, more) {
     for (let k = 1; k < n - 1; k++) al[k] = (th[k + 1] - 2 * th[k] + th[k - 1]) / (dt * dt);
     for (let k = 2; k < n - 1; k++) jk[k] = (al[k] - al[k - 1]) / dt;
     const res = new Float64Array(n);
-    for (let k = 3; k < n - 3; k++) res[k] = Math.abs(al[k] - (al[k - 2] + al[k + 2]) / 2);
-    const med = median(res.subarray(3, n - 3));
+    // (Off both neighbours, not off their mean: a corner in the speed is an
+    // acceleration that stands out from the steps either side of it. One
+    // that goes from the one's value to the other's is a force coming on or
+    // off, a hoof landing or a push beginning, which leaves the speed whole;
+    // against the mean, half of every such step counted as a kink.)
+    // (The motion's own scale, which the limit is relative to, stays the
+    // median off the mean: how hard it turns at all.)
+    const off = new Float64Array(n);
+    for (let k = 3; k < n - 3; k++) {
+        off[k] = Math.abs(al[k] - (al[k - 2] + al[k + 2]) / 2);
+        res[k] = Math.max(0, al[k] - Math.max(al[k - 2], al[k + 2]), Math.min(al[k - 2], al[k + 2]) - al[k]);
+    }
+    // (That scale is the second it is in or the one either side, whichever
+    // turns hardest: over a whole run of standing and hopping, or of a walk
+    // and a gallop, the median is the quiet part's, and the same stride that
+    // passes in a steady run counted there.)
+    const med = median(off.subarray(3, n - 3));
+    const B = Math.max(8, Math.round(1 / dt)), nb = Math.ceil(n / B), bm = new Float64Array(nb);
+    for (let b = 0; b < nb; b++) bm[b] = median(off.subarray(b * B, Math.min(n, (b + 1) * B)));
+    const local = (k) => { const b = Math.floor(k / B); return Math.max(bm[b], b > 0 ? bm[b - 1] : 0, b < nb - 1 ? bm[b + 1] : 0); };
     const lim = Math.max(spike, NATURAL.spikeRel * med);
     const spikes = [];
     // One kink leaves half of itself two steps either side: the peak within three steps counts.
     for (let k = 3; k < n - 3; k++) {
-        const limK = more ? Math.max(lim, more[k]) : lim;
+        const limK = Math.max(spike, NATURAL.spikeRel * local(k), more ? more[k] : 0);
         if (res[k] <= limK) continue;
         let peak = true;
         for (let j = Math.max(3, k - 3); j <= Math.min(n - 4, k + 3) && peak; j++) if (j !== k && (res[j] > res[k] || (res[j] === res[k] && j < k))) peak = false;
@@ -434,7 +452,7 @@ export function smoothness(rec) {
     // (Not the first NATURAL.settle seconds: a run sets the creature down
     // already at its pace, its springs at rest, and what it does settling
     // from that is the scenario's, not its gait's.)
-    const kinks = (...a) => { const e = kinksOf(...a); e.spikes = e.spikes.filter((s) => s.t >= NATURAL.settle); return e; };
+    const kinks = (th, d, nr, spike = NATURAL.spike, more = null) => { const e = kinksOf(th, d, nr, spike, more); e.spikes = e.spikes.filter((s) => s.t >= NATURAL.settle); return e; };
     const joints = [];
     for (const b of skel.bones) {
         if (b.parentIndex < 0) continue;
