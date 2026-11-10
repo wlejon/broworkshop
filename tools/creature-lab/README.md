@@ -287,6 +287,27 @@ runs, the head lifted to look about between. Its face draws a bare orange
 patch about a pale gold eye under a black brow, the nostril on a yellow
 cere and the gape's line.
 
+`faun` is the same legs under an upright body, in keys of its own: 34 kg,
+1.33 m to its crown, a slim trunk leaning a little forward over the toes,
+square shoulders, arms that hang to the thighs (a collar bone, upper arm,
+forearm and hand each; the skeleton rests them a fifth of a right angle
+out so the skin under the arm is meshed open, and `poses.js` `arm` hangs
+them), a long horned head with a drooping ear of one bone each side, a
+short upturned tail. Walking, the waist and chest turn back against the
+hips and on past them, so the shoulders' line swings opposite to the hips'
+and each arm swings whole from a shoulder that goes with it, the elbow
+giving as it comes forward; running, it leans in with its elbows bent
+square and driven; leaping, the arms are thrown up. Its rig stands it on
+one leg at a time (the hips over that foot and tipped, the waist and chest
+tipped back against them, the head level), sways its arms, lifts a hand to
+scratch at its breast, flicks an ear or wags its tail; gathering, its left
+hand picks about on the ground and comes up to its mouth, the head dipping
+to meet it; lying down it sits on its folded legs with its hands on the
+ground. Its face draws round hazel eyes with a little white at the
+corners under heavy lashed lids, and a brow over each that the lid bone's z
+moves (inner ends up in a flinch and as the eyes go to something new, down
+when it is intent).
+
 ### Keys: a creature drawn pose by pose
 
 A species whose whole body makes its gait (a biped: the hips drop, sway and
