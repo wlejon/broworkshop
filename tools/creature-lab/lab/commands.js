@@ -26,7 +26,7 @@ import { scanScenario } from "./finder.js";
 import { finderReport } from "./finder-out.js";
 import { naturalReport, naturalRun } from "./natural-out.js";
 import { herdCost } from "./herd.js";
-import { flockCost } from "./flock-cost.js";
+import { flockCost, flockTimeline } from "./flock-cost.js";
 import { scoreTable, sweepTable, compareTable, kinkReport, traceText } from "./iterate.js";
 
 export const HELP = `creature-lab <command> <creature> [scenario ...] [options]
@@ -273,7 +273,13 @@ export async function runCommand(argv) {
         const shadows = opt.shadows !== 'off';
         const view = ['ground', 'close'].includes(opt.view) ? opt.view : 'field';
         const cull = opt.cull !== 'off';
-        const base = `${dir}/flock-${behaviour}-${count}${shadows ? '' : '-noshadow'}${view === 'field' ? '' : '-' + view}${cull ? '' : '-nocull'}`;
+        if (opt.timeline) {
+            const rows = flockTimeline(creature, { count, behaviour, seconds: +opt.timeline || 12 });
+            console.log(`${count} x ${creature.label} ${behaviour}: t, gaits, speed median / fastest (m/s), mean height (m), the threat's distance from the nearest (m), away (1: straight from it)`);
+            for (const r of rows) console.log(`  ${r.t.toFixed(1).padStart(5)}  ${Object.entries(r.gaits).map(([g, c]) => `${g} ${c}`).join(', ').padEnd(34)} ${String(r.speedMedian).padStart(5)} / ${String(r.speedMax).padEnd(5)} h ${String(r.height).padEnd(5)} ${r.threat === null ? '' : `threat ${String(r.threat).padEnd(6)} away ${r.away}`}`);
+            return;
+        }
+        const base =`${dir}/flock-${behaviour}-${count}${shadows ? '' : '-noshadow'}${view === 'field' ? '' : '-' + view}${cull ? '' : '-nocull'}`;
         const r = flockCost(creature, { count, behaviour, shadows, view, cull, frames: opt.frames ? +opt.frames : 240,
             warm: opt.warm ? +opt.warm : 600, shot: base + '.png' });
         console.log(`${r.count} x ${r.creature} ${r.behaviour} (${r.view} view, field ${r.field} m, shadows ${r.shadows ? 'on' : 'off'}): levels drew ${r.levels.drawn.join(' / ')} (${r.levels.triangles.join(' / ')} triangles each), ${r.triangles} triangles, GPU ms a frame mean ${r.gpu.mean}, median ${r.gpu.median}, p90 ${r.gpu.p90}; kernels ${JSON.stringify(r.kernelsBy)}`);

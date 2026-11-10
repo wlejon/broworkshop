@@ -390,7 +390,18 @@ falling freely. Its head glances: quick turns to a new
 side every so often, held between, toward the gaze when there is one. The
 tail cocks up as it lands and settles through the flight after. Foraging, it leans over and pecks in quick jabs.
 Resting, it settles onto its belly. Startled, it crouches and flicks its
-wings a quarter open and its tail (`WING_FLICK`, `TAIL_FLICK`), then stands alert.
+wings a quarter open and its tail (`WING_FLICK`, `TAIL_FLICK`), then stands alert;
+startled with somewhere to go, the crouch is the spring it is off from, a
+fifth as long. On the ground it goes in fits (`FITFUL`; `finch:steady` is
+it without): a few hops, a stop to look about, on again, each fit at its own
+pace and a little off the last one's line. A glance is now and then a
+cocked head. Its face is its mood (a `mood` bone the face reads as the
+gaze): the pupil wide at ease and wider curious, pinned small in alarm and
+on the wing so the chestnut iris shows round it, the brow raised with a
+cocked head and sleeked low over the eye when it is alarmed or flying. No
+two birds bound or beat in step (each its own bound time, and going far its
+own height, up to four times `FLY_H`); on the wing it gathers speed and
+turns far quicker than on its feet.
 Its hops are quick and low (`HOP_F` 5.5 a second and more with speed: about
 0.1 s in the air, the body rising 2 cm). Its face draws a black eye in a pale ring and a
 stripe from the bill through the eye.
@@ -598,6 +609,11 @@ $B tools/creature-lab tools/creature-lab/cli.js -- scenarios deer
 live view's light and shadows, and writes the GPU frame time (mean, median,
 p90, max), its passes and the triangle count to `herd-<scenario>-<count>.json`.
 
+`flock <creature> <behaviour> --timeline <seconds>` prints what the group
+does over time instead, a row every half second: its gaits, its speed, its
+height, and while a threat is on how near it is and `away`, the share of
+the creatures' speed that carries them straight from it (1: all flee
+directly; 0: across it).
 `flock` runs `--count` creatures (200) under the flock brain doing one
 behaviour (graze, travel, mill, flee; `--warm` steps first, 600), seen from
 above the field (`--view field`) or from a standing eye among them
@@ -634,9 +650,13 @@ round field sized to its count. Its behaviours:
 - **travel**: they trot together along a heading shared from their
   neighbourhood's middle toward a goal that circles the field.
 - **mill**: they circle the field's middle.
-- **flee**: they graze until a threat crosses. One within 9 m of it, or near
-  an alarmed neighbour, startles, then bounds and gallops away (within 70° of
-  the way it faces). The alarm fades once the threat is far. A fleeing
+- **flee**: they graze until a threat crosses. One within the species'
+  `alarm` metres of it (creature.js; 9), or near an alarmed neighbour,
+  startles for its own share (0.5 to 1.5) of the species' `startle` seconds
+  (0.45), so a group goes off as a ripple, then bounds and goes away at its
+  fastest (`speeds.gallop`: a bird's is its flight), at first within 70° of
+  the way it faces, the slant closing to straight away over 2 s. The alarm
+  fades once the threat is far. A fleeing
   creature may run past the field's edge, to twice its radius, before the
   brain turns it back.
 

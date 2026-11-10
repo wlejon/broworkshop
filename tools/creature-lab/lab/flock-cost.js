@@ -95,3 +95,44 @@ export function flockCost(creature, { count = 200, behaviour = 'graze', frames =
     canvas.remove();
     return out;
 }
+
+// What a flock does over time, a row every `every` s (not drawn, not
+// timed): its gaits, its speed (median and fastest), its height over the
+// ground, and, while a threat is on, how far the threat is from the nearest
+// creature and `away`: the mean, over those within 15 m of it, of the share
+// of each one's speed that carries it straight away from the threat (1: all
+// flee directly from it; 0: across; under 0: toward it).
+export function flockTimeline(creature, { count = 200, behaviour = 'flee', seconds = 12, every = 0.5 } = {}) {
+    const canvas = document.createElement('canvas');
+    canvas.width = 64; canvas.height = 64;
+    document.body.append(canvas);
+    const scene = canvas.getContext('scene');
+    const flock = new Flock(creature, count, { scene, shadows: false, behaviour, cull: true });
+    flock.setGround(groundEnv({ kind: 'flat' }));
+    const dt = 1 / 120, rows = [];
+    const n = Math.round(every / dt);
+    for (let k = 0; k * dt < seconds; k++) {
+        flock.step(dt);
+        if ((k + 1) % n) continue;
+        const tele = flock.readTele(), th = flock.threat;
+        const gaits = {}, speeds = [];
+        let hsum = 0, near = Infinity, away = 0, heard = 0;
+        for (let i = 0; i < count; i++) {
+            const o = i * TELE, sp = tele[o + T.SPEED], yaw = tele[o + T.YAW];
+            const g = GAIT_NAMES[tele[o + T.GAIT]] || String(tele[o + T.GAIT]);
+            gaits[g] = (gaits[g] || 0) + 1;
+            speeds.push(sp);
+            hsum += tele[o + T.HEIGHT];
+            if (!th) continue;
+            const dx = tele[o + T.POS] - th.x, dz = tele[o + T.POS + 2] - th.z, d = Math.hypot(dx, dz) || 1e-6;
+            near = Math.min(near, d);
+            if (d < 15 && sp > 0.05) { away += (Math.sin(yaw) * dx + Math.cos(yaw) * dz) / d; heard++; }
+        }
+        speeds.sort((a, b) => a - b);
+        rows.push({ t: r2((k + 1) * dt), gaits, speedMedian: r2(speeds[count >> 1]), speedMax: r2(speeds[count - 1]), height: r2(hsum / count),
+            threat: th ? r2(near) : null, away: th && heard ? r2(away / heard) : null });
+    }
+    flock.destroy();
+    canvas.remove();
+    return rows;
+}

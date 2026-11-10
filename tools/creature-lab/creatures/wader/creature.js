@@ -22,7 +22,11 @@ export default {
     face: 'face.bk',
     rig: { file: 'rig.bk', kernel: 'k_rig' },
     scale: { height: 0.95, length: 0.66 },
-    speeds: { walk: 0.6, trot: 1.3, gallop: 2.6, circle: 0.5 },
+    // (Its fastest is its flight: a wader that flees flies.)
+    speeds: { walk: 0.6, trot: 1.3, gallop: 7.0, circle: 0.5 },
+    // (A flock's brain's: s it startles before it is off, m a threat alarms it from.)
+    startle: 0.3,
+    alarm: 22,
     space: 1.0,
     cycles: {
         walk: { scenario: 'walk' },

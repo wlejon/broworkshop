@@ -117,10 +117,13 @@ export class Flock {
         p[P.P_THREAT_ON] = this.threat ? 1 : 0;
         p[P.P_THREAT] = this.threat ? this.threat.x : 0;
         p[P.P_THREAT + 1] = this.threat ? this.threat.z : 0;
-        p[P.P_ALARM] = 9;
+        // (How near a threat alarms the species: creature.js's `alarm`, m.)
+        p[P.P_ALARM] = this.creature.def.alarm ?? 9;
         p[P.P_COUNT] = this.count;
         p[P.P_SPACE] = this.space;
         p[P.P_GRID] = this.grid;
+        // (The species' reaction time: creature.js's `startle`, s.)
+        p[P.P_STARTLE] = this.creature.def.startle ?? 0.45;
         this.paramsBuf.write(p);
     }
 

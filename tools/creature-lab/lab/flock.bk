@@ -47,11 +47,11 @@ pub const P_ALARM: i32 = 13;
 pub const P_COUNT: i32 = 14;
 pub const P_SPACE: i32 = 15;
 pub const P_GRID: i32 = 16;      // cells a side of the neighbour grid
+pub const P_STARTLE: i32 = 17;   // s the species startles before it goes (each its own share of it)
 pub const PARAMS: i32 = 20;
 
 pub const SEE: f32 = 7.0;        // m a creature heeds its neighbours within; a grid cell's side
 const ALARM_FADE: f32 = 6.0;     // s an alarm takes to fade once the threat is far
-const STARTLE_T: f32 = 0.45;     // s an alarmed creature startles before it runs
 const FLEE_FAN: f32 = 1.2;       // rad off straight away a fleeing creature may run
 
 fn sel(c: bool, a: f32, b: f32) -> f32 { if (c) { return a; } return b; }
@@ -201,12 +201,18 @@ fn k_flock(g: grid<1>, tele: read_store<f32, 1>, mind: read_store<f32, 1>, mind_
         // Away from the threat, but within FLEE_FAN of the way it already
         // faces: off at once on a slant rather than spinning round first.
         let away0 = normalize(p - threat + vec2<f32>(1e-3, 0.0));
-        let aa = atan2(away0.x, away0.y) + clamp(wrap_pi(atan2(fwd.x, fwd.y) - atan2(away0.x, away0.y)), -FLEE_FAN, FLEE_FAN);
+        // (The slant closes over its first seconds: it bends round to
+        // straight away rather than keep the line it left on.)
+        let fan = FLEE_FAN * mix(1.0, 0.12, smooth01(since / 2.0));
+        let aa = atan2(away0.x, away0.y) + clamp(wrap_pi(atan2(fwd.x, fwd.y) - atan2(away0.x, away0.y)), -fan, fan);
         let away = vec2<f32>(sin(aa), cos(aa));
         gaze = vec4<f32>(threat.x, 1.0, threat.y, 1.0 - smooth01(since / 1.5));
-        if (since < STARTLE_T) { action = ACT_STARTLE; }
+        // (No two are equally quick: each startles for 0.5 to 1.5 of the
+        // species' time, so a group goes off as a ripple, not as one.)
+        let startle_t = params[P_STARTLE] * (0.5 + hash01(seed * 6.31));
+        if (since < startle_t) { action = ACT_STARTLE; }
         else {
-            if (since < STARTLE_T + 1.2) { action = ACT_BOUND; }
+            if (since < startle_t + 1.2) { action = ACT_BOUND; }
             v = normalize(away + 0.5 * ali / max(gallop, 0.1) + 0.8 * sep) * gallop * (0.7 + 0.3 * alarm);
         }
         left = 1.0 + 2.0 * hash01(seed + t);

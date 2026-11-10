@@ -414,7 +414,8 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
     let vd = length(vdes);
     if (intent[ii + I_HEADING_MODE] > 0.5) { want = intent[ii + I_HEADING]; }
     else if (vd > 0.05) { want = atan2(vdes.x, vdes.y) + 0.03 * smooth01(speed / 0.5) * noise1(clock / 1.7, seed, 2.0); }
-    let rate = mix(1.8, 2.6 / (1.0 + 0.3 * speed), smooth01(speed / 0.4));
+    // (On the wing it wheels round at a rate its legs could not turn it.)
+    let rate = mix(mix(1.8, 2.6 / (1.0 + 0.3 * speed), smooth01(speed / 0.4)), 1.5, smooth01(state[s + D_FLY + F_OPEN]) * select_f(state[s + D_FLY + F_ALOFT] > 0.5, 1.0, 0.0));
     let w_t = clamp(4.0 * wrap_pi(want - yaw), -rate, rate);
     let omega = approach(state[s + D_OMEGA], w_t, 8.0, dt);
     yaw = wrap_pi(yaw + omega * dt);
@@ -425,7 +426,7 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
     // keeps the pace it came at.)
     let v_air = max(vd, select_f(state[s + D_FLY + F_LOG_T] < 0.12, speed, 0.0));
     let vt = select_f(aloft, v_air, min(vd, 3.0)) * clamp(cos(err), 0.2, 1.0);
-    speed = approach(speed, vt, select_f(aloft, select_f(vt > speed, 2.6, 1.6),select_f(vt > speed, 1.4 + 0.4 * speed, 2.6)), dt);
+    speed = approach(speed, vt, select_f(aloft, select_f(vt > speed, 4.5, 1.6),select_f(vt > speed, 1.4 + 0.4 * speed, 2.6)), dt);
     let qyaw = q_y(yaw);
     let fwd = q_rot(qyaw, vec3<f32>(0.0, 0.0, 1.0));
     var pos = ld3(state, s + S_POS);
@@ -461,8 +462,10 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
     if (aloft) {
         fly_t += dt;
         // (Brought to a little under the ground, so it meets it still sinking.)
-        var h_want = (FLY_H + 0.1) * smooth01((speed - 0.9) / 4.2) - 0.1;
-        if (fly_want) { h_want = select_f(far, FLY_H, log_h + LEAP_OVER); }
+        // (Going far and fast each flies at its own height, up to three times FLY_H.)
+        let fly_h = FLY_H * (1.0 + 2.0 * hash01(seed * 8.7 + 0.3) * smooth01((vd - 4.0) / 2.0));
+        var h_want = (fly_h + 0.1) * smooth01((speed - 0.9) / 4.2) - 0.1;
+        if (fly_want) { h_want = select_f(far, fly_h, log_h + LEAP_OVER); }
         let a = crit_step(vec2<f32>(alt, alt_v), h_want, select_f(fly_want, select_f(far, 1.9, 9.0), mix(7.0, 3.0, smooth01(speed / 3.0))), dt);
         alt = a.x;
         alt_v = a.y;
@@ -488,7 +491,9 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
     // The beat: begun with the wings raised, quicker climbing and lifting
     // itself than under way. The body rides it, up through each downstroke.
     if (wraw < 0.02) { beat = 0.86; }
-    else { beat += BEAT_HZ * (1.0 + 0.25 * (1.0 - trim)) * dt; }
+    // (Each bird's beat a little quicker or slower than the next's, so a
+    // flock's wings are never in step for long.)
+    else { beat += BEAT_HZ * (0.9 + 0.2 * hash01(seed * 3.3 + 0.7)) * (1.0 + 0.25 * (1.0 - trim)) * dt; }
     let ride_y = -0.014 * cos(TAU * (beat - 0.08)) * smooth01(alt / 0.1);
     let rise = alt + ride_y;
 

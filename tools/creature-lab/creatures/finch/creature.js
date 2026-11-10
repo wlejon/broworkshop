@@ -21,7 +21,11 @@ export default {
     face: 'face.bk',
     rig: { file: 'rig.bk', kernel: 'k_rig' },
     scale: { height: 0.09, length: 0.15 },
-    speeds: { walk: 0.25, trot: 0.55, gallop: 2.5, circle: 0.2 },
+    // (Its fastest is its flight. A flock's brain's: `startle`, s it takes
+    // to be off; `alarm`, m a threat alarms it from.)
+    speeds: { walk: 0.25, trot: 0.55, gallop: 6.5, circle: 0.2 },
+    startle: 0.12,
+    alarm: 14,
     space: 0.25,
     cycles: {
         hop: { scenario: 'walk' },
@@ -31,7 +35,8 @@ export default {
     form: { reference: {} },
     // `plan`: the motion layers off, the rig's plan as it draws it.
     // `spread`, `half`: the wings held open and half open, to look at them.
-    variants: { plan: { LAYERS: 0 }, spread: { WING_SPREAD: 1 }, half: { WING_SPREAD: 0.5 } },
+    // `steady`: hopping as a clock does, without its fits and stops.
+    variants: { steady: { FITFUL: 0 }, plan: { LAYERS: 0 },spread: { WING_SPREAD: 1 }, half: { WING_SPREAD: 0.5 } },
     scenarios: {
         flight: {
             about: 'hops, takes off, flies a few bounds, comes down and lands, hops on and stops',

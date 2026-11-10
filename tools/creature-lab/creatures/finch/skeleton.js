@@ -84,6 +84,10 @@ export const bones = [
     // (as a bird's shuts); z draws the third eyelid across from the front.
     { name: 'lid', parent: 'head', face: 'lid', head: [0, 0.08, 0.045], tail: [0, 0.08, 0.048],
       limits: { x: [-10, 90], y: [-1, 1], z: [-1, 90] } },
+    // `mood` (the face's gaze bone, which a bird has no other use for): y
+    // widens the pupil (under 0 pins it), x lowers the brow (under 0 raises it).
+    { name: 'mood', parent: 'head', face: 'gaze', head: [0, 0.082, 0.045], tail: [0, 0.082, 0.048],
+      limits: { x: [-40, 40], y: [-40, 40], z: [-1, 1] } },
 ];
 
 export const feet = [
