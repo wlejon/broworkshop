@@ -36,7 +36,7 @@ import bunny::legs::*;
 import bunny::stride::*;
 import creature::dangle::*;
 import creature::probe::*;
-from creature::ground import height, normal;
+from creature::ground import height, normal, obstacle_ahead;
 
 // --- state layout (after the contract's header) ------------------------------
 const D_SPEED: i32 = 5;
@@ -89,7 +89,8 @@ const L_SINCE: i32 = 14;      // s since it landed; in a swing, the roll onto it
 const D_DANGLE: i32 = D_LEG + 4 * LEG_REC;   // the ears' mid points and tips, the scut's tip (creature::dangle)
 const D_AHEAD: i32 = D_DANGLE + 5 * DANGLE_REC;   // how far ahead of the path's point the mass stands before the recoil, slowly smoothed,
 const D_OVER: i32 = D_AHEAD + 1;                  //   and how far over the hips' planned height
-pub const PROBE: i32 = D_AHEAD + 2;   // creature::probe's slice
+const D_LEAP: i32 = D_AHEAD + 2;      // a leap: on (0/1), s from its take-off (under 0: the push), m/s it leaves the ground at
+pub const PROBE: i32 = D_LEAP + 3;    // creature::probe's slice
 pub const STATE: i32 = PROBE + PROBE_N;
 
 const HOP_UP: f32 = 1.5;         // m/s the hop gives way to the bound
@@ -108,6 +109,15 @@ const CAP_SOFT: f32 = 0.003;     // m over which one reach limit hands over to a
 @knob const LEG_BAND: f32 = 0.15;    // rad a leg's joint eases into the ends of its range over
 @knob const SWING_FOLD_BAND: f32 = 0.015;  // m over which that floor eases in
 @knob const HOP_ARC: f32 = 0.045;     // m the hips vault over a hop's hind swing
+// A leap (bounding at a log in its way): one bound thrown high.
+@knob const LEAP_OVER: f32 = 0.03;    // m over the log's height the body rises at the least
+@knob const LEAP_SPARE: f32 = 0.7;   // m/s more it can leave the ground at, to put the log under the middle of its flight
+@knob const LEAP_PUSH_T: f32 = 0.08;  // s the hind feet's last stance is held for the push
+@knob const LEAP_DIP: f32 = 0.03;     // m the body sinks into it
+@knob const LEAP_PITCH: f32 = 0.045;  // m the withers are over the hips' line at the take-off, and under it coming down
+@knob const LEAP_CATCH: f32 = 0.07;   // m over the stride's height the body is as its fore feet come down
+@knob const LEAP_GIVE: f32 = 24.0;    // 1/s the legs take the fall up at
+@knob const LEAP_FOLD: f32 = 0.03;   // m more its feet are drawn up in the air
 @knob const SHUFFLE_FULL: f32 = 0.2;  // m/s at and under which it shuffles
 @knob const SHUFFLE_TOP: f32 = 0.7;   //   and by which it hops
 @knob const SHUFFLE_LIFT: f32 = 0.012; // m a shuffling hind foot lifts
@@ -299,7 +309,73 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
         phase = floor(phase) + 1.0 + offs[1] + duty_f;
         for (var l: i32 = 0; l < 4; l += 1) { state[s + D_LEG + l * LEG_REC + L_ARMED] = 1.0; }
     }
-    if (moving) { phase += freq * dt; }
+    // --- a leap ---------------------------------------------------------------------------
+    // Bounding at a log, it throws one bound high: the hind feet's stance
+    // before it is held, the body sinking into the haunches and driven up
+    // and forward off them, nose up; it sails over stretched out, tips nose
+    // down, and comes down on its fore feet with the hind feet swinging
+    // through to land past them, the body giving into the landing. The
+    // clock (and every foot's swing with it) runs at the leap's pace: slow
+    // through the push and the flight, so the feet come down as the body
+    // does.
+    var leap = state[s + D_LEAP];
+    var leap_s = state[s + D_LEAP + 1];
+    let leap_he = max(offs[0], offs[3]) + duty_h;
+    var leap_v = state[s + D_LEAP + 2];
+    let php = fract01(phase - offs[0]);
+    if (leap < 0.5 && bw > 0.7 && moving && !init && php + freq * dt >= 1.0) {
+        // (As the hind feet come down: thrown as high as puts the log under
+        // the middle of the flight, from the lowest that clears it, and
+        // begun at the footfall that can.)
+        let ob = obstacle_ahead(env, pos.x, pos.z, vec2<f32>(fwd.x, fwd.z));
+        let v_lo = sqrt(2.0 * 9.81 * (ob.y + LEAP_OVER));
+        let slack = 0.5 * max(speed / freq - speed * LEAP_SPARE / 9.81, 0.0);
+        if (ob.y > 0.02 && ob.x < speed * (LEAP_PUSH_T + (v_lo + LEAP_SPARE) / 9.81) + slack) {
+            leap = 1.0;
+            leap_s = -LEAP_PUSH_T - dt;
+            leap_v = clamp(9.81 * (ob.x / max(speed, 0.5) - LEAP_PUSH_T), v_lo, v_lo + LEAP_SPARE);
+        }
+    }
+    state[s + D_LEAP + 2] = leap_v;
+    let leap_up = max(leap_v * 0.3 * LEAP_PUSH_T - LEAP_DIP, 0.0);     // the hips over the stride's own at the take-off
+    // (Its flight ends LEAP_CATCH over the stride's height: the fore legs
+    // meet the ground at their length and take the fall up from there.)
+    let leap_T = (leap_v + sqrt(leap_v * leap_v + 2.0 * 9.81 * max(leap_up - LEAP_CATCH, -0.4 * leap_v * leap_v / 9.81))) / 9.81;
+    var cfreq = freq;
+    var leap_y: f32 = 0.0;      // the body's height over the stride's own
+    var leap_nose: f32 = 0.0;   // the withers' over that
+    var leap_air: f32 = 0.0;    // 1 in its flight
+    var leap_clear: f32 = 0.0;  // and how far its feet are held clear of what passes under them
+    if (leap > 0.5) {
+        leap_s += dt;
+        if (leap_s < 0.0) {
+            cfreq = leap_he / LEAP_PUSH_T;
+            let u = 1.0 + leap_s / LEAP_PUSH_T;
+            let up = max(u - 0.4, 0.0) / 0.6;
+            leap_y = -LEAP_DIP * smooth01(u / 0.4) + (LEAP_DIP + leap_up) * up * up;
+            leap_nose = LEAP_PITCH * smooth01(up);
+        } else if (leap_s < leap_T) {
+            // (The clock comes to the fore feet's landing as the flight ends,
+            // and waits there if it is early.)
+            let rem = fract01(min(offs[1], offs[2]) - php);
+            cfreq = select_f(rem > 0.6, 0.0, min(rem / max(leap_T - leap_s, 0.02), 2.0 * freq));
+            leap_y = leap_up + leap_v * leap_s - 4.905 * leap_s * leap_s;
+            leap_nose = LEAP_PITCH * cos(PI * leap_s / leap_T);
+            leap_air = 1.0;
+            leap_clear = smooth01(leap_s / 0.1) * smooth01((leap_T - leap_s) / 0.12);
+        } else {
+            // Down: it gives into the landing from the speed it fell with.
+            let t = leap_s - leap_T;
+            let y0 = leap_up + leap_v * leap_T - 4.905 * leap_T * leap_T;
+            leap_y = (y0 + (leap_v - 9.81 * leap_T + LEAP_GIVE * y0) * t) * exp(-LEAP_GIVE * t);
+            leap_nose = -LEAP_PITCH * (1.0 - smooth01(t / 0.16));
+            if (t > 0.4) { leap = 0.0; }
+        }
+    }
+    state[s + D_LEAP] = leap;
+    state[s + D_LEAP + 1] = leap_s;
+    let warp = cfreq / max(freq, 0.1);
+    if (moving) { phase += cfreq * dt; }
     let mv = select_f(moving, 1.0, 0.0) * smooth01(speed / 0.3);
 
     // --- the stride: each girdle's surge (bunny::stride) -----------------------------
@@ -423,7 +499,9 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
                 // Where its girdle will be by mid-stance: the path's pace,
                 // and the girdle's surge then.
                 let stance_t = duty / max(freq, 0.1);
-                let lead = (1.0 - u) * tt + 0.5 * stance_t;
+                // (In a leap's flight: once it is down.)
+                var lead = (1.0 - u) * tt + 0.5 * stance_t;
+                if (leap_air > 0.5) { lead += max(leap_T - leap_s, 0.0); }
                 let yl = yaw + omega * lead;
                 let ahead = girdle_surge(p + lead * freq, mh, sa, len, hind);
                 let land = select_f(hind, HOP_LAND_H * hw, 0.0);
@@ -431,17 +509,20 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
             }
             if (!held) { target.y = height(env, target.x, target.z); }
             st3(state, k + L_TO, target);
-            u = min(u + dt / tt, 1.0);
+            u = min(u + warp * dt / tt, 1.0);
+            // (No foot comes down before the leap does.)
+            if (leap_air > 0.5) { u = min(u, 0.9); }
             let lifted = ld3(state, k + L_FROM);
             let e = smooth01(u);
-            var hgt = select_f(hind, lift_h.x, lift_h.y);
+            var hgt = select_f(hind, lift_h.x, lift_h.y) + LEAP_FOLD * leap_air;
             if (state[k + L_KIND] > 0.5) { hgt = 0.012; }
             // On an arc about its girdle (as it stood last step), folded
             // toward it as far as clears the ground by the swing's lift.
             toe =mix(lifted, target, vec3<f32>(e));
             if (!held) {
                 toe = swing_arc(top, qyaw, lifted, target, e);
-                let w = swing_bump(u);
+                // (Through a leap's flight all the way: what is under it is the log.)
+                let w = max(swing_bump(u), leap_clear);
                 let below = top.y - toe.y;
                 if (w > 0.0 && below > 1e-3) {
                     let room = max(top.y - height(env, toe.x, toe.z) - hgt, 0.01);
@@ -470,6 +551,22 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
                 let hn = soft_cap(hl, hmax, select_f(hind, CAP_BAND, FORE_BAND));
                 toe.x = top.x + hv2.x * (hn / hl);
                 toe.z = top.z + hv2.y * (hn / hl);
+            }
+            // In a leap's flight the legs are the leap's: the fore paws drawn
+            // up under the chest and let down ahead for the landing, the
+            // hind feet left trailing off the push, gathered under the
+            // haunches over the log and brought through.
+            if (leap_clear > 0.0 && !held) {
+                let ls = clamp(leap_s / max(leap_T, 0.1), 0.0, 1.0);
+                let lat = dot(toe - top, left);
+                var lz = mix(0.06, 0.09, ls);
+                var ld = mix(0.09, 0.15, smooth01((ls - 0.45) / 0.55));
+                if (hind) {
+                    lz = mix(-0.15, 0.05, smooth01((ls - 0.12) / 0.8));
+                    ld = 0.15 - 0.055 * sin(PI * ls);
+                }
+                let tuck = top + left * lat + fwd * lz - vec3<f32>(0.0, ld, 0.0);
+                toe = mix(toe, tuck, vec3<f32>(leap_clear));
             }
             // Nor nearer its girdle than the leg folds within its joints'
             // ranges (passing under a girdle carried low, a foot drawn up to
@@ -569,8 +666,11 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
     hy_t = mix(hy_t, hind_ground + REAR_HIP, rear_s);
     let fy_t = mix(fy_plan + crouch - 0.018 * graze, height(env, wpos.x, wpos.z) + LIE_WITHERS, lie_f);
     let wh: f32 = 26.0;
-    let hs = crit_step(vec2<f32>(state[s + D_HY], state[s + D_HV]), hy_t, wh, dt);
-    let fs = crit_step(vec2<f32>(state[s + D_FY], state[s + D_FV]), fy_t, wh, dt);
+    var hs = crit_step(vec2<f32>(state[s + D_HY], state[s + D_HV]), hy_t, wh, dt);
+    var fs = crit_step(vec2<f32>(state[s + D_FY], state[s + D_FV]), fy_t, wh, dt);
+    // (In a leap's flight the plan stays where it took off from: the log
+    // passing under it is not ground it stands over.)
+    if (leap_air > 0.5) { hs = vec2<f32>(state[s + D_HY], 0.0); fs = vec2<f32>(state[s + D_FY], 0.0); }
     // The bound's flights: the body falls freely between the hind push and
     // the fore feet's landing, and between their lift and the hind landing.
     let he = max(offs[0], offs[3]) + duty_h;
@@ -579,8 +679,9 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
     let fl = FLIGHT * bw * mv * flight(fract01(phase - offs[0]), 1.0 / max(freq, 0.1), he, f_s, f_e);
     // The hop's vault rides on top, as the bound's flights do: through the
     // height's spring it would peak late, as the hind feet come down.
-    let hy = hs.x + fl + bob_h;
-    var fy = fs.x + fl;
+    // (A leap's push, flight and landing are over all of it.)
+    let hy = hs.x + fl + bob_h + leap_y;
+    var fy = fs.x + fl + leap_y + leap_nose;
     let ch_t = min(cap_h, hind_ground + HEAD[B_PELVIS].y + CAP_FADE);
     let cf_t = min(cap_f, fore_ground + HEAD[B_SCAPL].y + CAP_FADE);
     var chs = crit_step(vec2<f32>(state[s + D_CAP_H], state[s + D_CAP_HV]), ch_t, wh, dt);

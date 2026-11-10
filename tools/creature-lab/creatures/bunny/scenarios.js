@@ -25,4 +25,10 @@ export const scenarios = {
             { t: 4.2, action: 'move', speed: 0.5, heading: 40 }, { t: 5.6, speed: 0 }, { t: 7, speed: 0.4, heading: -20 }, { t: 8.4, speed: 0 },
         ],
     },
+    leap: {
+        about: 'bounding at 3 m/s, a leap over a 0.12 m log, bounding on',
+        duration: 5,
+        ground: { log: { at: [0, 6], yaw: 90, height: 0.12, length: 3 } },
+        track: [{ t: 0, speed: 3 }, { t: 4, speed: 1.5 }],
+    },
 };
