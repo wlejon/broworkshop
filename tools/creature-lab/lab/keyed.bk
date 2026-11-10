@@ -37,46 +37,16 @@ pub fn key_get(k: i32) -> Key {
     return K;
 }
 
-// S with w of K added (each of K's turns on R's side of the sphere): the
-// keys of a weighted mean, finished by key_done.
-fn key_acc(S: Key, K: Key, w: f32, R: Key) -> Key {
-    var o = S;
-    o.root += w * K.root;
-    for (var b: i32 = 0; b < NB; b += 1) {
-        var q = K.q[b];
-        if (dot(q, R.q[b]) < 0.0) { q = -q; }
-        o.q[b] += w * q;
-    }
-    for (var l: i32 = 0; l < NLEGS; l += 1) {
-        o.foot[l] += w * K.foot[l];
-        o.fa[l] += w * K.fa[l];
-    }
-    return o;
-}
-
-fn key_zero() -> Key {
-    var K: Key;
-    K.root = vec3<f32>(0.0);
-    for (var b: i32 = 0; b < NB; b += 1) { K.q[b] = vec4<f32>(0.0); }
-    for (var l: i32 = 0; l < NLEGS; l += 1) { K.foot[l] = vec3<f32>(0.0); K.fa[l] = vec3<f32>(0.0); }
-    return K;
-}
-
-fn key_done(S: Key) -> Key {
-    var o = S;
-    for (var b: i32 = 0; b < NB; b += 1) { o.q[b] = q_norm(S.q[b]); }
-    return o;
-}
-
 // From A toward B by t.
 pub fn key_mix(A: Key, B: Key, t: f32) -> Key {
-    return key_done(key_acc(key_acc(key_zero(), A, 1.0 - t, A), B, t, A));
-}
-
-// A with w of (B - C) added: a key's difference from another laid over a
-// third (an arm's gesture over a walk).
-pub fn key_add(A: Key, B: Key, C: Key, w: f32) -> Key {
-    return key_done(key_acc(key_acc(key_acc(key_zero(), A, 1.0, A), B, w, A), C, -w, A));
+    var o: Key;
+    o.root = mix(A.root, B.root, t);
+    for (var j: i32 = 0; j < NB; j += 1) { o.q[j] = q_norm((1.0 - t) * A.q[j] + t * same_side(B.q[j], A.q[j])); }
+    for (var l: i32 = 0; l < NLEGS; l += 1) {
+        o.foot[l] = mix(A.foot[l], B.foot[l], t);
+        o.fa[l] = mix(A.fa[l], B.fa[l], t);
+    }
+    return o;
 }
 
 // Cycle c at `phase` (cycles): through its keys as a Hermite spline whose
@@ -110,15 +80,38 @@ pub fn cycle_at(c: i32, phase: f32) -> Key {
     let h11 = t3 - t2;
     let a = h10 * h / max(p2 - p0, 1e-5);
     let b = h11 * h / max(p3 - p1, 1e-5);
-    let K1 = key_get(CYC_KEY[o + i]);
-    var S = key_acc(key_zero(), K1, h00 - b, K1);
-    S = key_acc(S, key_get(CYC_KEY[o + im]), -a, K1);
-    S = key_acc(S, key_get(CYC_KEY[o + ip]), h01 + a, K1);
-    S = key_acc(S, key_get(CYC_KEY[o + iq]), b, K1);
-    // (The curve through a foot's lift may dip under the ground beside a
-    // key that has it down; a foot does not.)
-    for (var l: i32 = 0; l < NLEGS; l += 1) { S.foot[l].y = max(S.foot[l].y, 0.0); }
-    return key_done(S);
+    // (The four keys' weighted mean, each bone read from the keys' tables
+    // and written once: built as whole keys added one to the next, the
+    // compiler carried every bone of every key through each step, and a rig
+    // reading two cycles took eighteen seconds to compile.)
+    let k1 = CYC_KEY[o + i];
+    let k0 = CYC_KEY[o + im];
+    let k2 = CYC_KEY[o + ip];
+    let k3 = CYC_KEY[o + iq];
+    let w1 = h00 - b;
+    let w0 = -a;
+    let w2 = h01 + a;
+    let w3 = b;
+    var S: Key;
+    S.root = w1 * KEY_ROOT[k1] + w0 * KEY_ROOT[k0] + w2 * KEY_ROOT[k2] + w3 * KEY_ROOT[k3];
+    for (var j: i32 = 0; j < NB; j += 1) {
+        let q1 = KEY_Q[k1 * NB + j];
+        S.q[j] = q_norm(w1 * q1 + w0 * same_side(KEY_Q[k0 * NB + j], q1) + w2 * same_side(KEY_Q[k2 * NB + j], q1) + w3 * same_side(KEY_Q[k3 * NB + j], q1));
+    }
+    for (var l: i32 = 0; l < NLEGS; l += 1) {
+        S.foot[l] = w1 * KEY_FOOT[k1 * NLEGS + l] + w0 * KEY_FOOT[k0 * NLEGS + l] + w2 * KEY_FOOT[k2 * NLEGS + l] + w3 * KEY_FOOT[k3 * NLEGS + l];
+        S.fa[l] = w1 * KEY_FA[k1 * NLEGS + l] + w0 * KEY_FA[k0 * NLEGS + l] + w2 * KEY_FA[k2 * NLEGS + l] + w3 * KEY_FA[k3 * NLEGS + l];
+        // (The curve through a foot's lift may dip under the ground beside
+        // a key that has it down; a foot does not.)
+        S.foot[l].y = max(S.foot[l].y, 0.0);
+    }
+    return S;
+}
+
+// q on r's side of the sphere.
+fn same_side(q: vec4<f32>, r: vec4<f32>) -> vec4<f32> {
+    if (dot(q, r) < 0.0) { return -q; }
+    return q;
 }
 
 // Whether leg l is in its stance at `phase` of cycle c, and how far through
@@ -152,9 +145,7 @@ pub fn cycle_duty(c: i32, l: i32) -> f32 {
 // some of each.
 
 pub fn gait_at(a: i32, b: i32, w: f32, phase: f32) -> Key {
-    if (w <= 0.0) { return cycle_at(a, phase); }
-    if (w >= 1.0) { return cycle_at(b, phase); }
-    return key_mix(cycle_at(a, phase), cycle_at(b, phase), w);
+    return key_mix(cycle_at(a, phase), cycle_at(b, phase), clamp(w, 0.0, 1.0));
 }
 
 // Leg l's stance: where in the cycle it begins, and the share it lasts.
@@ -232,13 +223,6 @@ pub fn air_step(st: rw_store<f32, 1>, at: i32, com: vec3<f32>, grounded: bool, i
     st3(st, at + 6, ld3(st, at + 6) + d);
     st3(st, at + 9, ld3(st, at + 9) + d / max(dt, 1e-5));
     return d;
-}
-
-// K with bone b turned a further `e` (x, y, z, rad) from its parent.
-pub fn key_turn(K: Key, b: i32, e: vec3<f32>) -> Key {
-    var o = K;
-    o.q[b] = q_mul(K.q[b], q_xyz(e));
-    return o;
 }
 
 // Where K has leg l's ball, for a creature whose rest root stands over

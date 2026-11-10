@@ -278,7 +278,7 @@ a rig reads them with:
 
 | Function | What |
 |----------|------|
-| `key_get`, `key_mix`, `key_add`, `key_turn` | a pose; two blended; one's difference from another laid over a third; a bone turned further |
+| `key_get`, `key_mix` | a pose; two blended |
 | `cycle_at` | a cycle at a phase: a spline through its keys with no corner in any bone's speed, and no foot under the ground between keys that have it down |
 | `cycle_stance`, `cycle_swing`, `cycle_duty` | where a leg is in its stance or swing |
 | `gait_at`, `gait_stance`, `gait_swing`, `gait_duty`, `gait_span` | two cycles on one clock blended (a walk into a run), their stances' lengths with them |

@@ -108,6 +108,9 @@ fn ball_on(env: read_store<f32, 1>, p: vec3<f32>, l: i32, lift: f32) -> vec3<f32
 
 // Bone b of T hung again from its parent as K turns it, then turned to its
 // tip, which is on a spring at st[k..] from where that puts it.
+// A bone's turn from its parent, turned a further `e` (x, y, z, rad).
+fn turned(q: vec4<f32>, e: vec3<f32>) -> vec4<f32> { return q_mul(q, q_xyz(e)); }
+
 fn loose(st: rw_store<f32, 1>, k: i32, T: Pose, K: Key, b: i32, w: f32, zeta: f32, amax: f32, share: f32, dt: f32, init: bool) -> Pose {
     var P = T;
     P.q[b] = q_mul(P.q[PARENT[b]], K.q[b]);
@@ -405,12 +408,12 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
     // --- life ---------------------------------------------------------------------------
     // Breathing: the chest lifts and the shoulders with it.
     let breath = LIFE * (0.02 + 0.01 * wl + 0.012 * alert) * (1.0 - 0.7 * gw) * sin(TAU * clock / BREATH_T + seed);
-    KP = key_turn(KP, B_SPINE, vec3<f32>(-0.5 * breath, 0.0, 0.0));
-    KP = key_turn(KP, B_CHEST, vec3<f32>(-breath, 0.0, 0.0));
-    KP = key_turn(KP, B_SHOULDERL, vec3<f32>(0.0, 0.0, 3.0 * breath));
-    KP = key_turn(KP, B_SHOULDERR, vec3<f32>(0.0, 0.0, -3.0 * breath));
-    KP = key_turn(KP, B_UPPERARML, vec3<f32>(0.8 * breath, 0.0, -2.0 * breath));
-    KP = key_turn(KP, B_UPPERARMR, vec3<f32>(0.8 * breath, 0.0, 2.0 * breath));
+    KP.q[B_SPINE] = turned(KP.q[B_SPINE], vec3<f32>(-0.5 * breath, 0.0, 0.0));
+    KP.q[B_CHEST] = turned(KP.q[B_CHEST], vec3<f32>(-breath, 0.0, 0.0));
+    KP.q[B_SHOULDERL] = turned(KP.q[B_SHOULDERL], vec3<f32>(0.0, 0.0, 3.0 * breath));
+    KP.q[B_SHOULDERR] = turned(KP.q[B_SHOULDERR], vec3<f32>(0.0, 0.0, -3.0 * breath));
+    KP.q[B_UPPERARML] = turned(KP.q[B_UPPERARML], vec3<f32>(0.8 * breath, 0.0, -2.0 * breath));
+    KP.q[B_UPPERARMR] = turned(KP.q[B_UPPERARMR], vec3<f32>(0.8 * breath, 0.0, 2.0 * breath));
     // Its hands are never quite still: each arm shifts on its own, and now
     // and then a hand is let down from the breast and drawn up again.
     for (var a: i32 = 0; a < 2; a += 1) {
@@ -419,20 +422,20 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
         let fid = idle * (1.0 - wl);
         let up = fid * smooth01(3.0 * noise1(clock * 0.17, seed, ch) - 1.2);
         let ua = select_i(a == 0, B_UPPERARML, B_UPPERARMR);
-        KP = key_turn(KP, ua, vec3<f32>(0.1 * fid * noise1(clock * 0.31, seed, ch + 1.0) - 0.25 * up, 0.0, -side * 0.06 * fid * noise1(clock * 0.23, seed, ch + 2.0)));
-        KP = key_turn(KP, ua + 1, vec3<f32>(0.14 * fid * noise1(clock * 0.43, seed, ch + 3.0) + 0.6 * up, 0.0, 0.0));
-        KP = key_turn(KP, ua + 2, vec3<f32>(0.2 * fid * noise1(clock * 0.61, seed, ch + 4.0) + 0.4 * up, 0.0, side * 0.15 * fid * noise1(clock * 0.37, seed, ch + 5.0)));
+        KP.q[ua] = turned(KP.q[ua], vec3<f32>(0.1 * fid * noise1(clock * 0.31, seed, ch + 1.0) - 0.25 * up, 0.0, -side * 0.06 * fid * noise1(clock * 0.23, seed, ch + 2.0)));
+        KP.q[ua + 1] = turned(KP.q[ua + 1], vec3<f32>(0.14 * fid * noise1(clock * 0.43, seed, ch + 3.0) + 0.6 * up, 0.0, 0.0));
+        KP.q[ua + 2] = turned(KP.q[ua + 2], vec3<f32>(0.2 * fid * noise1(clock * 0.61, seed, ch + 4.0) + 0.4 * up, 0.0, side * 0.15 * fid * noise1(clock * 0.37, seed, ch + 5.0)));
     }
     // Its weight wanders from foot to foot, the hips tipping with it.
     let shift = idle * (1.0 - wl) * noise1(clock * 0.21, seed, 1.0);
     KP.root.x += 0.016 * shift;
-    KP = key_turn(KP, B_PELVIS, vec3<f32>(0.0, 0.0, 0.03 * shift));
-    KP = key_turn(KP, B_SPINE, vec3<f32>(0.0, 0.0, -0.03 * shift));
+    KP.q[B_PELVIS] = turned(KP.q[B_PELVIS], vec3<f32>(0.0, 0.0, 0.03 * shift));
+    KP.q[B_SPINE] = turned(KP.q[B_SPINE], vec3<f32>(0.0, 0.0, -0.03 * shift));
     // The tail sways, a wave down it.
     let sway = idle * (1.0 - 0.6 * wl) * (0.6 + 0.4 * noise1(clock * 0.3, seed, 2.0));
     for (var i: i32 = 0; i < 5; i += 1) {
         let a = sway * (0.05 + 0.025 * f32(i)) * sin(TAU * clock / 3.7 - 0.7 * f32(i) + 2.0 * seed);
-        KP = key_turn(KP, B_TAIL1 + i, vec3<f32>(0.0, a, 0.0));
+        KP.q[B_TAIL1 + i] = turned(KP.q[B_TAIL1 + i], vec3<f32>(0.0, a, 0.0));
     }
     // An ear flicks now and then: round and back in a quarter of a second.
     for (var e: i32 = 0; e < 2; e += 1) {
@@ -453,8 +456,8 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
         let listen = LIFE * (1.0 - 0.6 * gw) * (1.0 - 0.8 * rw) * mix(l0, l1, lu);
         // (And both lead the head round to what it turns to.)
         let lead = 0.25 * (look - lk.x);
-        KP = key_turn(KP, b, vec3<f32>(-0.12 * fl - 0.12 * abs(listen), 0.9 * listen + lead, 0.25 * listen));
-        KP = key_turn(KP, b + 1, vec3<f32>(0.1 * fl, -side * 0.36 * fl + 0.15 * listen, 0.0));
+        KP.q[b] = turned(KP.q[b], vec3<f32>(-0.12 * fl - 0.12 * abs(listen), 0.9 * listen + lead, 0.25 * listen));
+        KP.q[b + 1] = turned(KP.q[b + 1], vec3<f32>(0.1 * fl, -side * 0.36 * fl + 0.15 * listen, 0.0));
     }
 
     // --- the head, held steady ---------------------------------------------------------
@@ -480,19 +483,19 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
     KP.q[B_HEAD] = q_mul(q_conj(qn), qn2);
     // Over that, it turns to what it looks at.
     let turn = vec3<f32>(0.5 * lp.x, 0.5 * lk.x, 0.0);
-    KP = key_turn(KP, B_NECK, turn);
-    KP = key_turn(KP, B_HEAD, turn);
+    KP.q[B_NECK] = turned(KP.q[B_NECK], turn);
+    KP.q[B_HEAD] = turned(KP.q[B_HEAD], turn);
 
     // Foraging, it noses about and scrabbles at the ground in bouts.
     if (wg > 0.0) {
         let nose = wg * (0.05 * sin(TAU * clock / 0.8 + seed) + 0.08 * noise1(clock * 0.7, seed, 3.0));
-        KP = key_turn(KP, B_NECK, vec3<f32>(nose, 0.12 * wg * noise1(clock * 0.5, seed, 4.0), 0.0));
-        KP = key_turn(KP, B_HEAD, vec3<f32>(0.6 * nose, 0.0, 0.0));
+        KP.q[B_NECK] = turned(KP.q[B_NECK], vec3<f32>(nose, 0.12 * wg * noise1(clock * 0.5, seed, 4.0), 0.0));
+        KP.q[B_HEAD] = turned(KP.q[B_HEAD], vec3<f32>(0.6 * nose, 0.0, 0.0));
         let dig = wg * smooth01(2.0 * noise1(clock * 0.35, seed, 5.0)) * sin(TAU * clock / 0.42);
-        KP = key_turn(KP, B_FOREARML, vec3<f32>(0.22 * dig, 0.0, 0.0));
-        KP = key_turn(KP, B_FOREARMR, vec3<f32>(-0.22 * dig, 0.0, 0.0));
-        KP = key_turn(KP, B_UPPERARML, vec3<f32>(-0.1 * dig, 0.0, 0.0));
-        KP = key_turn(KP, B_UPPERARMR, vec3<f32>(0.1 * dig, 0.0, 0.0));
+        KP.q[B_FOREARML] = turned(KP.q[B_FOREARML], vec3<f32>(0.22 * dig, 0.0, 0.0));
+        KP.q[B_FOREARMR] = turned(KP.q[B_FOREARMR], vec3<f32>(-0.22 * dig, 0.0, 0.0));
+        KP.q[B_UPPERARML] = turned(KP.q[B_UPPERARML], vec3<f32>(-0.1 * dig, 0.0, 0.0));
+        KP.q[B_UPPERARMR] = turned(KP.q[B_UPPERARMR], vec3<f32>(0.1 * dig, 0.0, 0.0));
     }
 
     // --- the pose: the keys' trunk, the legs solved to the feet ------------------------

@@ -83,6 +83,12 @@ function groundMesh(rec) {
 
 async function load(specA = S.specA, specB = S.specB, scenario = S.scenario) {
     clearRuns();
+    // The scenarios listed are creature A's own (a deer leaps a log, a
+    // finch does not); one the new creature has not got falls back to its
+    // walk, or its first, instead of failing the load.
+    const have = Object.keys(scenariosFor(await loadCreature(specA)));
+    if (!have.includes(scenario)) scenario = have.includes('walk') ? 'walk' : have[0];
+    fill($('scenario'), have, scenario);
     S.specA = specA; S.specB = specB; S.scenario = scenario;
     $('specA').value = specA; $('specB').value = specB; $('scenario').value = scenario;
     status(`running ${scenario}...`);
