@@ -665,6 +665,9 @@ Every output is deterministic. A rerun writes the same bytes.
   `back-quarter`, `top`) and per part of a cycle (`--from 0.4 --span 0.25`),
   or per stretch of time (`--from 10.25 --to 10.6`, seconds: a moment of a
   run of several gaits, which is not in its last cycle).
+  - It draws the run `kinks` and `trace` read (a steady gait for 20 s), so
+    a moment they name is the moment drawn; a time past the run's end is
+    refused.
   - One camera for all the frames, standing where the creature does at its
     steady pace, not on its hips: its rise and fall, sway and lean are in
     the picture. A run that turns where it stands (`turn-in-place`) is

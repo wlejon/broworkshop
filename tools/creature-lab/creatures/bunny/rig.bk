@@ -101,7 +101,8 @@ const SETTLE_T: f32 = 0.16;
 const WITHERS_Z: f32 = 0.18;     // hips (pelvis head) to withers, along the back
 const CAP_FADE: f32 = 0.06;      // m a coming or going foot's reach limit is slackened by
 const CAP_SOFT: f32 = 0.003;     // m over which one reach limit hands over to another
-@knob const FORE_CARRY: f32 = 0.97;   // of its reach a swinging fore foot is carried from its girdle at most
+@knob const FORE_BAND: f32 = 0.3;   // of that reach over which a swinging fore foot eases up to it
+@knob const FORE_CARRY: f32 = 0.97;  // of its reach a swinging fore foot is carried from its girdle at most
 @knob const SWING_FOLD_F: f32 = 0.6;  // of its reach a swinging fore foot stays from its girdle at least
 @knob const SWING_FOLD_H: f32 = 0.45;  //   and a hind foot (sitting, 0.57)
 @knob const LEG_BAND: f32 = 0.15;    // rad a leg's joint eases into the ends of its range over
@@ -462,7 +463,11 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
             let hv2 = vec2<f32>(toe.x - top.x, toe.z - top.z);
             let hl = length(hv2);
             if (hl > 1e-4 && !held) {
-                let hn = soft_cap(hl, hmax, CAP_BAND);
+                // (A fore paw comes to its reach over FORE_BAND of it: reaching
+                // for a mark the body has yet to come up to, it ran out to
+                // the end of its leg at a centimetre a step and stopped
+                // there in two, the elbow thrown straight with it.)
+                let hn = soft_cap(hl, hmax, select_f(hind, CAP_BAND, FORE_BAND));
                 toe.x = top.x + hv2.x * (hn / hl);
                 toe.z = top.z + hv2.y * (hn / hl);
             }

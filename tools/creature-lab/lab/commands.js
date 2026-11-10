@@ -355,8 +355,13 @@ export async function runCommand(argv) {
     } else if (cmd === 'watch') {
         // One run from one side, large: it takes one scenario and a view, and no more.
         if (rest.length !== 1 || !opt.view) throw new Error(`watch: name one scenario and one --view (${Object.keys(WATCH_VIEWS).join(', ')}); it draws at most ${WATCH.frames} frames, large, and is run again for another view`);
-        const sc = rest[0], rec = runScenario(creature, sc, { seed });
+        // (The run kinks and trace read, so a moment they name is the one
+        // drawn: a steady gait runs 20 s there, and a time past the
+        // scenario's own few seconds drew its last frame six times.)
+        const sc = rest[0], rec = naturalRun(creature, sc, { seed });
         const num = (v) => (v !== undefined ? +v : null);
+        const end = rec.steps * rec.dt;
+        for (const t of [num(opt.from), num(opt.to)]) if (t !== null && t > end) throw new Error(`watch: ${sc} runs ${end.toFixed(2)} s, and ${t} s is past its end`);
         const part = opt.from !== undefined || opt.span !== undefined ? `-${String(opt.from ?? 0)}+${String(opt.span ?? 1)}` : '';
         const s = watchSheet(rec, { path: `${dir}/${sc}-watch-${opt.view}${part}.png`, view: String(opt.view), frames: opt.frames ? +opt.frames : WATCH.frames,
             from: num(opt.from), span: num(opt.span), to: num(opt.to) });
