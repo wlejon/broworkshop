@@ -62,7 +62,8 @@ const tail = (lift = [0, 0, 0, 0, 0], swing = [0, 0, 0, 0, 0]) => Object.fromEnt
 //   tail    each joint keeps the heading the hips had a moment before, and
 //           a little more of it down its length: a wave runs out along it
 //           behind each step, and it lifts and settles twice a stride
-//   arms    folded, the elbows giving with each step, a beat behind
+//   arms    carried bent, each swinging against its side's leg from the
+//           shoulder, the elbows pumping and giving with each step
 //   ears    nod back at each landing
 function stride(p, G) {
     // One leg at phase q since its touchdown: the ball from its rest place.
@@ -91,6 +92,10 @@ function stride(p, G) {
     const head = (i) => (i < 0 ? Y : (G.stream ?? 1) ** (i + 1) * (1 + G.whip * (i + 1)) * yaw(p - G.lag * (i + 1)));
     const lift = (i) => G.tailLift[i] + G.tailBob * (1 + 0.3 * i) * cos(2 * (p - G.low - 0.1 - 0.05 * i));
     const beat = cos(2 * (p - G.low - 0.12));
+    // The arms swing against the legs (the left back as the left foot
+    // reaches): the elbow opens as an arm goes back and closes as it comes
+    // forward, and the hand trails the forearm a beat behind.
+    const swing = G.armSwing * cos(p - 0.06), pump = G.armPump * cos(p - 0.12), wrist = G.armWrist * cos(p - 0.24);
     // The head rides each step on the neck: the neck gives forward as the
     // weight lands, and the head lifts against it a moment after.
     const give = G.headNod * cos(2 * (p - G.low - 0.14)), lift2 = -0.7 * G.headNod * cos(2 * (p - G.low - 0.22));
@@ -102,8 +107,8 @@ function stride(p, G) {
             chest: [0.3 * G.curl - 0.3 * nod, -0.42 * Y, -0.5 * roll],
             neck: [-0.5 * (G.pitch + 0.6 * G.curl) - 0.3 * nod + give, -0.14 * Y, 0],
             head: [-0.5 * (G.pitch + 0.6 * G.curl) + G.chin + lift2, -0.1 * Y, 0],
-            ...arm('L', G.armBack + G.armSwing * cos(p - 0.06), G.armBend + G.armBeat * beat, 50 + 8 * cos(2 * (p - G.low - 0.2)), 6),
-            ...arm('R', G.armBack - G.armSwing * cos(p - 0.06), G.armBend + G.armBeat * beat, 50 + 8 * cos(2 * (p - G.low - 0.2)), 6),
+            ...arm('L', G.armBack + swing, G.armBend + G.armBeat * beat - pump, 44 + wrist, 6),
+            ...arm('R', G.armBack - swing, G.armBend + G.armBeat * beat + pump, 44 - wrist, 6),
             ...tail([0, 1, 2, 3, 4].map(lift), [0, 1, 2, 3, 4].map((i) => head(i) - head(i - 1))),
             ...ears(G.earBack + G.earNod * (0.5 + 0.5 * cos(2 * (p - G.low - 0.06))), G.earNod * (0.5 + 0.5 * cos(2 * (p - G.low - 0.14)))),
         },
@@ -121,7 +126,7 @@ const WALK = {
     heelLand: -4, heelGive: -13, heelPush: 34, heelFold: 62,
     down: -0.022, bob: 0.014, low: 0.06, fore: 0, sway: 0.018, yaw: 7, roll: 2.2, pitch: 1.5, nod: 1.2, curl: 0, chin: 0, headNod: 6,
     whip: 0.14, lag: 0.075, tailLift: [0, 0, 0, 0, 0], tailBob: 0.7,
-    armBack: 14, armSwing: 5, armBend: 122, armBeat: 5, earBack: 2, earNod: 8,
+    armBack: 12, armSwing: 17, armPump: 14, armWrist: 14, armBend: 108, armBeat: 4, earBack: 2, earNod: 8,
 };
 // The run: stretched out and leaning into it, a long step and a flight
 // after each; the tail streams level behind, the ears are laid back.
@@ -132,7 +137,7 @@ const RUN = {
     heelLand: 2, heelGive: -16, heelPush: 44, heelFold: 78,
     down: -0.05, bob: 0.024, low: 0.15, fore: 0.02, sway: 0.008, yaw: 9, roll: 1.5, pitch: 13, nod: 2, curl: 6, chin: 3, headNod: 5,
     whip: 0.03, lag: 0.06, stream: 0.55, tailLift: [4, 5, 3, -5, -9], tailBob: 1.6,
-    armBack: 26, armSwing: 12, armBend: 128, armBeat: 7, earBack: 34, earNod: 5,
+    armBack: 24, armSwing: 30, armPump: 20, armWrist: 18, armBend: 118, armBeat: 6, earBack: 34, earNod: 5,
 };
 
 // A gait's cycle: `stride` at eight phases a step, the second step mirrored.
@@ -172,8 +177,23 @@ export const poses = {
         bones: { spine: [10, 0, 0], chest: [12, 0, 0], neck: [24, 0, 0], head: [4, 0, 0], ...arms(-36, 24, 10, 0), ...tail([-20, -14, -8, -2, 4]), ...ears(10) },
         feet: { L: { at: [0.02, 0, 0.06], heel: -46 }, R: { at: [-0.02, 0, 0.0], heel: -46 } },
     },
-    // Resting: sat back on its hocks, the body upright, the hands at its
-    // breast, the tail laid round.
+    // Lying: down on its belly, the legs folded beside it with the feet
+    // flat, the forearms out in front on the ground, the head up, the tail
+    // laid round its side.
+    lie: {
+        root: [0, -0.55, -0.05], turn: [36, 0, 0],
+        bones: {
+            spine: [-4, 0, 0], chest: [-8, 0, 0], neck: [-26, 0, 0], head: [2, 0, 0], ...arms(-70, 14, -34, 4), ...ears(18),
+            tail1: [-42, 24, 0], tail2: [-16, 36, 0], tail3: [-4, 40, 0], tail4: [2, 40, 0], tail5: [2, 30, 0],
+        },
+        // (The shins lie along the ground back from the knees and the feet
+        // come forward over them, the hocks folded as far as they go.)
+        // (Its feet stay where it stood: the hips come down behind them.)
+        feet: { L: { heel: -52 }, R: { heel: -52 } },
+    },
+    // Sitting: sat back on its hocks, the body upright, the hands at its
+    // breast, the tail laid round. (It sits on its way down to lying and on
+    // its way up.)
     rest: {
         root: [0, -0.4, 0.15], turn: [-24, 0, 0],
         bones: {

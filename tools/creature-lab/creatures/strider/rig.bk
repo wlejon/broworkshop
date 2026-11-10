@@ -261,7 +261,13 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
     let wg = smooth01(graze);
     let wl = smooth01(lie);
     if (wg > 0.0) { K = key_mix(K, key_get(K_FORAGE), wg); }
-    if (wl > 0.0) { K = key_mix(K, key_get(K_REST), wl); }
+    // It lies down as a dog does: back onto its hocks first, then the chest
+    // let down forward onto the ground; up again the other way.
+    if (wl > 0.0) {
+        let sit = smooth01(lie / 0.55);
+        let down = smooth01((lie - 0.4) / 0.6);
+        K = key_mix(K, key_mix(key_get(K_REST), key_get(K_LIE), down), sit);
+    }
     let wa = smooth01(alert) * (1.0 - 0.6 * gw) * (1.0 - wl);
     if (wa > 0.0) { K = key_mix(K, key_get(K_ALERT), wa); }
     if (flinch > 0.0) { K = key_mix(K, key_get(K_FLINCH), flinch * (1.0 - wl)); }
