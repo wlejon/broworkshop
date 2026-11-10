@@ -911,11 +911,15 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
     let rise = max(smin(ch - hy, cf - fy, CAP_SOFT), 0.0) + GALLOP_FREE * gw.z;
     if (!lp.on) {
         let over = shift.y - rise;
+        let free_y = shift.y;
         shift.y = smin(shift.y, rise, RISE_EASE);
+        // (Put back to the 3 cm it passed, not onto the ceiling: as a
+        // gallop's room goes in the change to a trot the body crosses that
+        // line, and set down on the ceiling it fell 35 mm in a step.)
         if (over > 0.03) {
             var v = bd.vel;
             v.y = min(v.y, hv);
-            body_set(state, s + D_BODY, plan + coff_p + shift, v);
+            body_set(state, s + D_BODY, plan + coff_p + vec3<f32>(shift.x, min(free_y, rise + 0.03), shift.z), v);
         }
     }
     // And no further than they reach any way: a body the planted hooves

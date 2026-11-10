@@ -50,6 +50,8 @@ export const NATURAL = {
     spike: 10000,         // deg/s^2 off the line through its neighbours: the velocity kinking by ~80 deg/s in a step
     spikeLeg: 0.85,       // m of leg that is sized for: a shorter-legged creature's joints are allowed more (turnSpike)
     spikeRel: 8,          // ... or this many times the joint's median jump, the larger
+    settle: 0.5,          // s at a run's start that kinks are not counted in
+    push: 2.5,           // the peak of a stance's push over its mean (a half sine is 1.6): the root's height may turn that hard
     variety: [0.01, 0.12],// variety as a share of the joint's range: below repeats, above wanders
     jitter: 0.015,        // jitter as a share of range
     headRatio: 0.8,       // head pitch range over the trunk's: above, the head rides the trunk
@@ -392,7 +394,9 @@ export function turnSpike(skel) {
     return NATURAL.spike * Math.max(1, NATURAL.spikeLeg / Math.max(mean, 0.01));
 }
 
-export function kinks(th, dt, near, spike = NATURAL.spike) {
+// (`more`: a limit of its own at each step, where it is the larger.)
+export function kinks(th, dt, near, spike = NATURAL.spike, more = null) { return kinksOf(th, dt, near, spike, more); }
+function kinksOf(th, dt, near, spike, more) {
     const n = th.length;
     const al = new Float64Array(n), jk = new Float64Array(n);
     for (let k = 1; k < n - 1; k++) al[k] = (th[k + 1] - 2 * th[k] + th[k - 1]) / (dt * dt);
@@ -404,14 +408,15 @@ export function kinks(th, dt, near, spike = NATURAL.spike) {
     const spikes = [];
     // One kink leaves half of itself two steps either side: the peak within three steps counts.
     for (let k = 3; k < n - 3; k++) {
-        if (res[k] <= lim) continue;
+        const limK = more ? Math.max(lim, more[k]) : lim;
+        if (res[k] <= limK) continue;
         let peak = true;
         for (let j = Math.max(3, k - 3); j <= Math.min(n - 4, k + 3) && peak; j++) if (j !== k && (res[j] > res[k] || (res[j] === res[k] && j < k))) peak = false;
-        if (peak) spikes.push({ t: r2(k * dt), jump: Math.round(res[k]), at: near[k] || 'between' });
+        if (peak) spikes.push({ t: r2(k * dt), jump: Math.round(res[k]), limit: Math.round(limK), at: near[k] || 'between' });
     }
     let js = 0;
     for (let k = 2; k < n - 1; k++) js += jk[k] * jk[k];
-    return { range: r1(Math.max(...th) - Math.min(...th)), spikes, jerkRms: Math.round(Math.sqrt(js / Math.max(1, n - 3))), medAcc: Math.round(med) };
+    return { range: r1(Math.max(...th) - Math.min(...th)), spikes, jerkRms: Math.round(Math.sqrt(js / Math.max(1, n - 3))), medAcc: Math.round(med), limit: Math.round(lim) };
 }
 
 function mostAt(spikes) {
@@ -426,6 +431,10 @@ export function smoothness(rec) {
     const S = series(rec), skel = rec.creature.skel, n = rec.steps, dt = rec.dt;
     const near = footEvents(rec);
     const turn = turnSpike(skel);
+    // (Not the first NATURAL.settle seconds: a run sets the creature down
+    // already at its pace, its springs at rest, and what it does settling
+    // from that is the scenario's, not its gait's.)
+    const kinks = (...a) => { const e = kinksOf(...a); e.spikes = e.spikes.filter((s) => s.t >= NATURAL.settle); return e; };
     const joints = [];
     for (const b of skel.bones) {
         if (b.parentIndex < 0) continue;
@@ -446,11 +455,41 @@ export function smoothness(rec) {
     // kink there shows in every leg on the ground at once.
     const root = [];
     const r0 = skel.bones.find((b) => b.parentIndex < 0).index;
+    // (Its height while it leaves the ground: what gravity takes in the air
+    // the feet give back on it, so standing on them a share d of the time
+    // it is pushed up at g (1/d - 1) on average and NATURAL.push times that
+    // at the peak. That much is the gait, and only more is a kink: a hopper
+    // a quarter of its time on the ground turns round at 3 g and more
+    // however softly it lands.)
+    // (Carried is read off the body, not the feet: it is on them while it
+    // falls slower than half of g. A toe reaching for the ground is near it
+    // before it bears anything.)
+    const on = new Uint8Array(n).fill(1), ry = (k) => rec.pose[k * rec.poseStride + r0 * ROWS + 7];
+    for (let k = 1; k < n - 1; k++) if ((ry(k + 1) - 2 * ry(k) + ry(k - 1)) / (dt * dt) < -0.5 * 9.81) on[k] = 0;
+    // (The share in the air is taken over the 0.4 s either side, the gait
+    // it is in then: a run through walk, trot and gallop is not one gait.)
+    const airs = new Float64Array(n + 1), lift = new Float64Array(n), w = Math.round(0.4 / dt);
+    for (let k = 0; k < n; k++) airs[k + 1] = airs[k] + 1 - on[k];
+    for (let k = 0; k < n; k++) {
+        const a = Math.max(0, k - w), b = Math.min(n, k + w + 1);
+        const d = Math.min(0.85, (airs[b] - airs[a]) / (b - a));
+        lift[k] = NATURAL.push * 9810 * d / (1 - d);
+    }
+    // (Its turn is each step's small rotation, about its own axes, summed:
+    // angles of the whole turn flip where the heading passes a quarter
+    // turn, and a creature turning round kinked by 30 degrees in a step
+    // that it did not.)
+    const spin = [new Float64Array(n), new Float64Array(n), new Float64Array(n)];
+    const m = (k, i, j) => rec.pose[k * rec.poseStride + r0 * ROWS + 4 * i + j];
+    for (let k = 0; k < n - 1; k++) {
+        const d = (i, j) => m(k + 1, i, 0) * m(k, j, 0) + m(k + 1, i, 1) * m(k, j, 1) + m(k + 1, i, 2) * m(k, j, 2);
+        const v = [0.5 * (d(2, 1) - d(1, 2)), 0.5 * (d(0, 2) - d(2, 0)), 0.5 * (d(1, 0) - d(0, 1))];
+        for (let c = 0; c < 3; c++) spin[c][k + 1] = spin[c][k] + (m(k, 0, c) * v[0] + m(k, 1, c) * v[1] + m(k, 2, c) * v[2]) * DEG;
+    }
     for (let c = 0; c < 3; c++) {
-        const p = new Float64Array(n), a = new Float64Array(n);
-        for (let k = 0; k < n; k++) { p[k] = 1000 * rec.pose[k * rec.poseStride + r0 * ROWS + 4 * c + 3]; a[k] = S.angles[k][r0][c] * DEG; }
-        for (let k = 1; k < n; k++) a[k] = a[k - 1] + wrap(a[k] - a[k - 1]);
-        root.push({ channel: `place ${'xyz'[c]}`, ...kinks(p, dt, near) }, { channel: `turn ${'xyz'[c]}`, ...kinks(a, dt, near, turn) });
+        const p = new Float64Array(n), a = spin[c];
+        for (let k = 0; k < n; k++) p[k] = 1000 * rec.pose[k * rec.poseStride + r0 * ROWS + 4 * c + 3];
+        root.push({ channel: `place ${'xyz'[c]}`, ...kinks(p, dt, near, NATURAL.spike, c === 1 ? lift : null) }, { channel: `turn ${'xyz'[c]}`, ...kinks(a, dt, near, turn) });
     }
     root.sort((x, y) => y.spikes.length - x.spikes.length);
     // Where they fall: the foot events the spikes gather at, most first.

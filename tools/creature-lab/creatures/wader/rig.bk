@@ -461,7 +461,11 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
             // A foot swung on its arc under the hip would go into the ground:
             // there the leg folds, the toes drawn toward the hip far enough to
             // clear it.
-            let need = height(env, path.x, path.z) + (0.006 + 0.5 * lift_h) * bump(u, 0.12, 0.75);
+            // (Drawn up over the swing's first third, not its first eighth:
+            // that was 4 cm in five steps, a snatch: the knee, at rest as the
+            // foot's roll ended, jumped ten degrees in two steps and stopped
+            // again at every lift, and the body kinked with it.)
+            let need = height(env, path.x, path.z) + (0.006 + 0.5 * lift_h) * bump(u, 0.32, 0.75);
             if (path.y < need) {
                 let t = (need - path.y) / max(hip.y - path.y, 0.05);
                 path += (hip - path) * min(t, 0.8);

@@ -580,7 +580,8 @@ text under the creature's folder; `score`, `sweep` and `kinks` run what
   is and with each value, a table a scenario. Other `--knob` overrides apply
   to every row.
 - `kinks` (`kinks.txt`): per scenario, the foot events the kinks gather at,
-  with the bones kinking at each and their median size; the root's; the
+  with the bones kinking at each and their median size; the root's, each
+  channel with its worst kink, the limit that one was held to and when; the
   joints' and the root's kinks in each half second of the run (a scenario of
   several parts kinks in some of them: a gallop gathering speed, not the
   bound after it); and the moments most bones kink at together (kinks
@@ -905,7 +906,18 @@ Every output is deterministic. A rerun writes the same bytes.
     measured against the creature's size (`turnSpike`: `NATURAL.spike` for a
     creature whose mean leg is `NATURAL.spikeLeg` or longer, more in
     proportion for a smaller one, whose joints turn faster through the same
-    motion); the root's place is not.
+    motion); the root's place is not. Its turn is each step's small rotation
+    about its own axes, summed, so a creature turning round has no angle
+    that flips. Its height is allowed the push its gait needs: read off the
+    body itself (it is carried while it falls slower than half of g), the
+    share d of the 0.4 s either side it spends in the air asks an average
+    push of g d / (1 - d), and up to `NATURAL.push` times that is the gait,
+    not a kink (a hopper a quarter of its time on the ground turns round at
+    3 g however softly it lands). Kinks in a run's first `NATURAL.settle`
+    seconds are not counted: the creature is set down already at its pace.
+    A sole is down within `LIMITS.contact` of the ground, or within
+    `LIMITS.contactLeg` of the legs' length where that is less (`contactHeight`
+    in lab/analyze.js: a finch's whole hop clears 2 cm).
   - **Variety**: each steady cycle's deviation from the mean cycle, split
     into slow change (variety: `repeats` under 1% of the range, `wanders`
     over 12%) and step-to-step noise (`jitters` over 1.5%).

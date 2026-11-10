@@ -79,7 +79,8 @@ pub const STATE: i32 = PROBE + PROBE_N;
 // the air and rose 5 cm, a bouncing ball's hop.)
 @knob const HOP_F: f32 = 5.5;       // hops a second barely moving
 @knob const HOP_FV: f32 = 1.5;       //   and more per m/s
-@knob const TUCK: f32 = 0.3;       // share of the hip's height the feet are drawn up in a flight
+// (Little: in a tenth of a second's flight a deep tuck is a fold and unfold of 60 degrees.)
+@knob const TUCK: f32 = 0.12;      // share of the hip's height the feet are drawn up in a flight
 @knob const ROLL: f32 = 0.8;         // rad the toes stand up as the feet leave them
 @knob const CURL: f32 = 0.3;         // the toes' limb angle curled under in a flight (0: hanging)
 @knob const COCK: f32 = 0.45;        // rad the tail cocks up as it lands
@@ -481,7 +482,12 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
     // (Hopping, the body rides its plan: the bounce is already a true fall
     // and a spring's push, and the layer's feet, too slow for a stance this
     // short, only held the mass to the plan by its stray limit.)
-    var shift = (bd.com - coff_p - plan) * LAYERS * (1.0 - wl) * (1.0 - go);    if (wl > 0.0) { body_set(state, s + D_BODY, mix(bd.com, plan + coff_p, wl), mix(bd.vel, bd.tvel, wl)); }
+    var shift = (bd.com - coff_p - plan) * LAYERS * (1.0 - wl) * (1.0 - go);
+    if (wl > 0.0) { body_set(state, s + D_BODY, mix(bd.com, plan + coff_p, wl), mix(bd.vel, bd.tvel, wl)); }
+    // (And the layer's mass is kept on the plan while it hops, so that it
+    // stops from where the body is: left to itself it strayed a centimetre
+    // ahead, and the body jumped there in the step the hopping ended.)
+    if (moving) { body_set(state, s + D_BODY, plan + coff_p, bd.tvel); }
     var held = 0.0;
     let over0 = max(reach_over(state, s, balls, plan, qbody), 0.0);
     if (reach_over(state, s, balls, plan + shift, qbody) > over0) {

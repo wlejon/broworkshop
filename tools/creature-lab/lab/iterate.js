@@ -136,7 +136,7 @@ export function kinkReport(rec, { bone = null, at = null, top = 6 } = {}) {
         L.push(`  ${padR(ev, 9)} ${pad(n, 5)}: ${bones.slice(0, at ? 99 : 6).map(([b, a]) => `${b} ${a.length} (~${Math.round(med(a) / 1000)}k)`).join(', ')}`);
     }
     const rk = sm.root.filter((r) => r.spikes.length);
-    L.push(rk.length ? `  root: ${rk.map((r) => `${r.channel} ${r.spikes.length}`).join(', ')}` : '  root: smooth');
+    L.push(rk.length ? `  root: ${rk.map((r) => { const s = r.spikes.reduce((a, b) => (b.jump / b.limit > a.jump / a.limit ? b : a)); return `${r.channel} ${r.spikes.length} (worst ${s.jump} over its limit of ${s.limit}, at ${s.t} s)`; }).join(', ')}` : '  root: smooth');
     // When: the joints' kinks and the root's in each half second of the run
     // (a scenario of several parts kinks in some of them, not all).
     const half = (spikes) => { const c = new Array(Math.ceil(rec.steps * rec.dt * 2)).fill(0); for (const s of spikes) c[Math.min(c.length - 1, Math.floor(s.t * 2))]++; return c; };

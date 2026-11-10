@@ -17,7 +17,8 @@ import { boneTail, bonePoint, boneHead, boneAt, jointAngles, centreOfMass } from
 import { groundHeights } from "./run.js";
 
 export const LIMITS = {
-    contact: 0.012,      // m: a sole point this close to the ground is down
+    contact: 0.012,      // m: a sole point this close to the ground is down ...
+    contactLeg: 0.04,    // ... or this share of its legs' length, the smaller (never under 2 mm): a finch's hop clears 2 cm
     slip: 0.015,         // m: a planted hoof sliding further than this is a fault
     sink: 0.008,         // m: a sole point deeper than this is a fault
     jointSink: 0.02,     // m: a joint centre deeper than this
@@ -83,6 +84,15 @@ function convexHull(pts) {
     return lo.concat(hi);
 }
 
+// How near the ground a sole of `skel` counts as down: LIMITS.contact for a
+// long leg, less for a short one, whose whole hop is a centimetre or two.
+export function contactHeight(skel) {
+    const legs = skel.parts.legs;
+    if (!legs.length) return LIMITS.contact;
+    const mean = legs.reduce((s, l) => s + l.length, 0) / legs.length;
+    return Math.max(0.002, Math.min(LIMITS.contact, LIMITS.contactLeg * mean));
+}
+
 // Per-step series every sheet and measure reads: sole points, their ground,
 // contact, joint angles, the centre of mass, tracked points.
 export function series(rec) {
@@ -106,6 +116,7 @@ export function series(rec) {
     const per = nf * ns + skel.count;
     const soleH = new Float32Array(n * nf * ns), jointH = new Float32Array(n * skel.count);
     const contact = new Uint8Array(n * nf);
+    const near = contactHeight(skel);
     for (let k = 0; k < n; k++) {
         for (let i = 0; i < nf; i++) {
             let down = false;
@@ -114,7 +125,7 @@ export function series(rec) {
                 soleH[s] = sole[s * 3 + 1] - gh[k * per + i * ns + j];
                 // Down on any of its sole: a foot that lands heel first, its
                 // toe still coming down, is already carrying the body.
-                if (soleH[s] < LIMITS.contact) down = true;
+                if (soleH[s] < near) down = true;
             }
             contact[k * nf + i] = down ? 1 : 0;
         }

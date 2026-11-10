@@ -184,12 +184,16 @@ export function watchSheet(rec, { path, view = 'side', frames = WATCH.frames, fr
     const track = (name) => { const t = skel.tracks.find((x) => x.name === name); if (!t) return null; const b = skel.bones[t.boneIndex]; return b.head[1] + (b.tail[1] - b.head[1]) * t.at; };
     const levels = [['hips at rest', track('hips')], ['head at rest', track('head')]].filter((l) => l[1] != null);
     const feet = skel.feet;
-    const k0 = F.frames[0].step * TELE;
+    // (Its speed over the frames shown: one figure at a steady pace, the
+    // range across a start, a stop or a change of gait.)
+    const sp = F.frames.map((f) => rec.tele[f.step * TELE + T.SPEED]);
+    const s0 = Math.min(...sp), s1 = Math.max(...sp);
+    const speed = s1 - s0 < 0.05 ? `${s1.toFixed(2)} m/s` : `${s0.toFixed(2)} to ${s1.toFixed(2)} m/s`;
     const S = beginSheet(W, H);
     const g = S.g;
     rect(g, 0, 0, W, H, '#ecebe6');
     text(g, `${creature.label} · ${rec.scenario.name} · watch · ${view}`, 12, 30, { size: 22, weight: 700 });
-    text(g, `${rec.scenario.about || ''} — ${cyc ? `cycle ${cyc.period.toFixed(3)} s, ` : ''}${rec.tele[k0 + T.SPEED].toFixed(2)} m/s, a frame every ${(1000 * F.every).toFixed(0)} ms; one camera, ${turns ? 'staying where the creature began (it turns on the spot)' : 'standing where the creature does at its steady pace'}`, 12, 52, { size: 14, color: DIM });
+    text(g, `${rec.scenario.about || ''} — ${cyc ? `cycle ${cyc.period.toFixed(3)} s, ` : ''}${speed}, a frame every ${(1000 * F.every).toFixed(0)} ms; one camera, ${turns ? 'staying where the creature began (it turns on the spot)' : 'standing where the creature does at its steady pace'}`, 12, 52, { size: 14, color: DIM });
     text(g, 'blue outline: the frame before · plumb line: where it stands · level lines: its hips and head at rest · ▼ foot down △ up', 12, 70, { size: 13, color: DIM });
     F.frames.forEach((f, i) => {
         const x0 = 6 + (i % cols) * (cw + GAP), y0 = TM + Math.floor(i / cols) * (ch + LAB);
