@@ -111,9 +111,21 @@ export function watchSheet(rec, { path, view = 'side', frames = WATCH.frames, fr
     // moment of a run of several gaits is not in its last cycle.)
     const cyc = turns || to != null ? null : lastCycle(rec);
     const F = framesOf(rec, cyc, frames, { from, span, to });
+    // (Over the ground itself, not a log lying on it: a creature leaping
+    // one is drawn as high as it is, and the log under it.)
+    const bare = rec.env[8] > 0 ? Float32Array.from(rec.env, (v, i) => (i === 8 ? 0 : v)) : rec.env;
     const poseAt = (step) => {
         const r = rootOf(rec, step);
-        return relativePose(rec, step, groundHeights(rec.env, new Float32Array([r.x, r.z]))[0], new Float32Array(rec.poseStride), 0, turns ? first : null);
+        return relativePose(rec, step, groundHeights(bare, new Float32Array([r.x, r.z]))[0], new Float32Array(rec.poseStride), 0, turns ? first : null);
+    };
+    // The log's middle and top in a frame's own coordinates (relativePose's).
+    const logAt = (step) => {
+        if (!(rec.env[8] > 0)) return null;
+        const r = turns ? first : rootOf(rec, step), rr = rootOf(rec, step);
+        const c = Math.cos(-r.yaw), s = Math.sin(-r.yaw), px = rec.env[9] - r.x, pz = rec.env[10] - r.z;
+        const base = groundHeights(bare, new Float32Array([rec.env[9], rec.env[10], rr.x, rr.z]));
+        const y = base[0] - base[1] + 0.5 * rec.env[8];
+        return { mid: [c * px + s * pz, y, -s * px + c * pz], top: [c * px + s * pz, y + 0.5 * rec.env[8], -s * px + c * pz] };
     };
     const poses = F.frames.map((f) => poseAt(f.step));
     const before = poseAt(F.before);
@@ -172,6 +184,17 @@ export function watchSheet(rec, { path, view = 'side', frames = WATCH.frames, fr
     F.frames.forEach((f, i) => {
         const x0 = 6 + (i % cols) * (cw + GAP), y0 = TM + Math.floor(i / cols) * (ch + LAB);
         g.drawImage(toCanvas(shots[i]), x0, y0);
+        const lg = !top && logAt(f.step);
+        if (lg) {
+            // The log, end on (a side view) as the circle it is.
+            const m = project(cam, cw, ch, lg.mid), t = project(cam, cw, ch, lg.top);
+            g.save();
+            g.beginPath(); g.rect(x0, y0, cw, ch); g.clip();
+            g.beginPath(); g.arc(x0 + m.x, y0 + m.y, Math.abs(m.y - t.y), 0, 2 * Math.PI);
+            g.fillStyle = 'rgba(120,90,60,0.35)'; g.fill();
+            g.strokeStyle = 'rgba(80,55,30,0.9)'; g.lineWidth = 2; g.stroke();
+            g.restore();
+        }
         if (!top) {
             const a = project(cam, cw, ch, [0, 0, 0]), b = project(cam, cw, ch, [0, hi[1] * 1.05, 0]);
             line(g, x0 + a.x, y0 + a.y, x0 + b.x, y0 + b.y, 'rgba(20,20,20,0.55)', 1, [5, 5]);

@@ -137,6 +137,32 @@ export function kinkReport(rec, { bone = null, at = null, top = 6 } = {}) {
     }
     const rk = sm.root.filter((r) => r.spikes.length);
     L.push(rk.length ? `  root: ${rk.map((r) => `${r.channel} ${r.spikes.length}`).join(', ')}` : '  root: smooth');
+    // When: the joints' kinks and the root's in each half second of the run
+    // (a scenario of several parts kinks in some of them, not all).
+    const half = (spikes) => { const c = new Array(Math.ceil(rec.steps * rec.dt * 2)).fill(0); for (const s of spikes) c[Math.min(c.length - 1, Math.floor(s.t * 2))]++; return c; };
+    const jc = half(sm.joints.flatMap((j) => j.spikes)), rc = half(sm.root.flatMap((r) => r.spikes));
+    L.push(`  by half second, joints: ${jc.join(' ')}`);
+    L.push(`  by half second, root:   ${rc.join(' ')}`);
+    // The moments: kinks within two steps of each other are one event of the
+    // rig's (a rule switching, a target moving), and the moments most bones
+    // kink at together are the ones to trace. `+root` where the root's place
+    // kinks too.
+    const all = sm.joints.flatMap((j) => j.spikes.map((s) => ({ k: Math.round(s.t / rec.dt), bone: j.bone, at: s.at })))
+        .concat(sm.root.flatMap((r) => r.spikes.map((s) => ({ k: Math.round(s.t / rec.dt), bone: 'root', at: s.at }))))
+        .sort((a, b) => a.k - b.k);
+    const moments = [];
+    for (const e of all) {
+        const m = moments[moments.length - 1];
+        if (m && e.k - m.k1 <= 2) { m.k1 = e.k; m.bones.add(e.bone); } else moments.push({ k0: e.k, k1: e.k, bones: new Set([e.bone]), at: e.at });
+    }
+    moments.sort((a, b) => b.bones.size - a.bones.size);
+    const inTop = moments.slice(0, 14);
+    const share = Math.round(100 * inTop.reduce((s, m) => s + m.bones.size, 0) / Math.max(1, moments.reduce((s, m) => s + m.bones.size, 0)));
+    L.push(`  ${moments.length} moments; the ${inTop.length} most bones kink at together (${share}% of all):`);
+    for (const m of inTop) {
+        const names = [...m.bones].filter((b) => b !== 'root');
+        L.push(`    ${(m.k0 * rec.dt).toFixed(3)}${m.k1 > m.k0 ? `-${(m.k1 * rec.dt).toFixed(3)}` : '      '} s  ${pad(names.length, 2)} bones${m.bones.has('root') ? ' +root' : '      '}  ${padR(m.at, 8)}  ${names.slice(0, 7).join(' ')}`);
+    }
     return { lines: L, smoothness: sm };
 }
 

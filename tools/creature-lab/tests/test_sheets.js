@@ -93,7 +93,7 @@ await test('the text tools: score, sweep, kinks, trace', async () => {
     const { runScenario, PROBE_N } = await import('/app/lab/run.js');
     const rec = runScenario(await loadCreature('bunny'), 'idle');
     eq(rec.probe && rec.probe.length, rec.steps * PROBE_N, 'the probe slice recorded every step');
-    eq(runScenario(await loadCreature('deer'), 'idle').probe, null, 'a rig without one records none');
+    eq(runScenario(await loadCreature('hexa'), 'idle').probe, null, 'a rig without one records none');
 });
 
 test('edit -> sheet in seconds', () => {

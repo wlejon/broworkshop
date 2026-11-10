@@ -67,6 +67,20 @@ pub const BOTTOM_ACC: f32 = 1.0;   // g the hips are pushed up at the stroke's b
 pub fn leg_time() -> f32 { return sqrt(max(MEAN_LEG, 0.05) / G); }
 @knob pub const ABSORB: f32 = 0.5;     // leg times the landing takes the hips' fall up over
 fn absorb_t() -> f32 { return ABSORB * leg_time(); }
+@knob pub const LAND_G: f32 = 2.0;     // g the landing takes the fall up at (over the body's weight)
+@knob pub const LAND_T: f32 = 0.5;    // leg times the landing's sink lasts at most
+@knob pub const LAND_DIP: f32 = 0.1;  // leg lengths under standing the hips sink to at most, landing
+// How far the hips sink stopping the fall they land with (v0 at the fore
+// touchdown), and how long that takes at most.
+fn sink_d(o: Leap) -> f32 { let v = min(o.v0, 0.0); return v * v / (2.0 * LAND_G * G); }
+fn sink_t(o: Leap) -> f32 { return min(max(-o.v0, 0.0) / (LAND_G * G), LAND_T * leg_time()); }
+// The landing's sink from the fore touchdown to its bottom (s), the hips to
+// stand at `hs`: as long as a steady stop over that drop takes, no longer
+// than the hooves can stay on the ground under a running body (LAND_T).
+pub fn sink_time(o: Leap, hs: f32) -> f32 {
+    let hb = max(min(o.h0 - sink_d(o), hs), hs - LAND_DIP * MEAN_LEG);
+    return min(2.0 * (o.h0 - hb) / max(-o.v0, 0.1), LAND_T * leg_time());
+}
 // (A push still asked while the feet's load fades is not given: the body
 // left the ground that much slower than the leap needed.)
 fn unload_t() -> f32 { return UNLOAD * leg_time(); }
@@ -257,7 +271,11 @@ pub fn leap_follow(o: Leap) -> f32 {
 // When the fore feet touch down and when the legs go back to the gait.
 pub fn fore_down(o: Leap) -> f32 { return leap_leg(o, false, 0.0).w; }
 pub fn legs_done(o: Leap) -> f32 { return leap_leg(o, true, 1.0).w + 0.05 * leg_time(); }
-pub fn leap_end(o: Leap) -> f32 { return max(fore_down(o) + absorb_t(), legs_done(o)); }
+pub fn leap_end(o: Leap) -> f32 {
+    var sink: f32 = 0.0;
+    if (o.tau >= fore_down(o)) { sink = sink_t(o); }
+    return max(fore_down(o) + sink + absorb_t(), legs_done(o));
+}
 
 // The hips' planned height and its speed at the leap's tau: the push from
 // the crouch's start, the arc, and from the fore touchdown the return to
@@ -280,7 +298,21 @@ pub fn leap_hip(o: Leap, land_ground: f32) -> vec2<f32> {
     if (o.tau < fd) { return vec2<f32>(flight_hip(o, o.tau), o.vy - G * o.tau); }
     // (From the hips' own height and speed at the touchdown, which the rig
     // puts in h0 and v0 then.)
-    return hermite5(o.h0, o.v0, -G, land_ground + o.h_stand, 0.0, 0.0, absorb_t(), o.tau - fd);
+    // The fall is stopped over the distance a steady LAND_G takes, the legs
+    // folding under it as far below the standing height as that goes, and
+    // the hips brought back up from there: stopped at the standing height
+    // itself, the body had a few centimetres to lose its fall in, and lost
+    // it in three steps at eight times its weight.
+    let hs = land_ground + o.h_stand;
+    // (No deeper than LAND_DIP under standing, where the legs still have
+    // their fold to push from: a faster fall is stopped harder.)
+    let hb = max(min(o.h0 - sink_d(o), hs), hs - LAND_DIP * MEAN_LEG);
+    let t1 = sink_time(o, hs);
+    let t = o.tau - fd;
+    if (o.v0 > -0.3 || t1 < 0.02) { return hermite5(o.h0, o.v0, -G, hs, 0.0, 0.0, absorb_t(), t); }
+    let ab = clamp(6.0 * (hs - hb) / (absorb_t() * absorb_t()), 0.0, LAND_G * G);
+    if (t < t1) { return hermite5(o.h0, o.v0, -G, hb, 0.0, ab, t1, t); }
+    return hermite5(hb, 0.0, ab, hs, 0.0, 0.0, absorb_t(), t - t1);
 }
 
 // The trunk's planned pitch (rad, nose up) and its rate at tau.

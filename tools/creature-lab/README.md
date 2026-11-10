@@ -56,7 +56,7 @@ legs' bone):
 |--------|------|
 | `creature::pose` (`lab/pose.bk`) | `Pose`: every bone's world rotation and head; points on bones, local rotations, the centre of mass, writing a pose out |
 | `creature::body` (`lab/body.bk`) | the centre of mass as a state of its own, moved only by what the loaded feet can push: each leg along its line from foot to swing joint, push only, more as it flexes, a little across it, within friction; free fall with no foot down. `body_step(plan, stiffness, Support)` steers it toward the rig's plan; a foot loads and unloads over 0.125 of the legs' pendulum time (40 ms for the deer), the body strays at most a quarter leg from its plan, and a gait with flight pushes harder in stance to carry its weight over the stride. `Support.effort` above 1 is an all-out push (each leg pushes that much more, nearly to full reach); `Support.lead` feeds the plan's vertical acceleration forward, for a deliberate move whose push begins when it is asked rather than when the body has fallen behind (that acceleration already carries the flight's weight, so the extra stance push is owed only for the share not led); `Support.spring` (0 to 1) makes the legs springs under a landing: at 0 the body is brought to its plan with no overshoot, toward 1 it sinks on through the stance and is thrown back up |
-| `creature::leap` (`lab/leap.bk`) | a leap from a gait: the run-up's strides paced so the hind feet's last stance ends at the take-off spot, a crouch onto the hind legs and an all-out push held long enough to lift the body, a ballistic flight whose height clears an obstacle (or a bound's rise with none), the trunk pitching nose-up to nose-down, and a landing absorbed fore first. `leap_begin`, `leap_hip` and `leap_pitch` give the plan, `leap_leg` each foot's lift and touchdown, `leap_effort` and `leap_follow` the body's Support; times scale with the legs' pendulum time. The crouch falls at free fall's pace (`FALL`) no deeper than `DEPTH` leg lengths under the take-off height; where that depth limits the stroke the hips wait at the bottom and push over the room there is at a steady rate, and the push ends `UNLOAD` leg times before the take-off, as the feet unload (a push asked while their load fades is not given). The landing takes the fall up over `ABSORB` leg times, the time the landing feet are down, from the hips' own height and speed at the fore touchdown (the rig puts them in `h0`, `v0`); `CLEAR` is the leg lengths the hips pass over an obstacle |
+| `creature::leap` (`lab/leap.bk`) | a leap from a gait: the run-up's strides paced so the hind feet's last stance ends at the take-off spot, a crouch onto the hind legs and an all-out push held long enough to lift the body, a ballistic flight whose height clears an obstacle (or a bound's rise with none), the trunk pitching nose-up to nose-down, and a landing absorbed fore first. `leap_begin`, `leap_hip` and `leap_pitch` give the plan, `leap_leg` each foot's lift and touchdown, `leap_effort` and `leap_follow` the body's Support; times scale with the legs' pendulum time. The crouch falls at free fall's pace (`FALL`) no deeper than `DEPTH` leg lengths under the take-off height; where that depth limits the stroke the hips wait at the bottom and push over the room there is at a steady rate, and the push ends `UNLOAD` leg times before the take-off, as the feet unload (a push asked while their load fades is not given). The landing stops the fall at a steady `LAND_G` over the distance that takes, the hips sinking no deeper than `LAND_DIP` leg lengths under standing and for no longer than `LAND_T` leg times (the time the landing hooves can stay down under a running body; `sink_time`), then brings them up to standing over `ABSORB` leg times, from the hips' own height and the body's own fall at the fore touchdown (the rig puts them in `h0`, `v0`); the rig hands the legs back to the gait only once the sink is over. `CLEAR` is the leg lengths the hips pass over an obstacle |
 | `creature::spine` (`lab/spine.bk`) | the back's flex, bend and twist from what the legs do: flexed by the feet's spread along the body (most in a gait whose pairs swing together), bent into a turn's curve and toward gathered feet, twisted by sideways acceleration, hollowed by the body's vertical acceleration; each a spring of the trunk's frequency |
 | `creature::secondary` (`lab/secondary.bk`) | every dangling chain (neck, head, ears, tail) carried by its momentum: the subtree's centre of mass on a spring and damper toward where the rig puts it, its frequency from the part's size and its damping from its share of the body's mass (a heavy neck near critical, so a gait's rhythm never rings it into a whip; an ear or a slender tail light, so it swings past and settles), joint limits eased into, and a part swung into the ground resting on it (a part the rig lays there stays there); `hold` keeps part of a bone's world rotation (a head steadied in space but not pinned). `carry` takes the `env`, for the ground |
 
@@ -97,7 +97,16 @@ body moves about), so the body's own motion shows against it.
 The reference creature is `deer`: a deer-sized quadruped with spine, neck,
 head, ears and tail. Its gaits are walk, trot and gallop, and its actions are
 idle, graze, startle, lie down and bound; from a gallop it leaps a log in its
-path (`creature::leap`). Turning on the spot it steps round in diagonal
+path (`creature::leap`). In a leap's flight each hoof swings from where
+it left the ground as its girdle carries it, the hind hooves drawn up
+forward under the belly (`TUCK_BACK`, `TUCK_HIND`: the highest the leg
+folds, and the first of it over a log) until they are past it (`UNTUCK`),
+and comes down to where the leg will hold its mark near its full length
+(`LAND_EXT`); a fore hoof the body has run past in the landing steps on.
+Its path gathers speed no faster than its body follows (`LAG_FREE`,
+`LAG_BAND`; a gallop's feet give it `GALLOP_ACC` of a walk's push), and
+galloping its fore knee folds in a swing only as far as the leg has length
+to spare (`FOLD_EXT`, `FOLD_BAND`). Turning on the spot it steps round in diagonal
 pairs, and lying down its lower joints fold ahead of the rest
 (`FOLD_AHEAD`). Galloping, its body may rise `GALLOP_FREE` past what its
 planted hooves hold, and a hoof the posed leg hung short of last step
@@ -569,7 +578,12 @@ text under the creature's folder; `score`, `sweep` and `kinks` run what
   is and with each value, a table a scenario. Other `--knob` overrides apply
   to every row.
 - `kinks` (`kinks.txt`): per scenario, the foot events the kinks gather at,
-  with the bones kinking at each and their median size; the root's.
+  with the bones kinking at each and their median size; the root's; the
+  joints' and the root's kinks in each half second of the run (a scenario of
+  several parts kinks in some of them: a gallop gathering speed, not the
+  bound after it); and the moments most bones kink at together (kinks
+  within two steps of each other are one event of the rig's, `+root` where
+  the root's place kinks too), which are the ones to `trace`.
   `--bone <name>` lists that bone's every kink (time, size, event); `--at
   "<foot> <down|lift>"` every bone kinking there.
 - `trace <scenario>` (`<scenario>-trace.txt`): a row a step from `--from` to
@@ -643,6 +657,9 @@ Every output is deterministic. A rerun writes the same bytes.
     since, and how far, is seen.
   - A plumb line through where it stands and level lines at its hips' and
     head's rest heights; under each frame, which feet are down.
+  - A scenario's log is drawn where it lies (end on, the circle it is), and
+    the creature at its height over the ground itself, so a leap is seen
+    as high as it is and what clears the log, or does not.
 - **Skin** (`skin`, `lab/skinsee.js`): whether each limb has a skin of its
   own, and where the skin is pulled as the bones move.
   - **bound**: at rest each limb (a chain of bones out to a leaf) is cut
