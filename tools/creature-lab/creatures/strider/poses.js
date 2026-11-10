@@ -177,6 +177,16 @@ export const poses = {
         bones: { spine: [10, 0, 0], chest: [12, 0, 0], neck: [24, 0, 0], head: [4, 0, 0], ...arms(-36, 24, 10, 0), ...tail([-20, -14, -8, -2, 4]), ...ears(10) },
         feet: { L: { at: [0.02, 0, 0.06], heel: -46 }, R: { at: [-0.02, 0, 0.0], heel: -46 } },
     },
+    // Leaping, in the air: stretched out level, the chest lifted and the
+    // head up looking where it will land, the arms thrown forward, the tail
+    // up behind it, the ears flat. (The legs are the stride's own: rig.bk.)
+    leap: {
+        turn: [4, 0, 0],
+        bones: {
+            spine: [-5, 0, 0], chest: [-7, 0, 0], neck: [-6, 0, 0], head: [10, 0, 0], ...arms(-34, 62, 14, 12),
+            ...tail([10, 10, 8, 5, 2]), ...ears(46, 10),
+        },
+    },
     // Lying: down on its belly, the legs folded beside it with the feet
     // flat, the forearms out in front on the ground, the head up, the tail
     // laid round its side.

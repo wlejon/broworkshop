@@ -29,5 +29,12 @@ export default {
     form: { reference: {} },
     // `plan`: the motion layers off, the keys as the rig stands them.
     variants: { plan: { LAYERS: 0 } },
-    scenarios: {},
+    scenarios: {
+        leap: {
+            about: 'a run-up at 3 m/s, a leap over a 0.4 m log, the run-out',
+            duration: 7,
+            ground: { log: { at: [0, 9], yaw: 90, height: 0.4, length: 4 } },
+            track: [{ t: 0, speed: 3 }, { t: 5.5, speed: 1.5 }],
+        },
+    },
 };
