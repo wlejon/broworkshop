@@ -33,7 +33,13 @@
 //               the creature's frame: corners where a path turns sharply, and
 //               the share of a path that runs straight.
 
-import { T, TELE, I, INTENT } from "./contract.js";
+import { T, TELE, I, INTENT, GAIT } from "./contract.js";
+
+// A bone marked `beats` (a wing's) is one the creature drives hard on
+// purpose: flying, a wingbeat's reversals are its motion and not a kink or a
+// jolt, and they are not counted while its gait is `fly`. On the ground it
+// is judged as any bone is.
+const flyingAt = (rec, k) => rec.tele[Math.max(0, Math.min(rec.steps - 1, k)) * TELE + T.GAIT] === GAIT.FLY;
 import { ROWS, boneHead, boneTail } from "./skeleton.js";
 import { series } from "./analyze.js";
 import { cycles } from "./cycle.js";
@@ -475,6 +481,7 @@ export function smoothness(rec) {
             for (let k = 0; k < n; k++) th[k] = S.angles[k][b.index][c] * DEG;
             for (let k = 1; k < n; k++) th[k] = th[k - 1] + wrap(th[k] - th[k - 1]);
             const e = { axis: 'xyz'[c], ...kinks(th, dt, near, turn) };
+            if (b.beats) e.spikes = e.spikes.filter((s) => !flyingAt(rec, Math.round(s.t / dt)));
             if (e.range > 0.5 && worse(e, worst)) worst = e;
         }
         if (worst) joints.push({ bone: b.name, ...worst, perSecond: r2(worst.spikes.length / (n * dt)) });
@@ -574,6 +581,7 @@ export function seen(rec) {
         const land = legOf.has(b.index) ? landing[legOf.get(b.index)] : null;
         for (let k = k0; k < n - 2; k++) {
             if (land && land[k]) continue;
+            if (b.beats && flyingAt(rec, k)) continue;
             let d2 = 0;
             for (let c = 0; c < 3; c++) {
                 const e = p[3 * k + c] - (4 * (p[3 * (k - 1) + c] + p[3 * (k + 1) + c]) - p[3 * (k - 2) + c] - p[3 * (k + 2) + c]) / 6;

@@ -138,10 +138,15 @@ export function watchSheet(rec, { path, view = 'side', frames = WATCH.frames, fr
 
     // One camera: everything the bones reach through the frames, on the
     // ground, fills the frame.
-    const lo = [Infinity, 0, Infinity], hi = [-Infinity, -Infinity, -Infinity];
+    const lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity];
     for (const P of [...poses, before]) for (const b of skel.bones) for (const p of [boneHead(P, 0, b.index), boneTail(P, 0, b)]) {
         for (let k = 0; k < 3; k++) { lo[k] = Math.min(lo[k], p[k]); hi[k] = Math.max(hi[k], p[k]); }
     }
+    // (Flying, more than its own height clear of the ground through all of
+    // them, the frame is fitted to the creature and a little under it: with
+    // the ground in it a finch at its height was a twentieth of the frame.)
+    const tall = Math.max(...skel.bones.map((b) => Math.max(b.head[1], b.tail[1])));
+    lo[1] = lo[1] > tall ? lo[1] - 0.3 * tall : 0;
     // (And the skin as far outside them as it stands at rest: a small
     // bird's skull and breast are well off its bones, and a frame fitted
     // to the bones alone cut its crown off.)
@@ -232,8 +237,9 @@ export function watchSheet(rec, { path, view = 'side', frames = WATCH.frames, fr
                 // (A level the frame does not reach, as a tall bird's head at
                 // rest over its running crouch, is named at the frame's top
                 // and not drawn across the row above.)
+                // (Each on its own line: flying, both are below it.)
                 if (ys[j] < 12 || ys[j] > ch) {
-                    if (i === 0) text(g, `${name}: ${ys[j] < 12 ? 'above' : 'below'} the frame`, x0 + 6, y0 + (ys[j] < 12 ? 14 : ch - 6), { size: 11, color: '#333' });
+                    if (i === 0) text(g, `${name}: ${ys[j] < 12 ? 'above' : 'below'} the frame`, x0 + 6, y0 + (ys[j] < 12 ? 14 + 13 * j : ch - 6 - 13 * j), { size: 11, color: '#333' });
                     return;
                 }
                 line(g, x0, y0 + ys[j], x0 + cw, y0 + ys[j], 'rgba(20,20,20,0.4)', 1, [2, 6]);

@@ -1,8 +1,9 @@
 // The finch's skeleton: a small songbird of about 24 g, 14 cm from the bill
-// to the tail's tip and 9 cm to the crown standing. Its body is a plump egg
-// carried a little nose-up, the head close on a short neck, a stout conical
-// bill. The tail is long and angled down behind, and the wings fold along the
-// flanks with their tips over the tail.
+// to the tail's tip, 9 cm to the crown standing and 24 cm across its spread
+// wings. Its body is a plump egg carried a little nose-up, the head close on
+// a short neck, a stout conical bill. The tail is long and angled down
+// behind. The wings are stood spread (the rig folds them along the flanks
+// with their tips over the tail, and opens them to fly).
 //
 // The legs are the wader's Z in miniature: the femur and most of the
 // drumstick hidden in the belly's feathers, the bare tarsus short and near
@@ -29,16 +30,39 @@ function leg(side, tag) {
     ];
 }
 
+// A wing, stood here spread flat (the rig folds it): the arm's three bones
+// from the shoulder out along the leading edge, and the flight feathers,
+// each a bone from its root on the arm to its tip at the trailing edge:
+// four primaries on the hand (the hand's own line is the outermost), four
+// secondaries on the forearm, a tertial on the upper arm. They are the
+// rig's to turn (a wing folds by its feathers closing like a fan, each
+// over the next), so every one is free about all three axes.
+export const WING_Y = 0.062;
+export const WING = {
+    shoulder: [0.016, 0.02], elbow: [0.034, 0.012], wrist: [0.058, 0.022], tip: [0.122, 0.0],
+    feathers: [
+        { name: 'p2', on: 'hand', root: [0.070, 0.018], tip: [0.114, -0.012] },
+        { name: 'p3', on: 'hand', root: [0.066, 0.019], tip: [0.103, -0.021] },
+        { name: 'p4', on: 'hand', root: [0.062, 0.020], tip: [0.090, -0.028] },
+        { name: 'p5', on: 'hand', root: [0.058, 0.020], tip: [0.077, -0.032] },
+        { name: 's1', on: 'forearm', root: [0.052, 0.018], tip: [0.064, -0.034] },
+        { name: 's2', on: 'forearm', root: [0.046, 0.016], tip: [0.052, -0.034] },
+        { name: 's3', on: 'forearm', root: [0.040, 0.014], tip: [0.041, -0.033] },
+        { name: 's4', on: 'forearm', root: [0.034, 0.012], tip: [0.031, -0.031] },
+        { name: 't1', on: 'humerus', root: [0.024, 0.016], tip: [0.021, -0.026] },
+    ],
+};
+
 function wing(side, tag) {
-    const x = (v) => v * side;
+    const at = (p) => [p[0] * side, WING_Y, p[1]];
+    const free = { x: [-180, 180], y: [-180, 180], z: [-180, 180] };
+    // (`beats`: lab/natural.js does not count a wingbeat as a kink.)
     return [
-        { name: `humerus${tag}`, parent: 'body', head: [x(0.016), 0.062, 0.02], tail: [x(0.02), 0.059, -0.004],
-          limits: { x: [-80, 40], y: [-30, 60], z: side > 0 ? [-20, 100] : [-100, 20] }, mass: 0.0009 },
-        { name: `forearm${tag}`, parent: `humerus${tag}`, head: [x(0.02), 0.059, -0.004], tail: [x(0.019), 0.062, -0.03],
-          limits: { x: [-30, 30], y: [-100, 10], z: [-20, 20] }, mass: 0.0005 },
-        { name: `hand${tag}`, parent: `forearm${tag}`, head: [x(0.019), 0.062, -0.03], tail: [x(0.009), 0.052, -0.066],
-          limits: { x: [-30, 30], y: [-50, 50], z: [-20, 20] }, mass: 0.0003 },
-    ];
+        { name: `humerus${tag}`, parent: 'body', head: at(WING.shoulder), tail: at(WING.elbow), limits: free, mass: 0.0009 },
+        { name: `forearm${tag}`, parent: `humerus${tag}`, head: at(WING.elbow), tail: at(WING.wrist), limits: free, mass: 0.0005 },
+        { name: `hand${tag}`, parent: `forearm${tag}`, head: at(WING.wrist), tail: at(WING.tip), limits: free, mass: 0.0003 },
+        ...WING.feathers.map((f) => ({ name: `${f.name}${tag}`, parent: `${f.on}${tag}`, head: at(f.root), tail: at(f.tip), limits: free })),
+    ].map((b) => ({ ...b, beats: true }));
 }
 
 export const bones = [

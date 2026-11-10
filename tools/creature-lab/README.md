@@ -343,15 +343,44 @@ of a stand it lifts as soon as the body is rising. The toes roll through the
 last half of the stance.
 Those moves are eased with no acceleration at their ends, because the legs
 are a seventh of the mass and a quick tuck would jerk a body that should be
-falling freely. The folded wings are held to the body outside the startle;
-sprung, a landing flings them open. Its head glances: quick turns to a new
+falling freely. Its head glances: quick turns to a new
 side every so often, held between, toward the gaze when there is one. The
 tail cocks up as it lands and settles through the flight after. Foraging, it leans over and pecks in quick jabs.
 Resting, it settles onto its belly. Startled, it crouches and flicks its
-folded wings and its tail (`WING_FLICK`, `TAIL_FLICK`), then stands alert.
+wings a quarter open and its tail (`WING_FLICK`, `TAIL_FLICK`), then stands alert.
 Its hops are quick and low (`HOP_F` 5.5 a second and more with speed: about
 0.1 s in the air, the body rising 2 cm). Its face draws a black eye in a pale ring and a
 stripe from the bill through the eye.
+
+Its wings are real ones. The skeleton stands each spread (24 cm tip to tip):
+the arm's three bones along the leading edge and a bone to each flight
+feather, four primaries on the hand, four secondaries on the forearm and a
+tertial, marked `beats`. The body gives the arm its coverts and each feather
+a blade wide enough to lie over the next, barely blended, so spread they are
+one sheet with a furrow between feathers and a scalloped trailing edge. The
+rig folds them: every bone is turned from where it stands spread to where it
+lies folded (`FOLD_D`: the upper arm back along the flank, the forearm
+doubled forward over it, the hand and every feather back to the rump, their
+upper faces out), by a share, so a wing half open is a fan half closed.
+`finch:spread` and `finch:half` hold them open standing, to look at them.
+
+Asked to go faster than it hops (`FLY_AT`; its `gallop` is 2.5 m/s) it flies
+(telemetry's gait `fly`). It takes off from its feet, springing up as the
+wings open, the feet staying down until the legs run out and then trailed
+back under the tail with the toes closed; it climbs beating all the way to
+`FLY_H` and cruises in a finch's bounds: a burst of `BEATS` beats, then the
+wings shut against the body for the rest of `BOUND_T`, the body rising out
+of each burst and sinking into the next as a thrown thing does (`UNDULATE`),
+nose up as it rises and down as it sinks, banking into its turns. A beat
+swings the arm about the shoulder (`STROKE`), the hand and its primaries
+trailing it (`TIP_LAG`), the leading edge turned down into the downstroke
+(`FEATHER`) and the wing half folded on the way up (`FLEX`). Asked to slow,
+it comes down as its speed goes, beating without a pause, rears back with
+the wings held high and the tail thrown down to brake, reaches its feet
+down and lands on them; what is left of its fall goes into the hop's spring.
+A log in the way of its hopping it flits over the same way, `FLIT_OVER`
+clear of it (scenario `leap`; `flight` is a take-off, a few bounds and a
+landing).
 
 A creature can carry its own motion oracle: its def's `motion(rec, series,
 {steadyFrom, steady, headBob})`, which `analyze` calls and whose flags join
@@ -614,7 +643,9 @@ text under the creature's folder; `score`, `sweep` and `kinks` run what
   reaches a tenth of the time in those seconds, so the same stride counts
   the same in a steady run, in a run of several paces and in one that starts
   from a stand, and a joint that brakes hard every stride is not kinking
-  when it brakes that hard again.)
+  when it brakes that hard again.) A bone the skeleton marks `beats` (a
+  wing's) is not counted, for kinks or for jolts, while the gait is `fly`:
+  a wingbeat's reversals are its motion.
   `--bone <name>` lists that bone's every kink (time, size, event); `--at
   "<foot> <down|lift>"` every bone kinking there.
 - `trace <scenario>` (`<scenario>-trace.txt`): a row a step from `--from` to
@@ -684,6 +715,9 @@ Every output is deterministic. A rerun writes the same bytes.
   - It draws the run `kinks` and `trace` read (a steady gait for 20 s), so
     a moment they name is the moment drawn; a time past the run's end is
     refused.
+  - A creature more than its own height clear of the ground through all
+    the frames (a bird flying) is framed alone, with a little under it,
+    and not with the ground it is over.
   - One camera for all the frames, standing where the creature does at its
     steady pace, not on its hips: its rise and fall, sway and lean are in
     the picture. A run that turns where it stands (`turn-in-place`) is
