@@ -2,8 +2,8 @@
 // (lab/flesh.js), as skeleton.js stands it:
 //   trunk    an egg 0.32 m long and 0.19 across, carried a little nose-up,
 //            the breast full, the back flat under the folded wings
-//   wings    folded along the flanks, a slab from the shoulder to the
-//            primaries' tips crossed over the tail
+//   wings    each a piece of its own, built spread: the arm under its
+//            coverts and a blade to every flight feather (the rig folds them)
 //   neck     long and slender in an S, thickest at its base
 //   head     small, a dark crest trailing from the crown, the bill a
 //            dagger 14 cm long
@@ -13,18 +13,39 @@
 // the crest (face.bk), the primaries near black, the bill and legs yellow.
 
 import { Flesh, SIDES } from "/app/lab/flesh.js";
+import { WING, WING_Y } from "./skeleton.js";
 
 const mix = (a, b, t) => a.map((x, i) => x + (b[i] - x) * Math.max(0, Math.min(1, t)));
 const sstep = (e0, e1, x) => { const t = Math.max(0, Math.min(1, (x - e0) / (e1 - e0))); return t * t * (3 - 2 * t); };
 const GREY = [0.50, 0.54, 0.60], DARKGREY = [0.33, 0.36, 0.41], WHITE = [0.90, 0.90, 0.88];
 const BLACK = [0.07, 0.07, 0.08], YELLOW = [0.86, 0.68, 0.22], LEG = [0.62, 0.52, 0.26];
+const SLATE = [0.20, 0.22, 0.27];
+
+// z of the spread wing's leading edge at |x| out along it.
+function WING_FRONT(x) {
+    const a = WING.shoulder, e = WING.elbow, w = WING.wrist, t = WING.tip;
+    const seg = (p, q) => p[1] + (q[1] - p[1]) * Math.max(0, Math.min(1, (x - p[0]) / (q[0] - p[0])));
+    return (x < e[0] ? seg(a, e) : x < w[0] ? seg(e, w) : seg(w, t)) + 0.03;
+}
 
 function coat(p, n, share) {
     const LR = (k) => share(k + 'L') + share(k + 'R');
     let c = mix(GREY, WHITE, 0.6 * sstep(-0.2, -0.7, n[1]));
-    // The wings darker, their primaries (behind z -0.14) near black.
-    c = mix(c, DARKGREY, LR('wing'));
-    c = mix(c, BLACK, LR('wing') * sstep(-0.13, -0.19, p[2]));
+    // The wings (p is where the skin stands spread): the coverts over the
+    // arm grey, a black patch at the wrist, the flight feathers slate and
+    // darker to their tips; beneath, pale linings and grey flight feathers.
+    let fl = 0, cv = LR('arm');
+    for (const f of WING.feathers) { fl += LR(f.name); cv += LR('c' + f.name); }
+    const wing = Math.min(1, cv + fl);
+    if (wing > 0) {
+        const x = Math.abs(p[0]);
+        const back = WING_FRONT(x) - p[2];                    // m behind the leading edge
+        const feather = sstep(0.4, 0.6, fl / (cv + fl));
+        let up = mix(mix(GREY, DARKGREY, 0.3 + 0.5 * sstep(0.3, 0.8, x)), SLATE, feather);
+        up = mix(up, BLACK, feather * (0.25 + 0.4 * sstep(0.10, 0.30, back) + 0.35 * sstep(0.45, 0.8, x)));
+        const under = mix(mix(WHITE, GREY, 0.5), mix(GREY, SLATE, 0.6), feather);
+        c = mix(c, mix(up, under, sstep(-0.1, -0.5, n[1])), wing);
+    }
     // The neck and face white, the crest black.
     const neck = share('neck') + share('head');
     c = mix(c, WHITE, neck);
@@ -35,7 +56,7 @@ function coat(p, n, share) {
 }
 
 export function body(skel, detail = {}) {
-    const B = new Flesh(skel, { color: coat, triangles: 16000, cell: 0.003, ...detail });
+    const B = new Flesh(skel, { color: coat, triangles: 16000, pieces: { wingL: 4000, wingR: 4000 }, cell: 0.003, ...detail });
     B.limb('trunk', ['body'], [
         { c: [0, 0.565, -0.15], r: [0.035, 0.03] },
         { c: [0, 0.565, -0.09], r: [0.075, 0.068] },
@@ -68,14 +89,39 @@ export function body(skel, detail = {}) {
     ], { blend: 0.004 });
     for (const [s, t] of SIDES) {
         B.blob(`eye${t}`, 'head', [0.021 * s, 0.912, 0.235], [0.007, 0.007, 0.007], { blend: 0.002, keep: true });
-        // The folded wing over the flank, its tip over the tail.
-        B.limb(`wing${t}`, [`humerus${t}`, `forearm${t}`, `hand${t}`], [
-            { c: [0.068 * s, 0.632, 0.10], r: [0.014, 0.04], bone: `humerus${t}` },
-            { c: [0.082 * s, 0.622, 0.0], r: [0.016, 0.05] },
-            { c: [0.07 * s, 0.628, -0.11], r: [0.013, 0.04] },
-            { c: [0.04 * s, 0.6, -0.20], r: [0.008, 0.024], bone: `hand${t}` },
-            { c: [0.018 * s, 0.578, -0.25], r: [0.004, 0.008], bone: `hand${t}` },
-        ], { up: [0, 1, 0], blend: 0.012 });
+        // A wing, spread as the skeleton stands it, a piece of its own
+        // (meshed apart from the body, which it lies against folded): the
+        // arm under its coverts along the leading edge, and a broad blade
+        // to each flight feather's bone, each lying over the next.
+        const at = (p) => [p[0] * s, WING_Y, p[1]];
+        const piece = `wing${t}`;
+        B.limb(`arm${t}`, [`humerus${t}`, `forearm${t}`, `hand${t}`], [
+            { c: at(WING.shoulder), r: [0.03, 0.016], bone: `humerus${t}` },
+            { c: at(WING.elbow), r: [0.03, 0.015], bone: `forearm${t}` },
+            { c: at(WING.wrist), r: [0.028, 0.013], bone: `hand${t}` },
+            { c: at([0.68, 0.068]), r: [0.024, 0.010], bone: `hand${t}` },
+            { c: at(WING.tip), r: [0.014, 0.006], bone: `hand${t}` },
+        ], { up: [0, 1, 0], blend: 0.003, piece });
+        for (const f of WING.feathers) {
+            const along = (u) => [f.root[0] + (f.tip[0] - f.root[0]) * u, f.root[1] + (f.tip[1] - f.root[1]) * u];
+            const prim = f.name[0] === 'p';
+            const w = prim ? 0.036 : 0.046;
+            B.limb(`${f.name}${t}`, [`${f.name}${t}`], [
+                { c: at(f.root), r: [w * 0.7, 0.007] },
+                { c: at(along(0.5)), r: [w, 0.006] },
+                { c: at(f.tip), r: [w * (prim ? 0.45 : 0.75), 0.005] },
+            ], { up: [0, 1, 0], blend: 0.003, piece });
+            // Its covert: a shorter, thicker blade over its root, on the
+            // same bone, so the coverts close with the feathers they
+            // cover. (They end in a step over the blade, and the grey ends
+            // at that step, where the mesh keeps an edge: a marking drawn
+            // across a flat sheet has no vertices to hold it once the
+            // sheet is decimated.)
+            B.limb(`c${f.name}${t}`, [`${f.name}${t}`], [
+                { c: at(f.root), r: [w * 0.8, 0.012] },
+                { c: at(along(prim ? 0.3 : 0.42)), r: [w * 0.95, 0.010] },
+            ], { up: [0, 1, 0], blend: 0.003, piece });
+        }
         const fe = skel.bones[skel.index(`femur${t}`)], ti = skel.bones[skel.index(`tibia${t}`)];
         const ta = skel.bones[skel.index(`tarsus${t}`)], to = skel.bones[skel.index(`toe${t}`)];
         const x = fe.head[0];

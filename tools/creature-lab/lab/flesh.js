@@ -14,7 +14,10 @@
 // with a rounding of `joint` (1 cm). Each has a `blend` (m): the distance
 // over which it melts into the masses about it. A mass given `carve: true`
 // takes the body away inside it instead (an ear's hollow, a nostril), cut
-// with a rounding of about its blend; it has no weights or colour.
+// with a rounding of about its blend; it has no weights or colour. Masses
+// given the same `piece` (a wing's) are a part apart from the body: blended
+// among themselves and meshed in a grid of their own, standing through the
+// body where they meet it.
 //
 // The field (lab/flesh.bk, on the GPU). A mass at distance d (negative
 // inside) contributes exp(-d / blend); the body is where the contributions
@@ -196,6 +199,7 @@ export class Flesh {
             name, prims, blend: opts.blend ?? 0.03, soft: opts.soft ?? this.opts.soft, joint: opts.joint ?? 0, lo, hi,
             keep: opts.keep ?? false,
             carve: opts.carve ?? false,
+            piece: opts.piece ?? '',
             // The rest centre, the middle of its extent: lab/form.js measures
             // its volume from there.
             centre: lo.map((v, k) => (v + hi[k]) / 2),
@@ -211,32 +215,35 @@ export class Flesh {
         this.sections.push({ name, at, normal: norm(normal), bones, radius });
     }
 
-    // The masses and their primitives as flesh.bk reads them.
-    pack() {
-        const prims = this.masses.flatMap((m) => m.prims);
+    // Masses and their primitives as flesh.bk reads them.
+    pack(masses = this.masses) {
+        const prims = masses.flatMap((m) => m.prims);
         const P = new Float32Array(prims.length * 32);
         prims.forEach((q, i) => {
             P.set([q.kind, q.L, q.bend ?? 1, 0, ...q.a, 0, ...q.t, 0, ...q.side, 0, ...q.up, 0, ...q.r, ...q.lo, 0, ...q.hi, 0], 32 * i);
         });
-        const M = new Float32Array(this.masses.length * 12);
+        const M = new Float32Array(masses.length * 12);
         let first = 0;
-        this.masses.forEach((m, i) => {
+        masses.forEach((m, i) => {
             M.set([first, m.prims.length, m.blend, m.joint, ...m.lo, m.soft, ...m.hi, m.carve ? 1 : 0], 12 * i);
             first += m.prims.length;
         });
         return { prims, P, M };
     }
 
-    build() {
+    // One part of the body meshed: `masses` blended among themselves in a
+    // grid about them alone, decimated to `budget` triangles and put back
+    // on their surface. Returns positions and normals with the distance
+    // left (PN, eight a vertex) and the triangles.
+    meshPart(K, masses, budget, ms) {
         const t0 = Date.now();
-        const K = fleshKernels();
-        const { prims, P, M } = this.pack();
-        const nm = this.masses.length;
+        const { P, M } = this.pack(masses);
+        const nm = masses.length;
         const primBuf = bro.kernel.createBuffer(P), massBuf = bro.kernel.createBuffer(M);
         const cell = this.opts.cell;
-        const pad = Math.max(...this.masses.map((m) => m.blend)) + 3 * cell;
-        const lo = [0, 1, 2].map((k) => Math.min(...this.masses.map((m) => m.lo[k])) - pad);
-        const hi = [0, 1, 2].map((k) => Math.max(...this.masses.map((m) => m.hi[k])) + pad);
+        const pad = Math.max(...masses.map((m) => m.blend)) + 3 * cell;
+        const lo = [0, 1, 2].map((k) => Math.min(...masses.map((m) => m.lo[k])) - pad);
+        const hi = [0, 1, 2].map((k) => Math.max(...masses.map((m) => m.hi[k])) + pad);
         const dim = [0, 1, 2].map((k) => Math.ceil((hi[k] - lo[k]) / cell) + 1);
         const fieldBuf = K.field.dispatch(dim, primBuf, massBuf, nm, lo, cell);
         const S = fieldBuf.read(new Float32Array(dim[0] * dim[1] * dim[2]));
@@ -246,9 +253,9 @@ export class Flesh {
         const rawTris = raw.indices.length / 3;
         // The kept masses' vertices stay as meshed: decimation spends the
         // budget on the rest.
-        const kept = this.opts.keep ? this.masses.filter((m) => m.keep) : [];
+        const kept = this.opts.keep ? masses.filter((m) => m.keep) : [];
         let lock = null, locked = 0;
-        if (kept.length && rawTris > this.opts.triangles) {
+        if (kept.length && rawTris > budget) {
             const G = raw.positions, nv0 = G.length / 3;
             lock = new Uint8Array(nv0);
             const boxes = kept.map((m) => {
@@ -260,7 +267,7 @@ export class Flesh {
                 if (boxes.some((b) => p.every((x, k) => x >= b.lo[k] && x <= b.hi[k]))) { lock[v] = 1; locked++; }
             }
         }
-        if (rawTris > this.opts.triangles) raw.simplifyToTriangleCount(this.opts.triangles, this.opts.simplifyError, lock);
+        if (rawTris > budget) raw.simplifyToTriangleCount(budget, this.opts.simplifyError, lock);
         // Triangles in vertex-cache order and vertices in first-use order:
         // the skin hook blends four bones a vertex, so each one shaded again
         // costs (twice the herd's shadow pass in the order decimation leaves).
@@ -273,17 +280,70 @@ export class Flesh {
         const startBuf = bro.kernel.createBuffer(start), projBuf = bro.kernel.createBuffer(nv * 32);
         K.project.dispatch(nv, primBuf, massBuf, nm, startBuf, cell, projBuf);
         const PN = projBuf.read(new Float32Array(nv * 8));
+        for (const b of [primBuf, massBuf, startBuf, projBuf]) b.destroy();
+        ms.field += t1 - t0; ms.mesh += t2 - t1; ms.place += Date.now() - t2;
+        return { PN, idx: new Uint32Array(idx), nv, dim, rawTris, locked };
+    }
+
+    build() {
+        const t0 = Date.now();
+        const K = fleshKernels();
+        const ms = { field: 0, mesh: 0, place: 0 };
+        // The body, and each piece apart from it (a mass's `piece`: a wing,
+        // which is a sheet a body's length out to the side). A piece is
+        // meshed among its own masses in its own grid, so the grid is not
+        // one box about the whole spread of it, most of it empty, and the
+        // piece stands through the body where they meet instead of melting
+        // into it. Its triangles are its own (`pieces: { name: count }`).
+        const groups = new Map();
+        for (const m of this.masses) {
+            const g = m.piece || '';
+            if (!groups.has(g)) groups.set(g, []);
+            groups.get(g).push(m);
+        }
+        if (!groups.has('')) throw new Error('flesh: every mass is in a piece; the body needs some of its own');
+        const names = ['', ...[...groups.keys()].filter((g) => g !== '')];
+        const parts = names.map((g) => {
+            const budget = g === '' ? this.opts.triangles : (this.opts.pieces || {})[g];
+            if (!budget) throw new Error(`flesh: piece '${g}' has no triangle budget (opts.pieces)`);
+            return this.meshPart(K, groups.get(g), budget, ms);
+        });
+        const nv = parts.reduce((s, p) => s + p.nv, 0);
+        const PN = new Float32Array(nv * 8), idx = new Uint32Array(parts.reduce((s, p) => s + p.idx.length, 0));
+        let v0 = 0, i0 = 0;
+        for (const p of parts) {
+            PN.set(p.PN, 8 * v0);
+            for (let i = 0; i < p.idx.length; i++) idx[i0 + i] = p.idx[i] + v0;
+            v0 += p.nv; i0 += p.idx.length;
+        }
+        const dim = parts[0].dim, cell = this.opts.cell;
+        const rawTris = parts.reduce((s, p) => s + p.rawTris, 0), locked = parts.reduce((s, p) => s + p.locked, 0);
         const pos = new Float32Array(nv * 3), nrm = new Float32Array(nv * 3);
         let offSurface = 0;
         for (let v = 0; v < nv; v++) {
             for (let k = 0; k < 3; k++) { pos[3 * v + k] = PN[8 * v + k]; nrm[3 * v + k] = PN[8 * v + 4 + k]; }
             offSurface = Math.max(offSurface, Math.abs(PN[8 * v + 3]));
         }
+        // Every vertex against every mass, for its bones and its colour.
+        const tp = Date.now();
+        const { prims, P, M } = this.pack();
+        const nm = this.masses.length;
+        const primBuf = bro.kernel.createBuffer(P), massBuf = bro.kernel.createBuffer(M);
+        const projBuf = bro.kernel.createBuffer(PN);
         const massOut = bro.kernel.createBuffer(nv * nm * 16);
         K.masses.dispatch([nv, nm], primBuf, massBuf, projBuf, massOut);
         const MD = massOut.read(new Float32Array(nv * nm * 4));
-        for (const b of [primBuf, massBuf, startBuf, projBuf, massOut]) b.destroy();
-        const t3 = Date.now();
+        for (const b of [primBuf, massBuf, projBuf, massOut]) b.destroy();
+        ms.place += Date.now() - tp;
+        const t1 = t0 + ms.field, t2 = t1 + ms.mesh, t3 = t2 + ms.place;
+        // A vertex is its own part's masses' alone: a wing's skin does not
+        // follow the body's bones where it stands through the flank, nor
+        // the flank's the wing's.
+        const partOf = new Int32Array(nv);
+        v0 = 0;
+        parts.forEach((p, g) => { partOf.fill(g, v0, v0 + p.nv); v0 += p.nv; });
+        const massPart = this.masses.map((m) => names.indexOf(m.piece || ''));
+        for (let mi = 0; mi < nm; mi++) for (let v = 0; v < nv; v++) if (massPart[mi] !== partOf[v]) MD[4 * (mi * nv + v) + 1] = -1;
         const { weights, vertexMass, shares } = this.weigh(MD, prims, nv, idx);
         const swell = this.swell(MD, nv, vertexMass, shares);
         const col = new Float32Array(nv * 4);
@@ -302,7 +362,11 @@ export class Flesh {
         const mesh = new Mesh({ positions: pos, normals: nrm, colors: col, indices });
         return {
             mesh, skin, vertices: nv, triangles: indices.length / 3, positions: pos, normals: nrm, indices, weights,
-            pieces: [{ name: 'body', kind: 'flesh', base: 0, count: nv, start: 0, end: indices.length }], piece: new Float32Array(nv),
+            pieces: (() => {
+                let b = 0, s = 0;
+                return parts.map((p, g) => { const o = { name: names[g] || 'body', kind: 'flesh', base: b, count: p.nv, start: s, end: s + p.idx.length }; b += p.nv; s += p.idx.length; return o; });
+            })(),
+            piece: Float32Array.from(partOf),
             masses: this.masses.map((m) => ({ name: m.name, bone: m.bone, centre: m.centre })), vertexMass,
             sections: this.sections, swell,
             build: { grid: dim, cell, rawTriangles: rawTris, locked, offSurface, ms: { field: t1 - t0, mesh: t2 - t1, place: t3 - t2, total: Date.now() - t0 } },

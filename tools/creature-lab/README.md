@@ -315,12 +315,44 @@ the gaze. Looking aside, the head is carried toward what it looks at
 share of the look growing up it (`NECK_TWIST`). The folded wings are not
 still: standing, one is now and then shrugged loose and tucked again;
 walking, the wing over the leg that carries the bird is pressed to its flank
-and the other rides a little loose, its tip dipping.
+and the other rides a little loose.
 Foraging, it leans forward, the neck lowered and the bill down, and strikes
 at the ground now and then. Resting, it sits back on its folded legs.
-Startled, it crouches with its wings lifted from the body, then stands alert
-with the neck stretched up. Its face draws side-set yellow eyes, the lores
-and a black brow stripe into the crest.
+Startled, it crouches with its wings thrown half open (on a spring: each
+is a body's length of wing), then stands alert with the neck stretched up.
+Its face draws side-set yellow eyes, the lores and a black brow stripe into
+the crest.
+
+Its wings are 1.7 m across. The skeleton stands them spread flat: the arm's
+three bones along the leading edge and a bone to each flight feather (five
+primaries on the hand, five secondaries on the forearm, two tertials),
+marked `beats`, the feathers `vane`. The body builds each wing as a piece
+of its own (below), the arm a roll at the leading edge, a blade to each
+feather and a shorter, thicker covert over each blade's root on the same
+bone. The rig folds a wing as a wing folds, in its own plane: each bone
+swings from where it points spread to where it points folded
+(`FOLD_SWEEP`), the upper arm back, the forearm doubled forward over it,
+the hand back again, every feather closing over the next; the plane is
+rolled down about the shoulder to lie on the flank (`FOLD_ROLL`) and turned
+in toward the tail. Half folded is a wing half folded, which the upstroke
+uses. `wader:spread` and `wader:half` hold the wings open to look at.
+
+Asked for more than its run (`FLY_AT`) it flies. The wings come open as it
+goes, it springs off (a push through a tenth of a second, up onto its toes
+as the legs run out) and climbs slowly to `FLY_H` on deep beats of
+`BEAT_HZ`: the downstroke the longer half (`DOWN`), the hand trailing the
+arm (`TIP_LAG`), the leading edge turned down into the downstroke
+(`FEATHER`), the wing folding a little at the wrist on the way up (`FLEX`),
+the body riding each beat. Once on its way it trims: the legs, hung at
+first, are trailed out straight behind with the toes shut, and the neck is
+drawn back onto the shoulders. It banks into its turns. Asked to slow it
+comes down as its speed goes, lets the legs hang and the neck out, rears
+back with the wings held high and the tail down to brake, and reaches its
+feet down to where it stands; the legs take up what is left of the fall,
+it walks on, and the wings fold away after. A log across its way it lifts
+itself over on a few quicker beats with the legs hung (`LEAP_OVER`), and
+comes down past it. Its gait reports as `fly` in the air. Scenarios
+`flight` and `leap`.
 
 `finch` is an invented small songbird (14 cm, 24 g) that hops, with legs
 like the wader's, on the same layers (`finch:plan` is its plan alone). Both
@@ -448,6 +480,15 @@ along it; they are smoothed over the mesh and the top four kept. The
 colour function is called per vertex with `share(mass)`, how much of each
 mass is there. The result is one closed piece; the lab's dual-quaternion
 skin hook deforms it.
+
+Masses given the same `piece` (`{ piece: 'wingL' }`) are a part apart from
+the body: blended among themselves only, meshed in a grid about them alone
+and decimated to their own budget (`pieces: { wingL: 4000 }` beside
+`triangles`), their vertices weighted and coloured by their own masses
+only. A wing a body's length out to the side is built so: one grid about
+the whole bird would be mostly empty, and a wing blended into the flank
+drags its skin when it opens. A piece stands through the body where they
+meet, and `build()` lists it in `pieces`.
 
 ### Faces
 
@@ -645,7 +686,9 @@ text under the creature's folder; `score`, `sweep` and `kinks` run what
   from a stand, and a joint that brakes hard every stride is not kinking
   when it brakes that hard again.) A bone the skeleton marks `beats` (a
   wing's) is not counted, for kinks or for jolts, while the gait is `fly`:
-  a wingbeat's reversals are its motion.
+  a wingbeat's reversals are its motion. A bone marked `vane` (a flight
+  feather's) is a stiff part of the bone it grows from: `natural` does not
+  ask it to lag its parent or to swing on after a change.
   `--bone <name>` lists that bone's every kink (time, size, event); `--at
   "<foot> <down|lift>"` every bone kinking there.
 - `trace <scenario>` (`<scenario>-trace.txt`): a row a step from `--from` to
@@ -898,7 +941,8 @@ Every output is deterministic. A rerun writes the same bytes.
   line a single skin would not, measured without a reference, so it judges
   any creature.
   - A body is one piece or several (`build()` returns `pieces` and each
-    vertex's `piece`); a flesh body is one, and its skin is labelled by the
+    vertex's `piece`); a flesh body is one unless it names pieces (a
+    wader's wings), and its skin is labelled by the
     mass and bone under it (`neck over thorax`). On the skinned mesh of every
     4th step (`lab/seams.js`): **crossings**, the curve along which two
     pieces pass through each other, its length and the angle between the

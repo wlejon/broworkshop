@@ -39,6 +39,10 @@ import { T, TELE, I, INTENT, GAIT } from "./contract.js";
 // purpose: flying, a wingbeat's reversals are its motion and not a kink or a
 // jolt, and they are not counted while its gait is `fly`. On the ground it
 // is judged as any bone is.
+//
+// A bone marked `vane` (a flight feather's) is a stiff part of the bone it
+// grows from, placed by the rig as the wing folds: it is not a part that
+// hangs, so it is not asked to lag its parent or to swing on after a change.
 const flyingAt = (rec, k) => rec.tele[Math.max(0, Math.min(rec.steps - 1, k)) * TELE + T.GAIT] === GAIT.FLY;
 import { ROWS, boneHead, boneTail } from "./skeleton.js";
 import { series } from "./analyze.js";
@@ -90,7 +94,7 @@ export function chains(skel) {
         }
     }
     const root = skel.bones.find((b) => b.parentIndex < 0).index;
-    const free = skel.bones.filter((b) => !limb.has(b.index) && b.index !== root && !b.face).map((b) => b.index);
+    const free = skel.bones.filter((b) => !limb.has(b.index) && b.index !== root && !b.face && !b.vane).map((b) => b.index);
     return { limb, free, root, kids };
 }
 
@@ -164,7 +168,7 @@ export function overlap(rec, A, cyc) {
     const period = cyc.reduce((s, c) => s + c.period, 0) / cyc.length;
     const pairs = [];
     for (const b of skel.bones) {
-        if (b.parentIndex < 0 || b.face) continue;
+        if (b.parentIndex < 0 || b.face || b.vane) continue;
         const comps = ['sag', 'lat'].map((which) => {
             const pa = cycleMean(A[which], A.nb, b.parentIndex, cyc), ca = cycleMean(A[which], A.nb, b.index, cyc);
             const rel = ca.map((v, i) => v - pa[i]);

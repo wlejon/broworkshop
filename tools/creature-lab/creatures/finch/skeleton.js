@@ -61,7 +61,8 @@ function wing(side, tag) {
         { name: `humerus${tag}`, parent: 'body', head: at(WING.shoulder), tail: at(WING.elbow), limits: free, mass: 0.0009 },
         { name: `forearm${tag}`, parent: `humerus${tag}`, head: at(WING.elbow), tail: at(WING.wrist), limits: free, mass: 0.0005 },
         { name: `hand${tag}`, parent: `forearm${tag}`, head: at(WING.wrist), tail: at(WING.tip), limits: free, mass: 0.0003 },
-        ...WING.feathers.map((f) => ({ name: `${f.name}${tag}`, parent: `${f.on}${tag}`, head: at(f.root), tail: at(f.tip), limits: free })),
+        // (`vane`: nor asks a feather to swing on its own.)
+        ...WING.feathers.map((f) => ({ name: `${f.name}${tag}`, parent: `${f.on}${tag}`, head: at(f.root), tail: at(f.tip), limits: free, vane: true })),
     ].map((b) => ({ ...b, beats: true }));
 }
 
