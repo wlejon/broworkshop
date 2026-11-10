@@ -33,6 +33,7 @@
 //               makes a leg top-light.
 
 import { cycles, relativePose, planted, rootOf } from "./cycle.js";
+import { T, TELE } from "./contract.js";
 import { groundHeights } from "./run.js";
 import { setPose, capture, orbitView, showGround, project } from "./lit.js";
 import { beginSheet, saveSheet, text, line, rect, poly, INK, DIM, FOOT_COLORS } from "./page.js";
@@ -233,68 +234,147 @@ function drawSil(g, S, x0, y0, w, h, color) {
     return { yPx: (y) => oy + (S.top + 0.02 - y) * k, uPx: (u) => ox + (S.cOf(u) + 0.5) * S.cell * k, k };
 }
 
+// --- morphology & aerial cycle helpers --------------------------------------------------
+
+// Fallback steady cycle from T.PHASE wraparounds when no footfall cycle exists
+// (aerial gaits such as powered flight), or the final 1.0 s window if phase never wraps.
+function phaseCycle(rec, fromT = 0) {
+    const k0 = Math.max(1, Math.round(fromT / rec.dt));
+    const wraps = [];
+    for (let k = k0; k < rec.steps; k++) {
+        if (rec.tele[k * TELE + T.PHASE] < rec.tele[(k - 1) * TELE + T.PHASE] - 0.5) wraps.push(k);
+    }
+    if (wraps.length >= 2) return { a: wraps[wraps.length - 2], b: wraps[wraps.length - 1] };
+    const b = Math.max(1, rec.steps - 1);
+    return { a: Math.max(0, b - Math.max(1, Math.round(1.0 / rec.dt))), b };
+}
+
+// Whether a 2-legged creature has free non-wing hanging arms whose skin lives on
+// the main body piece (piece 0), rather than tucked avian wings or wing-piece vanes.
+function freeArmsOf(creature) {
+    const { skel, body } = creature;
+    if (skel.feet.length !== 2) return false;
+    const legSet = new Set(skel.parts.legs.flatMap((l) => l.chain));
+    const tails = tailBones(skel);
+    const headAnc = new Set();
+    for (let b = skel.bones.find((x) => x.name === 'head'); b; b = b.parentIndex >= 0 ? skel.bones[b.parentIndex] : null) headAnc.add(b.index);
+    const kids = skel.bones.map(() => []);
+    for (const b of skel.bones) if (b.parentIndex >= 0 && !b.face) kids[b.parentIndex].push(b.index);
+    const main = body.weights.map((ws) => ws.reduce((a, x) => (x.w > a.w ? x : a), ws[0]).index);
+    const hipY = skel.parts.legs.reduce((s, l) => s + skel.bones[l.top].head[1], 0) / 2;
+    const rootZ = skel.bones[skel.parts.root].head[2];
+    for (const leaf of skel.bones) {
+        if (leaf.face || kids[leaf.index].length || legSet.has(leaf.index) || tails.has(leaf.index) || headAnc.has(leaf.index)) continue;
+        const chain = [];
+        for (let i = leaf.index; i >= 0 && !headAnc.has(i) && i !== skel.parts.root; i = skel.bones[i].parentIndex) chain.push(i);
+        if (!chain.length || chain.some((i) => skel.bones[i].beats || skel.bones[i].vane)) continue;
+        // Tucked forelimbs held high/forward on a horizontal trunk are not hanging arms.
+        if (leaf.tail[1] > hipY + 0.08 || Math.abs(leaf.tail[2] - rootZ) > 0.22) continue;
+        const cset = new Set(chain);
+        let p0 = 0, tot = 0;
+        for (let v = 0; v < main.length; v++) {
+            if (!cset.has(main[v])) continue;
+            tot++;
+            if (!body.piece || body.piece[v] === 0) p0++;
+        }
+        if (tot > 0 && p0 / tot > 0.8) return true;
+    }
+    return false;
+}
+
 // --- the sheet ----------------------------------------------------------------------------
 
 export function posesSheet(rec, { path } = {}) {
     const t0 = Date.now();
     const creature = rec.creature, skel = creature.skel;
-    const cyc = cycles(rec, rec.scenario.duration * 0.4);
-    if (!cyc.length || skel.feet.length < 1) throw new Error(`poses: ${rec.scenario.name} has no steady cycle`);
-    const { a, b } = cyc[cyc.length - 1];
-    let lift = a + 1;
-    while (lift < b && planted(rec, lift, 0)) lift++;
-    const S = lift - a, duty = S / (b - a);
+    const cyc = skel.feet.length >= 1 ? cycles(rec, rec.scenario.duration * 0.4) : [];
+    const { a, b } = cyc.length ? cyc[cyc.length - 1] : phaseCycle(rec, rec.scenario.duration * 0.4);
+    let lift = a;
+    if (skel.feet.length >= 1 && planted(rec, a, 0)) {
+        lift = a + 1;
+        while (lift < b && planted(rec, lift, 0)) lift++;
+    }
+    const S = lift - a, duty = S / Math.max(1, b - a);
     const F = [];
     for (let k = a; k <= b; k++) F.push(frameOf(rec, k));
     const at = (k) => F[k - a];
-    let lo = a, hi = a;
-    for (let k = a; k < lift; k++) {
-        if (k < a + 0.5 * S && at(k).rootY < at(lo).rootY) lo = k;
-        if (at(k).rootY > at(hi).rootY) hi = k;
-    }
-    const mid = a + Math.round(0.5 * S), swing = lift + Math.round(0.5 * (b - lift));
-    const keys = [['contact', a], ['hips lowest', lo], ['mid-stance', mid], ['hips highest', hi], ['lift-off', lift], ['mid-swing', swing]]
-        .sort((p, q) => p[1] - q[1]);
 
-    // The gait's measures, on the first leg.
-    const gait = { duty, run: duty < 0.5 };
+    const plantigradeBiped = skel.feet.length === 2 && skel.feet.every((f) => !!f.heel);
+    const hasFreeArms = freeArmsOf(creature);
+
+    let lo = a, hi = a, mid, keys, gait;
     const flags = [];
-    if (!gait.run) {
-        let s = 0, n = 0, mx = 0;
-        for (let k = a + Math.round(0.2 * S); k <= a + Math.round(0.7 * S); k++) { const bd = at(k).legs[0].bend; s += bd; n++; mx = Math.max(mx, bd); }
-        gait.stanceBend = s / n;
-        gait.stanceBendMax = mx;
-        const c = at(a).legs[0], m = at(mid).legs[0];
-        const reach = Math.abs(c.end[2] - c.hip[2]), Ls = len(sub(m.hip, m.end));
-        const rigid = Ls - Math.sqrt(Math.max(Ls * Ls - reach * reach, 0));
-        gait.rise = at(hi).rootY - at(a).rootY;
-        gait.rigidRise = rigid;
-        gait.vault = rigid > 1e-4 ? gait.rise / rigid : 0;
-        gait.peakAt = (hi - a) / S;
-        if (gait.stanceBend > POSES.walkBend) flags.push(`walk: the stance leg is bent ${gait.stanceBend.toFixed(0)} deg through mid-stance (a strut wants <= ${POSES.walkBend})`);
-        if (gait.vault < POSES.walkVault) flags.push(`walk: the hips rise ${(100 * gait.rise).toFixed(1)} cm over the stance leg, ${(100 * gait.vault).toFixed(0)}% of a rigid leg's ${(100 * rigid).toFixed(1)} cm (want >= ${(100 * POSES.walkVault).toFixed(0)}%)`);
+    if (S === 0) {
+        for (let k = a; k <= b; k++) {
+            if (at(k).rootY < at(lo).rootY) lo = k;
+            if (at(k).rootY > at(hi).rootY) hi = k;
+        }
+        mid = a + Math.round(0.5 * (b - a));
+        const phs = [0, 0.2, 0.4, 0.6, 0.8, 1.0];
+        const ks = phs.map((p) => Math.round(a + p * (b - a)));
+        let iHi = -1, iLo = -1;
+        if (at(hi).rootY - at(lo).rootY > 1e-4) {
+            iHi = ks.reduce((best, k, i) => (at(k).rootY > at(ks[best]).rootY ? i : best), 0);
+            iLo = ks.reduce((best, k, i) => (i !== iHi && (best < 0 || at(k).rootY < at(ks[best]).rootY) ? i : best), -1);
+        }
+        keys = ks.map((k, i) => [i === iHi ? 'apex' : i === iLo ? 'lowest' : `flight ${phs[i].toFixed(1)}`, k]);
+        gait = { duty: 0, run: false, flight: true, rise: at(hi).rootY - at(lo).rootY, lowY: at(lo).rootY, highY: at(hi).rootY };
     } else {
-        gait.contactBend = at(a).legs[0].bend;
-        gait.midBend = at(mid).legs[0].bend;
-        gait.liftExt = at(lift - 1).legs[0].ext;
-        if (gait.liftExt < POSES.pushOff) flags.push(`run: the leg leaves the ground at ${(100 * gait.liftExt).toFixed(0)}% extension (a push-off wants >= ${(100 * POSES.pushOff).toFixed(0)}%)`);
-        if (gait.midBend < gait.contactBend + 3) flags.push(`run: the leg does not give through stance (${gait.contactBend.toFixed(0)} deg at contact, ${gait.midBend.toFixed(0)} mid-stance)`);
+        for (let k = a; k < lift; k++) {
+            if (k < a + 0.5 * S && at(k).rootY < at(lo).rootY) lo = k;
+            if (at(k).rootY > at(hi).rootY) hi = k;
+        }
+        mid = a + Math.round(0.5 * S);
+        const swing = lift + Math.round(0.5 * (b - lift));
+        keys = [['contact', a], ['hips lowest', lo], ['mid-stance', mid], ['hips highest', hi], ['lift-off', lift], ['mid-swing', swing]]
+            .sort((p, q) => p[1] - q[1]);
+        // The gait's measures, on the first leg.
+        gait = { duty, run: duty < 0.5 };
+        if (!gait.run) {
+            let s = 0, n = 0, mx = 0;
+            for (let k = a + Math.round(0.2 * S); k <= a + Math.round(0.7 * S); k++) { const bd = at(k).legs[0].bend; s += bd; n++; mx = Math.max(mx, bd); }
+            gait.stanceBend = s / Math.max(1, n);
+            gait.stanceBendMax = mx;
+            const c = at(a).legs[0], m = at(mid).legs[0];
+            const reach = Math.abs(c.end[2] - c.hip[2]), Ls = len(sub(m.hip, m.end));
+            const rigid = Ls - Math.sqrt(Math.max(Ls * Ls - reach * reach, 0));
+            gait.rise = at(hi).rootY - at(a).rootY;
+            gait.rigidRise = rigid;
+            gait.vault = rigid > 1e-4 ? gait.rise / rigid : 0;
+            gait.peakAt = (hi - a) / S;
+            if (plantigradeBiped && gait.stanceBend > POSES.walkBend) flags.push(`walk: the stance leg is bent ${gait.stanceBend.toFixed(0)} deg through mid-stance (a strut wants <= ${POSES.walkBend})`);
+            if (plantigradeBiped && gait.vault < POSES.walkVault) flags.push(`walk: the hips rise ${(100 * gait.rise).toFixed(1)} cm over the stance leg, ${(100 * gait.vault).toFixed(0)}% of a rigid leg's ${(100 * rigid).toFixed(1)} cm (want >= ${(100 * POSES.walkVault).toFixed(0)}%)`);
+        } else {
+            gait.contactBend = at(a).legs[0].bend;
+            gait.midBend = at(mid).legs[0].bend;
+            gait.liftExt = at(lift - 1).legs[0].ext;
+            if (plantigradeBiped && gait.liftExt < POSES.pushOff) flags.push(`run: the leg leaves the ground at ${(100 * gait.liftExt).toFixed(0)}% extension (a push-off wants >= ${(100 * POSES.pushOff).toFixed(0)}%)`);
+            if (plantigradeBiped && gait.midBend < gait.contactBend + 3) flags.push(`run: the leg does not give through stance (${gait.contactBend.toFixed(0)} deg at contact, ${gait.midBend.toFixed(0)} mid-stance)`);
+        }
     }
 
     // Silhouettes: the rest pose from the front and the side, mid-stance from the front.
     const X0 = creature.body.positions;
     const front = silhouette(creature, X0, false), side = silhouette(creature, X0, true);
-    const midFront = silhouette(creature, skinPositions(creature, at(mid).P), false);
+    const Xmid = skinPositions(creature, at(mid).P);
+    if (gait.flight) {
+        const dy = at(mid).rootY - skel.bones[skel.parts.root].head[1];
+        for (let v = 0; v < Xmid.length; v += 3) Xmid[v + 1] = Math.max(0.01, Xmid[v + 1] - dy);
+    }
+    const midFront = silhouette(creature, Xmid, false);
     const form = frontForm(skel, front), formMid = frontForm(skel, midFront);
     const trunkPinch = form.pinches.filter((p) => p.y > form.crotch + 0.03 && p.y < form.shoulder);
-    const neck = form.pinches.filter((p) => p.y >= form.shoulder).sort((p, q) => p.w - q.w)[0];
-    if (form.crotchShare < POSES.crotch) flags.push(`silhouette: the legs part ${(100 * form.crotch).toFixed(0)} cm up, ${(100 * form.crotchShare).toFixed(0)}% of the hips' height (want >= ${(100 * POSES.crotch).toFixed(0)}%)`);
+    const headBone = skel.bones.find((bn) => bn.name === 'head');
+    const headTop = headBone ? Math.max(headBone.head[1], headBone.tail[1]) : Infinity;
+    const hasNeck = skel.bones.some((bn) => /^neck/i.test(bn.name));
+    const neck = hasNeck ? form.pinches.filter((p) => p.y >= form.shoulder && p.y <= headTop).sort((p, q) => p.w - q.w)[0] : null;
+    if (plantigradeBiped && form.crotchShare < POSES.crotch) flags.push(`silhouette: the legs part ${(100 * form.crotch).toFixed(0)} cm up, ${(100 * form.crotchShare).toFixed(0)}% of the hips' height (want >= ${(100 * POSES.crotch).toFixed(0)}%)`);
     // (Running, the swing knee comes through in front of the stance leg.)
-    if (!gait.run && formMid.crotchShare < POSES.crotch) flags.push(`silhouette: at mid-stance the legs part ${(100 * formMid.crotch).toFixed(0)} cm up (${(100 * formMid.crotchShare).toFixed(0)}% of the hips' height)`);
-    if (form.armClear < POSES.armGap) flags.push(`silhouette: the arms stand clear of the trunk over ${(100 * form.armClear).toFixed(0)}% of its height (want >= ${(100 * POSES.armGap).toFixed(0)}%)`);
-    if (!trunkPinch.some((p) => p.contrast >= POSES.pinch)) flags.push(`silhouette: no waist: the trunk narrows nowhere by ${(100 * (POSES.pinch - 1)).toFixed(0)}% between its bulges (a tube)`);
+    if (plantigradeBiped && !gait.run && !gait.flight && formMid.crotchShare < POSES.crotch) flags.push(`silhouette: at mid-stance the legs part ${(100 * formMid.crotch).toFixed(0)} cm up (${(100 * formMid.crotchShare).toFixed(0)}% of the hips' height)`);
+    if ((plantigradeBiped || hasFreeArms) && form.armClear < POSES.armGap) flags.push(`silhouette: the arms stand clear of the trunk over ${(100 * form.armClear).toFixed(0)}% of its height (want >= ${(100 * POSES.armGap).toFixed(0)}%)`);
+    if (plantigradeBiped && !trunkPinch.some((p) => p.contrast >= POSES.pinch)) flags.push(`silhouette: no waist: the trunk narrows nowhere by ${(100 * (POSES.pinch - 1)).toFixed(0)}% between its bulges (a tube)`);
     const leg = legForm(creature);
-    if (leg && leg.ratio < POSES.thighCalf) flags.push(`silhouette: the thigh (${(100 * leg.thigh).toFixed(1)} cm deep) is only ${leg.ratio.toFixed(2)}x the shank's ${(100 * leg.shank).toFixed(1)} cm, side on (want >= ${POSES.thighCalf})`);
+    if (plantigradeBiped && leg && leg.ratio < POSES.thighCalf) flags.push(`silhouette: the thigh (${(100 * leg.thigh).toFixed(1)} cm deep) is only ${leg.ratio.toFixed(2)}x the shank's ${(100 * leg.shank).toFixed(1)} cm, side on (want >= ${POSES.thighCalf})`);
     if (neck && neck.contrast < POSES.headNeck) flags.push(`silhouette: the neck (${(100 * neck.w).toFixed(1)} cm) is only ${neck.contrast.toFixed(2)}x narrower than what is about it (want >= ${POSES.headNeck})`);
 
     // --- draw ---
@@ -302,14 +382,29 @@ export function posesSheet(rec, { path } = {}) {
     const SH = 330;
     const W = LM + keys.length * (cw + GAP) + 8, H = TM + ch + 110 + SH + 40 + 18 * flags.length + 20;
     const top = Math.max(...skel.bones.map((bn) => Math.max(bn.head[1], bn.tail[1])));
-    const target = [0, top * 0.5, 0];
-    const view = orbitView(target, 90, 4, top * 2.25, 30);
-    const shots = keys.map(([, k]) => { setPose(creature, at(k).P); showGround(true); return capture(view, cw, ch); });
+    let target = [0, top * 0.5, 0], camDist = top * 2.25;
+    if (gait.flight) {
+        let yMin = Infinity, yMax = -Infinity, zMin = Infinity, zMax = -Infinity;
+        for (const [, k] of keys) {
+            const Xk = skinPositions(creature, at(k).P);
+            for (let v = 0; v < Xk.length; v += 3) {
+                yMin = Math.min(yMin, Xk[v + 1]); yMax = Math.max(yMax, Xk[v + 1]);
+                zMin = Math.min(zMin, Xk[v + 2]); zMax = Math.max(zMax, Xk[v + 2]);
+            }
+        }
+        target = [0, 0.5 * (yMin + yMax), 0.5 * (zMin + zMax)];
+        camDist = Math.max(top * 2.25, (yMax - yMin) * 2.15, (zMax - zMin) * 3.4);
+    }
+    const view = orbitView(target, 90, gait.flight ? 8 : 4, camDist, 30);
+    const shots = keys.map(([, k]) => { setPose(creature, at(k).P); showGround(!gait.flight || gait.lowY < top * 1.2); return capture(view, cw, ch); });
     const Sh = beginSheet(W, H);
     const g = Sh.g;
     rect(g, 0, 0, W, H, '#ecebe6');
     text(g, `${creature.label} · ${rec.scenario.name} · poses`, 12, 30, { size: 22, weight: 700 });
-    text(g, `the first foot's cycle (${((b - a) * rec.dt).toFixed(3)} s, duty ${duty.toFixed(2)}) from the left; legs traced (${skel.feet.map((f) => f.name).join(' red, ')} orange; thick: planted), bend = degrees between the two upper bones, ext = hip to their end over their length`, 12, 52, { size: 13, color: DIM });
+    const subhead = gait.flight
+        ? `flight cycle (${((b - a) * rec.dt).toFixed(3)} s, duty 0.00) from the left; legs traced (${skel.feet.map((f) => f.name).join(' red, ')} orange), bend = degrees between the two upper bones, ext = hip to their end over their length`
+        : `the first foot's cycle (${((b - a) * rec.dt).toFixed(3)} s, duty ${duty.toFixed(2)}) from the left; legs traced (${skel.feet.map((f) => f.name).join(' red, ')} orange; thick: planted), bend = degrees between the two upper bones, ext = hip to their end over their length`;
+    text(g, subhead, 12, 52, { size: 13, color: DIM });
     keys.forEach(([name, k], i) => {
         const x0 = LM + i * (cw + GAP), fr = at(k);
         const c = document.createElement('canvas');
@@ -321,20 +416,22 @@ export function posesSheet(rec, { path } = {}) {
             poly(g, pts, FOOT_COLORS[f], fr.down[f] ? 3.5 : 1.5);
         });
         text(g, name, x0 + 6, TM + 18, { size: 15, weight: 700 });
-        text(g, `phase ${((k - a) / (b - a)).toFixed(2)}`, x0 + 6, TM + 36, { size: 12, color: DIM });
+        text(g, `phase ${((k - a) / Math.max(1, b - a)).toFixed(2)}`, x0 + 6, TM + 36, { size: 12, color: DIM });
         const y = TM + ch + 20;
         text(g, `hips ${(100 * fr.rootY).toFixed(1)} cm · lean ${fr.lean.toFixed(0)} deg`, x0 + 4, y, { size: 13 });
         fr.legs.forEach((L, f) => text(g, `${skel.feet[f].name}: bend ${L.bend.toFixed(0)} · ext ${(100 * L.ext).toFixed(0)}%${fr.down[f] ? ' · down' : ''}`, x0 + 4, y + 20 + 18 * f, { size: 13, color: FOOT_COLORS[f] }));
     });
     const gy = TM + ch + 86;
-    const gl = gait.run
-        ? `run: bend at contact ${gait.contactBend.toFixed(0)} deg, mid-stance ${gait.midBend.toFixed(0)}, extension at lift-off ${(100 * gait.liftExt).toFixed(0)}%`
-        : `walk: stance bend ${gait.stanceBend.toFixed(0)} deg (max ${gait.stanceBendMax.toFixed(0)}) through mid-stance; hips rise ${(100 * gait.rise).toFixed(1)} cm from contact, a rigid leg ${(100 * gait.rigidRise).toFixed(1)} (vault ${(100 * gait.vault).toFixed(0)}%), highest at ${(100 * gait.peakAt).toFixed(0)}% of stance`;
+    const gl = gait.flight
+        ? `flight: cycle ${((b - a) * rec.dt).toFixed(3)} s, body height ${(100 * gait.lowY).toFixed(1)}-${(100 * gait.highY).toFixed(1)} cm (rise ${(100 * gait.rise).toFixed(1)} cm)`
+        : gait.run
+            ? `run: bend at contact ${gait.contactBend.toFixed(0)} deg, mid-stance ${gait.midBend.toFixed(0)}, extension at lift-off ${(100 * gait.liftExt).toFixed(0)}%`
+            : `walk: stance bend ${gait.stanceBend.toFixed(0)} deg (max ${gait.stanceBendMax.toFixed(0)}) through mid-stance; hips rise ${(100 * gait.rise).toFixed(1)} cm from contact, a rigid leg ${(100 * gait.rigidRise).toFixed(1)} (vault ${(100 * gait.vault).toFixed(0)}%), highest at ${(100 * gait.peakAt).toFixed(0)}% of stance`;
     text(g, gl, LM, gy, { size: 14, weight: 650 });
 
     // Silhouettes with the front profile's pinches marked.
     const sy = gy + 24;
-    const panels = [['rest, front', front, form], ['rest, side', side, null], ['mid-stance, front', midFront, formMid]];
+    const panels = [['rest, front', front, form], ['rest, side', side, null], [gait.flight ? 'mid-flight, front' : 'mid-stance, front', midFront, formMid]];
     panels.forEach(([name, Sx, fm], i) => {
         const x0 = LM + i * 300, pw = 280;
         text(g, name, x0, sy + 14, { size: 14, weight: 650 });
@@ -362,7 +459,7 @@ export function posesSheet(rec, { path } = {}) {
     flags.forEach((f, i) => text(g, f, LM + 10, fy + 20 + 18 * i, { size: 13 }));
     const out = saveSheet(path);
     const r = (x) => Math.round(x * 1e4) / 1e4;
-    const keyJson = keys.map(([name, k]) => ({ name, phase: r((k - a) / (b - a)), hips: r(at(k).rootY), lean: r(at(k).lean),
+    const keyJson = keys.map(([name, k]) => ({ name, phase: r((k - a) / Math.max(1, b - a)), hips: r(at(k).rootY), lean: r(at(k).lean),
         legs: at(k).legs.map((L, f) => ({ foot: skel.feet[f].name, bend: r(L.bend), ext: r(L.ext), down: at(k).down[f] })) }));
     const strip = (fm) => ({ crotch: r(fm.crotch), crotchShare: r(fm.crotchShare), armClear: r(fm.armClear), pinches: fm.pinches.map((p) => ({ y: r(p.y), w: r(p.w), contrast: r(p.contrast) })) });
     return { path, width: out.width, height: out.height, ms: Date.now() - t0,

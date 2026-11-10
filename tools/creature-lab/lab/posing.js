@@ -221,6 +221,7 @@ export function keyPoses(creature, sel) {
 export function balanceOf(skel, P) {
     const com = centreOfMass(P, 0, skel);
     let z0 = Infinity, z1 = -Infinity, x0 = Infinity, x1 = -Infinity, down = 0;
+    const footBones = new Set();
     for (const ft of skel.feet) {
         const toe = skel.bones[ft.boneIndex];
         const ball = boneHead(P, 0, toe.index), tip = boneTail(P, 0, toe);
@@ -229,8 +230,27 @@ export function balanceOf(skel, P) {
         if (Math.min(ball[1], tip[1], heel ? heel[1] : Infinity) > 0.03) continue;
         if (heel && heel[1] <= 0.03) { z0 = Math.min(z0, heel[2]); z1 = Math.max(z1, heel[2]); x0 = Math.min(x0, heel[0]); x1 = Math.max(x1, heel[0]); }
         down++;
+        footBones.add(toe.index);
         z0 = Math.min(z0, ball[2], tip[2]); z1 = Math.max(z1, ball[2], tip[2]);
         x0 = Math.min(x0, ball[0], tip[0]); x1 = Math.max(x1, ball[0], tip[0]);
+    }
+    const restRootY = skel.bones[skel.parts.root].head[1];
+    const rootHead = boneHead(P, 0, skel.parts.root);
+    let extraDown = 0;
+    if (skel.feet.length === 0 || rootHead[1] < 0.78 * restRootY) {
+        for (const b of skel.bones) {
+            if (b.face) continue;
+            const h = boneHead(P, 0, b.index), t = boneTail(P, 0, b);
+            let hit = false;
+            for (const p of [h, t]) {
+                if (p[1] <= 0.035) {
+                    z0 = Math.min(z0, p[2]); z1 = Math.max(z1, p[2]);
+                    x0 = Math.min(x0, p[0]); x1 = Math.max(x1, p[0]);
+                    hit = true;
+                }
+            }
+            if (hit && !footBones.has(b.index)) { down++; extraDown++; }
+        }
     }
     if (!down) return { com, down, fore: 0, side: 0, text: 'in the air' };
     const past = (v, lo, hi) => (v < lo ? v - lo : v > hi ? v - hi : 0);
@@ -239,7 +259,8 @@ export function balanceOf(skel, P) {
     const parts = [];
     if (fore) parts.push(`${cm(fore)} ${fore > 0 ? 'ahead of' : 'behind'} its feet`);
     if (side) parts.push(`${cm(side)} to the ${side > 0 ? 'left' : 'right'} of them`);
-    return { com, down, fore, side, text: parts.length ? `centre of mass ${parts.join(', ')}` : `balanced (${down} ${down > 1 ? 'feet' : 'foot'} down)` };
+    const supportLabel = extraDown ? `${down} points down` : `${down} ${down > 1 ? 'feet' : 'foot'} down`;
+    return { com, down, fore, side, text: parts.length ? `centre of mass ${parts.join(', ')}` : `balanced (${supportLabel})` };
 }
 
 const VIEWS = [

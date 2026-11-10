@@ -9,6 +9,7 @@ module hook;
 import mesh;
 import scene;
 from creature::skeleton import NB, FACE_GAZE, FACE_LID, FACE_HEAD;
+from creature::coat import coat;
 from creature::face import face;
 
 @binding(4, 14) var dq: read_buffer<vec4<f32>>;
@@ -22,7 +23,9 @@ fn rotate(q: vec4<f32>, v: vec3<f32>) -> vec3<f32> {
 
 pub fn fragment(v: mesh::Vertex, s: mesh::Surface) -> mesh::Surface {
     let rest = v.v0.xyz;
-    return face(rest, max(length(dpdx(rest)), length(dpdy(rest))), v.v1, s);
+    let foot = max(length(dpdx(rest)), length(dpdy(rest)));
+    var out = coat(rest, foot, s);
+    return face(rest, foot, v.v1, out);
 }
 
 fn conj(q: vec4<f32>) -> vec4<f32> { return vec4<f32>(-q.xyz, q.w); }

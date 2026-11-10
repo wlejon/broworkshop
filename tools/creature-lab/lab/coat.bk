@@ -1,0 +1,10 @@
+// creature::coat for a creature without its own: the surface as its vertex
+// colours leave it. A coat is drawn per pixel by the skin hooks (lab/skin.bk,
+// lab/skin-crowd.bk) from the rest pose's position of the point shaded, so
+// markings stay sharp across coarse meshes before creature::face draws over it.
+module creature::coat;
+import mesh;
+
+pub fn coat(p: vec3<f32>, foot: f32, s: mesh::Surface) -> mesh::Surface {
+    return s;
+}

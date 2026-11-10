@@ -291,14 +291,19 @@ export function massPhysics(rec) {
         const a = [0, 1, 2].map((i) => (S.com[k + h][i] - 2 * S.com[k][i] + S.com[k - h][i]) / (H * H));
         const v = [0, 1, 2].map((i) => (S.com[k + h][i] - S.com[k - h][i]) / (2 * H));
         acc.push(a); vel.push(v);
-        let air = true;
-        for (let j = k - h; j <= k + h; j++) if (down(j)) { air = false; break; }
-        if (air) {
+        let air = true, powered = false;
+        for (let j = k - h; j <= k + h; j++) {
+            if (down(j)) air = false;
+            if (flyingAt(rec, j)) powered = true;
+        }
+        // In powered wing-borne flight (GAIT.FLY), aerodynamic lift supports CoM:
+        // do not count it as ballistic free-fall or unexplained energy gain.
+        if (air && !powered) {
             flight[k] = 1; nFlight++;
             const off = Math.hypot(a[0], a[1] + g, a[2]);
             if (off > worstF.a) worstF = { a: off, t: k * dt };
             if (off > NATURAL.flightTol) { badFlight++; viol.push({ k, kind: 'flight', a: r1(off) }); }
-        } else if (down(k)) {
+        } else if (down(k) && !flyingAt(rec, k)) {
             nGround++;
             const ah = Math.hypot(a[0], a[2]), lim = NATURAL.mu * Math.max(0, a[1] + g);
             const p = -g - a[1], s = ah - lim;

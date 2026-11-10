@@ -6,7 +6,7 @@
 //   scripts/validate.sh tools/creature-lab/tests/test_keys.js
 
 import { check, eq, test, done } from "/lib/kit/test.js";
-import { loadCreature } from "/app/lab/creature.js";
+import { loadCreature, skinModules, readApp } from "/app/lab/creature.js";
 import { runScenario } from "/app/lab/run.js";
 import { analyzeRun, runCommand } from "/app/lab/commands.js";
 import { keyPoses, balanceOf } from "/app/lab/posing.js";
@@ -67,6 +67,18 @@ test('standing it is balanced over its feet', () => {
     check(b.fore === 0 && b.side === 0, `its centre of mass over them (${b.text})`);
     const [F] = keyPoses(strider, [[-1, K.index['run-6']]]);
     eq(balanceOf(skel, F).down, 0, 'the run\'s flight has neither down');
+    // A lowered pose floating above 3.5 cm stays in the air; skinModules wires creature::coat.
+    const [L0] = keyPoses(strider, [[-1, K.index.lie]]);
+    check(balanceOf(skel, L0).down >= 2, 'a resting lowered pose is supported on the ground');
+    const lowAir = Float32Array.from(L0);
+    for (let b = 0; b < skel.count; b++) lowAir[12 * b + 7] += 0.06;
+    const lb = balanceOf(skel, lowAir);
+    eq(lb.down, 0, 'a lowered floating pose has nothing on the ground');
+    eq(lb.text, 'in the air', 'and says it is in the air');
+    const nearMods = skinModules({ ...strider, coat: '// custom coat\n' + readApp('lab/coat.bk') }, true);
+    const farMods = skinModules({ ...strider, coat: '// custom coat\n' + readApp('lab/coat.bk') }, false);
+    check(nearMods['creature::coat'].startsWith('// custom coat'), 'near LOD uses creature coat');
+    eq(farMods['creature::coat'], readApp('lab/coat.bk'), 'coarse LOD falls back to lab/coat.bk');
 });
 
 const recs = {};

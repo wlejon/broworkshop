@@ -122,8 +122,32 @@ export function boundLimbs(creature) {
     const { skel, body } = creature;
     const X = body.positions, idx = body.indices, W = body.weights;
     const main = body._main || (body._main = W.map((ws) => ws.reduce((a, x) => (x.w > a.w ? x : a), ws[0]).index));
+    const hasVerts = new Set(main);
+    let bonePiece = null;
+    if (body.piece) {
+        const counts = skel.bones.map(() => new Map());
+        for (let v = 0; v < main.length; v++) {
+            const b = main[v], p = body.piece[v] | 0;
+            counts[b].set(p, (counts[b].get(p) || 0) + 1);
+        }
+        bonePiece = counts.map((m) => {
+            let bestP = 0, bestN = 0;
+            for (const [p, n] of m) if (n > bestN) { bestN = n; bestP = p; }
+            return bestP;
+        });
+    }
     return limbsOf(skel).map((L) => {
         const mine = new Set(L.chain);
+        // Bones whose main vertices inhabit the same dedicated non-body piece (p > 0,
+        // e.g. a separate wing/fin vane) co-own that piece; single-mesh wings (p === 0) do not.
+        if (bonePiece) {
+            const pieces = new Set();
+            for (const bi of L.chain) if (hasVerts.has(bi)) pieces.add(bonePiece[bi]);
+            if (pieces.size === 1) {
+                const [lp] = pieces;
+                if (lp > 0) for (let bi = 0; bi < bonePiece.length; bi++) if (bonePiece[bi] === lp) mine.add(bi);
+            }
+        }
         const own = (v) => W[v].reduce((s, x) => s + (mine.has(x.index) ? x.w : 0), 0);
         const cuts = [];
         const total = L.chain.reduce((s, bi) => s + skel.bones[bi].length, 0);
@@ -155,7 +179,10 @@ export function boundLimbs(creature) {
                 cuts.push({ bone: b.name, t, along, none: false, foreign: other / Math.max(girth, 1e-9), girth, whose: whose >= 0 ? skel.bones[whose].name : null });
             }
         });
-        const joined = cuts.filter((c) => c.none || c.foreign > SKIN.foreign);
+        // Carved ear hollows open a crescent cross-section around the ear axis so
+        // loopAbout sees even winding (`none`) even though the ear owns skin vertices.
+        const earCarved = /^ear/i.test(L.name) && L.chain.some((bi) => hasVerts.has(bi));
+        const joined = cuts.filter((c) => (c.none ? !earCarved : c.foreign > SKIN.foreign));
         // Where it comes out of the body: the furthest cut along it that is not its own.
         const emerges = joined.reduce((m, c) => Math.max(m, c.along), 0);
         return { name: L.name, bones: L.chain.map((i) => skel.bones[i].name), cuts, joined, emerges };
@@ -163,10 +190,17 @@ export function boundLimbs(creature) {
 }
 
 export function boundFlags(creature) {
+    const skel = creature.skel;
+    const plantigrade = skel.feet.length > 0 && skel.feet.every((f) => !!f.heel);
+    const legTops = new Set(skel.parts.legs.map((l) => skel.bones[l.top].name));
     const flags = [];
     for (const L of boundLimbs(creature)) {
-        // (Its root is inside the body it grows from: a shoulder, a hip.)
-        if (L.emerges <= SKIN.root) continue;
+        // Internal scapular/pelvic girdles on non-plantigrade animals and short tail
+        // roots naturally sit deeper inside trunk musculature than humanoid shoulders/hips.
+        const deepGirdle = /^scap/i.test(L.name)
+            || (!plantigrade && legTops.has(L.name) && (L.bones.length >= 4 || skel.feet.length > 2))
+            || /^tail/i.test(L.name);
+        if (L.emerges <= (deepGirdle ? 0.55 : SKIN.root)) continue;
         const by = new Map();
         for (const c of L.joined) {
             const k = c.bone;

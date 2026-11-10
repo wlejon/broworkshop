@@ -19,6 +19,7 @@ import { TELE, T } from "./contract.js";
 import { jointAngles, boneHead, boneTail } from "./skeleton.js";
 import { naturalness, smoothness, seen, NATURAL, kinks, turnSpike, footEvents } from "./natural.js";
 import { naturalRun } from "./natural-out.js";
+import { boundFlags, skinInMotion, skinFlags } from "./skinsee.js";
 
 const DEG = 180 / Math.PI;
 const pad = (s, n) => String(s).padStart(n);
@@ -69,10 +70,21 @@ export function scoreLine(first, w, r) {
 }
 
 export function scoreTable(creature, scenarios, analyzeRun, { seed = 1 } = {}) {
-    const rows = scenarios.map((sc) => scoreRun(naturalRun(creature, sc, { seed }), analyzeRun));
+    const bound = creature.body?.positions ? boundFlags(creature) : [];
+    const rows = scenarios.map((sc) => {
+        const rec = naturalRun(creature, sc, { seed });
+        const row = scoreRun(rec, analyzeRun);
+        let sf = [];
+        try {
+            if (rec.steps >= 4 && creature.body?.positions) sf = skinFlags(skinInMotion(rec));
+        } catch (_) {}
+        return { ...row, skinFlags: sf };
+    });
     const lines = [`${creature.label}`, scoreHeader('scenario', 14), ...rows.map((r) => scoreLine(r.scenario, 14, r))];
     for (const r of rows) for (const f of r.metricFlags) lines.push(`  ${r.scenario}: ${f}`);
-    return { rows, lines };
+    for (const f of bound) lines.push(`  skin: ${f}`);
+    for (const r of rows) for (const f of r.skinFlags) lines.push(`  ${r.scenario}: ${f}`);
+    return { rows, lines, skinFlags: [...bound, ...rows.flatMap((r) => r.skinFlags.map((f) => `${r.scenario}: ${f}`))] };
 }
 
 // --- sweep ----------------------------------------------------------------------------

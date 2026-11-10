@@ -29,6 +29,7 @@ module hook;
 import mesh;
 import scene;
 from creature::skeleton import NB, HEAD, FACE_GAZE, FACE_LID, FACE_HEAD;
+from creature::coat import coat;
 from creature::face import face;
 
 @binding(4, 14) var pose: read_buffer<vec4<f32>>;
@@ -44,9 +45,11 @@ fn lin(c: vec3<f32>) -> vec3<f32> {
 fn level(b: f32) -> f32 { return b / 255.0; }
 
 pub fn fragment(v: mesh::Vertex, s: mesh::Surface) -> mesh::Surface {
-    // The face, by the point's rest position (v0) and a pixel's size there.
+    // The coat and face, by the point's rest position (v0) and a pixel's size there.
     let rest = v.v0.xyz;
-    var out = face(rest, max(length(dpdx(rest)), length(dpdy(rest))), v.v1, s);
+    let foot = max(length(dpdx(rest)), length(dpdy(rest)));
+    var out = coat(rest, foot, s);
+    out = face(rest, foot, v.v1, out);
     if (SCENE_DEBUG(normal)) { out.debug = vec4<f32>(lin(normalize(s.normal) * 0.5 + vec3<f32>(0.5)), 1.0); }
     if (SCENE_DEBUG(depth)) {
         let cm = clamp(floor(length(v.world_pos) * 100.0 + 0.5), 0.0, 4095.0);

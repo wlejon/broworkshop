@@ -26,6 +26,7 @@ import { setPose } from "/app/lab/lit.js";
 import { debugPlanes, imageLines } from "/app/lab/shots.js";
 import { restShape, scanView, SCAN, SCAN_VIEWS } from "/app/lab/finder.js";
 import { NATURAL, smoothness, variety, massPhysics, steadyCycles } from "/app/lab/natural.js";
+import { T as TELE_T, TELE, GAIT } from "/app/lab/contract.js";
 
 globalThis.creatureLab?.dispose?.();
 
@@ -258,6 +259,13 @@ await test('natural: flight is free fall, or it is flagged', () => {
     const oa = off(arc), ol = off(line);
     check(ol > 10 && oa * 3 < ol, `off free fall at ${oa} sampled steps on the arc, ${ol} on the line`);
     check(arc.worstFlight.a < line.worstFlight.a, `worst off free fall ${arc.worstFlight.a} against ${line.worstFlight.a}`);
+    // Powered wing-borne flight (GAIT.FLY) is aerodynamically supported, not free fall.
+    const liftedLine = lift((t) => Math.min(t, T * 0.8) * (top / (T * 0.8)));
+    const teleFly = Float32Array.from(liftedLine.tele);
+    for (let k = k0; k <= k1; k++) teleFly[k * TELE + TELE_T.GAIT] = GAIT.FLY;
+    const powered = massPhysics({ ...liftedLine, tele: teleFly });
+    eq(powered.flightOff, 0, 'powered flight is exempt from ballistic free-fall flags');
+    eq(powered.energyFromNowhere, 0, 'powered flight does not count lift as unexplained energy');
 });
 
 done('creature-lab measures');

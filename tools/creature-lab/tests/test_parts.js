@@ -55,6 +55,22 @@ test('a limb with a skin of its own is bound; one inside another\'s is found', (
     eq(flags.length, 1, 'the fused arm is flagged');
     check(/upper is in trunk's skin/.test(flags[0]), flags[0]);
     check(boundLimbs(fused)[0].emerges > 0.5, 'and where it comes out of the body is past its middle');
+    // Two ribs sharing a dedicated non-body wing piece (piece 1) co-own it; on piece 0 they are flagged.
+    const wingSkel = resolveSkeleton({
+        bones: [
+            { name: 'trunk', parent: null, head: [-0.2, 1, 0], tail: [0, 1, 0] },
+            { name: 'ribA', parent: 'trunk', head: [0, 1, 0], tail: [1, 1, 0] },
+            { name: 'ribB', parent: 'trunk', head: [0, 1, 0], tail: [1, 1, 0] },
+        ],
+        feet: [], tracks: [],
+    });
+    const wingMesh = (p) => {
+        const base = tube((x) => (x < 0 ? 0 : x < 0.85 ? 1 : 2));
+        const piece = Float32Array.from({ length: base.body.weights.length }, (_, v) => (base.body.weights[v][0].index === 0 ? 0 : p));
+        return { skel: wingSkel, body: { ...base.body, piece } };
+    };
+    eq(boundFlags(wingMesh(1)), [], 'feather ribs in a separate wing piece co-own their vane');
+    check(boundFlags(wingMesh(0)).length >= 1, 'feather ribs fused into body piece 0 are still flagged');
 });
 
 // A chest carrying a head carrying two ears; poses from turns about Z.
