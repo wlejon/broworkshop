@@ -317,8 +317,10 @@ and a black brow stripe into the crest.
 like the wader's, on the same layers (`finch:plan` is its plan alone). Both
 feet are on one clock, with a short stance and a flight each cycle (telemetry's
 gait `hop`). The body's height is a bouncing body's, measured from where it
-lands and leaves: a free fall through the flight, an even push through the
-stance. A hop keeps the pace it left the ground at (the pace is followed in
+lands and leaves: a free fall through the flight, and through the stance the
+push a spring gives (nothing at the touchdown, most at the middle, nothing as
+the feet leave), so its acceleration has no jump at either end; the hop rides
+higher by what that push sinks past an even one, so the legs fold no further. A hop keeps the pace it left the ground at (the pace is followed in
 the stance and held through the flight). Hopping, the body rides that plan
 and not `creature::body`, whose feet are too slow for a stance this short;
 in the air the whole bird is put back on its mass's usual place over the

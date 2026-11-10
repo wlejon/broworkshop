@@ -4,7 +4,7 @@
 // How it goes. It hops: both feet on one clock, down together for a short
 // stance and up together for a flight. The body's height through a hop is
 // a bouncing body's (hop_bounce): it falls freely in the flight and is
-// turned round by an even push through the stance, so it sinks into each
+// turned round by a spring's push through the stance, so it sinks into each
 // landing and springs out of it. Each leg is a bird's Z (femur, drumstick,
 // the short bare tarsus, the toes) solved hip to toe tip as a pantograph
 // (creature::limbs solve_hind). The toes lie flat in stance and rise onto
@@ -155,17 +155,24 @@ fn ground_pitch(env: read_store<f32, 1>, toe: vec3<f32>, fwd: vec3<f32>) -> f32 
 
 // A hop's rise and fall of the body from the height it lands and leaves at,
 // one stance a cycle at its start: free fall through the flight (up at v0
-// off the ground, down at v0 onto it), and through the stance an even push
-// turning the fall into the rise (an upward acceleration g tf / ts), so the
-// body sinks into the landing and springs out with no corner in its speed.
+// off the ground, down at v0 onto it), and through the stance the legs'
+// push as a spring gives it: nothing at the touchdown, most at the middle,
+// nothing again as the feet leave (a half sine over the stance on top of
+// gravity), so the body sinks into the landing and springs out with no
+// corner in its speed nor a jump in its acceleration at either end.
 fn hop_bounce(phase: f32, duty: f32, freq: f32) -> f32 {
     let ts = duty / freq;
     let tf = (1.0 - duty) / freq;
     let v0 = 0.5 * 9.81 * tf;
     let t = fract01(phase) / freq;
-    if (t < ts) { return v0 / ts * (t - 0.5 * ts) * (t - 0.5 * ts) - 0.25 * v0 * ts; }
+    // (A spring's push sinks the body further at mid-stance than an even
+    // one would, by `deep`: the whole hop rides that much higher, so the
+    // legs fold no further under it than they are made to.)
+    let k = v0 + 4.905 * ts;
+    let deep = (0.5 - 1.0 / PI) * k * ts - 0.5 * v0 * ts - 1.22625 * ts * ts + 0.25 * v0 * ts;
+    if (t < ts) { return -deep - v0 * t - 4.905 * t * t + k * (t - ts / PI * sin(PI * t / ts)); }
     let u = t - ts;
-    return v0 * u - 4.905 * u * u;
+    return -deep + v0 * u - 4.905 * u * u;
 }
 
 fn place(st: rw_store<f32, 1>, env: read_store<f32, 1>, s: i32) {
@@ -468,7 +475,7 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
     let bd = body_step(state, s + D_BODY, plan + coff_m, mix(3.0, 1.0, go), sup, init, dt);
     let wl = smooth01(lie * 3.0);
     // (Hopping, the body rides its plan: the bounce is already a true fall
-    // and an even push, and the layer's feet, too slow for a stance this
+    // and a spring's push, and the layer's feet, too slow for a stance this
     // short, only held the mass to the plan by its stray limit.)
     var shift = (bd.com - coff_p - plan) * LAYERS * (1.0 - wl) * (1.0 - go);    if (wl > 0.0) { body_set(state, s + D_BODY, mix(bd.com, plan + coff_p, wl), mix(bd.vel, bd.tvel, wl)); }
     var held = 0.0;
