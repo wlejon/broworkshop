@@ -591,7 +591,9 @@ text under the creature's folder; `score`, `sweep` and `kinks` run what
   `--bone <name>` lists that bone's every kink (time, size, event); `--at
   "<foot> <down|lift>"` every bone kinking there.
 - `trace <scenario>` (`<scenario>-trace.txt`): a row a step from `--from` to
-  `--to` (0.25 s mid-run by default; `--every <n>`): which feet are down,
+  `--to` (0.25 s mid-run by default; `--every <n>`) of the run `kinks` and
+  `score` measure (a steady gait's is 20 s, so a moment `kinks` names is
+  there to trace; a window past the run's end is an error): which feet are down,
   then for `--leg <foot>` its toe over the ground, its distance from the
   leg's top bone and that offset along the heading and down, and its miss
   from where the rig's telemetry says it is (its target while it swings),

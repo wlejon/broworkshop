@@ -73,7 +73,7 @@ pub const STATE: i32 = D_SPINE + SPINE_STATE;
 // as the ripple closes into the tripod three go together and each is down
 // little more than half.
 @knob const DUTY_WALK: f32 = 0.68;@knob const DUTY_RUN: f32 = 0.5;
-@knob const RUN_BOB: f32 = 0.014;    // m the body rises and falls, tripod to tripod, at a run
+@knob const RUN_BOB: f32 = 0.022;   // m the body rises and falls, tripod to tripod, at a run
 @knob const LIFT: f32 = 0.09;
 @knob const SWAY: f32 = 0.07;
 @knob const LAYERS: f32 = 1.0;       // the motion layers' share (0: the rig's plan as it is)

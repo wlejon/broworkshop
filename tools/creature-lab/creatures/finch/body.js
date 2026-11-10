@@ -7,7 +7,7 @@
 //   tail    long and narrow, a little notched, angled down
 //   legs    the bare tarsi short and thin, three toes forward, one back
 // Warm brown above with a chestnut cap, a grey nape and cheek, a buff breast
-// paling to a white belly. The wings are brown with dark flight feathers,
+// paling to a white belly. The wings are a darker brown with a buff bar and dark flight feathers,
 // the tail dark, the bill horn-pink, the legs pinkish.
 
 import { Flesh, SIDES } from "/app/lab/flesh.js";
@@ -16,6 +16,7 @@ const mix = (a, b, t) => a.map((x, i) => x + (b[i] - x) * Math.max(0, Math.min(1
 const sstep = (e0, e1, x) => { const t = Math.max(0, Math.min(1, (x - e0) / (e1 - e0))); return t * t * (3 - 2 * t); };
 const BROWN = [0.45, 0.32, 0.20], CHESTNUT = [0.48, 0.20, 0.10], GREY = [0.55, 0.55, 0.55];
 const BUFF = [0.80, 0.66, 0.48], WHITE = [0.88, 0.86, 0.82], DARK = [0.16, 0.12, 0.09];
+const WING = [0.36, 0.25, 0.16];
 const BILL = [0.72, 0.58, 0.52], LEG = [0.70, 0.55, 0.50];
 
 function coat(p, n, share) {
@@ -29,8 +30,11 @@ function coat(p, n, share) {
     c = mix(c, CHESTNUT, hd * sstep(0.2, 0.6, n[1]) * sstep(0.025, 0.04, p[2]));
     // Wings: brown, the flight feathers dark.
     const w = LR('wing');
-    c = mix(c, BROWN, w);
-    c = mix(c, DARK, w * sstep(-0.018, -0.032, p[2]));
+    // (A shade darker than the back, so the folded wing reads on the flank;
+    // a buff bar across it where the coverts end.)
+    c = mix(c, WING, sstep(0.3, 0.7, w));
+    c = mix(c, DARK, w * sstep(-0.012, -0.026, p[2]));
+    c = mix(c, BUFF, 0.8 * sstep(0.45, 0.8, w) * sstep(-0.011, -0.007, p[2]) * sstep(-0.001, -0.005, p[2]));
     c = mix(c, DARK, share('tail') * sstep(-0.045, -0.06, p[2]));
     c = mix(c, BILL, share('bill'));
     c = mix(c, LEG, LR('tarsus') + LR('toes') + LR('toeOut') + LR('toeIn') + LR('toeBack'));
@@ -64,11 +68,15 @@ export function body(skel, detail = {}) {
     for (const [s, t] of SIDES) {
         B.blob(`eye${t}`, 'head', [0.0095 * s, 0.0785, 0.0445], [0.0026, 0.0026, 0.0026], { blend: 0.0008, keep: true });
         B.limb(`wing${t}`, [`humerus${t}`, `forearm${t}`, `hand${t}`], [
-            { c: [0.015 * s, 0.062, 0.018], r: [0.004, 0.010], bone: `humerus${t}` },
-            { c: [0.019 * s, 0.059, 0.0], r: [0.0045, 0.0125] },
-            { c: [0.0175 * s, 0.061, -0.025], r: [0.0038, 0.010] },
-            { c: [0.012 * s, 0.056, -0.050], r: [0.0022, 0.006], bone: `hand${t}` },
-            { c: [0.006 * s, 0.050, -0.066], r: [0.001, 0.002], bone: `hand${t}` },
+            // (Lying in the flank, their inner faces inside the body and
+            // their tops no higher than the back between them: thin plates
+            // standing off it left a trough behind the neck and a ragged
+            // edge over the rump.)
+            { c: [0.0145 * s, 0.054, 0.018], r: [0.006, 0.008], bone: `humerus${t}` },
+            { c: [0.0175 * s, 0.050, 0.0], r: [0.006, 0.010] },
+            { c: [0.0135 * s, 0.050, -0.025], r: [0.0055, 0.008] },
+            { c: [0.008 * s, 0.050, -0.045], r: [0.004, 0.0045], bone: `hand${t}` },
+            { c: [0.004 * s, 0.047, -0.060], r: [0.002, 0.002], bone: `hand${t}` },
         ], { up: [0, 1, 0], blend: 0.003 });
         const ta = skel.bones[skel.index(`tarsus${t}`)], to = skel.bones[skel.index(`toe${t}`)];
         const x = ta.head[0];

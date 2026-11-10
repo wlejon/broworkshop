@@ -136,8 +136,18 @@ export function watchSheet(rec, { path, view = 'side', frames = WATCH.frames, fr
     for (const P of [...poses, before]) for (const b of skel.bones) for (const p of [boneHead(P, 0, b.index), boneTail(P, 0, b)]) {
         for (let k = 0; k < 3; k++) { lo[k] = Math.min(lo[k], p[k]); hi[k] = Math.max(hi[k], p[k]); }
     }
+    // (And the skin as far outside them as it stands at rest: a small
+    // bird's skull and breast are well off its bones, and a frame fitted
+    // to the bones alone cut its crown off.)
+    const pos = creature.body.positions;
+    if (pos && pos.length >= 3) {
+        const rl = [Infinity, Infinity, Infinity], rh = [-Infinity, -Infinity, -Infinity], ml = rl.slice(), mh = rh.slice();
+        for (const b of skel.bones) for (const p of [b.head, b.tail]) for (let k = 0; k < 3; k++) { rl[k] = Math.min(rl[k], p[k]); rh[k] = Math.max(rh[k], p[k]); }
+        for (let i = 0; i + 2 < pos.length; i += 3) for (let k = 0; k < 3; k++) { ml[k] = Math.min(ml[k], pos[i + k]); mh[k] = Math.max(mh[k], pos[i + k]); }
+        for (let k = 0; k < 3; k++) { if (k !== 1) lo[k] -= Math.max(rl[k] - ml[k], 0); hi[k] += Math.max(mh[k] - rh[k], 0); }
+    }
     const mid = lo.map((v, k) => (v + hi[k]) / 2);
-    const yw = (V.yaw * Math.PI) / 180, top = V.pitch > 60;
+    const yw =(V.yaw * Math.PI) / 180, top = V.pitch > 60;
     const across = (Math.abs(Math.cos(yw)) * (hi[0] - lo[0]) + Math.abs(Math.sin(yw)) * (hi[2] - lo[2])) / 2;
     const up = top ? (Math.abs(Math.sin(yw)) * (hi[0] - lo[0]) + Math.abs(Math.cos(yw)) * (hi[2] - lo[2])) / 2 : (hi[1] - lo[1]) / 2;
     // The frames are shaped to what they hold (a tall creature from the
@@ -203,6 +213,13 @@ export function watchSheet(rec, { path, view = 'side', frames = WATCH.frames, fr
             const ys = levels.map(([, h]) => project(cam, cw, ch, [0, h, 0]).y);
             const close = ys.length === 2 && Math.abs(ys[0] - ys[1]) < 18;
             levels.forEach(([name], j) => {
+                // (A level the frame does not reach, as a tall bird's head at
+                // rest over its running crouch, is named at the frame's top
+                // and not drawn across the row above.)
+                if (ys[j] < 12 || ys[j] > ch) {
+                    if (i === 0) text(g, `${name}: ${ys[j] < 12 ? 'above' : 'below'} the frame`, x0 + 6, y0 + (ys[j] < 12 ? 14 : ch - 6), { size: 11, color: '#333' });
+                    return;
+                }
                 line(g, x0, y0 + ys[j], x0 + cw, y0 + ys[j], 'rgba(20,20,20,0.4)', 1, [2, 6]);
                 const under = close && ys[j] === Math.max(...ys);
                 if (i === 0) text(g, name, x0 + 6, y0 + ys[j] + (under ? 13 : -4), { size: 11, color: '#333' });

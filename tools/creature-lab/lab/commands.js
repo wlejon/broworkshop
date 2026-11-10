@@ -321,7 +321,8 @@ export async function runCommand(argv) {
             file = `${dir}/kinks.txt`;
         } else {
             if (!rest.length) throw new Error(`trace: name a scenario\n${HELP}`);
-            const r = traceText(runScenario(creature, rest[0], { seed }), {
+            // The run `kinks` and `score` measure, so a moment either names is here.
+            const r = traceText(naturalRun(creature, rest[0], { seed }), {
                 leg: opt.leg || null, bones: opt.bones ? String(opt.bones).split(',') : null, root: !!opt.root,
                 from: opt.from !== undefined ? +opt.from : null, to: opt.to !== undefined ? +opt.to : null, every: opt.every ? +opt.every : 1,
             });

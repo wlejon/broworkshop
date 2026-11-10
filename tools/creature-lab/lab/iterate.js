@@ -175,6 +175,7 @@ export function traceText(rec, { leg = null, bones = null, root = false, from = 
     if (!(Number.isInteger(every) && every >= 1)) throw new Error(`trace: --every counts steps (a whole number, 1 or more; a step is ${dt.toFixed(4)} s), got ${every}`);
     const k0 = Math.max(3, Math.round((from ?? rec.scenario.duration * 0.5) / dt));
     const k1 = Math.min(n - 3, Math.round((to ?? (k0 * dt + 0.25)) / dt));
+    if (k1 < k0) throw new Error(`trace: nothing from ${(k0 * dt).toFixed(2)} s: the run is ${(n * dt).toFixed(2)} s long`);
     const near = footEvents(rec);
     const feet = skel.feet;
     let chain = [], foot = null, top = -1;

@@ -81,6 +81,8 @@ pub const STATE: i32 = PROBE + PROBE_N;
 @knob const ROLL: f32 = 0.8;         // rad the toes stand up as the feet leave them
 @knob const CURL: f32 = 0.3;         // the toes' limb angle curled under in a flight (0: hanging)
 @knob const COCK: f32 = 0.45;        // rad the tail cocks up as it lands
+@knob const WING_FLICK: f32 = 0.25;  // of a wing swung right out: how far the folded wings flick, startled
+@knob const TAIL_FLICK: f32 = 0.35;  // rad the tail flicks up with them
 @knob const GLANCE: f32 = 0.55;      // rad a glance turns the head at most
 @knob const BALANCE: f32 = 1.0;      // share of the centre's offset over the feet it corrects, standing
 
@@ -536,17 +538,20 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
 
     // --- tail and wings ---------------------------------------------------------------------
     let flick = 0.25 * max(noise1(clock / 0.35, seed, 5.0) - 0.5, 0.0) / 0.5;
-    let cock = COCK * landed + flick + 0.25 * alert - 0.15 * lie - 0.25 * graze;
-    T.q[B_TAIL] = q_mul(qbody, q_xyz(soft_xyz(vec3<f32>(cock, 0.0, 0.0), B_TAIL, 0.1)));
-    T.p[B_TAIL] = head_of(T, B_TAIL);
-    // Startled: the wings flutter, out from the body and back, a dozen times a second.
+    // Startled: the folded wings flick, their tips a little out from the
+    // body and back a dozen times a second, and the tail flicks up with
+    // them. (They stay folded: a folded wing swung wide open is a club
+    // over the back, not a wing.)
     var flut: f32 = 0.0;
     if (st_t >= 0.0) { flut = smooth01(st_t / 0.05) * (1.0 - smooth01((st_t - 0.35) / 0.25)); }
     let beat = 0.5 + 0.5 * sin(TAU * 13.0 * max(st_t, 0.0));
+    let cock = COCK * landed + flick + 0.25 * alert - 0.15 * lie - 0.25 * graze + TAIL_FLICK * flut * (0.4 + 0.6 * beat);
+    T.q[B_TAIL] = q_mul(qbody, q_xyz(soft_xyz(vec3<f32>(cock, 0.0, 0.0), B_TAIL, 0.1)));
+    T.p[B_TAIL] = head_of(T, B_TAIL);
     for (var w: i32 = 0; w < 2; w += 1) {
         let sd = SIDE[w];
         let b0 = WING_B0[w];
-        let open = flut * (0.35 + 0.65 * beat);
+        let open = WING_FLICK * flut * (0.35 + 0.65 * beat);
         T.q[b0] = q_mul(qbody, q_xyz(soft_xyz(vec3<f32>(-0.4 * open, 0.0, sd * 1.3 * open), b0, 0.1)));
         T.p[b0] = head_of(T, b0);
         T.q[b0 + 1] = q_mul(T.q[b0], q_xyz(soft_xyz(vec3<f32>(0.0, -sd * 1.2 * open, 0.0), b0 + 1, 0.1)));
