@@ -361,12 +361,16 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
             }
         }
         if (!planted) {
-            let u = min(state[k + L_U] + dt / max(state[k + L_DUR], 0.03), 1.0);
+            let u_end = state[k + L_U] + dt / max(state[k + L_DUR], 0.03);
+            let u = min(u_end, 1.0);
             state[k + L_U] = u;
             let settle = state[k + L_KIND] > 0.5;
             // Where it lands: home as it will be by mid-stance, turned on by
             // the turn it will make, placed from the body where it is.
-            let to_mid = (1.0 - u) * state[k + L_DUR] + 0.5 * stance_t;
+            // (The time left runs past the swing's end by what the last step
+            // overshoots it: cut off there, the landing place went on over the
+            // ground by up to a step of the body's travel as the foot met it.)
+            let to_mid = (1.0 - u_end) * state[k + L_DUR] + 0.5 * stance_t;
             var target = home;
             if (!settle) { target = q_rot(q_y(omega * to_mid), home - pos) + pos + fwd * (speed * to_mid) + lag; }
             target.y = height(env, target.x, target.z);

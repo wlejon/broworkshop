@@ -16,7 +16,9 @@
 // A foot's load comes and goes over T_LOAD after it lands and before it
 // lifts, so a touchdown is a loading and a lift-off an unloading, not a jump
 // in what the body can do. Over a stride the pushes must carry the body's
-// weight: the body keeps the share of time its feet are loaded (over about a
+// weight (a body further from its plan than STRAY leg lengths is held
+// there, and a loaded one is drawn back by a spring from STRAY_SOFT of that
+// on, so it meets the limit without a halt): the body keeps the share of time its feet are loaded (over about a
 // stride, T_SHARE) and, while loaded, pushes that much more than its weight
 // on top of the steering (a gait with flight pushes harder in stance). The rig places the body's bones about the
 // centre this returns (the pose moved by the gap between it and the plan's).
@@ -40,6 +42,7 @@ pub const MU: f32 = 0.75;        // friction the feet use, at most
 pub const MU_T: f32 = 0.35;      // the push across a leg (hip torque), as a share of its load
 pub const T_LOAD: f32 = 0.125;   // leg times to load a foot after touchdown, and to unload it before lift-off
 pub const STRAY: f32 = 0.25;     // leg lengths the body may stray from its plan at most
+pub const STRAY_SOFT: f32 = 0.6; // the share of that at which a loaded body begins to be drawn back
 
 // One foot for the body: where it is, the joint its leg swings from, the
 // leg's reach, s since it landed and s until it lifts (large when not
@@ -164,6 +167,17 @@ pub fn body_step(st: rw_store<f32, 1>, base: i32, target: vec3<f32>, stiff: f32,
         var h = hax + clamp_len(want_h - hax, MU_T * fz);
         h = clamp_len(h, MU * fz);
         a = vec3<f32>(h.x, fz - G, h.y);
+    }
+    // A loaded body nearing the most it may stray is drawn back by a spring
+    // that begins at STRAY_SOFT of it, so the limit is met without a halt.
+    let gap0 = com - target;
+    let g0 = length(gap0);
+    let soft = STRAY_SOFT * STRAY * MEAN_LEG;
+    if (g0 > soft && cap > 1e-4) {
+        let n = gap0 / g0;
+        let wb = 2.0 * wh;
+        let out = max(dot(vel - vt, n), 0.0);
+        a -= n * (wb * wb * (g0 - soft) + 2.0 * wb * out) * held;
     }
     vel += a * dt;
     com += vel * dt;

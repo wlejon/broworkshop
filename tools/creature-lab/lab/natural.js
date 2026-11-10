@@ -50,7 +50,8 @@ export const NATURAL = {
     spike: 10000,         // deg/s^2 off the line through its neighbours: the velocity kinking by ~80 deg/s in a step
     spikeLeg: 0.85,       // m of leg that is sized for: a shorter-legged creature's joints are allowed more (turnSpike)
     spikeRel: 8,          // ... or this many times the joint's median jump, the larger
-    settle: 0.5,          // s at a run's start that kinks are not counted in
+    spikeOwn: 1.0,        // ... or this many times the strongest tenth of its own accelerations then
+    settle: 0.5,         // s at a run's start that kinks are not counted in
     push: 2.5,           // the peak of a stance's push over its mean (a half sine is 1.6): the root's height may turn that hard
     variety: [0.01, 0.12],// variety as a share of the joint's range: below repeats, above wanders
     jitter: 0.015,        // jitter as a share of range
@@ -420,13 +421,24 @@ function kinksOf(th, dt, near, spike, more) {
     // passes in a steady run counted there.)
     const med = median(off.subarray(3, n - 3));
     const B = Math.max(8, Math.round(1 / dt)), nb = Math.ceil(n / B), bm = new Float64Array(nb);
-    for (let b = 0; b < nb; b++) bm[b] = median(off.subarray(b * B, Math.min(n, (b + 1) * B)));
+    // (And how hard it turns when it turns hardest, the tenth of that second's
+    // accelerations that are largest: a quick swing eased at both ends has
+    // peaks of acceleration a few steps wide, which stand out from the
+    // steps beside them by less than they are; a corner in the speed is a
+    // spike well over anything the motion does of itself.)
+    const strong = new Float64Array(nb);
+    for (let b = 0; b < nb; b++) {
+        bm[b] = median(off.subarray(b * B, Math.min(n, (b + 1) * B)));
+        const s = Float64Array.from(al.subarray(b * B, Math.min(n, (b + 1) * B)), Math.abs).sort();
+        strong[b] = s.length ? s[Math.floor(0.9 * (s.length - 1))] : 0;
+    }
+    const near3 = (a, k) => { const b = Math.floor(k / B); return Math.max(a[b], b > 0 ? a[b - 1] : 0, b < nb - 1 ? a[b + 1] : 0); };
     const local = (k) => { const b = Math.floor(k / B); return Math.max(bm[b], b > 0 ? bm[b - 1] : 0, b < nb - 1 ? bm[b + 1] : 0); };
     const lim = Math.max(spike, NATURAL.spikeRel * med);
     const spikes = [];
     // One kink leaves half of itself two steps either side: the peak within three steps counts.
     for (let k = 3; k < n - 3; k++) {
-        const limK = Math.max(spike, NATURAL.spikeRel * local(k), more ? more[k] : 0);
+        const limK = Math.max(spike, NATURAL.spikeRel * local(k), NATURAL.spikeOwn * near3(strong, k), more ? more[k] : 0);
         if (res[k] <= limK) continue;
         let peak = true;
         for (let j = Math.max(3, k - 3); j <= Math.min(n - 4, k + 3) && peak; j++) if (j !== k && (res[j] > res[k] || (res[j] === res[k] && j < k))) peak = false;

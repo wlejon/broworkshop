@@ -587,10 +587,12 @@ text under the creature's folder; `score`, `sweep` and `kinks` run what
   bound after it); and the moments most bones kink at together (kinks
   within two steps of each other are one event of the rig's, `+root` where
   the root's place kinks too), which are the ones to `trace`. (A kink is a
-  spike over the larger of the joint's limit and eight times its own median
-  in the second it is in and the one either side, so the same stride counts
+  spike over the largest of the joint's limit, eight times its own median
+  in the second it is in and the one either side, and the acceleration it
+  reaches a tenth of the time in those seconds, so the same stride counts
   the same in a steady run, in a run of several paces and in one that starts
-  from a stand.)
+  from a stand, and a joint that brakes hard every stride is not kinking
+  when it brakes that hard again.)
   `--bone <name>` lists that bone's every kink (time, size, event); `--at
   "<foot> <down|lift>"` every bone kinking there.
 - `trace <scenario>` (`<scenario>-trace.txt`): a row a step from `--from` to
