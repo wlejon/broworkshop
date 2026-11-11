@@ -379,10 +379,12 @@ export function posesSheet(rec, { path } = {}) {
 
     // --- draw ---
     const cw = 270, ch = 430, LM = 16, TM = 74, GAP = 8;
-    const SH = 330;
-    const W = LM + keys.length * (cw + GAP) + 8, H = TM + ch + 110 + SH + 40 + 18 * flags.length + 20;
+    const SH = 330, extraLegH = 18 * Math.max(0, skel.feet.length - 2);
+    const W = LM + keys.length * (cw + GAP) + 8, H = TM + ch + 110 + extraLegH + SH + 40 + 18 * flags.length + 20;
     const top = Math.max(...skel.bones.map((bn) => Math.max(bn.head[1], bn.tail[1])));
-    let target = [0, top * 0.5, 0], camDist = top * 2.25;
+    const zVals = skel.bones.flatMap((bn) => [bn.head[2], bn.tail[2]]);
+    const zMin0 = Math.min(...zVals), zMax0 = Math.max(...zVals);
+    let target = [0, top * 0.5, 0.5 * (zMin0 + zMax0)], camDist = Math.max(top * 2.25, (zMax0 - zMin0) * 3.1);
     if (gait.flight) {
         let yMin = Infinity, yMax = -Infinity, zMin = Infinity, zMax = -Infinity;
         for (const [, k] of keys) {
@@ -421,7 +423,7 @@ export function posesSheet(rec, { path } = {}) {
         text(g, `hips ${(100 * fr.rootY).toFixed(1)} cm · lean ${fr.lean.toFixed(0)} deg`, x0 + 4, y, { size: 13 });
         fr.legs.forEach((L, f) => text(g, `${skel.feet[f].name}: bend ${L.bend.toFixed(0)} · ext ${(100 * L.ext).toFixed(0)}%${fr.down[f] ? ' · down' : ''}`, x0 + 4, y + 20 + 18 * f, { size: 13, color: FOOT_COLORS[f] }));
     });
-    const gy = TM + ch + 86;
+    const gy = TM + ch + 86 + extraLegH;
     const gl = gait.flight
         ? `flight: cycle ${((b - a) * rec.dt).toFixed(3)} s, body height ${(100 * gait.lowY).toFixed(1)}-${(100 * gait.highY).toFixed(1)} cm (rise ${(100 * gait.rise).toFixed(1)} cm)`
         : gait.run
