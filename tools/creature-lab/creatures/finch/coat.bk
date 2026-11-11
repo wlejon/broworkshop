@@ -1,0 +1,85 @@
+// creature::coat — per-pixel plumage markings for the finch in rest-pose
+// coordinates (x left, y up, z forward, metres), keeping wing-bars, dark
+// remiges with pale feather-edge scalloping, mantle streaks and outer tail
+// edges crisp across every LOD while matching body.js vertex colours.
+module creature::coat;
+import mesh;
+
+fn lin(c: vec3<f32>) -> vec3<f32> {
+    return vec3<f32>(pow(c.x, 2.2), pow(c.y, 2.2), pow(c.z, 2.2));
+}
+
+fn wing_bar_z(ax: f32) -> f32 {
+    // Follows skeleton.js WING leading-edge line minus 11 mm covert chord.
+    var z: f32 = 0.020;
+    if (ax < 0.034) {
+        z = mix(0.020, 0.012, clamp((ax - 0.016) / 0.018, 0.0, 1.0));
+    } else if (ax < 0.058) {
+        z = mix(0.012, 0.022, clamp((ax - 0.034) / 0.024, 0.0, 1.0));
+    } else {
+        z = mix(0.022, 0.000, clamp((ax - 0.058) / 0.064, 0.0, 1.0));
+    }
+    return z - 0.011;
+}
+
+pub fn coat(p: vec3<f32>, foot: f32, s: mesh::Surface) -> mesh::Surface {
+    var out = s;
+    let w = max(foot, 0.0002);
+    let ax = abs(p.x);
+    var c = s.base_color;
+    var rough = s.roughness;
+
+    // Dorsal spread-wing plumage: greater & median buff wing-bars and crisp
+    // dark remiges with pale buff outer-vane edging.
+    let on_wing = smoothstep(0.0165, 0.0195, ax) * smoothstep(0.056, 0.0605, p.y);
+    if (on_wing > 0.001) {
+        let dorsal = smoothstep(0.0598, 0.0616, p.y);
+        let back = wing_bar_z(ax) - p.z;
+        let covert_dark = lin(vec3<f32>(0.33, 0.23, 0.14));
+        let bar_buff = lin(vec3<f32>(0.86, 0.74, 0.56));
+        let remex_dark = lin(vec3<f32>(0.13, 0.10, 0.08));
+        let vane_pale = lin(vec3<f32>(0.74, 0.65, 0.52));
+
+        // Greater wing-bar along covert tips, plus a subtle inner median bar.
+        let bar1 = smoothstep(-0.0055 - w, -0.0032, back) * (1.0 - smoothstep(-0.0006, 0.0014 + w, back))
+                   * smoothstep(0.020, 0.026, ax) * (1.0 - smoothstep(0.060, 0.072, ax));
+        let bar2 = smoothstep(-0.0115 - w, -0.0095, back) * (1.0 - smoothstep(-0.0078, -0.0060 + w, back))
+                   * smoothstep(0.021, 0.027, ax) * (1.0 - smoothstep(0.048, 0.056, ax));
+        let remex = smoothstep(-0.0005 - w, 0.0030 + w, back);
+
+        // Feather-vane periodicity across secondaries and primaries.
+        let pitch = mix(0.0062, 0.0078, smoothstep(0.052, 0.085, ax));
+        let fphase = fract((ax - 0.020 + 0.16 * max(back, 0.0)) / pitch);
+        let edge = smoothstep(0.74, 0.90, fphase) * (1.0 - smoothstep(0.93, 1.0, fphase))
+                   * smoothstep(0.002, 0.008, back) * (1.0 - smoothstep(0.036, 0.046, back));
+
+        var wc = mix(c, covert_dark, 0.45 * (1.0 - remex));
+        wc = mix(wc, remex_dark, 0.88 * remex);
+        wc = mix(wc, bar_buff, 0.88 * bar1 + 0.52 * bar2);
+        wc = mix(wc, vane_pale, 0.62 * remex * edge);
+        c = mix(c, wc, on_wing * dorsal);
+        rough = mix(rough, 0.68, 0.35 * on_wing * dorsal);
+    }
+
+    // Subtle warm-dark mantle streaking on the upper back, and pale outer
+    // tail-feather margins on the dark tail.
+    let on_mantle = (1.0 - smoothstep(0.011, 0.0155, ax))
+                    * smoothstep(0.055, 0.060, p.y)
+                    * smoothstep(-0.026, -0.014, p.z) * (1.0 - smoothstep(0.016, 0.025, p.z));
+    if (on_mantle > 0.001) {
+        let st = 0.5 + 0.5 * cos(6.2831853 * ax / 0.0042);
+        let along = 0.5 + 0.5 * sin(6.2831853 * (p.z + 0.4 * ax) / 0.016);
+        c = mix(c, lin(vec3<f32>(0.24, 0.16, 0.10)), 0.28 * on_mantle * smoothstep(0.45, 0.85, st) * along);
+    }
+
+    let on_tail = smoothstep(-0.040, -0.052, p.z) * (1.0 - smoothstep(0.013, 0.016, ax));
+    if (on_tail > 0.001) {
+        let outer = smoothstep(0.0072, 0.0094, ax);
+        c = mix(c, lin(vec3<f32>(0.12, 0.09, 0.07)), 0.70 * on_tail * (1.0 - outer));
+        c = mix(c, lin(vec3<f32>(0.84, 0.80, 0.72)), 0.65 * on_tail * outer);
+    }
+
+    out.base_color = c;
+    out.roughness = rough;
+    return out;
+}

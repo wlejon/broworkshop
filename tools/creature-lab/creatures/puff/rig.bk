@@ -107,10 +107,10 @@ const WINK_T: f32 = 7.0;             // s between its chances to wink
 @knob const LEAP_PUSH_T: f32 = 0.2;  // s the last stance is held for the push
 @knob const LEAP_DIP: f32 = 0.09;    // m the hips sink into it
 @knob const LEAP_RISE: f32 = 0.09;   // m over the stride's own they are at as the foot leaves
-const LEAP_FOLD: f32 = 0.44;      // m from its hip a foot is kept in a leap: as far as the leg folds
+const LEAP_FOLD: f32 = 0.30;      // m minimum 3D hip-to-ball fold distance in a leap
 const LEAP_FLIGHT: f32 = 0.6;       // s of flight it plans its take-off spot for
 @knob const LEAP_LATE: f32 = 0.07;   // s after the hips cross the log that the flight tops
-@knob const LEAP_TUCK: f32 = 0.2;   // m the feet are drawn up under it in the air
+@knob const LEAP_TUCK: f32 = 0.14;   // m the feet are drawn up under it in the air
 
 fn select_i(c: bool, a: i32, b: i32) -> i32 {
     if (c) { return a; }
@@ -317,7 +317,12 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
         // (A foot the clock has down is on the ground: only one in its swing is drawn up.)
         for (var l: i32 = 0; l < NLEGS; l += 1) {
             // (The trailing one, which pushed, more: the leading leg is high already.)
-            if (gait_stance(C_WALK, C_RUN, rw, l, phase) < 0.0) { K.foot[l].y += LEAP_TUCK * w * select_f(l == leap_leg, 1.0, 0.2); }
+            if (gait_stance(C_WALK, C_RUN, rw, l, phase) < 0.0) {
+                let su = gait_swing(C_WALK, C_RUN, rw, l, phase);
+                let env_u = bump(su, 0.28, 0.72);
+                K.foot[l].y += LEAP_TUCK * w * env_u * select_f(l == leap_leg, 1.0, 0.25);
+                K.fa[l].x = mix(K.fa[l].x, clamp(K.fa[l].x, -0.45, 0.52), 0.72 * w * env_u);
+            }
         }
     }
 
@@ -445,26 +450,23 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
                 // its side.
                 // The leg that pushed is drawn through under the hips as a
                 // hurdler's trailing leg is, not left hanging out behind.
+                let lw = smooth01(leap_w) * bump(u, 0.28, 0.72);
                 if (l == leap_leg) {
-                    let under = org + lift + vec3<f32>(0.0, HEAD[LEG_TOP[l] + 3].y + 0.16, 0.0) + q_rot(qyaw, vec3<f32>(HEAD[LEG_TOP[l]].x, 0.0, -0.1));
-                    ball = mix(ball, under, 0.7 * smooth01(leap_w));
+                    let under = org + lift + vec3<f32>(0.0, HEAD[LEG_TOP[l] + 3].y + 0.14, 0.0) + q_rot(qyaw, vec3<f32>(HEAD[LEG_TOP[l]].x, 0.0, -0.05));
+                    ball = mix(ball, under, 0.65 * lw);
                 }
                 let own = height(env, ball.x, ball.z);
-                ball.y = max(ball.y + smooth01(leap_w) * (ground_now - own), own + HEAD[LEG_TOP[l] + 3].y + 0.05);
-                // (Over the log a foot is lifted toward the hip it hangs
-                // from; nearer than the leg can fold, it is carried out
-                // ahead or behind instead, where it is already going.)
+                ball.y = max(ball.y + lw * (ground_now - own), own + HEAD[LEG_TOP[l] + 3].y + 0.05 * lw);
+                // Keep the tucked foot comfortably inside the leg's sagittal plane
+                // and smooth minimum 3D fold radius, without any front/back sign flip.
                 let hip = org + lift + vec3<f32>(0.0, HEAD[LEG_TOP[l]].y + K.root.y, 0.0) + q_rot(qyaw, vec3<f32>(HEAD[LEG_TOP[l]].x, 0.0, K.root.z));
-                let dh = vec2<f32>(ball.x - hip.x, ball.z - hip.z);
-                let need = sqrt(max(LEAP_FOLD * LEAP_FOLD - (ball.y - hip.y) * (ball.y - hip.y), 0.0));
-                let have = length(dh);
-                if (have < need) {
-                    let way = select_f(dot(dh, vec2<f32>(fwd.x, fwd.z)) >= 0.0, 1.0, -1.0);
-                    let out = mix(vec2<f32>(fwd.x, fwd.z) * way, dh / max(have, 0.0001), smooth01(have / 0.1));
-                    let to = out / max(length(out), 0.0001) * need;
-                    ball.x = hip.x + to.x;
-                    ball.z = hip.z + to.y;
-                }
+                var rel = q_rot(q_conj(qyaw), ball - hip);
+                rel.x = mix(rel.x, clamp(rel.x, -0.035, 0.035), lw);
+                let d3 = length(rel);
+                let d_safe = 0.5 * (d3 + LEAP_FOLD + sqrt((d3 - LEAP_FOLD) * (d3 - LEAP_FOLD) + 0.0025));
+                rel = mix(rel, rel * (d_safe / max(d3, 1e-4)), lw);
+                ball = hip + q_rot(qyaw, rel);
+                ball.y = max(ball.y, own + HEAD[LEG_TOP[l] + 3].y + 0.045 * lw);
             }
             if (sp >= 0.0 && !early) {
                 planted = true;

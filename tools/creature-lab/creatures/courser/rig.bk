@@ -78,9 +78,9 @@ pub const STATE: i32 = PROBE + PROBE_N;
 // damping, and the most it turns from where the keys have it (rad).
 const LOOSE: array<i32, NLOOSE> = [B_CREST1, B_CREST2, B_WINGL, B_WINGR, B_TAIL1, B_TAIL2, B_TAIL3];
 // (The tail's are not sprung but trail, `trail`: rad/s each follows at.)
-const LOOSE_W: array<f32, NLOOSE> = [30.0, 22.0, 24.0, 25.0, 34.0, 30.0, 26.0];
-const LOOSE_RUN: array<f32, NLOOSE> = [30.0, 30.0, 6.0, 6.0, 0.0, 0.0, 0.0];
-const LOOSE_ZETA: array<f32, NLOOSE> = [0.55, 0.5, 0.55, 0.55, 0.8, 0.8, 0.8];
+const LOOSE_W: array<f32, NLOOSE> = [26.0, 20.0, 24.0, 25.0, 34.0, 30.0, 26.0];
+const LOOSE_RUN: array<f32, NLOOSE> = [6.0, 6.0, 6.0, 6.0, 0.0, 0.0, 0.0];
+const LOOSE_ZETA: array<f32, NLOOSE> = [0.76, 0.72, 0.62, 0.62, 0.8, 0.8, 0.8];
 const LOOSE_MAX: array<f32, NLOOSE> = [0.5, 0.5, 0.14, 0.14, 0.16, 0.2, 0.24];
 
 @knob const LAYERS: f32 = 1.0;       // the head's steadying and the loose parts' share (0: the keys as they are)
@@ -100,13 +100,12 @@ const SNAP_T: f32 = 0.11;            // s its head takes to a new one
 const SHUFFLE_T: f32 = 6.5;          // s between its wings' chances to shuffle
 const BLINK_T: f32 = 2.7;            // s to a blink, about
 // A leap (over a log in its way, at a run): a hurdler's, off one foot.
-@knob const LEAP_PUSH_T: f32 = 0.2;  // s the last stance is held for the push
-@knob const LEAP_DIP: f32 = 0.09;    // m the hips sink into it
-@knob const LEAP_RISE: f32 = 0.09;   // m over the stride's own they are at as the foot leaves
-const LEAP_FOLD: f32 = 0.44;         // m from its hip a foot is kept in a leap: as far as the leg folds
-const LEAP_FLIGHT: f32 = 0.6;       // s of flight it plans its take-off spot for
-@knob const LEAP_LATE: f32 = 0.07;   // s after the hips cross the log that the flight tops
-@knob const LEAP_TUCK: f32 = 0.2;   // m the feet are drawn up under it in the air
+@knob const LEAP_PUSH_T: f32 = 0.19; // s the last stance is held for the push
+@knob const LEAP_DIP: f32 = 0.075;   // m the hips sink into it
+@knob const LEAP_RISE: f32 = 0.11;   // m over the stride's own they are at as the foot leaves
+const LEAP_FLIGHT: f32 = 0.52;       // s of flight it plans its take-off spot for
+@knob const LEAP_LATE: f32 = 0.06;   // s after the hips cross the log that the flight tops
+@knob const LEAP_TUCK: f32 = 0.20;   // m the feet are drawn up under it in the air
 
 fn select_i(c: bool, a: i32, b: i32) -> i32 {
     if (c) { return a; }
@@ -289,7 +288,7 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
         // (The flight's top a little short of the log: the trailing foot,
         // lowest, crosses it a moment after the hips.)
         let spot = speed * (LEAP_PUSH_T + 0.5 * LEAP_FLIGHT - LEAP_LATE);
-        if (ob.y > 0.02 && ob.x < spot + 0.3 * speed / freq) {
+        if (ob.y > 0.02 && ob.x > 0.25 && ob.x < spot + 0.3 * speed / freq) {
             for (var l: i32 = 0; l < NLEGS; l += 1) {
                 // (The foot that has just come down pushes.)
                 if (gait_stance(C_WALK, C_RUN, rw, l, phase) < 0.0 && gait_stance(C_WALK, C_RUN, rw, l, phase + freq * dt) >= 0.0 && leap < 0.5) {
@@ -306,7 +305,7 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
         if (push_u < 0.0) {
             // Off the ground: the flight is what the push gave it.
             leap = 2.0;
-            leap_left = clamp(2.0 * state[s + D_AIR + 4] / 9.81, 0.2, 0.9);
+            leap_left = clamp(2.0 * state[s + D_AIR + 4] / 9.81, 0.22, 0.85);
         }
     }
     if (leap > 1.5) {
@@ -324,21 +323,31 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
     if (moving || air) { phase += cfreq * dt; }
     var K = key_mix(KS, gait_at(C_WALK, C_RUN, rw, phase), gw);
     if (push_u >= 0.0) {
-        // The push: down into the leg, then up out of it faster and faster.
+        // The push: down into the leg, then up and forward out of it faster and faster.
         let up = max(push_u - 0.4, 0.0) / 0.6;
         K.root.y += -LEAP_DIP * smooth01(push_u / 0.4) + (LEAP_DIP + LEAP_RISE) * up * up;
+        K.root.z += 0.038 * up * up;
+        // Keep the swinging ankle inside its flexion range while the hip dips into the push.
+        let swing_l = 1 - leap_leg;
+        K.fa[swing_l].x = mix(K.fa[swing_l].x, min(K.fa[swing_l].x, 0.62), smooth01(push_u / 0.22));
     }
     if (leap_w > 0.0) {
         // In the air: the neck stretched out ahead, the wings thrown open,
         // the tail up behind and the crest flat; the legs keep the stride's
-        // split, drawn up under it.
+        // split, drawn up under it with toes dorsiflexed clear of the obstacle.
         let L = key_get(K_LEAP);
         let w = smooth01(leap_w);
         for (var b: i32 = 0; b < NB; b += 1) { K.q[b] = q_norm(mix(K.q[b], same_way(L.q[b], K.q[b]), 0.85 * w)); }
         // (A foot the clock has down is on the ground: only one in its swing is drawn up.)
+        let w_tail = smooth01(min(leap_w * 1.6, 1.0));
         for (var l: i32 = 0; l < NLEGS; l += 1) {
-            // (The trailing one, which pushed, more: the leading leg is high already.)
-            if (gait_stance(C_WALK, C_RUN, rw, l, phase) < 0.0) { K.foot[l].y += LEAP_TUCK * w * select_f(l == leap_leg, 1.0, 0.2); }
+            if (gait_stance(C_WALK, C_RUN, rw, l, phase) < 0.0) {
+                let su = gait_swing(C_WALK, C_RUN, rw, l, phase);
+                let env_u = bump(su, 0.10, 0.84);
+                K.foot[l].y += LEAP_TUCK * w_tail * env_u * select_f(l == leap_leg, 1.0, 0.62);
+                K.fa[l].x = mix(K.fa[l].x, clamp(K.fa[l].x, -0.25, 0.34), 0.88 * w_tail);
+                K.fa[l].y = mix(K.fa[l].y, min(K.fa[l].y, -0.34), 0.88 * w_tail * env_u);
+            }
         }
     }
 
@@ -444,7 +453,8 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
             // its pace: the swinging foot leaves the ground it lifted from by
             // the push's time, not the clock's, or it would be dragged out
             // behind.)
-            let join = (1.0 - smooth01(u / JOIN_U)) * (1.0 - select_f(leap > 1.5, 1.0, smooth01(max(push_u, 0.0) / 0.5)));
+            let leap_hold = max(smooth01(min(leap_w * 2.0, 1.0)), smooth01(max(push_u, 0.0) / 0.5));
+            let join = (1.0 - smooth01(u / JOIN_U)) * (1.0 - leap_hold);
             // (A step on the spot, which the stand's key has no lift for, is
             // lifted here.)
             let hop = 0.045 * (1.0 - gw) * bump(u, 0.4, 0.6);
@@ -457,35 +467,36 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
             // (Joined from the ground it left, not from an offset carried
             // with the body: it leaves at the ground's speed and gathers the
             // swing's, with no corner in its path or in the legs' turning.)
-            ball = ball_on(env, mix(lead_at + lift * vec3<f32>(1.0, 0.0, 1.0), ld3(state, k + L_OFF), join), l, max(K.foot[l].y + hop + clear + max(lift.y, -0.5 * (K.foot[l].y + hop + clear)), 0.0));
+            let lift_xz = lift * vec3<f32>(1.0, 0.0, 1.0);
+            let swing_h = K.foot[l].y + hop + clear;
+            let air_y_w = (1.0 - join) * mix(1.0 - smooth01((u - 0.72) / 0.28), 1.0, smooth01(leap_w));
+            ball = ball_on(env, mix(lead_at + lift_xz, ld3(state, k + L_OFF), join), l, max(swing_h + air_y_w * max(lift.y, -0.5 * swing_h), 0.0));
             fyaw = yaw + wrap_pi(fyaw - yaw) * join;
             if (leap_w > 0.0) {
-                // In a leap a foot's height is from the ground the body
-                // stands over, not from what passes under the foot: it is
-                // carried over the log with the body, and does not step up
-                // its side.
-                // The leg that pushed is drawn through under the hips as a
-                // hurdler's trailing leg is, not left hanging out behind.
-                if (l == leap_leg) {
-                    let under = org + lift + vec3<f32>(0.0, HEAD[LEG_TOP[l] + 3].y + 0.16, 0.0) + q_rot(qyaw, vec3<f32>(HEAD[LEG_TOP[l]].x, 0.0, -0.1));
-                    ball = mix(ball, under, 0.7 * smooth01(leap_w));
-                }
+                // In a leap a foot's height is from `ground_y` (without the
+                // log's 20 cm cylinder-side cliff), plus a C1-smooth spatial
+                // arch over any obstacle bounded cleanly below the hip so
+                // neither `L` nor trailing `R` clips the log or overbends IK.
+                let w_leap = smooth01(min(leap_w * 1.6, 1.0));
+                let tuck_u = smooth01(leap_w) * bump(u, 0.20, 0.80);
                 let own = height(env, ball.x, ball.z);
-                ball.y = max(ball.y + smooth01(leap_w) * (ground_now - own), own + HEAD[LEG_TOP[l] + 3].y + 0.05);
-                // (Over the log a foot is lifted toward the hip it hangs
-                // from; nearer than the leg can fold, it is carried out
-                // ahead or behind instead, where it is already going.)
-                let hip = org + lift + vec3<f32>(0.0, HEAD[LEG_TOP[l]].y + K.root.y, 0.0) + q_rot(qyaw, vec3<f32>(HEAD[LEG_TOP[l]].x, 0.0, K.root.z));
-                let dh = vec2<f32>(ball.x - hip.x, ball.z - hip.z);
-                let need = sqrt(max(LEAP_FOLD * LEAP_FOLD - (ball.y - hip.y) * (ball.y - hip.y), 0.0));
-                let have = length(dh);
-                if (have < need) {
-                    let way = select_f(dot(dh, vec2<f32>(fwd.x, fwd.z)) >= 0.0, 1.0, -1.0);
-                    let out = mix(vec2<f32>(fwd.x, fwd.z) * way, dh / max(have, 0.0001), smooth01(have / 0.1));
-                    let to = out / max(length(out), 0.0001) * need;
-                    ball.x = hip.x + to.x;
-                    ball.z = hip.z + to.y;
+                ball.y = ball.y + w_leap * (ground_y - own);
+                let hip_y = org.y + lift.y + HEAD[LEG_TOP[l]].y + K.root.y;
+                if (l == leap_leg) {
+                    let under = org + lift + vec3<f32>(0.0, HEAD[LEG_TOP[l] + 3].y + 0.19, 0.0) + q_rot(qyaw, vec3<f32>(HEAD[LEG_TOP[l]].x, 0.0, -0.03));
+                    ball = mix(ball, under, 0.60 * tuck_u);
                 }
+                let ob_f = obstacle_ahead(env, ball.x - 0.85 * fwd.x, ball.z - 0.85 * fwd.z, vec2<f32>(fwd.x, fwd.z));
+                if (ob_f.y > 0.02 && ob_f.x < 1.7) {
+                    let d_axis = ob_f.x - 0.85;
+                    let r_flat = 0.5 * ob_f.y + 0.11;
+                    let u_arch = 1.0 - smooth01((abs(d_axis) - r_flat) / 0.34);
+                    let clear_y = min(ground_y + HEAD[LEG_TOP[l] + 3].y + (ob_f.y + 0.085) * u_arch * w_leap, hip_y - 0.42);
+                    let dy_c = ball.y - clear_y;
+                    ball.y = 0.5 * (ball.y + clear_y + sqrt(dy_c * dy_c + 0.0016));
+                }
+                ball.y = min(ball.y, hip_y - 0.41);
+                fyaw = yaw + wrap_pi(fyaw - yaw) * (1.0 - 0.85 * w_leap);
             }
             if (sp >= 0.0 && !early) {
                 planted = true;

@@ -3,14 +3,11 @@
 // left, y up, z forward, metres). `foot` is a pixel's size there; every
 // edge is softened over it.
 //
-// What it shows, from the side: a round glossy eye in a thin pale
-// eye-ring, a chestnut iris about a black pupil, and a dark stripe from the
-// bill's base back through the eye. A bird's eye does not turn in its
-// head; its face is its pupil and its brow (the rig's `mood` bone, read
-// here as look.x and look.y): at ease the pupil is wide, the eye a dark
-// bead; curious, wider still, the brow raised clear and the ring broad;
-// alarmed or flying the pupil pins small, the iris flashing round it, and
-// the brow's feathers come down over the eye's top, lowest in front.
+// Shows a glossy songbird eye in a pale buff orbital ring, a warm superciliary
+// arc below the chestnut cap, a dark lore that meets the bill's base cleanly
+// and tapers to a fine post-ocular point over the grey ear coverts, a subtle
+// malar whisker and ear-covert border, and a stout horn-pink conical bill
+// with culmen shading, nostril slits, and crisp tomium commissure.
 module creature::face;
 import mesh;
 
@@ -25,12 +22,11 @@ fn inside(d: f32, w: f32) -> f32 {
 
 // The eye (body.js's eye mass) seen from the side: (y, z) of its middle,
 // the side it is on (|x|), the opening's radius.
-const EYE: vec2<f32> = vec2<f32>(0.0785, 0.0455);
+const EYE: vec2<f32> = vec2<f32>(0.0785, 0.0448);
 const EYE_X: f32 = 0.0095;
-const EYE_R: f32 = 0.0019;
-// Where the stripe meets the bill's base, and how far back it runs.
-const BILL: vec2<f32> = vec2<f32>(0.0765, 0.0485);
-const STRIPE_BACK: f32 = 0.036;
+const EYE_R: f32 = 0.00195;
+const LORE_FRONT: vec2<f32> = vec2<f32>(0.0762, 0.0496);
+const STRIPE_BACK: vec2<f32> = vec2<f32>(0.0772, 0.0332);
 
 pub fn face(p: vec3<f32>, foot: f32, look: vec4<f32>, s: mesh::Surface) -> mesh::Surface {
     var out = s;
@@ -40,50 +36,111 @@ pub fn face(p: vec3<f32>, foot: f32, look: vec4<f32>, s: mesh::Surface) -> mesh:
     var rough = s.roughness;
     let q = vec2<f32>(p.y, p.z);
 
-    if (ax > EYE_X - 0.004 && p.z > STRIPE_BACK - 0.002 && p.z < 0.05 && abs(p.y - EYE.x) < 0.008) {
-        // The stripe: from the bill's base through the eye, fading behind it.
-        let t = clamp((p.z - BILL.y) / (STRIPE_BACK - BILL.y), 0.0, 1.0);
-        let sy = mix(BILL.x, EYE.x - 0.0004, t);
-        let fade = 1.0 - smoothstep(0.6, 1.0, t);
-        let stripe = inside(abs(p.y - sy) - 0.0011, w) * fade;
-        c = mix(c, lin(vec3<f32>(0.12, 0.09, 0.07)), 0.85 * stripe);
-        // The eye in its pale ring.
-        let r = length(q - EYE);
-        let d = r - EYE_R;
-        // (Its mood, from the rig's `mood` bone: look.x the pupil, wide at
-        // ease and curious, pinned small in alarm so the chestnut iris
-        // flashes round it; look.y the brow.)
-        let pin = clamp(look.x / 0.6, -1.0, 1.0);
-        let brow = clamp(look.y / 0.6, -1.0, 1.0);
-        c = mix(c, lin(vec3<f32>(0.85, 0.82, 0.74)), inside(d - 0.0005 - 0.0003 * max(brow, 0.0), w));
-        let open = inside(d, w);
-        var eye = mix(lin(vec3<f32>(0.50, 0.24, 0.08)), lin(vec3<f32>(0.16, 0.08, 0.04)), smoothstep(0.75, 1.0, r / EYE_R));
-        eye = mix(eye, lin(vec3<f32>(0.02, 0.018, 0.015)), inside(r - EYE_R * (0.70 + 0.24 * pin), w));
-        // The sky's light on the bead, high and forward.
-        eye = mix(eye, vec3<f32>(1.0), 0.9 * inside(length(q - EYE - vec2<f32>(0.35, 0.3) * EYE_R) - 0.22 * EYE_R, w));
-        // The third eyelid (look.w): pale and half clear, across from the
-        // front corner.
-        let front = (p.z - EYE.y) / EYE_R;
-        let mem = inside((1.0 - 2.0 * look.w - front) * EYE_R, w) * step(0.001, look.w);
-        eye = mix(eye, lin(vec3<f32>(0.62, 0.64, 0.66)), 0.8 * mem);
-        c = mix(c, eye, open);
-        rough = mix(rough, mix(0.04, 0.3, mem), open);
-        // The lower lid (look.z): the face's feathers, up over the eye.
-        let lid = open * inside(((p.y - EYE.x) / EYE_R - (2.0 * look.z - 1.0)) * EYE_R, w) * step(0.001, look.z);
-        c = mix(c, s.base_color * 0.9, lid);
-        rough = mix(rough, s.roughness, lid);
-        // The brow: the feathers over the eye. Sleeked down in alarm and in
-        // flight they come low over it, lowest in front, and flatten its
-        // top to a glare; raised, curious, they stand clear and the eye is
-        // round in a wider ring.
-        let stern = max(-brow, 0.0);
-        let by = EYE.x + EYE_R * (1.02 + 0.5 * brow) - 0.55 * stern * (p.z - EYE.y);
-        let over = open * inside(by - p.y, w) * step(0.001, stern);
-        c = mix(c, s.base_color * 0.8, over);
-        rough = mix(rough, s.roughness, over);
-        let line = inside(abs(p.y - by) - 0.00035, w) * inside(abs(p.z - EYE.y) - 1.3 * EYE_R, w);
-        c = mix(c, lin(vec3<f32>(0.10, 0.08, 0.06)), (0.25 + 0.6 * stern) * line);
+    // Stout conical songbird bill: culmen shading, tiny nostril slit, and
+    // crisp dark tomium/commissure gape line.
+    if (p.z > 0.0476 && p.y > 0.068 && p.y < 0.082) {
+        let on_bill = smoothstep(0.0480, 0.0496, p.z);
+        let u = clamp((p.z - 0.0488) / 0.0128, 0.0, 1.0);
+        let gape_y = mix(0.0739, 0.0713, u);
+        let culmen_y = mix(0.0786, 0.0716, u);
+        // Subtle horn-dusky culmen ridge and tip.
+        let culmen = smoothstep(gape_y + 0.0006, culmen_y, p.y) * (0.35 + 0.50 * smoothstep(0.45, 0.98, u));
+        c = mix(c, lin(vec3<f32>(0.34, 0.25, 0.22)), 0.55 * on_bill * culmen);
+        // Pale warm-ivory lower mandible highlight.
+        let lower = smoothstep(gape_y, gape_y - 0.0018, p.y) * (1.0 - smoothstep(0.65, 1.0, u));
+        c = mix(c, lin(vec3<f32>(0.80, 0.68, 0.60)), 0.35 * on_bill * lower);
+        // Commissure / gape line from rictus to bill tip.
+        let gape_line = inside(abs(p.y - gape_y) - mix(0.00028, 0.00014, u), w)
+                        * smoothstep(0.0478, 0.0488, p.z);
+        c = mix(c, lin(vec3<f32>(0.16, 0.11, 0.09)), 0.78 * gape_line);
+        // Tiny oval nostril near the base of the upper mandible.
+        let nd = length((q - vec2<f32>(0.0759, 0.0507)) / vec2<f32>(0.00042, 0.00078)) - 1.0;
+        let naris = inside(nd * 0.0005, w) * smoothstep(0.0014, 0.0022, ax) * (1.0 - smoothstep(0.0036, 0.0044, ax));
+        c = mix(c, lin(vec3<f32>(0.10, 0.07, 0.06)), 0.85 * naris);
+        rough = mix(rough, 0.36, 0.55 * on_bill);
     }
+
+    // Head markings: supercilium, tapered lore & post-ocular eye-stripe,
+    // auricular cheek framing, malar whisker, and glossy eye.
+    if (ax > 0.0025 && p.z > 0.030 && p.z < 0.0515 && p.y > 0.067 && p.y < 0.086) {
+        let side_f = smoothstep(0.0032, 0.0068, ax);
+
+        // Pale-buff superciliary eyebrow arc separating cheek from chestnut cap.
+        let sup_u = clamp((p.z - 0.034) / 0.0155, 0.0, 1.0);
+        let sup_y = EYE.x + 0.0029 + 0.0007 * sin(3.14159265 * sup_u) - 0.0007 * (1.0 - sup_u);
+        let sup_hw = mix(0.00035, 0.00095, sin(3.14159265 * clamp(sup_u * 0.92 + 0.05, 0.0, 1.0)));
+        let sup = inside(abs(p.y - sup_y) - sup_hw, w + 0.00025)
+                  * smoothstep(0.0335, 0.037, p.z) * (1.0 - smoothstep(0.0482, 0.0502, p.z))
+                  * side_f;
+        c = mix(c, lin(vec3<f32>(0.86, 0.78, 0.64)), 0.58 * sup);
+
+        // Subtle warm-brown rear/lower border framing the grey ear coverts, plus
+        // a fine malar whisker slanting back from the gape corner.
+        let aur_c = vec2<f32>(0.0748, 0.0392);
+        let aur_r = length((q - aur_c) / vec2<f32>(0.0036, 0.0056));
+        let aur_rim = smoothstep(0.75, 1.0, aur_r) * (1.0 - smoothstep(1.02, 1.28, aur_r))
+                      * smoothstep(0.043, 0.037, p.z) * side_f;
+        c = mix(c, lin(vec3<f32>(0.28, 0.20, 0.14)), 0.35 * aur_rim);
+
+        let mal_u = clamp((0.0488 - p.z) / 0.0078, 0.0, 1.0);
+        let mal_y = mix(0.0736, 0.0706, mal_u);
+        let malar = inside(abs(p.y - mal_y) - mix(0.00042, 0.00015, mal_u), w + 0.00012)
+                    * smoothstep(0.0494, 0.0482, p.z) * (1.0 - smoothstep(0.0422, 0.0405, p.z))
+                    * side_f;
+        c = mix(c, lin(vec3<f32>(0.18, 0.13, 0.10)), 0.55 * malar);
+
+        // Dark lore (bill base -> eye) and tapered post-ocular streak (eye -> ear coverts).
+        var sy: f32 = EYE.x;
+        var shw: f32 = 0.0011;
+        var sfade: f32 = 0.0;
+        if (p.z >= EYE.y) {
+            let lt = clamp((p.z - EYE.y) / (LORE_FRONT.y - EYE.y), 0.0, 1.0);
+            sy = mix(EYE.x, LORE_FRONT.x, lt * lt);
+            shw = mix(0.00125, 0.00072, lt);
+            sfade = (1.0 - smoothstep(0.72, 1.06, lt)) * smoothstep(0.0030, 0.0056, ax);
+        } else {
+            let pt = clamp((EYE.y - p.z) / (EYE.y - STRIPE_BACK.y), 0.0, 1.0);
+            sy = mix(EYE.x, STRIPE_BACK.x, pt);
+            shw = mix(0.00115, 0.00018, smoothstep(0.0, 1.0, pt));
+            sfade = (1.0 - smoothstep(0.35, 1.0, pt)) * smoothstep(0.0055, 0.0082, ax);
+        }
+        let stripe = inside(abs(p.y - sy) - shw, w + 0.00012) * sfade;
+        c = mix(c, lin(vec3<f32>(0.11, 0.08, 0.06)), 0.86 * stripe);
+
+        // The eye in its pale orbital ring (only on the lateral eye surface).
+        if (ax > EYE_X - 0.0036) {
+            let r = length(q - EYE);
+            let d = r - EYE_R;
+            let pin = clamp(look.x / 0.6, -1.0, 1.0);
+            let brow = clamp(look.y / 0.6, -1.0, 1.0);
+            c = mix(c, lin(vec3<f32>(0.87, 0.83, 0.75)), inside(d - 0.00048 - 0.00028 * max(brow, 0.0), w));
+            let open = inside(d, w);
+            var eye = mix(lin(vec3<f32>(0.52, 0.25, 0.09)), lin(vec3<f32>(0.15, 0.07, 0.035)), smoothstep(0.72, 1.0, r / EYE_R));
+            eye = mix(eye, lin(vec3<f32>(0.018, 0.016, 0.014)), inside(r - EYE_R * (0.68 + 0.24 * pin), w));
+            // Primary sky catchlight + subtle warm lower-rear reflection.
+            eye = mix(eye, vec3<f32>(1.0), 0.92 * inside(length(q - EYE - vec2<f32>(0.36, 0.30) * EYE_R) - 0.22 * EYE_R, w));
+            eye = mix(eye, lin(vec3<f32>(0.75, 0.68, 0.58)), 0.25 * inside(length(q - EYE - vec2<f32>(-0.38, -0.28) * EYE_R) - 0.16 * EYE_R, w));
+            // Third eyelid (look.w): translucent pale membrane drawn from front.
+            let front = (p.z - EYE.y) / EYE_R;
+            let mem = inside((1.0 - 2.0 * look.w - front) * EYE_R, w) * step(0.001, look.w);
+            eye = mix(eye, lin(vec3<f32>(0.62, 0.64, 0.66)), 0.8 * mem);
+            c = mix(c, eye, open);
+            rough = mix(rough, mix(0.035, 0.3, mem), open);
+            // Lower feathered lid (look.z).
+            let lid = open * inside(((p.y - EYE.x) / EYE_R - (2.0 * look.z - 1.0)) * EYE_R, w) * step(0.001, look.z);
+            c = mix(c, s.base_color * 0.9, lid);
+            rough = mix(rough, s.roughness, lid);
+            // Expressive brow feathers over top of eye.
+            let stern = max(-brow, 0.0);
+            let by = EYE.x + EYE_R * (1.02 + 0.5 * brow) - 0.55 * stern * (p.z - EYE.y);
+            let over = open * inside(by - p.y, w) * step(0.001, stern);
+            c = mix(c, s.base_color * 0.8, over);
+            rough = mix(rough, s.roughness, over);
+            let line = inside(abs(p.y - by) - 0.00032, w) * inside(abs(p.z - EYE.y) - 1.3 * EYE_R, w);
+            c = mix(c, lin(vec3<f32>(0.10, 0.08, 0.06)), (0.22 + 0.58 * stern) * line);
+        }
+    }
+
     out.base_color = c;
     out.roughness = rough;
     return out;

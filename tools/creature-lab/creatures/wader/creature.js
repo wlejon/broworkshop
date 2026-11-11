@@ -20,7 +20,11 @@ export default {
     skeleton: { bones, feet, tracks, chartJoints },
     body,
     face: 'face.bk',
-    rig: { file: 'rig.bk', kernel: 'k_rig' },
+    rig: {
+        file: 'rig.bk',
+        kernel: 'k_rig',
+        modules: { 'wader::flight': 'flight.bk' },
+    },
     scale: { height: 0.95, length: 0.66 },
     // (Its fastest is its flight: a wader that flees flies.)
     speeds: { walk: 0.6, trot: 1.3, gallop: 7.0, circle: 0.5 },

@@ -10,11 +10,15 @@
 //
 // What it shows, looking ahead:
 //   eyes    two great round ones side by side on the flat of the face: a
-//           ring of gold about a wide black pupil that widens when it is
+//           ring of luminous gold about a wide black pupil that widens when
 //           alert, glossy, a catch-light high on each, in a dark rim; the
 //           lid comes down from the top, feathered as the face is
-//   disc    fine dark rays out from each eye across the pale face, and a
-//           dark line round its edge
+//   disc    fine radial stiff-feather rays out from each eye across the pale
+//           cream disc, medial loreal bristles framing the bill, and a crisp
+//           dark radial ruff around the facial disc's rim
+//   bill    a dark slate-charcoal cere with oval nostrils at the base, horn
+//           culmen ridge and shaded lateral plates, dark tomium/mandible
+//           cleft, and dark hooked raptor tip
 module creature::face;
 import mesh;
 
@@ -33,7 +37,7 @@ const EYE: vec2<f32> = vec2<f32>(0.078, 0.985);
 const EYE_R: f32 = 0.039;
 // The face's disc (body.js's): its middle and radii, seen from the front.
 const DISC: vec2<f32> = vec2<f32>(0.0, 0.972);
-const DISC_R: vec2<f32> = vec2<f32>(0.158, 0.13);
+const DISC_R: vec2<f32> = vec2<f32>(0.158, 0.132);
 
 pub fn face(p: vec3<f32>, foot: f32, look: vec4<f32>, s: mesh::Surface) -> mesh::Surface {
     var out = s;
@@ -45,17 +49,97 @@ pub fn face(p: vec3<f32>, foot: f32, look: vec4<f32>, s: mesh::Surface) -> mesh:
     let e = (q - EYE) / EYE_R;
     let k = length(e);
 
-    if (p.z > 0.17 && k < 3.2) {
-        // The disc: rays out from the eye, fading, and a dark line round
-        // the face's edge.
+    // Mask for the hooked bill + cere protruding forward from the disc.
+    let bill_hw = mix(0.0045, 0.024, smoothstep(0.898, 0.972, p.y));
+    let bill_z0 = 0.258 - 0.008 * smoothstep(0.955, 0.915, p.y);
+    let on_bill = inside(ax - bill_hw, w * 1.5)
+                * smoothstep(0.893, 0.900, p.y)
+                * (1.0 - smoothstep(0.980, 0.988, p.y))
+                * smoothstep(bill_z0 - 0.006, bill_z0 + 0.005, p.z);
+
+    if (p.z > 0.16 && k < 3.4) {
+        // The facial disc: fine stiff radial feather rays around each eye,
+        // dark medial loreal V-arch above the cere, and a crisp scalloped
+        // dark facial-disc ruff around the outer border.
         let ang = atan2(e.y, e.x);
-        let rays = 0.5 + 0.5 * sin(46.0 * ang + 3.0 * sin(5.0 * ang));
-        let ray = smoothstep(0.55, 0.9, rays) * smoothstep(1.1, 1.35, k) * (1.0 - smoothstep(1.7, 2.6, k));
-        c = mix(c, lin(vec3<f32>(0.5, 0.4, 0.33)), 0.4 * ray);
-        let dk = length((q - DISC) / DISC_R);
-        let edge = smoothstep(0.8, 0.94, dk) * (1.0 - smoothstep(0.98, 1.1, dk));
-        c = mix(c, lin(vec3<f32>(0.2, 0.15, 0.14)), 0.7 * edge);
+        let rays = 0.5 + 0.5 * sin(52.0 * ang + 2.5 * sin(5.0 * ang));
+        let fine = 0.5 + 0.5 * sin(104.0 * ang);
+        let ray = (0.72 * smoothstep(0.48, 0.88, rays) + 0.28 * fine)
+                * smoothstep(1.06, 1.28, k)
+                * (1.0 - smoothstep(1.75, 2.65, k))
+                * (1.0 - on_bill);
+        c = mix(c, lin(vec3<f32>(0.44, 0.34, 0.28)), 0.44 * ray);
+
+        // Medial superciliary / loreal feather V-arch framing the bridge between eyes.
+        let brow_y = 0.982 + 0.62 * ax;
+        let v_arch = exp(-pow((p.y - brow_y) / 0.011, 2.0))
+                   * smoothstep(0.006, 0.022, ax)
+                   * (1.0 - smoothstep(0.055, 0.095, ax))
+                   * smoothstep(0.22, 0.252, p.z)
+                   * (1.0 - on_bill);
+        c = mix(c, lin(vec3<f32>(0.26, 0.20, 0.18)), 0.52 * v_arch);
+
+        // Crisp radial facial-disc rim ruff (classic owl dark disc border + pale inner halo).
+        let d_vec = (q - DISC) / DISC_R;
+        let dk = length(d_vec);
+        let d_ang = atan2(d_vec.y, d_vec.x);
+        let ruff_tex = 0.5 + 0.5 * sin(88.0 * d_ang + 2.0 * sin(7.0 * d_ang));
+        let inner_halo = smoothstep(0.72, 0.84, dk) * (1.0 - smoothstep(0.86, 0.94, dk)) * (1.0 - on_bill);
+        c = mix(c, lin(vec3<f32>(0.99, 0.97, 0.91)), 0.45 * inner_halo);
+        let rim_band = smoothstep(0.83, 0.93, dk) * (1.0 - smoothstep(0.99, 1.09, dk)) * (1.0 - on_bill);
+        let rim_speck = mix(0.68, 1.0, smoothstep(0.3, 0.75, ruff_tex));
+        c = mix(c, lin(vec3<f32>(0.15, 0.11, 0.10)), 0.82 * rim_band * rim_speck);
+
+        // Soft dark rictal bristle shadow tucked right around the bill's base.
+        let rictal = inside(ax - (bill_hw + 0.0055), w * 2.0) * (1.0 - on_bill)
+                   * smoothstep(0.912, 0.935, p.y) * (1.0 - smoothstep(0.980, 0.992, p.y))
+                   * smoothstep(0.244, 0.258, p.z);
+        c = mix(c, lin(vec3<f32>(0.22, 0.17, 0.15)), 0.58 * rictal);
     }
+
+    // Hooked owl bill: dark slate cere, nostril slits, horn culmen, tomium rim & dark hooked tip.
+    if (on_bill > 0.001) {
+        let horn_side = lin(vec3<f32>(0.26, 0.22, 0.19));
+        let horn_ridge = lin(vec3<f32>(0.48, 0.41, 0.33));
+        let cere_col = lin(vec3<f32>(0.13, 0.12, 0.13));
+        let tip_col = lin(vec3<f32>(0.07, 0.06, 0.065));
+
+        // Horn body with pale dorsal culmen ridge and darker sides, so the
+        // hooked beak stands out sharply against the cream facial disc.
+        let ridge = exp(-pow(ax / max(0.36 * bill_hw, 0.002), 2.0)) * smoothstep(0.268, 0.286, p.z);
+        var bc = mix(horn_side, horn_ridge, 0.78 * ridge);
+
+        // Dark hooked raptor bill tip.
+        let tip_w = smoothstep(0.928, 0.905, p.y);
+        bc = mix(bc, tip_col, 0.88 * tip_w);
+
+        // Slate-charcoal cere across the upper base of the bill.
+        let cere_line = 0.958 - 0.16 * max(0.285 - p.z, 0.0);
+        let on_cere = inside(cere_line - p.y, w * 1.5);
+        bc = mix(bc, cere_col, 0.92 * on_cere);
+
+        // Subtle dark oblique nostril slits at the lower edge of the cere.
+        let n_pos = vec2<f32>(ax - 0.0092, (p.y - 0.960) + 0.22 * (ax - 0.0092));
+        let n_d = length(n_pos / vec2<f32>(0.0030, 0.0017)) - 1.0;
+        let naris = inside(n_d * 0.002, w * 0.85) * smoothstep(0.258, 0.268, p.z);
+        let naris_rim = inside((n_d - 0.45) * 0.002, w) * (1.0 - naris) * smoothstep(0.258, 0.268, p.z);
+        bc = mix(bc, lin(vec3<f32>(0.24, 0.22, 0.22)), 0.55 * naris_rim);
+        bc = mix(bc, lin(vec3<f32>(0.02, 0.018, 0.02)), 0.95 * naris);
+
+        // Dark tomium / mandible cleft curving down from the gape toward the hook.
+        let cleft_y = 0.934 - 0.34 * max(p.z - 0.258, 0.0);
+        let cleft = inside(abs(p.y - cleft_y) - 0.0011, w * 0.85)
+                  * (1.0 - smoothstep(0.286, 0.294, p.z));
+        // Slightly darker lower mandible tucked beneath the cleft.
+        let lower_m = inside(p.y - cleft_y, w * 1.2) * (1.0 - smoothstep(0.285, 0.292, p.z));
+        bc = mix(bc, lin(vec3<f32>(0.17, 0.14, 0.13)), 0.65 * lower_m);
+        bc = mix(bc, lin(vec3<f32>(0.03, 0.022, 0.02)), 0.92 * cleft);
+
+        c = mix(c, bc, on_bill);
+        let bill_rough = mix(0.26, 0.68, on_cere) + 0.45 * naris;
+        rough = mix(rough, clamp(bill_rough, 0.18, 0.85), on_bill);
+    }
+
     if (p.z > 0.2 && k < 1.25) {
         // This eye's lid: the blink's, or the wink's if it is this one's.
         let mine = clamp(look.w * sign(p.x), 0.0, 1.0);
@@ -64,7 +148,7 @@ pub fn face(p: vec3<f32>, foot: f32, look: vec4<f32>, s: mesh::Surface) -> mesh:
         let d = (k - 1.0) * EYE_R;
         // The dark rim.
         let rim = inside(d - 0.004, w);
-        c = mix(c, lin(vec3<f32>(0.06, 0.04, 0.035)), rim);
+        c = mix(c, lin(vec3<f32>(0.05, 0.035, 0.03)), rim);
         rough = mix(rough, 0.5, rim);
         // The lid comes down from the top; the lower rises a little to
         // meet it, in a line that sags in the middle.
@@ -74,16 +158,15 @@ pub fn face(p: vec3<f32>, foot: f32, look: vec4<f32>, s: mesh::Surface) -> mesh:
         // The eye barely turns in its opening.
         let ei = e - 0.35 * vec2<f32>(sign(p.x) * look.x, look.y);
         let ki = length(ei);
-        // Gold, deeper at its edge, streaked; the pupil wide, and wider
-        // when it is alert.
+        // Gold, deeper amber-orange at its edge, radially streaked; the pupil wide.
         let ia = atan2(ei.y, ei.x);
-        var iris = mix(lin(vec3<f32>(1.0, 0.72, 0.1)), lin(vec3<f32>(0.78, 0.36, 0.04)), smoothstep(0.55, 1.0, ki));
-        iris = iris * (0.9 + 0.1 * sin(38.0 * ia));
+        var iris = mix(lin(vec3<f32>(1.0, 0.75, 0.11)), lin(vec3<f32>(0.76, 0.34, 0.035)), smoothstep(0.52, 1.0, ki));
+        iris = iris * (0.89 + 0.11 * sin(40.0 * ia));
         let pr = 0.56 + 0.16 * wide - 0.06 * shut;
         iris = mix(iris, lin(vec3<f32>(0.01, 0.008, 0.008)), inside((ki - pr) * EYE_R, w));
-        iris = mix(iris, lin(vec3<f32>(0.05, 0.03, 0.02)), smoothstep(0.9, 1.0, max(k, ki)));
+        iris = mix(iris, lin(vec3<f32>(0.04, 0.025, 0.02)), smoothstep(0.89, 1.0, max(k, ki)));
         // The upper lid's shade.
-        iris = iris * mix(1.0, 0.5, smoothstep(-0.7, 0.0, e.y - min(yu, 1.0)));
+        iris = iris * mix(1.0, 0.48, smoothstep(-0.7, 0.0, e.y - min(yu, 1.0)));
         // The catch-light: on the same side of both eyes, high, and a
         // small one low across from it.
         let pp = vec2<f32>(p.x, p.y);

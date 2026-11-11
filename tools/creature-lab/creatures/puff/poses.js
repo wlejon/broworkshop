@@ -46,19 +46,28 @@ const tail = (lift = 0, swing = 0) => ({ tail1: [lift, swing, 0], tail2: [0.5 * 
 //   tail    tips up as the body sinks, and wags against the hips' turn
 function stride(p, G) {
     // One leg at phase q since its touchdown: the ball from its rest place.
+    // Smooth toe uncurling across stance/swing and C1 heel roll at liftoff.
     const leg = (q) => {
         if (q < G.duty) {
             const s = q / G.duty;
-            const heel = s < 0.45 ? mix(G.heelLand, G.heelGive, smooth(s / 0.45)) : mix(G.heelGive, G.heelPush, ((s - 0.45) / 0.55) ** 2);
-            return { z: G.reach * (1 - 2 * s) + G.ahead, y: 0, heel, toe: mix(-10, 0, smooth(s / 0.12)) };
+            const heel = s < 0.45
+                ? mix(G.heelLand, G.heelGive, smooth(s / 0.45))
+                : mix(G.heelGive, G.heelPush, smooth((s - 0.45) / 0.55));
+            return { z: G.reach * (1 - 2 * s) + G.ahead, y: 0, heel, toe: mix(G.toeLand, 0, smooth(s / 0.34)) };
         }
         const u = (q - G.duty) / (1 - G.duty);
-        const heel = u < 0.3 ? mix(G.heelPush, G.heelFold, smooth(u / 0.3)) : mix(G.heelFold, G.heelLand, smooth((u - 0.3) / 0.7));
-        const toe = u < 0.3 ? mix(0, 34, smooth(u / 0.3)) : u < 0.8 ? mix(34, -16, smooth((u - 0.3) / 0.5)) : mix(-16, -10, smooth((u - 0.8) / 0.2));
+        const heel = u < 0.34
+            ? mix(G.heelPush, G.heelFold, smooth(u / 0.34))
+            : mix(G.heelFold, G.heelLand, smooth((u - 0.34) / 0.66));
+        const toe = u < 0.38
+            ? mix(0, G.toeCurl, smooth(u / 0.38))
+            : u < 0.84
+                ? mix(G.toeCurl, G.toeOpen, smooth((u - 0.38) / 0.46))
+                : mix(G.toeOpen, G.toeLand, smooth((u - 0.84) / 0.16));
         // (It reaches a little past where it lands and is drawn back onto the ground.)
         const fwd = smooth(u / 0.92);
-        const z = G.reach * (-1 + 2 * (u < 0.92 ? 1.04 * fwd : mix(1.04, 1, (u - 0.92) / 0.08))) + G.ahead;
-        return { z, y: G.lift * Math.sin(Math.PI * u ** 0.85) ** 1.3, heel, toe };
+        const z = G.reach * (-1 + 2 * (u < 0.92 ? 1.035 * fwd : mix(1.035, 1, (u - 0.92) / 0.08))) + G.ahead;
+        return { z, y: G.lift * Math.sin(Math.PI * u ** 0.9) ** 1.6, heel, toe };
     };
     const l = leg(p), r = leg((p + 0.5) % 1);
     const Y = -G.yaw * cos(p - 0.03);
@@ -91,8 +100,9 @@ function stride(p, G) {
 // The walk: a waddle, the ball rocking from foot to foot.
 const WALK = {
     duty: 0.62, reach: 0.25, ahead: 0.01, lift: 0.1, inset: 0.03,
-    heelLand: -4, heelGive: -13, heelPush: 34, heelFold: 62,
-    down: -0.022, bob: 0.018, low: 0.06, fore: 0, sway: 0.026, yaw: 8, rock: 5.5, pitch: 2, nod: 1.4, chin: 0,
+    heelLand: -4, heelGive: -13, heelPush: 32, heelFold: 58,
+    toeCurl: 24, toeOpen: -9, toeLand: -5,
+    down: -0.022, bob: 0.018, low: 0.06, fore: 0.014, sway: 0.026, yaw: 8, rock: 5.5, pitch: 2, nod: 1.4, chin: 0,
     wingOut: 2, wingFlap: 16, wingBack: 0, wingBeat: 2, tuftBack: 0, tuftFlat: 0,
     tailLift: 0, tailBob: 6, tailWag: 11,
 };
@@ -100,8 +110,9 @@ const WALK = {
 // flat, a long step and a flight after each.
 const RUN = {
     duty: 0.3, reach: 0.29, ahead: -0.02, lift: 0.17, inset: 0.05,
-    heelLand: 2, heelGive: -16, heelPush: 44, heelFold: 78,
-    down: -0.05, bob: 0.026, low: 0.15, fore: 0.02, sway: 0.008, yaw: 9, rock: 2.5, pitch: 17, nod: 0, chin: -3,
+    heelLand: 2, heelGive: -16, heelPush: 42, heelFold: 72,
+    toeCurl: 26, toeOpen: -8, toeLand: -4,
+    down: -0.05, bob: 0.026, low: 0.15, fore: 0.024, sway: 0.008, yaw: 9, rock: 2.5, pitch: 17, nod: 0, chin: -3,
     wingOut: 34, wingFlap: 8, wingBack: 58, wingBeat: 6, tuftBack: 46, tuftFlat: 22,
     tailLift: 22, tailBob: 9, tailWag: 5,
 };
@@ -119,14 +130,14 @@ function cycleOf(name, G) {
 const walk = cycleOf('walk', WALK), run = cycleOf('run', RUN);
 
 export const poses = {
-    // Standing: as the skeleton stands it.
-    stand: { bones: {} },
+    // Standing: poised squarely over its feet (margin > +0.01 m inside support).
+    stand: { root: [0, 0, 0.024], bones: {} },
     ...walk.poses,
     ...run.poses,
     // Alert: stretched up tall on straight legs, the tufts stood up, the
     // wings tight, the tail up.
     alert: {
-        root: [0, 0.035, 0.02], turn: [-5, 0, 0],
+        root: [0, 0.035, 0.032], turn: [-5, 0, 0],
         bones: { chest: [-3, 0, 0], head: [8, 0, 0], ...tufts(-8, -16), ...wings(0), ...tail(24) },
         feet: { L: { heel: 8 }, R: { heel: 8 } },
     },

@@ -1,0 +1,194 @@
+// Pure kinematic helpers for the wader's legs, S-curved neck, and wings.
+// Kept in a submodule so `rig.bk` stays focused on intent, gait, and flight state.
+module wader::flight;
+import creature::common::*;
+import creature::skeleton::*;
+import creature::pose::*;
+import creature::limbs::*;
+from creature::ground import height;
+
+pub const LEG_B0: array<i32, 2> = [B_FEMURL, B_FEMURR];
+pub const WING_B0: array<i32, 2> = [B_HUMERUSL, B_HUMERUSR];
+pub const WING_NB: i32 = 15;
+pub const SIDE: array<f32, 2> = [1.0, -1.0];
+
+// Folded wing geometry: each bone swings in the wing plane from its spread
+// direction to FOLD_SWEEP, then the plane rolls down along the flank
+// (FOLD_ROLL) and angles slightly inward (FOLD_IN / FOLD_TIP) so both wings
+// nest sleekly outside the body without crossing the back or each other.
+pub const FOLD_SWEEP: array<f32, 15> = [
+    1.30, -1.78, 1.44,
+    1.46, 1.49, 1.51, 1.53, 1.55,
+    1.37, 1.39, 1.42, 1.45, 1.49,
+    1.52, 1.50];
+pub const FOLD_ROLL: f32 = -1.39;
+pub const FOLD_IN: f32 = 0.055;
+pub const FOLD_TIP: f32 = 0.020;
+
+pub const NECK_TWIST: array<f32, 3> = [0.15, 0.35, 0.6];
+const NECK_HOOK: f32 = 1.12;
+const NECK_NEAR: f32 = 0.62;
+const NECK_FAR: f32 = 0.985;
+const RISE_EASE: f32 = 0.012;
+const TOE_LEN: f32 = 0.10;
+
+// 0 to 1 over x in [0, 1] with no speed or acceleration at either end.
+pub fn ease5(x: f32) -> f32 {
+    let t = clamp(x, 0.0, 1.0);
+    return t * t * t * (t * (6.0 * t - 15.0) + 10.0);
+}
+
+pub fn select_i(c: bool, a: i32, b: i32) -> i32 {
+    if (c) { return a; }
+    return b;
+}
+
+pub fn select_v2(c: bool, a: vec2<f32>, b: vec2<f32>) -> vec2<f32> {
+    if (c) { return a; }
+    return b;
+}
+
+// A leg's home: its toe tip under its hip as the rest pose stands it,
+// narrower running, from the root.
+pub fn home_of(l: i32, rw: f32) -> vec3<f32> {
+    let t = TAIL[LEG_B0[l] + 3] - HEAD[B_BODY];
+    return vec3<f32>(t.x * (1.0 - 0.4 * rw), 0.0, t.z);
+}
+
+// The toes at limb angle a (in the yaw frame): from the ball to the tip.
+pub fn toe_vec(l: i32, a: f32) -> vec3<f32> {
+    let lh = rest_len(LEG_B0[l] + 3);
+    return vec3<f32>(0.0, -lh * cos(a), lh * sin(a));
+}
+
+// The pantograph's reach from the hip to the ball: the femur and tarsus as
+// one strut at their rest angle, the drumstick between.
+pub fn leg_reach(l: i32) -> f32 {
+    let b0 = LEG_B0[l];
+    let c = rest_angle(b0 + 2) - rest_angle(b0);
+    return length(rest_len(b0) * limb_dir(0.0) + rest_len(b0 + 2) * limb_dir(c)) + rest_len(b0 + 1);
+}
+
+pub fn under_cap(y: f32, cap: f32) -> f32 {
+    let e = cap - RISE_EASE;
+    if (y <= e) { return y; }
+    return e + RISE_EASE * (1.0 - exp(-(y - e) / RISE_EASE));
+}
+
+// The ground's pitch under a foot along the heading (toe down positive).
+pub fn ground_pitch(env: read_store<f32, 1>, toe: vec3<f32>, fwd: vec3<f32>) -> f32 {
+    let b = toe - fwd * TOE_LEN;
+    return atan2(height(env, b.x, b.z) - height(env, toe.x, toe.z), TOE_LEN);
+}
+
+// A run's rise and fall about its mean: free fall in each flight, an even
+// push through each stance.
+pub fn run_bounce(phase: f32, duty: f32, freq: f32) -> f32 {
+    if (duty >= 0.5) { return 0.0; }
+    let ts = duty / freq;
+    let tf = (0.5 - duty) / freq;
+    let v0 = 0.5 * 9.81 * tf;
+    let t = fract01(2.0 * phase) * 0.5 / freq;
+    var y: f32 = 0.0;
+    if (t < ts) { y = v0 / ts * (t - 0.5 * ts) * (t - 0.5 * ts); }
+    else { let u = t - ts; y = 0.25 * v0 * ts + v0 * u - 4.905 * u * u; }
+    let mean = (ts * (v0 * ts / 12.0) + tf * (0.25 * v0 * ts + 9.81 * tf * tf / 12.0)) / (ts + tf);
+    return y - mean;
+}
+
+fn neck_rest(b: i32) -> vec3<f32> {
+    let dl = rest_len(b) * limb_dir(rest_angle(b));
+    return vec3<f32>(0.0, dl.y, dl.x);
+}
+
+fn q_part(q0: vec4<f32>, t: f32) -> vec4<f32> {
+    var q = q0;
+    if (q.w < 0.0) { q = -q; }
+    let s = length(q.xyz);
+    if (s < 1e-6) { return q_id(); }
+    let h = atan2(s, q.w) * t;
+    return vec4<f32>(q.xyz * (sin(h) / s), cos(h));
+}
+
+// Solve the 3-bone cervical S-curve from its shoulder base to `to` (world).
+pub fn solve_neck(T: Pose, to: vec3<f32>) -> Pose {
+    var P = T;
+    let qb = P.q[B_BODY];
+    let base = head_of(P, B_NECK1);
+    let r1 = neck_rest(B_NECK1);
+    let r2 = neck_rest(B_NECK2);
+    let r3 = neck_rest(B_NECK3);
+    let l1 = length(r1);
+    let l2 = length(r2);
+    var d = q_rot(q_conj(qb), to - base);
+    let full = l1 + l2 + length(r3);
+    let near = NECK_NEAR * full;
+    let dl = max(length(d), 1e-6);
+    let over = 0.5 * (dl - near + sqrt((dl - near) * (dl - near) + 0.0009));
+    d = d * ((near + soft_cap(over, NECK_FAR * full - near, 0.3)) / dl);
+    let q3 = q_part(q_from_to(r1 + r2 + r3, d), NECK_HOOK);
+    let w = d - q_rot(q3, r3);
+    let dmin = abs(l1 - l2) + 0.004;
+    let D = dmin + soft_cap(max(length(w) - dmin, 0.0), (l1 + l2) * 0.995 - dmin, 0.12);
+    let wn = w / max(length(w), 1e-6);
+    let qt = q_from_to(r1 + r2, w);
+    let e0 = q_rot(qt, r1);
+    var side = e0 - wn * dot(e0, wn);
+    side = side / max(length(side), 1e-6);
+    let a = (l1 * l1 - l2 * l2 + D * D) / (2.0 * D);
+    let joint = wn * a + side * sqrt(max(l1 * l1 - a * a, 0.0));
+    let q1 = q_mul(q_from_to(e0, joint), qt);
+    let q2 = q_mul(q_from_to(q_rot(qt, r2), wn * D - joint), qt);
+    P.q[B_NECK1] = q_mul(qb, q1);
+    P.p[B_NECK1] = head_of(P, B_NECK1);
+    P.q[B_NECK2] = q_mul(qb, q2);
+    P.p[B_NECK2] = head_of(P, B_NECK2);
+    P.q[B_NECK3] = q_mul(qb, q3);
+    P.p[B_NECK3] = head_of(P, B_NECK3);
+    return P;
+}
+
+// Smooth asymmetric wingbeat phase: C-infinity continuous velocity and
+// acceleration across both stroke reversals, with `down_share` for downstroke.
+pub fn beat_wave(beat: f32, down_share: f32) -> vec2<f32> {
+    let fb = fract01(beat);
+    let u = fb + (0.5 - down_share) * sin(TAU * fb) / PI;
+    return vec2<f32>(cos(TAU * u), sin(TAU * u));
+}
+
+// Pose both wings symmetrically from the beat wave, open/splay state, and
+// subtle standing/walking flank shrug.
+pub fn pose_wings(T_in: Pose, qbody: vec4<f32>, wopen: f32, splay: f32, flare: f32,
+                  sw: f32, dn: f32, stroke_mid: f32, stroke: f32, tip_lag: f32,
+                  feather: f32, flex_amt: f32, go: f32, lie: f32, sway_u: f32,
+                  clock: f32, seed: f32) -> Pose {
+    var T = T_in;
+    let th = wopen * (stroke_mid + 0.3 * flare + stroke * (1.0 - 0.4 * flare) * sw);
+    let up_part = max(-dn, 0.0);
+    let flex = wopen * (0.05 + flex_amt * up_part * up_part);
+    for (var w: i32 = 0; w < 2; w += 1) {
+        let sd = SIDE[w];
+        let b0 = WING_B0[w];
+        let shrug = (1.0 - go) * (1.0 - lie) * smooth01((noise1(clock / 2.6, seed, 9.0 + f32(w)) - 0.5) / 0.4);
+        let ride = 0.5 - 0.5 * sd * sway_u;
+        let loose = (0.07 * shrug + 0.03 * ride * go) * (1.0 - wopen);
+        let open = smooth01(clamp(max(wopen, splay), 0.0, 1.0));
+        let f = 1.0 - open * (1.0 - flex) - 0.4 * loose;
+        let roll_a = mix(FOLD_ROLL + loose, th, open);
+        let roll_h = mix(FOLD_ROLL + loose, th + wopen * tip_lag * dn, open);
+        let q_a = q_mul(q_y(sd * FOLD_IN * (1.0 - open)), q_mul(q_z(sd * roll_a), q_x(feather * dn * wopen)));
+        let q_h = q_mul(q_y(sd * (FOLD_IN + FOLD_TIP) * (1.0 - open)), q_mul(q_z(sd * roll_h), q_x(1.25 * feather * dn * wopen)));
+        for (var i: i32 = 0; i < WING_NB; i += 1) {
+            let b = b0 + i;
+            let d = TAIL[b] - HEAD[b];
+            let spread = atan2(-d.z, sd * d.x);
+            let q_in = q_y(sd * (FOLD_SWEEP[i] - spread) * f);
+            var qb_w = q_mul(qbody, q_mul(q_a, q_in));
+            if (i >= 2 && i <= 7) { qb_w = q_mul(qbody, q_mul(q_h, q_in)); }
+            if (i > 0 && dot(qb_w, T.q[PARENT[b]]) < 0.0) { qb_w = -qb_w; }
+            T.q[b] = qb_w;
+            T.p[b] = head_of(T, b);
+        }
+    }
+    return T;
+}

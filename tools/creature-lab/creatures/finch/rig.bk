@@ -54,7 +54,10 @@ const D_BOFF: i32 = 27;      // the bounce left over from a start or stop, its s
 const D_BOFF_V: i32 = 28;
 const D_BPREV: i32 = 29;
 const D_PACE: i32 = 30;      // the pace the hop under way left the ground at
-const D_LEG: i32 = 31;
+const D_COCK: i32 = 31;      // the tail's landing-bob spring and its speed
+const D_COCK_V: i32 = 32;
+const D_WOPEN_V: i32 = 33;   // rate of opening/closing the wings
+const D_LEG: i32 = 34;
 const LEG_REC: i32 = 16;
 const L_PLANT: i32 = 0;
 const L_TOE: i32 = 1;        // the toe tip: planted, or where the swing has it (3)
@@ -124,11 +127,11 @@ const WING_NB: i32 = 12;
 // breast's side, the hand back from there to the rump; every feather back
 // along the flank, the inner ones lower, their upper faces out.
 const FOLD_D: array<vec3<f32>, 12> = [
-    vec3<f32>(0.40, -0.45, -0.80), vec3<f32>(-0.12, 0.23, 0.96), vec3<f32>(-0.15, -0.09, -0.98),
-    vec3<f32>(-0.15, -0.11, -0.98), vec3<f32>(-0.14, -0.13, -0.98), vec3<f32>(-0.14, -0.15, -0.98), vec3<f32>(-0.13, -0.17, -0.98),
-    vec3<f32>(-0.12, -0.19, -0.97), vec3<f32>(-0.11, -0.21, -0.97), vec3<f32>(-0.10, -0.23, -0.97), vec3<f32>(-0.09, -0.25, -0.96),
-    vec3<f32>(-0.09, -0.18, -0.98)];
-const FOLD_N: vec3<f32> = vec3<f32>(1.0, 0.35, 0.0);
+    vec3<f32>(0.18, -0.36, -0.915), vec3<f32>(-0.16, 0.18, 0.97), vec3<f32>(-0.08, -0.11, -0.99),
+    vec3<f32>(-0.085, -0.13, -0.988), vec3<f32>(-0.085, -0.15, -0.985), vec3<f32>(-0.085, -0.17, -0.982), vec3<f32>(-0.085, -0.19, -0.978),
+    vec3<f32>(-0.075, -0.20, -0.977), vec3<f32>(-0.07, -0.215, -0.974), vec3<f32>(-0.065, -0.23, -0.971), vec3<f32>(-0.06, -0.245, -0.968),
+    vec3<f32>(-0.065, -0.17, -0.983)];
+const FOLD_N: vec3<f32> = vec3<f32>(1.0, 0.32, 0.0);
 const BODY_REACH: f32 = 0.985;
 @knob const TRAIL_T: f32 = 0.045;    // s after a hop's take-off the feet trail where they stood
 @knob const REACH_OUT: f32 = 0.85;  // share of the leg and toes' length a foot reaching out to land may be from its hip
@@ -376,8 +379,9 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
     var und: f32 = 0.0;       // the bounds' rise and sink, and its rate
     var und_v: f32 = 0.0;
     var phi: f32 = 0.5;       // the beat's phase: 0 the wings up, 0.5 down
-    var shut_f: f32 = 1.0;    // the wings shut between bursts
+    var shut_f: f32 = 0.0;    // the wings shut between bursts (0 during climb/flare/landing)
     var flare: f32 = 0.0;     // coming down to land
+    let bound_t = BOUND_T * (0.85 + 0.3 * hash01(seed * 3.3 + 0.7));
     if (aloft) {
         fly_t += dt;
         // (Coming down it is brought to a little under the ground, so it
@@ -393,9 +397,9 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
         let a = crit_step(vec2<f32>(alt, alt_v), h_want, select_f(fly_want, select_f(vd > FLY_AT, 7.0, 13.0), mix(10.0, 6.0, smooth01(speed / 1.5))), dt);
         alt = a.x;
         alt_v = a.y;
+        if (!fly_want) { flare = smooth01(1.0 - alt / 0.12); }
         cw = approach(cw, select_f(fly_want && vd > FLY_AT && fly_t > 0.45, 1.0, 0.0), 3.0, dt);
-        let bound_t = BOUND_T * (0.85 + 0.3 * hash01(seed * 3.3 + 0.7));
-        bc += dt / bound_t;
+        bc += dt * (1.0 - 0.88 * flare) / bound_t;
         // (Climbing and coming down there is no pause: the clock goes
         // from a burst's end to the next one's start, the wings down at both.)
         if (cw < 0.5 && fract01(bc) >= BURST) { bc = floor(bc) + 1.0; }
@@ -410,16 +414,33 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
             und = -v0 * tau + v0 * tau * tau / t_b;
             und_v = -v0 + 2.0 * v0 * tau / t_b;
         } else {
+            shut_f = cw;
             let tau = (fb - BURST) * bound_t;
             und = v0 * tau - 4.905 * tau * tau;
             und_v = v0 - 9.81 * tau;
         }
         und *= UNDULATE * cw;
         und_v *= UNDULATE * cw;
-        if (!fly_want) { flare = smooth01(1.0 - alt / 0.12); }
+    } else if (wopen > 0.002) {
+        // Coast the flared wing posture smoothly to rest as the wings tuck
+        // onto the flanks after touchdown, without flapping on the ground.
+        cw = approach(cw, 0.0, 4.0, dt);
+        bc += dt * (0.12 * wopen) / bound_t;
+        if (cw < 0.5 && fract01(bc) >= BURST) { bc = floor(bc) + 1.0; }
+        let fb = fract01(bc);
+        if (fb < BURST) {
+            let ub = fb / BURST;
+            phi = 0.5 + BEATS * ub;
+            shut_f = cw * max(1.0 - smooth01(ub / 0.15), smooth01((ub - 0.87) / 0.13));
+        } else {
+            shut_f = cw;
+        }
+        flare = 1.0;
     }
-    wopen = approach(wopen, select_f(aloft, 1.0, 0.0), select_f(aloft, 14.0, 7.0), dt);
-    let rise = alt + und;     // m the body is over where it would stand
+    let ws = crit_step(vec2<f32>(wopen, state[s + D_WOPEN_V]), select_f(aloft, 1.0, 0.0), select_f(aloft, 18.0, 12.0), dt);
+    wopen = clamp(select_f(init, 0.0, ws.x), 0.0, 1.0);
+    state[s + D_WOPEN_V] = select_f(init, 0.0, ws.y);
+    var rise = alt + und;     // m the body is over where it would stand
     let rise_v = alt_v + und_v;
 
     // --- gait and the clock ---------------------------------------------------------------
@@ -463,6 +484,7 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
         boff += vec2<f32>(alt, alt_v);
         alt = 0.0;
         alt_v = 0.0;
+        rise = 0.0;
     }
     // (It is let go only while the feet are down, most at the middle of a
     // stance and not at all where they leave and land: in the air nothing
@@ -506,7 +528,7 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
         // end on the clock is one about to lift, not one just landed.)
         // (Through the push, from the bottom of the crouch on: a stance is
         // a few hundredths of a second, and a roll kept to its end is a snap.)
-        let roll = smooth01((ph - 0.45 * duty) / (0.55 * duty)) * select_f(ph < duty || state[k + L_ARMED] > 0.5, 1.0, 0.0) * go;
+        let roll = smooth01((ph - 0.40 * duty) / (0.60 * duty)) * select_f(ph < duty || state[k + L_ARMED] > 0.5, 1.0, 0.0) * go;
         var a = flat - ground_pitch(env, toe, fwd) - ROLL * roll;
         if (aloft) {
             // Flying. A foot stays down through the spring until its leg
@@ -620,7 +642,7 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
             // The toes curl under as the feet lift and open ahead to land flat.
             let gpt = ground_pitch(env, target, fwd);
             let curl = select_f(settle, mix(state[k + L_A0], flat, 0.5), CURL);
-            a = mix(mix(state[k + L_A0], curl, smooth01(u / 0.3)), flat - gpt, smooth01((u - 0.55) / 0.35));
+            a = mix(mix(state[k + L_A0], curl, smooth01(u / 0.35)), flat - gpt, smooth01((u - 0.50) / 0.42));
             toe = path;
             if (u >= 1.0 && there) {
                 planted = true;
@@ -648,13 +670,15 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
     state[s + D_FLY + 6] = wopen;
     state[s + D_FLY + 7] = log_t;
     state[s + D_FLY + 8] = log_h;
-    // The time since it landed, running on through the flight after (the
-    // tail cocked at a landing comes down in its own time, not at the step
-    // the feet leave the ground).
-    var since = state[s + D_LEG + L_SINCE];
-    if (state[s + D_LEG + L_PLANT] < 0.5) { since += state[s + D_LEG + L_U] * state[s + D_LEG + L_DUR]; }
-    let landed = select_f(state[s + D_LEG + L_KIND] < 0.5, 1.0, 0.0)
-                 * smooth01(since / 0.06) * (1.0 - smooth01((since - 0.06) / 0.18));
+    // Supple C2 springy tail bob driven by stance absorption, so the tail
+    // cocks smoothly into every hop landing and relaxes without 1-frame snaps.
+    let both_hop = state[s + D_LEG + L_PLANT] > 0.5 && state[s + D_LEG + L_KIND] < 0.5 && !aloft;
+    let stance_bell = sin(PI * clamp(fract01(phase) / duty, 0.0, 1.0));
+    let cock_in = select_f(both_hop, select_f(moving, stance_bell, smooth01(1.0 - state[s + D_LEG + L_SINCE] / 0.14)), 0.0);
+    let cs = crit_step(vec2<f32>(state[s + D_COCK], state[s + D_COCK_V]), cock_in, 24.0, dt);
+    let landed = clamp(select_f(init, 0.0, cs.x), 0.0, 1.2);
+    state[s + D_COCK] = landed;
+    state[s + D_COCK_V] = select_f(init, 0.0, cs.y);
 
     // --- the body's plan ---------------------------------------------------------------------
     // Foraging, a peck at the ground every half second or so.
@@ -662,7 +686,8 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
     let peck = smooth01(pk / 0.12) * (1.0 - smooth01((pk - 0.18) / 0.22));
     // (Flying it lies level along its way, nose up as it rises and down as
     // it sinks, and rears back to brake as it comes in to land.)
-    let lean_fly = 0.22 - clamp(0.45 * rise_v, -0.4, 0.5) - 0.55 * flare;
+    let air_v = rise_v + select_f(aloft, 0.0, boff.y);
+    let lean_fly = 0.22 - clamp(0.45 * air_v, -0.4, 0.5) - 0.55 * flare;
     let lean_want = mix(0.1 * smooth01(speed / 0.8) + (0.45 + 0.2 * peck) * graze - 0.1 * lie + 0.15 * flinch - 0.12 * alert, lean_fly, wopen);
     let ls = crit_step(vec2<f32>(state[s + D_LEAN], state[s + D_LEAN_V]), lean_want, 18.0, dt);
     let lean = select_f(init, lean_want, ls.x);
@@ -782,37 +807,36 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
     // Its mood, which its face draws (face.bk): the pupil wide at ease
     // and wider curious, pinned in alarm and on the wing; the brow raised
     // with a cocked head, sleeked down low when it is alarmed or flying.
-    {
-        let curious = abs(cocked) / 0.5;
-        let pupil = clamp(0.25 + 0.3 * graze + 0.3 * lie + 0.5 * curious - 1.1 * alert - 0.7 * flinch - 0.6 * wopen, -1.0, 1.0);
-        let brow = clamp(0.8 * curious + 0.15 * graze - 0.9 * alert - 0.6 * flinch - 0.7 * wopen, -1.0, 1.0);
-        T.q[B_MOOD] = q_mul(T.q[B_HEAD], q_mul(q_y(asin(0.6 * pupil)), q_x(-asin(0.6 * brow))));
-        T.p[B_MOOD] = head_of(T, B_MOOD);
-    }
+    let curious = abs(cocked) / 0.5;
+    let pupil = clamp(0.25 + 0.3 * graze + 0.3 * lie + 0.5 * curious - 1.1 * alert - 0.7 * flinch - 0.6 * wopen, -1.0, 1.0);
+    let brow = clamp(0.8 * curious + 0.15 * graze - 0.9 * alert - 0.6 * flinch - 0.7 * wopen, -1.0, 1.0);
+    let mood_y = asin(0.6 * pupil);
+    let mood_x = clamp(-asin(clamp(0.6 * brow / max(cos(mood_y), 0.75), -0.62, 0.62)), -0.65, 0.65);
+    let q_mood_rel = q_xyz(vec3<f32>(mood_x, mood_y, 0.0));
+    T.q[B_MOOD] = q_mul(T.q[B_HEAD], q_mood_rel);
+    T.p[B_MOOD] = head_of(T, B_MOOD);
     // The eyes: it blinks with the third eyelid, a pale flick across from
     // the front, often and too quick to follow, and at each peck as the
     // bill goes down; settled to rest, the lower lids come up and it dozes,
     // opening one now and then.
-    {
-        let bt = clock / 1.7 + seed * 4.3;
-        let bk = floor(bt);
-        let bu = ((bt - bk) - 0.1 - 0.7 * hash01(bk * 6.7 + seed)) * 1.7;
-        var flick_m: f32 = 0.0;
-        if (bu > 0.0 && bu < 0.09) { flick_m = sin(PI * bu / 0.09); }
-        let mem = max(flick_m, peck * graze);
-        let peek = smooth01(3.0 * noise1(clock * 0.21, seed, 23.0) - 1.6);
-        let doze = 0.95 * smooth01((lie - 0.5) / 0.4) * (1.0 - 0.8 * peek) * (1.0 - alert);
-        T.q[B_LID] = q_mul(T.q[B_HEAD], q_xyz(vec3<f32>(asin(doze), 0.0, asin(0.98 * mem))));
-        T.p[B_LID] = head_of(T, B_LID);
-    }
+    let bt = clock / 1.7 + seed * 4.3;
+    let bk = floor(bt);
+    let bu = ((bt - bk) - 0.1 - 0.7 * hash01(bk * 6.7 + seed)) * 1.7;
+    var flick_m: f32 = 0.0;
+    if (bu > 0.0 && bu < 0.09) { flick_m = sin(PI * bu / 0.09); }
+    let mem = max(flick_m, peck * graze);
+    let peek = smooth01(3.0 * noise1(clock * 0.21, seed, 23.0) - 1.6);
+    let doze = 0.95 * smooth01((lie - 0.5) / 0.4) * (1.0 - 0.8 * peek) * (1.0 - alert);
+    let q_lid_rel = q_xyz(vec3<f32>(asin(doze), 0.0, asin(0.98 * mem)));
+    T.q[B_LID] = q_mul(T.q[B_HEAD], q_lid_rel);
+    T.p[B_LID] = head_of(T, B_LID);
 
     // --- tail and wings ---------------------------------------------------------------------
     let flick = 0.25 * max(noise1(clock / 0.35, seed, 5.0) - 0.5, 0.0) / 0.5;
-    // Startled: the wings flick, a quarter open and shut again a dozen
-    // times a second, and the tail flicks up with them.
+    // Startled: two crisp rapid wing-and-tail flicks with C2-smooth onset.
     var flut: f32 = 0.0;
-    if (st_t >= 0.0) { flut = smooth01(st_t / 0.05) * (1.0 - smooth01((st_t - 0.35) / 0.25)); }
-    let beat = 0.5 + 0.5 * sin(TAU * 13.0 * max(st_t, 0.0));
+    if (st_t >= 0.0) { flut = ease5(st_t / 0.09) * (1.0 - ease5((st_t - 0.34) / 0.26)); }
+    let beat = 0.5 - 0.5 * cos(TAU * 4.2 * max(st_t, 0.0));
     // (Flying the tail lies out along the body, and is thrown down to brake.)
     let cock = (COCK * landed + flick) * (1.0 - wopen) + 0.25 * alert - 0.15 * lie - 0.25 * graze + TAIL_FLICK * flut * (0.4 + 0.6 * beat)
                + wopen * (0.12 - 0.5 * flare);
@@ -879,6 +903,10 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
     firm[B_HEAD] = 1.0;
     firm[B_TAIL] = 0.5;
     var A = carry_held(state, env, s + D_SEC, T, hold, firm, LAYERS, init, dt);
+    A.q[B_MOOD] = q_mul(A.q[B_HEAD], q_mood_rel);
+    A.p[B_MOOD] = head_of(A, B_MOOD);
+    A.q[B_LID] = q_mul(A.q[B_HEAD], q_lid_rel);
+    A.p[B_LID] = head_of(A, B_LID);
     // The folded wings are held to the body (sprung, a hop's landing flings
     // them open); only fluttering do they carry their own momentum.
     let keep = max(1.0 - smooth01(flut * 4.0), smooth01(wopen * 4.0));

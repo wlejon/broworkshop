@@ -60,19 +60,28 @@ const tail = (lift = [0, 0, 0], swing = [0, 0, 0]) => Object.fromEntries(lift.ma
 //   crest   lies back, lifting a little after each of the head's throws
 function stride(p, G) {
     // One leg at phase q since its touchdown: the ball from its rest place.
+    // Zero-slope C1 heel roll and smooth toe uncurling across liftoff (s = 1, u = 0).
     const leg = (q) => {
         if (q < G.duty) {
             const s = q / G.duty;
-            const heel = s < 0.45 ? mix(G.heelLand, G.heelGive, smooth(s / 0.45)) : mix(G.heelGive, G.heelPush, ((s - 0.45) / 0.55) ** 2);
-            return { z: G.reach * (1 - 2 * s) + G.ahead, y: 0, heel, toe: mix(-10, 0, smooth(s / 0.12)) };
+            const heel = s < 0.45
+                ? mix(G.heelLand, G.heelGive, smooth(s / 0.45))
+                : mix(G.heelGive, G.heelPush, smooth((s - 0.45) / 0.55));
+            return { z: G.reach * (1 - 2 * s) + G.ahead, y: 0, heel, toe: mix(G.toeLand, 0, smooth(s / 0.34)) };
         }
         const u = (q - G.duty) / (1 - G.duty);
-        const heel = u < 0.3 ? mix(G.heelPush, G.heelFold, smooth(u / 0.3)) : mix(G.heelFold, G.heelLand, smooth((u - 0.3) / 0.7));
-        const toe = u < 0.3 ? mix(0, 34, smooth(u / 0.3)) : u < 0.8 ? mix(34, -16, smooth((u - 0.3) / 0.5)) : mix(-16, -10, smooth((u - 0.8) / 0.2));
+        const heel = u < 0.34
+            ? mix(G.heelPush, G.heelFold, smooth(u / 0.34))
+            : mix(G.heelFold, G.heelLand, smooth((u - 0.34) / 0.66));
+        const toe = u < 0.38
+            ? mix(0, G.toeCurl, smooth(u / 0.38))
+            : u < 0.84
+                ? mix(G.toeCurl, G.toeOpen, smooth((u - 0.38) / 0.46))
+                : mix(G.toeOpen, G.toeLand, smooth((u - 0.84) / 0.16));
         // (It reaches a little past where it lands and is drawn back onto the ground.)
         const fwd = smooth(u / 0.92);
-        const z = G.reach * (-1 + 2 * (u < 0.92 ? 1.04 * fwd : mix(1.04, 1, (u - 0.92) / 0.08))) + G.ahead;
-        return { z, y: G.lift * Math.sin(Math.PI * u ** 0.85) ** 1.3, heel, toe };
+        const z = G.reach * (-1 + 2 * (u < 0.92 ? 1.035 * fwd : mix(1.035, 1, smooth((u - 0.92) / 0.08)))) + G.ahead;
+        return { z, y: G.lift * Math.sin(Math.PI * u ** 0.92) ** 1.65, heel, toe };
     };
     const l = leg(p), r = leg((p + 0.5) % 1);
     const yaw = (ph) => -G.yaw * cos(ph - 0.03);
@@ -87,8 +96,8 @@ function stride(p, G) {
     const held = (s - G.throwT) / (1 - G.throwT);
     const thrown = s < G.throwT ? mix(-1, 1, smooth(s / G.throwT)) : mix(1, -1, 0.7 * held + 0.3 * smooth(held));
     const reach = G.neckReach + G.throw * thrown;
-    // (The crest lifts as the head stops at the throw's end, and settles.)
-    const flick = G.crestFlick * Math.exp(-5 * Math.max(0, held)) * smooth(s / G.throwT);
+    // (The crest lifts smoothly as the head stops at the throw's end, and settles.)
+    const flick = G.crestFlick * smooth(s / G.throwT) * (1 - smooth(Math.max(0, held)));
     // The wings' flick at a landing, each a moment after its own side's foot.
     const flickL = G.wingFlick * Math.max(0, cos(p - 0.07)) ** 6, flickR = G.wingFlick * Math.max(0, cos(p - 0.57)) ** 6;
     const pitch = G.pitch + nod;
@@ -116,7 +125,8 @@ function stride(p, G) {
 // The walk: a measured strut, the head thrown and held at every step.
 const WALK = {
     duty: 0.62, reach: 0.25, ahead: 0.01, lift: 0.1, inset: 0.035,
-    heelLand: -4, heelGive: -13, heelPush: 34, heelFold: 62,
+    heelLand: -4, heelGive: -13, heelPush: 32, heelFold: 58,
+    toeCurl: 24, toeOpen: -9, toeLand: -5,
     down: -0.022, bob: 0.012, low: 0.06, fore: 0, sway: 0.016, yaw: 6, roll: 2.0, pitch: 0, nod: 1.0,
     throwAt: 0.2, throwT: 0.36, throw: 9, neckReach: 0, neckDown: 0, nose: 0, crestFlick: 9, crest: 0,
     wingOut: 0, wingLift: 0, wingFlick: 0,
@@ -126,7 +136,8 @@ const WALK = {
 // long step and a flight after each.
 const RUN = {
     duty: 0.3, reach: 0.29, ahead: -0.02, lift: 0.17, inset: 0.05,
-    heelLand: 2, heelGive: -16, heelPush: 44, heelFold: 78,
+    heelLand: 2, heelGive: -16, heelPush: 42, heelFold: 74,
+    toeCurl: 26, toeOpen: -8, toeLand: -4,
     down: -0.05, bob: 0.022, low: 0.15, fore: 0.02, sway: 0.008, yaw: 7, roll: 1.5, pitch: 7, nod: 0.4,
     throwAt: 0.2, throwT: 0.5, throw: 0, neckReach: 16, neckDown: 26, nose: 4, crestFlick: 3, crest: -6,
     wingOut: 9, wingLift: 5, wingFlick: 10,

@@ -18,6 +18,7 @@ export default {
     name: 'finch',
     skeleton: { bones, feet, tracks, chartJoints },
     body,
+    coat: 'coat.bk',
     face: 'face.bk',
     rig: { file: 'rig.bk', kernel: 'k_rig' },
     scale: { height: 0.09, length: 0.15 },
