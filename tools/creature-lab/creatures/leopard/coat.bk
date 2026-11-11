@@ -1,0 +1,277 @@
+// creature::coat — per-pixel Panthera pardus pelage in rest-pose space `p`
+// (x left, y up, z forward in metres; `foot` pixel footprint for antialiasing).
+//
+// Combines:
+//   1. Rich golden-ochre dorsal saddle -> warm apricot-buff flanks -> luminous
+//      cream-white throat, chest, belly, inner legs, and tail underside.
+//   2. Seamless 3D jittered Voronoi rosettes built from 3-4 discrete, plump,
+//      rounded C-bean spot lobes arranged organically around warm burnt-copper
+//      centers (zero geometric pie-slice bowties!), transitioning smoothly into
+//      organic oval solid black spots on the head, neck, lower limbs, and paws.
+//   3. Distal tail banding + jet-black sub-terminal ring + snowy-white S-tip.
+//   4. Signature semicircular ear ocelli: jet-black dorsal ear backs with a
+//      bright central white "thumbprint" spot, and soft cream inner pinna tufts.
+//   5. Slate-black cushioned digital and metacarpal/metatarsal paw pads.
+module creature::coat;
+import mesh;
+
+fn lin(c: vec3<f32>) -> vec3<f32> {
+    return vec3<f32>(pow(c.x, 2.2), pow(c.y, 2.2), pow(c.z, 2.2));
+}
+
+fn hash3(p: vec3<f32>) -> vec3<f32> {
+    var q = vec3<f32>(
+        dot(p, vec3<f32>(127.1, 311.7, 74.7)),
+        dot(p, vec3<f32>(269.5, 183.3, 246.1)),
+        dot(p, vec3<f32>(113.5, 271.9, 124.6))
+    );
+    q = fract(q * 0.1031);
+    q += dot(q, q.yzx + vec3<f32>(33.33));
+    return fract((q.xxy + q.yxx) * q.zyx);
+}
+
+// Evaluates a 3D jittered Voronoi rosette/spot layer at `p * scale`.
+// Places 3 or 4 rounded C-bean spot lobes around each cell's tangent ring when
+// `openness > 0`, closing smoothly into a single organic oval spot at `openness == 0`.
+// Returns vec2(ring_mask, copper_center_mask), antialiased over `fw = foot * scale`.
+fn rosette_layer(p: vec3<f32>, scale: f32, openness: f32, radius_scale: f32, foot: f32) -> vec2<f32> {
+    let q = p * scale;
+    let fw = clamp(foot * scale, 0.015, 0.32);
+    let ip = floor(q);
+    var d1: f32 = 8.0;
+    var d2: f32 = 8.0;
+    var best_v = vec3<f32>(0.0);
+    var best_h = vec3<f32>(0.5);
+
+    for (var dz: i32 = -1; dz <= 1; dz += 1) {
+        for (var dy: i32 = -1; dy <= 1; dy += 1) {
+            for (var dx: i32 = -1; dx <= 1; dx += 1) {
+                let cell = ip + vec3<f32>(dx as f32, dy as f32, dz as f32);
+                let h = hash3(cell);
+                let center = cell + vec3<f32>(0.16) + 0.68 * h;
+                let v = q - center;
+                let d = length(v);
+                if (d < d1) {
+                    d2 = d1;
+                    d1 = d;
+                    best_v = v;
+                    best_h = h;
+                } else if (d < d2) {
+                    d2 = d;
+                }
+            }
+        }
+    }
+
+    // Keep neighboring rosettes cleanly separated across Voronoi cell walls.
+    let wall = smoothstep(0.05, 0.14 + fw, 0.5 * (d2 - d1));
+    let r_var = radius_scale * mix(0.86, 1.14, best_h.x);
+    let lod_fade = 1.0 - smoothstep(0.36, 0.68, foot * scale);
+
+    // Align the rosette's normal `axis` with the smooth rest-pose outward pelt
+    // direction (plus gentle per-cell organic tilt) so every rosette lies
+    // face-on to the flank/back/shoulder/haunch and is never sliced edge-on.
+    var sx = 1.0;
+    if (p.x < 0.0) { sx = -1.0; }
+    let surf_n = normalize(vec3<f32>(
+        sx * max(abs(p.x), 0.025),
+        (p.y - 0.49) * 0.65,
+        clamp(p.z - 0.62, -0.06, 0.14) * 0.8
+    ));
+    let axis = normalize(surf_n + 0.26 * (best_h - vec3<f32>(0.5)));
+    var ref_up = vec3<f32>(0.0, 1.0, 0.0);
+    if (abs(axis.y) > 0.85) { ref_up = vec3<f32>(0.0, 0.0, 1.0); }
+    let e1 = normalize(cross(ref_up, axis));
+    let e2 = cross(axis, e1);
+    let u = dot(best_v, e1);
+    let v = dot(best_v, e2);
+    let w3 = dot(best_v, axis);
+
+    // Pure solid organic oval spots on lower limbs, paws, neck, and head.
+    if (openness < 0.05) {
+        let sr = 0.27 * r_var;
+        let sd = length(vec3<f32>(u / (sr * 1.14), v / (sr * 0.90), w3 / (sr * 1.45)));
+        let aa = fw / max(sr, 0.05);
+        let solid = smoothstep(1.0 + aa, 1.0 - aa, sd) * wall;
+        return vec2<f32>(solid, 0.0) * lod_fade;
+    }
+
+    // Open / semi-open big-cat rosettes: 3 or 4 plump, rounded C-bean spot
+    // lobes arranged organically around a warm copper-amber center.
+    let n_petals = 3 + (best_h.y * 1.99) as i32;
+    let inv_n = 1.0 / (n_petals as f32);
+    let phase = 6.2831853 * best_h.z;
+    let ring_r = 0.245 * r_var * openness;
+    var ring: f32 = 0.0;
+
+    for (var k: i32 = 0; k < 4; k += 1) {
+        if (k >= n_petals) { break; }
+        let fk = k as f32;
+        let ang_k = phase + 6.2831853 * fk * inv_n + 0.24 * sin(fk * 2.17 + best_h.x * 5.7);
+        let rk = vec2<f32>(cos(ang_k), sin(ang_k));
+        let tk = vec2<f32>(-rk.y, rk.x);
+        let dp = vec2<f32>(u, v) - rk * ring_r;
+        let s_t = dot(dp, tk);
+        let s_r = dot(dp, rk);
+        // Gentle inward C-crescent bend so each rounded bean hugs the copper center.
+        let s_r_bent = s_r + 0.30 * openness * (s_t * s_t) / max(0.19 * r_var, 0.04);
+
+        let a_t = mix(0.24, 0.168, openness) * r_var * mix(0.88, 1.12, fract(best_h.z * 3.1 + fk * 0.37));
+        let b_r = mix(0.24, 0.102, openness) * r_var;
+        let c_w = 0.52 * r_var;
+        let ed = length(vec3<f32>(s_t / a_t, s_r_bent / b_r, w3 / c_w));
+        let aa = fw / max(b_r, 0.04);
+        let pk = smoothstep(1.0 + aa, 1.0 - aa, ed);
+        ring = max(ring, pk);
+    }
+    ring *= wall;
+
+    let core_r = 0.225 * r_var;
+    let core_d = length(vec3<f32>(u, v, w3 * 0.55)) / max(core_r, 0.04);
+    let core_aa = fw / max(core_r, 0.04);
+    let core = smoothstep(1.05 + core_aa, 0.55 - core_aa, core_d) * openness * wall * (1.0 - 0.60 * ring);
+
+    return vec2<f32>(ring, core) * lod_fade;
+}
+
+pub fn coat(p: vec3<f32>, foot: f32, s: mesh::Surface) -> mesh::Surface {
+    var out = s;
+    let w = max(foot, 0.0004);
+    let ax = abs(p.x);
+    var c = s.base_color;
+    var rough = mix(s.roughness, 0.76, 0.5);
+
+    let spine_gold = lin(vec3<f32>(0.68, 0.41, 0.16));
+    let dorsal_gold = lin(vec3<f32>(0.78, 0.53, 0.24));
+    let flank_buff = lin(vec3<f32>(0.87, 0.70, 0.45));
+    let cream = lin(vec3<f32>(0.95, 0.92, 0.85));
+    let pure_white = lin(vec3<f32>(0.98, 0.97, 0.94));
+    let copper = lin(vec3<f32>(0.50, 0.24, 0.08));
+    let rosette_dark = lin(vec3<f32>(0.024, 0.016, 0.012));
+    let pad_dark = lin(vec3<f32>(0.075, 0.068, 0.066));
+    let ear_in = lin(vec3<f32>(0.92, 0.85, 0.78));
+
+    // --- 1. Countershaded ground pelage across trunk, neck, limbs, and tail ---
+    let on_trunk = smoothstep(-0.52, -0.44, p.z) * (1.0 - smoothstep(0.42, 0.52, p.z)) * smoothstep(0.34, 0.40, p.y);
+    if (on_trunk > 0.0) {
+        let dorsal = smoothstep(0.55, 0.64, p.y);
+        let ridge = smoothstep(0.61, 0.65, p.y) * (1.0 - smoothstep(0.02, 0.065, ax));
+        var tc = mix(flank_buff, dorsal_gold, dorsal);
+        tc = mix(tc, spine_gold, 0.65 * ridge);
+        let belly_y = 0.425 + 0.032 * smoothstep(0.08, -0.24, p.z) - 0.032 * smoothstep(0.05, 0.28, p.z);
+        let jag = 0.004 * sin(p.z * 85.0 + ax * 50.0);
+        let belly = smoothstep(belly_y + 0.038 + w, belly_y - 0.018 - w, p.y + jag) * (1.0 - smoothstep(0.075, 0.115, ax));
+        tc = mix(tc, cream, 0.92 * belly);
+        c = mix(c, tc, 0.85 * on_trunk);
+    }
+
+    // Luminous cream throat, chin underside, and anterior brisket shield.
+    if (p.z > 0.36 && p.z < 0.75 && p.y > 0.36 && p.y < 0.625 && ax < 0.078) {
+        let chest_bib = smoothstep(0.072 + w, 0.032 - w, ax)
+            * smoothstep(0.575, 0.495, p.y - 0.25 * max(p.z - 0.50, 0.0))
+            * smoothstep(0.36, 0.41, p.z);
+        c = mix(c, cream, 0.82 * chest_bib);
+    }
+
+    // --- 2. Procedural Bean-Petal Voronoi Rosettes & Solid Spots ---
+    // Exclude eye sockets, unspotted nasal bridge, muzzle pads/nose, ear hollows/backs, and paw soles.
+    let on_ears = smoothstep(0.692, 0.706, p.y) * smoothstep(0.042, 0.052, ax) * smoothstep(0.576, 0.590, p.z) * (1.0 - smoothstep(0.620, 0.634, p.z));
+    let on_eyes = smoothstep(0.031, 0.020, length(vec3<f32>((ax - 0.041) * 0.92, p.y - 0.655, (p.z - 0.693) * 0.88)));
+    let on_nasal = smoothstep(0.662, 0.684, p.z) * (1.0 - smoothstep(0.016, 0.030, ax)) * smoothstep(0.618, 0.634, p.y);
+    let on_muzzle_tip = smoothstep(0.704, 0.726, p.z) * smoothstep(0.644, 0.626, p.y);
+    let paw_fade = smoothstep(0.018, 0.052, p.y);
+    let tail_tip_zone = smoothstep(-0.88, -1.04, p.z) * (1.0 - smoothstep(0.32, 0.38, p.y));
+
+    // Warm golden-ochre fur along the unspotted feline nasal bridge.
+    if (on_nasal > 0.01) {
+        c = mix(c, mix(flank_buff, dorsal_gold, 0.68), 0.85 * on_nasal * (1.0 - on_muzzle_tip));
+    }
+
+    // Blend between open torso/thigh rosettes (16.5/m) and finer limb/head solid spots (32.5/m).
+    let lower_leg = 1.0 - smoothstep(0.24, 0.37, p.y);
+    let head_zone = smoothstep(0.57, 0.63, p.z) * smoothstep(0.56, 0.60, p.y);
+    let neck_zone = smoothstep(0.45, 0.57, p.z) * smoothstep(0.48, 0.56, p.y);
+    let fine_mix = clamp(max(lower_leg, max(head_zone, 0.55 * neck_zone)), 0.0, 1.0);
+
+    // Ventral belly carries sparser, solid spots rather than copper-centered rosettes.
+    let ventral_zone = (1.0 - smoothstep(0.39, 0.47, p.y)) * on_trunk;
+    let openness = clamp((1.0 - fine_mix) * (1.0 - 0.85 * ventral_zone) * (1.0 - 0.6 * tail_tip_zone), 0.0, 1.0);
+
+    let mask_body = (1.0 - on_ears) * (1.0 - on_eyes) * (1.0 - on_nasal) * (1.0 - on_muzzle_tip) * paw_fade * (1.0 - 0.85 * tail_tip_zone);
+    if (mask_body > 0.01) {
+        let ros_main = rosette_layer(p, 16.5, openness, mix(1.04, 0.82, ventral_zone), w);
+        let ros_fine = rosette_layer(p + vec3<f32>(0.17, 0.31, 0.11), 32.5, 0.0, mix(0.84, 0.58, head_zone), w);
+        let ring = mix(ros_main.x, ros_fine.x, fine_mix) * mask_body;
+        let core = ros_main.y * (1.0 - fine_mix) * mask_body;
+
+        c = mix(c, copper, 0.84 * core);
+        c = mix(c, rosette_dark, 0.96 * ring);
+        rough = mix(rough, 0.62, ring);
+    }
+
+    // --- 3. Distal Tail Bands & Black-and-White S-Tip Lantern ---
+    if (p.z < -0.50 && p.y < 0.62 && ax < 0.055) {
+        let u = clamp((-0.495 - p.z) / 0.693, 0.0, 1.0);
+        let mid_y = mix(mix(0.592, 0.325, clamp(u / 0.50, 0.0, 1.0)),
+                        mix(0.258, 0.308, smoothstep(0.72, 1.0, u)),
+                        smoothstep(0.38, 0.76, u));
+        let under = smoothstep(mid_y + 0.008 + w, mid_y - 0.010 - w, p.y);
+        c = mix(c, cream, 0.75 * under * (1.0 - smoothstep(0.80, 0.92, u)));
+
+        let band_zone = smoothstep(0.56, 0.68, u) * (1.0 - smoothstep(0.88, 0.94, u));
+        let bands = smoothstep(0.15, 0.55, sin(u * 62.0)) * band_zone * (1.0 - 0.55 * under);
+        c = mix(c, rosette_dark, 0.90 * bands);
+
+        let black_collar = smoothstep(0.82, 0.88, u) * (1.0 - smoothstep(0.95, 0.985, u)) * (1.0 - 0.65 * under * smoothstep(0.90, 0.95, u));
+        c = mix(c, rosette_dark, 0.95 * black_collar);
+
+        let white_lantern = max(smoothstep(0.945 - w, 0.975 + w, u), smoothstep(0.84, 0.92, u) * under);
+        c = mix(c, pure_white, 0.96 * white_lantern);
+    }
+
+    // --- 4. Signature Semicircular Panther Ear Ocelli (Black Back + White Thumbprint) ---
+    if (on_ears > 0.01) {
+        let eu = clamp((ax - 0.052) / 0.058, 0.0, 1.0);
+        let ear_mid_z = 0.605 - 0.007 * eu;
+        let is_back = smoothstep(ear_mid_z + 0.002 + w, ear_mid_z - 0.003 - w, p.z);
+        let is_front = 1.0 - is_back;
+
+        // Dorsal back of ear: jet-black coat with bright white central ocellus spot!
+        let oc_d = length(vec2<f32>((ax - 0.080) / 0.015, (p.y - 0.731) / 0.013));
+        let ocellus = smoothstep(1.0 + w * 45.0, 0.72 - w * 45.0, oc_d);
+        let back_col = mix(rosette_dark, pure_white, 0.96 * ocellus);
+        c = mix(c, back_col, 0.97 * on_ears * is_back);
+
+        // Anterior inner pinna: warm concha depth, pale cream furnishing hair tufts + dark rim margin.
+        let dome_r = length(vec2<f32>((ax - 0.075) / 0.036, max(p.y - 0.718, 0.0) / 0.041));
+        let rim = smoothstep(0.76, 0.95, dome_r);
+        let concha_depth = smoothstep(0.76, 0.25, eu) * smoothstep(0.745, 0.718, p.y);
+        let tuft_stripes = (0.5 + 0.5 * sin((p.y - 0.712) * 340.0 - (ax - 0.056) * 150.0))
+                         * smoothstep(0.708, 0.722, p.y) * (1.0 - smoothstep(0.742, 0.752, p.y))
+                         * (1.0 - smoothstep(0.55, 0.85, eu));
+        let inner_base = mix(ear_in, lin(vec3<f32>(0.76, 0.63, 0.55)), 0.55 * concha_depth);
+        let tufted = mix(inner_base, pure_white, 0.65 * tuft_stripes);
+        let front_col = mix(tufted, rosette_dark, 0.92 * rim);
+        c = mix(c, front_col, 0.94 * on_ears * is_front);
+    }
+
+    // --- 5. Cushioned Feline Paw Pads & Claw-Sheath Dividers ---
+    if (p.y < 0.032) {
+        let is_fore = step(0.0, p.z);
+        let cx = mix(0.096, 0.098, is_fore);
+        let z_toe = mix(-0.348, 0.392, is_fore);
+        let sole = smoothstep(0.014 + w, 0.005 - w, p.y);
+        c = mix(c, pad_dark, 0.92 * sole);
+        rough = mix(rough, 0.42, sole);
+
+        let dx = abs(ax - cx);
+        let front_toes = smoothstep(z_toe - 0.022, z_toe - 0.004, p.z) * smoothstep(0.030, 0.008, p.y);
+        let cleft1 = smoothstep(0.0028 + w, 0.0007, abs(dx - 0.009));
+        let cleft2 = smoothstep(0.0028 + w, 0.0007, abs(dx - 0.023));
+        c = mix(c, rosette_dark, 0.65 * max(cleft1, cleft2) * front_toes);
+    }
+
+    out.base_color = c;
+    out.roughness = rough;
+    return out;
+}

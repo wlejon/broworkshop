@@ -1,0 +1,197 @@
+// creature::face — per-pixel pantherine facial shading for the leopard in
+// rest-pose coordinates `p` (x left, y up, z forward in metres; `foot` pixel
+// footprint; `look`: gaze x/y, lid closure z, pupil/brow tension w).
+//
+// Features:
+//   - Forward-facing binocular eyes projected cleanly onto the 33-deg outward
+//     corneal hemisphere (`EYE_SURF`), with luminous golden-amber outer iris,
+//     pale emerald-chartreuse inner collar, vertical-oval feline slit pupil
+//     (narrowing/widening dynamically with `look`), corneal shadow & catchlights.
+//   - Jet-black feline eyeliner rim, medial tear-duct hook, and pale white
+//     sub-ocular & supra-ocular sun-reflector fur arcs.
+//   - Dark malar cheek bar, three arched rows of crisp black vibrissae spots
+//     across plump cream whisker pads, dusty-terracotta nose leather framed in
+//     black with comma nostrils, and an inverted-Y (`人`) feline lip line.
+module creature::face;
+import mesh;
+
+fn lin(c: vec3<f32>) -> vec3<f32> {
+    return vec3<f32>(pow(c.x, 2.2), pow(c.y, 2.2), pow(c.z, 2.2));
+}
+
+fn inside(d: f32, w: f32) -> f32 {
+    return clamp(0.5 - d / (2.0 * w), 0.0, 1.0);
+}
+
+fn segment(q: vec2<f32>, a: vec2<f32>, b: vec2<f32>) -> f32 {
+    let ab = b - a;
+    let t = clamp(dot(q - a, ab) / max(dot(ab, ab), 1e-8), 0.0, 1.0);
+    return length(q - a - ab * t);
+}
+
+// Eyeball center `(0.036, 0.655, 0.680)` with optical axis `(0.54, 0.02, 0.84)`:
+const EYE_BALL: vec3<f32> = vec3<f32>(0.036, 0.655, 0.680);
+const EYE_HALF: vec2<f32> = vec2<f32>(0.0118, 0.0094);
+const EYE_SLANT: f32 = 0.22; // feline lateral-up / medial-down canthal tilt
+
+pub fn face(p: vec3<f32>, foot: f32, look: vec4<f32>, s: mesh::Surface) -> mesh::Surface {
+    var out = s;
+    let w = max(foot, 0.0003);
+    let ax = abs(p.x);
+    if (p.z < 0.61 || p.y < 0.57 || p.y > 0.72) { return out; }
+
+    let black = lin(vec3<f32>(0.025, 0.020, 0.018));
+    let cream = lin(vec3<f32>(0.94, 0.91, 0.84));
+    let white = lin(vec3<f32>(0.97, 0.96, 0.92));
+    var c = s.base_color;
+    var rough = s.roughness;
+
+    // --- 1. Binocular Feline Eyes, Eyeliner, Tear-Duct Hook & Highlight Arcs ---
+    let eye_front = (ax - EYE_BALL.x) * 0.54 + (p.z - EYE_BALL.z) * 0.84;
+    if (eye_front > 0.001 && ax > 0.022 && ax < 0.060 && p.z > 0.666 && p.z < 0.710 && p.y > 0.632 && p.y < 0.678) {
+        // Depth-invariant tangent coordinate `u` centered on the visible cornea
+        // from medial nasal tear duct (u < 0) to lateral outer canthus (u > 0).
+        let u = (ax - EYE_BALL.x) * 0.84 - (p.z - EYE_BALL.z) * 0.54 - 0.0026;
+        let v = (p.y - (EYE_BALL.y + 0.0004)) - EYE_SLANT * u;
+
+        let shut = clamp(look.z, 0.0, 1.0);
+        let wide = clamp(-look.z, 0.0, 0.8);
+        let focus = clamp(look.w, -0.5, 0.5);
+
+        let a = u / EYE_HALF.x;
+        let h = EYE_HALF.y * (1.0 + 0.22 * wide) * sqrt(max(0.0, 1.0 - a * a)) * (1.0 - 0.12 * a * a);
+        let d_alm = max(abs(v) - h, abs(u) - EYE_HALF.x);
+
+        // Pale white sub-ocular sun-reflector arc & subtle pale brow highlight.
+        let sub_arc = inside(abs(v + h + 0.0040) - 0.0022, 0.0020 + w) * inside(abs(u) - EYE_HALF.x - 0.002, 0.003 + w);
+        let brow_arc = inside(abs(v - h - 0.0038) - 0.0016, 0.0020 + w) * inside(abs(u + 0.002) - 0.010, 0.003 + w);
+        c = mix(c, white, 0.72 * sub_arc + 0.38 * brow_arc);
+
+        // Crisp jet-black feline eyeliner rim + medial tear-duct downward hook.
+        let rim = inside(d_alm - 0.0025, w);
+        let hook_d = segment(vec2<f32>(u, v), vec2<f32>(-EYE_HALF.x + 0.0015, -0.0006), vec2<f32>(-EYE_HALF.x - 0.0038, -0.0068));
+        let tear_hook = inside(hook_d - 0.0020, w);
+        let outer_wing = inside(segment(vec2<f32>(u, v), vec2<f32>(EYE_HALF.x - 0.001, 0.0004), vec2<f32>(EYE_HALF.x + 0.0036, 0.0024)) - 0.0015, w);
+        let liner = clamp(max(rim, max(tear_hook, outer_wing)), 0.0, 1.0);
+        c = mix(c, black, 0.97 * liner);
+        rough = mix(rough, 0.36, liner);
+
+        // Eyelid aperture & luminous amber-emerald iris with vertical slit pupil.
+        let lids = inside(v - h * (1.0 - 1.55 * shut), w) * inside(-h * (1.0 - 0.45 * shut) - v, w);
+        let almond = inside(d_alm, w);
+        let open = almond * lids;
+
+        // Coherent binocular gaze shift in world +/-X and +/-Y.
+        let gx = sign(p.x) * look.x * 0.009;
+        let gy = look.y * 0.007;
+        let ui = u - gx;
+        let vi = v - gy;
+        let ir = length(vec2<f32>(ui * 0.92, vi)) / 0.0104;
+
+        let amber_outer = lin(vec3<f32>(0.86, 0.58, 0.14));
+        let gold_mid = lin(vec3<f32>(0.95, 0.80, 0.25));
+        let emerald_in = lin(vec3<f32>(0.66, 0.82, 0.38));
+        let limbal_ring = lin(vec3<f32>(0.12, 0.07, 0.025));
+
+        var iris = mix(emerald_in, gold_mid, smoothstep(0.16, 0.56, ir));
+        iris = mix(iris, amber_outer, smoothstep(0.54, 0.86, ir));
+        iris *= 1.0 + 0.07 * sin(atan2(vi, ui) * 28.0);
+        iris = mix(iris, limbal_ring, smoothstep(0.84, 1.04, ir));
+
+        // Vertical-oval feline slit pupil: narrows in prowl/sprint focus, widens in startle/rest.
+        let slit_w = clamp(0.0024 + 0.0017 * wide - 0.0010 * focus, 0.0013, 0.0048);
+        let slit_h = 0.0082 * (1.0 + 0.12 * wide);
+        let py_norm = clamp(vi / slit_h, -1.0, 1.0);
+        let half_pw = slit_w * max(0.0, 1.0 - py_norm * py_norm);
+        let d_pupil = max(abs(ui) - half_pw, abs(vi) - slit_h);
+        let pupil = inside(d_pupil, w);
+        iris = mix(iris, lin(vec3<f32>(0.006, 0.006, 0.008)), pupil);
+
+        // Upper-lid corneal shadow and crisp glossy sky catchlights.
+        let top_shade = smoothstep(-0.001, h * 0.88, v);
+        iris *= mix(1.06, 0.62, top_shade);
+        let catch1 = inside(length(vec2<f32>(u - 0.0028, v - 0.0028)) - 0.0020, w);
+        let catch2 = inside(length(vec2<f32>(u + 0.0034, v + 0.0024)) - 0.0010, w);
+        iris = mix(iris, vec3<f32>(1.0), 0.94 * catch1 + 0.40 * catch2);
+
+        c = mix(c, iris, open);
+        rough = mix(rough, 0.04, open);
+
+        // Closed / blinking eyelid fur behind the black lash margin.
+        let lid_fur = almond * (1.0 - open) * (1.0 - inside(abs(v - h * (1.0 - 1.55 * shut)) - 0.0008, w));
+        c = mix(c, mix(s.base_color, cream, 0.35), lid_fur);
+        rough = mix(rough, s.roughness, lid_fur);
+    }
+
+    // --- 2. Dark Malar Cheek Bar ---
+    if (ax > 0.036 && ax < 0.066 && p.z > 0.654 && p.z < 0.696 && p.y > 0.614 && p.y < 0.648) {
+        let malar_d = segment(vec2<f32>(p.z, p.y), vec2<f32>(0.686, 0.642), vec2<f32>(0.664, 0.624));
+        let malar = inside(malar_d - 0.0028, 0.0018 + w) * smoothstep(0.038, 0.048, ax);
+        c = mix(c, black, 0.78 * malar);
+    }
+
+    // --- 3. Muzzle, Cream Whisker Pads, Whisker-Spot Rows, Nose Leather & Inverted-Y Mouth ---
+    if (p.z > 0.695) {
+        // Feline inverted-Y (`人`) lip curve: rises to meet the central philtrum
+        // under the nose (`y = 0.6155` at `ax = 0`) and dips gracefully around
+        // each plump whisker pad (`y = 0.6045` at `ax = 0.026`).
+        let lip_y = 0.6155 - 0.0110 * smoothstep(0.001, 0.027, ax) - 0.09 * max(0.0, 0.730 - p.z);
+
+        // Plump cream whisker pads above the lip line, keeping natural 3D shading.
+        let pad_zone = smoothstep(0.706, 0.730, p.z) * smoothstep(0.635, 0.616, p.y)
+                     * smoothstep(lip_y - 0.002, lip_y + 0.003, p.y) * smoothstep(0.046, 0.018, ax);
+        c = mix(c, cream, 0.68 * pad_zone);
+
+        // Softly shaded pale chin tuft below the lip line (preserving vertex normals/AO).
+        let chin_zone = inside(p.y - lip_y + 0.0014, 0.0028 + w) * smoothstep(0.702, 0.720, p.z) * (1.0 - smoothstep(0.024, 0.034, ax));
+        c = mix(c, cream, 0.52 * chin_zone);
+
+        // Three arched rows of crisp black feline vibrissae spots wrapping around each whisker pad!
+        let u_pad = (ax - 0.009) * 0.74 + max(0.761 - p.z, 0.0) * 0.67;
+        let v_pad = p.y - (lip_y + 0.0042);
+        if (ax > 0.009 && u_pad > 0.0 && u_pad < 0.041 && v_pad > 0.0 && v_pad < 0.0185 && p.z > 0.714) {
+            let cu = u_pad / 0.0082;
+            let cv = v_pad / 0.0060;
+            let fu = (fract(cu) - 0.5) * 0.0082;
+            let fv = (fract(cv) - 0.5) * 0.0060;
+            let row_idx = floor(cv);
+            // Upper row has slightly fewer medial spots, matching real Panthera vibrissae mystacial rows.
+            let ok = step(0.0, row_idx) * step(row_idx, 2.5) * step(0.35 * row_idx, cu) * step(cu, 4.7);
+            let spot_r = mix(0.0019, 0.0015, row_idx * 0.35);
+            let wsp = inside(length(vec2<f32>(fu * 0.88, fv * 1.15)) - spot_r, w) * ok;
+            c = mix(c, black, 0.90 * wsp);
+        }
+
+        // Crisp dark feline lip line, mouth corner flews, and vertical philtrum cleft.
+        let mouth_span = smoothstep(0.704, 0.712, p.z) * (1.0 - smoothstep(0.034, 0.041, ax));
+        let corner_flew = inside(length(vec2<f32>((p.z - 0.712) * 0.8, p.y - lip_y)) - 0.0024, w) * smoothstep(0.022, 0.030, ax);
+        let lip_line = inside(abs(p.y - lip_y) - 0.0011, w) * mouth_span;
+        let philtrum = inside(ax - 0.0010, w) * inside(p.y - 0.622, w) * inside(lip_y - p.y, w) * smoothstep(0.752, 0.760, p.z);
+        c = mix(c, black, 0.94 * max(max(lip_line, corner_flew), philtrum));
+
+        // Broad feline triangular nose leather: muted terracotta-pink center framed in black & comma nostrils.
+        let ny = p.y - 0.6295;
+        let half_nw = clamp(0.0155 * (0.54 + 34.0 * max(ny + 0.0075, 0.0)), 0.0028, 0.0175);
+        let nose_front = 0.755 - 0.34 * ax - 0.24 * abs(ny);
+        let d_nose = max(max(ax - half_nw, ny - 0.0100), max(-0.0100 - ny, nose_front - p.z));
+        let on_nose = inside(d_nose, w);
+        let inner_nose = inside(d_nose + 0.0032, 0.0014 + w);
+
+        let nose_pink = lin(vec3<f32>(0.50, 0.24, 0.22));
+        let nose_rim = lin(vec3<f32>(0.032, 0.024, 0.023));
+        let nose_col = mix(nose_rim, nose_pink, inner_nose);
+        c = mix(c, nose_col, on_nose);
+        rough = mix(rough, 0.26, on_nose);
+
+        // Comma-shaped feline nostrils curving outward on the lower sides of the nose leather.
+        let nq = vec2<f32>(ax - 0.0085, p.y - 0.6270);
+        let nt = vec2<f32>(nq.x * 0.82 + nq.y * 0.57, -nq.x * 0.57 + nq.y * 0.82);
+        let nost = inside(length(nt / vec2<f32>(0.0044, 0.0020)) - 1.0, w / 0.003) * on_nose;
+        c = mix(c, vec3<f32>(0.004), 0.95 * nost);
+        rough = mix(rough, 0.95, nost);
+    }
+
+    out.base_color = c;
+    out.roughness = rough;
+    return out;
+}

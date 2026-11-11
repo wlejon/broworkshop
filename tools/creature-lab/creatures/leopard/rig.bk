@@ -1,0 +1,643 @@
+// The leopard's GPU rig (`k_rig`): supple feline locomotion across prowl walk,
+// diagonal trot, rotary gallop with coiled spinal flexion & full flight
+// extension, coiled haunch pounce (`leap`), waterhole crouch (`graze`),
+// airplane-ear crouch-flinch (`startle`), and regal sphinx rest (`lie-down`).
+import creature::common::*;
+import creature::contract::*;
+import creature::skeleton::*;
+import creature::pose::*;
+import creature::body::*;
+import creature::spine::*;
+import creature::leap::*;
+import creature::limbs::*;
+import creature::probe::*;
+import leopard::legs::*;
+import leopard::gait::*;
+from creature::ground import height, terrain, obstacle_ahead;
+
+@knob const FAULT_SLIP: f32 = 0.0;
+@knob const FAULT_SINK: f32 = 0.0;
+@knob const FAULT_OVERBEND: f32 = 0.0;
+@knob const FAULT_STUMBLE: f32 = 0.0;
+
+pub const PROBE: i32 = D_PROBE;
+pub const STATE: i32 = D_STATE;
+
+const WALK_UP: f32 = 1.95;
+const TROT_DOWN: f32 = 1.55;
+const TROT_UP: f32 = 4.50;
+const GALLOP_DOWN: f32 = 3.90;
+
+const SETTLE_TRIG: f32 = 0.045;
+const REACH_TRIG: f32 = 0.42;
+const SETTLE_T: f32 = 0.32;
+
+@knob const FOLD_AHEAD: f32 = 0.86;     // lower joints fold ahead of trunk drop in sphinx lie
+@knob const HEAD_HOLD: f32 = 0.64;      // cervical counter-pitch keeping prowl head steady
+@knob const HEAD_SPACE: f32 = 0.58;     // world-space gaze stabilization through secondary
+@knob const NECK_LEVER: f32 = 0.24;     // cervical lever arm for vertical steadying
+@knob const REACH_FORE: f32 = 0.618;    // m from scapular pivot to forepaw tip
+@knob const SHORT_LET: f32 = 0.004;
+@knob const REACH_FORE_TOP: f32 = 0.698;// m from scapula dorsal border to forepaw tip
+@knob const LIE_HIP: f32 = 0.268;       // m pelvis rests above ground in sphinx posture
+@knob const LIE_WITHERS: f32 = 0.380;   // m scapula top rests above ground in sphinx posture
+@knob const REACH_HIND: f32 = 0.625;    // m from femur head to hindpaw tip
+@knob const SCAP_FOLLOW: f32 = 0.64;    // prominent feline scapular swing share
+@knob const NOD: f32 = 0.0;
+@knob const VARY: f32 = 1.0;
+@knob const LAYERS: f32 = 1.0;
+@knob const RISE_IN: f32 = 0.002;
+const RISE_EASE: f32 = 0.015;
+@knob const LAND_REACH: f32 = 0.78;
+@knob const LAND_WALK: f32 = 0.86;
+@knob const TROT_SPRING: f32 = 0.68;
+@knob const GALLOP_FREE: f32 = 0.068;
+@knob const TUCK_HIND: f32 = 0.40;
+@knob const TUCK_FORE: f32 = 0.36;      // forepaws poise cleanly forward/under chest over obstacle peak before reaching to land
+const GUARD_RATE: f32 = 20.0;
+@knob const LEAP_AHEAD: f32 = 0.52;
+@knob const SLOW_DUTY: f32 = 0.09;
+@knob const LAND_MIN: f32 = 0.30;
+@knob const SPENT: f32 = 1.5;
+@knob const FOLD_EXT: f32 = 0.96;
+@knob const FOLD_BAND: f32 = 0.34;
+@knob const TUCK_BACK: f32 = -0.06;
+@knob const LAND_EXT: f32 = 0.96;
+@knob const UNTUCK: f32 = 0.54;
+@knob const LAG_FREE: f32 = 0.028;
+@knob const LAG_BAND: f32 = 0.075;
+@knob const GALLOP_ACC: f32 = 0.65;
+@knob const COFF_W: f32 = 20.0;
+@knob const LAND_LEAD: f32 = 0.17;
+@knob const SPINE_GALLOP: f32 = 2.15;   // amplifies gather-and-reach spinal flexion in rotary gallop/leap
+
+@kernel @grid(1)
+fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state: rw_store<f32, 1>,
+         pose: write_store<vec4<f32>, 1>, tele: write_store<f32, 1>, dt: f32) {
+    let c = g.x();
+    let s = c * STATE;
+    let ii = c * INTENT;
+    let init = state[s + S_PLACED] < 0.5;
+    if (init) { place_leopard(state, env, s); }
+
+    // --- intent and feline actions ------------------------------------------------
+    var vdes = vec2<f32>(intent[ii + I_VEL_X], intent[ii + I_VEL_Z]);
+    let act = intent[ii + I_ACTION] as i32;
+    let seed = intent[ii + I_SEED];
+    let clock = state[s + D_CLOCK] + dt;
+    state[s + D_CLOCK] = clock;
+
+    var lie = approach(state[s + D_LIE], select_f(act == ACT_LIE, 1.0, 0.0), 0.45, dt);
+    var graze = approach(state[s + D_GRAZE], select_f(act == ACT_GRAZE, 1.0, 0.0), 1.15, dt);
+    let alert_want = select_f(act == ACT_STARTLE || act == ACT_ALERT, 1.0, 0.0);
+    let aw = select_f(alert_want > state[s + D_ALERT], 14.0, 2.2);
+    var als = crit_step(vec2<f32>(state[s + D_ALERT], state[s + D_ALERT_V]), alert_want, aw, dt);
+    if (init) { als = vec2<f32>(alert_want, 0.0); }
+    let alert = clamp(als.x, 0.0, 1.0);
+    var st_t = state[s + D_STARTLE_T];
+    if (act == ACT_STARTLE && (state[s + D_PREV_ACT] as i32) != ACT_STARTLE) { st_t = 0.0; }
+    if (st_t >= 0.0) { st_t += dt; }
+    if (st_t > 3.0) { st_t = -1.0; }
+    state[s + D_LIE] = lie;
+    state[s + D_GRAZE] = graze;
+    state[s + D_ALERT] = alert;
+    state[s + D_ALERT_V] = als.y;
+    state[s + D_STARTLE_T] = st_t;
+    state[s + D_PREV_ACT] = act as f32;
+    if (lie > 0.001 || act == ACT_LIE) { vdes = vec2<f32>(0.0); }
+    vdes *= (1.0 - 0.85 * graze);
+
+    // --- heading and speed --------------------------------------------------------
+    var yaw = state[s + S_YAW];
+    var speed = state[s + D_SPEED];
+    var want = yaw;
+    let vd = length(vdes);
+    let vary = VARY * smooth01(speed / 0.6) * smooth01(1.0 - abs(vd - speed) / 0.4);
+    if (intent[ii + I_HEADING_MODE] > 0.5) { want = intent[ii + I_HEADING]; }
+    else if (vd > 0.05) { want = atan2(vdes.x, vdes.y) + vary * 0.04 * noise1(clock / 1.7, seed, 2.0); }
+    let leaping = state[s + D_LEAP] > 0.5;
+    let rate = mix(0.55, 2.4 / (1.0 + 0.28 * speed), smooth01(speed / 0.8));
+    let w_t = clamp(3.2 * wrap_pi(want - yaw), -rate, rate) * select_f(leaping, 0.0, 1.0);
+    let omega = approach(state[s + D_OMEGA], w_t, 4.4, dt);
+    yaw = wrap_pi(yaw + omega * dt);
+    let err = wrap_pi(want - yaw);
+    let vt = vd * clamp(cos(err), 0.15, 1.0) * (1.0 + vary * 0.04 * noise1(clock / 1.3, seed, 1.0));
+    let dv_max = 0.82 * MU_T * 9.81;
+    let lag_f = dot(ld3(state, s + D_LAG), vec3<f32>(sin(yaw), 0.0, cos(yaw)));
+    let wait = 1.0 - 0.8 * smooth01((select_f(vt > speed, -lag_f, lag_f) - LAG_FREE) / LAG_BAND) * smooth01((abs(vt - speed) - 0.3) / 0.5);
+    let gallop_w = state[s + D_GW + 2];
+    if (!leaping) {
+        speed = approach(speed, vt, min(select_f(vt > speed, 1.8 + 0.65 * speed, 3.8), dv_max) * mix(1.0, GALLOP_ACC, gallop_w) * wait, dt);
+    }
+    let fwd = vec3<f32>(sin(yaw), 0.0, cos(yaw));
+    let left = vec3<f32>(cos(yaw), 0.0, -sin(yaw));
+    var pos = ld3(state, s + S_POS);
+    pos += fwd * speed * dt;
+    let tz = turn_z();
+    let yaw0 = state[s + S_YAW];
+    pos += (vec3<f32>(sin(yaw0), 0.0, cos(yaw0)) - fwd) * tz;
+    let lag = ld3(state, s + D_LAG) * vec3<f32>(1.0, 0.0, 1.0) * LAYERS;
+    let bpos = pos + lag;
+    let vel = fwd * speed + ld3(state, s + D_LAGV) * vec3<f32>(1.0, 0.0, 1.0) * LAYERS;
+
+    // --- feline pounce / leap (creature::leap) ------------------------------------
+    var lp = leap_load(state, s + D_LEAP);
+    let hip_t = terrain(env, pos.x, pos.z);
+    if (lp.on) {
+        lp.tau += dt;
+        if (lp.tau >= lp.tcr && lp.tau - dt < lp.tcr) {
+            lp.h0 = state[s + D_HY] + state[s + D_LAG + 1];
+            lp.v0 = state[s + D_HV] + state[s + D_LAGV + 1];
+        }
+        let fd_t = fore_down(lp);
+        if (lp.tau >= fd_t && lp.tau - dt < fd_t) {
+            lp.h0 = state[s + D_HY_O] + state[s + D_LAG + 1];
+            lp.v0 = state[s + D_BODY + 4];
+        }
+        let at_tc = lp.tau >= lp.tc && lp.tau - dt < lp.tc;
+        let at_off = lp.tau >= 0.0 && lp.tau - dt < 0.0;
+        if (at_off) {
+            lp = leap_takeoff(lp, state[s + D_BODY + 1] - state[s + D_COFF1 + 1], state[s + D_BODY + 4]);
+            state[s + D_BODY + 4] = lp.vy;
+            speed = max(speed + dot(ld3(state, s + D_LAGV), fwd), 0.5 * speed);
+            lp.fl = reach_time(env, lp, 1, pos, fwd, speed, q_y(yaw), REACH_HIND, REACH_FORE, LAND_LEAD);
+            lp.hl = max(reach_time(env, lp, 0, pos, fwd, speed, q_y(yaw), REACH_HIND, REACH_FORE, LAND_LEAD), lp.fl + 0.25 * leg_time());
+        }
+        for (var l: i32 = 0; l < 4; l += 1) {
+            let k = s + D_LEG + l * LEG_REC;
+            if (state[k + L_PLANT] < 0.5 && (at_off || (at_tc && LEG_HIND[l] == 0))) {
+                flight_swing(state, k, leap_leg(lp, LEG_HIND[l] == 1, 0.5 * (1.0 - LEG_SIDE[l])).w - lp.tau);
+            }
+        }
+        if (lp.tau >= leap_end(lp)) { lp.on = false; lp.since = 0.0; }
+    } else { lp.since += dt; }
+    var in_leap = lp.on && !lp.legs_back;
+
+    // --- gait clock & feline gait selection ---------------------------------------
+    var gait = state[s + D_GAIT] as i32;
+    if (gait == GAIT_WALK && speed > WALK_UP) { gait = GAIT_TROT; }
+    else if (gait == GAIT_TROT && speed < TROT_DOWN) { gait = GAIT_WALK; }
+    else if (gait == GAIT_TROT && speed > TROT_UP) { gait = GAIT_GALLOP; }
+    else if (gait == GAIT_GALLOP && speed < GALLOP_DOWN) { gait = GAIT_TROT; }
+    var gw = ld3(state, s + D_GW);
+    gw.x = approach(gw.x, select_f(gait == GAIT_WALK, 1.0, 0.0), 2.2, dt);
+    gw.y = approach(gw.y, select_f(gait == GAIT_TROT, 1.0, 0.0), 2.2, dt);
+    gw.z = approach(gw.z, select_f(gait == GAIT_GALLOP, 1.0, 0.0), 2.2, dt);
+    gw = gw / max(gw.x + gw.y + gw.z, 1e-4);
+
+    let veff = max(speed, abs(omega) * mix(1.25, 0.78, smooth01(speed / 0.8)));
+    let freq = gw.x * (0.58 + 0.44 * veff) + gw.y * (1.72 + 0.16 * veff) + gw.z * (2.06 + 0.08 * veff);
+    let duty = gw.x * (clamp(0.68 - 0.042 * veff, 0.59, 0.68) + SLOW_DUTY * (1.0 - smooth01(veff / 1.15))) + gw.y * 0.335 + gw.z * 0.185;
+    let lift_h = gw.x * vec2<f32>(0.050, 0.062) + gw.y * vec2<f32>(0.096, 0.120) + gw.z * vec2<f32>(0.128, 0.156);
+    let carpus = gw.x * 0.68 + gw.y * 0.88 + gw.z * 0.98;
+    let roll_w = gw.x * 0.13 + gw.y * 0.18 + gw.z * 0.12;
+    let paw_flex = gw.x * 0.48 + gw.y * 0.68 + gw.z * 0.82;
+
+    var phase = state[s + D_PHASE];
+    let was_moving = state[s + D_MOVING] > 0.5;
+    var moving = vd > 0.06 || speed > 0.06 || abs(err) > 0.12;
+    if (was_moving) { moving = moving || speed > 0.03 || vd > 0.03 || abs(err) > 0.05; }
+    if (lie > 0.001) { moving = false; }
+    var go_s = crit_step(vec2<f32>(state[s + D_STILL], state[s + D_STILL_V]), select_f(moving, 1.0, 0.0), 7.0, dt);
+    if (init) { go_s = vec2<f32>(0.0); }
+    state[s + D_STILL] = go_s.x; state[s + D_STILL_V] = go_s.y;
+    let gom = clamp(go_s.x, 0.0, 1.0);
+
+    var offs: array<f32, 4>;
+    let pivot = (1.0 - smooth01(speed / 0.3)) * smooth01(abs(omega) / 0.15);
+    for (var l: i32 = 0; l < 4; l += 1) {
+        offs[l] = off_mix(OFF_WALK, OFF_TROT, OFF_GALLOP, gw, l);
+        offs[l] += pivot * phase_diff(offs[l], OFF_TROT[l]);
+    }
+    let cyc = floor(phase);
+    if (cyc - 2.0 * floor(cyc * 0.5) > 0.5) { offs[3] += FAULT_STUMBLE; }
+    if (moving && !was_moving) {
+        phase = floor(phase) + 1.0 + offs[0] + duty;
+        for (var l: i32 = 0; l < 4; l += 1) {
+            state[s + D_LEG + l * LEG_REC + L_ARMED] = 1.0;
+        }
+    }
+    if (!lp.on && !init && moving && gw.z > 0.7 && lie < 0.001) {
+        var c_rem = fract01(duty - (phase - offs[3]));
+        if (c_rem < 0.05) { c_rem += 1.0; }
+        let trail = 0.5 * speed * duty / freq;
+        let h_take = hip_t + sqrt(max(REACH_HIND * REACH_HIND - trail * trail, 0.1)) + HEAD[B_PELVIS].y - leg_pivot(0).y - 0.02;
+        let ob = obstacle_ahead(env, pos.x, pos.z, vec2<f32>(fwd.x, fwd.z));
+        let dc = duty + fract01(offs[3] - offs[0]);
+        let held = max(PUSH_T * leg_time() - dc / freq, 0.0);
+        let dist = ob.x - leap_lead(flight_time(leap_rise(ob.y, hip_t, h_take)), speed, turn_z()) - speed * held;
+        var st_c = vec2<f32>(0.0, c_rem);
+        var obst = ob.y;
+        if (ob.y > 0.0 && dist < speed * (c_rem + 3.0) / freq) { st_c = leap_stride(c_rem, dist, speed, freq); }
+        else if (act == ACT_BOUND && lp.since > 0.05 && c_rem > dc + 0.25 && ob.x > 4.0 * speed / freq) { st_c.x = 1.0; obst = 0.0; }
+        if (st_c.x > 0.0) {
+            lp = leap_begin(lp, obst, hip_t, state[s + D_HY] - hip_t, h_take, state[s + D_HY] + state[s + D_LAG + 1], state[s + D_HV] + state[s + D_LAGV + 1], st_c.y, dc, freq, st_c.x);
+            for (var l: i32 = 0; l < 4; l += 1) { state[s + D_LEG + l * LEG_REC + L_LEAP] = 0.0; }
+            in_leap = true;
+        }
+    }
+    let cfreq = freq * select_f(in_leap && lp.tau < 0.0, select_f(lp.tau < lp.tc, lp.rate, lp.prate), 1.0);
+    if (moving) { phase += cfreq * dt; }
+    let hind_air = state[s + D_LEG + L_PLANT] < 0.5 || state[s + D_LEG + 3 * LEG_REC + L_PLANT] < 0.5;
+    let sunk = lp.tau >= fore_down(lp) + sink_time(lp, hip_t + lp.h_stand);
+    if (in_leap && lp.tau >= legs_done(lp) && sunk && (!hind_air || lp.tau >= legs_done(lp) + 0.25)) {
+        lp.legs_back = true;
+        in_leap = false;
+        phase = floor(phase) + 1.0 + offs[3];
+        for (var l: i32 = 0; l < 4; l += 1) {
+            state[s + D_LEG + l * LEG_REC + L_ARMED] = 1.0;
+            state[s + D_LEG + l * LEG_REC + L_LEAP] = 0.0;
+        }
+    }
+
+    probe(state, s + PROBE, 0, select_f(lp.on, lp.tau, 0.0));
+    probe(state, s + PROBE, 1, select_f(lp.on, lp.tc, 0.0));
+    probe(state, s + PROBE, 2, dot(lag, fwd));
+    probe(state, s + PROBE, 8, select_f(lp.on, lp.v0, 0.0));
+    probe(state, s + PROBE, 9, select_f(lp.on, lp.h0, 0.0));
+    probe(state, s + PROBE, 10, select_f(lp.on, fore_down(lp), 0.0));
+
+    // --- paw placement & swing trajectories ---------------------------------------
+    let qyaw = q_y(yaw);
+    var any_swing = false;
+    var worst: i32 = -1;
+    var worst_e: f32 = SETTLE_TRIG;
+    for (var l: i32 = 0; l < 4; l += 1) {
+        let k = s + D_LEG + l * LEG_REC;
+        if (state[k + L_PLANT] < 0.5) { any_swing = true; }
+        else {
+            let toe0 = TAIL[LEG_B0[l] + LEG_NB[l] - 1] - HEAD[B_PELVIS];
+            let home = bpos + q_rot(qyaw, vec3<f32>(toe0.x, 0.0, toe0.z));
+            let t = ld3(state, k + L_TOE);
+            let e = length(vec2<f32>(t.x - home.x, t.z - home.z));
+            if (e > worst_e) { worst_e = e; worst = l; }
+        }
+    }
+    var sw: array<f32, 4>;
+    var feet: array<vec3<f32>, 4>;
+    var toes: array<vec3<f32>, 4>;
+    var left_t: array<f32, 4>;
+    var swing_sum_hind: f32 = 0.0;
+    var swing_sum_fore: f32 = 0.0;
+    var sway: f32 = 0.0;
+    var hip_drop: f32 = 0.0;
+    var fore_load_roll: f32 = 0.0;
+    var nod: f32 = 0.0;
+    for (var l: i32 = 0; l < 4; l += 1) {
+        let k = s + D_LEG + l * LEG_REC;
+        let hind = LEG_HIND[l] == 1;
+        let side01 = 0.5 * (1.0 - LEG_SIDE[l]);
+        let toe0 = TAIL[LEG_B0[l] + LEG_NB[l] - 1] - HEAD[B_PELVIS];
+        let home_off = vec3<f32>(toe0.x, 0.0, toe0.z);
+        let home = bpos + q_rot(qyaw, home_off);
+        let ph = fract01(phase - offs[l]);
+        var planted = state[k + L_PLANT] > 0.5;
+        var toe = ld3(state, k + L_TOE);
+        var lift = false;
+        var lift_t: f32 = SETTLE_T;
+        var kind: f32 = 1.0;
+        if (planted) {
+            if (FAULT_SLIP > 0.0) { toe -= vel * (FAULT_SLIP * dt); }
+            if (ph < duty) { state[k + L_ARMED] = 1.0; }
+            let stray = length(vec2<f32>(toe.x - home.x, toe.z - home.z));
+            let top = leg_top(l, bpos, qyaw, state[s + D_HY_O], state[s + D_FY_O]) + vec3<f32>(0.0, max(state[s + D_LAG + 1], 0.0) * LAYERS, 0.0);
+            let over = length(toe - top) > select_f(hind, REACH_HIND, REACH_FORE) || (state[s + D_SHORT + l] > SHORT_LET && !init);
+            let lev = leap_leg(lp, hind, side01);
+            let early = lp.tau >= lp.tc - 0.1 && state[k + L_SINCE] < lp.tau - (lp.tc - 0.1);
+            if (in_leap && ((hind && (lp.tau >= lp.tc - 0.02 || early)) || lp.tau >= lev.z)) {
+                let spent = length(toe - top) > REACH_HIND - SPENT * lp.vy * dt;
+                if (state[k + L_LEAP] < 2.5 && (lp.tau >= lev.z || (hind && (over || spent) && lp.tau > -0.05))) {
+                    lift = true; lift_t = lev.w - lp.tau; kind = 0.0; state[k + L_LEAP] = 3.0;
+                } else if (!hind && state[k + L_LEAP] > 3.5 && state[k + L_LEAP] < 4.5 && over) {
+                    lift = true; kind = 0.0; state[k + L_LEAP] = 5.0;
+                    lift_t = clamp(0.6 * (1.0 - duty) / max(cfreq, 0.1), 0.12, 0.3);
+                }
+            } else if (moving && state[k + L_ARMED] > 0.5 && ph >= duty) {
+                lift = true;
+                lift_t = clamp((1.0 - ph) / max(cfreq, 0.1), 0.12, 0.6);
+                kind = 0.0;
+            } else if (moving && (stray > REACH_TRIG || over)) {
+                lift = true; kind = select_f(in_leap, 1.0, 0.0);
+                lift_t = clamp((1.0 - ph) / max(cfreq, 0.1), min(0.2, 0.5 * (1.0 - duty) / max(cfreq, 0.1)), 0.5);
+            } else if (!moving && !any_swing && worst == l) {
+                lift = true;
+            }
+            if (lift) {
+                planted = false;
+                any_swing = true;
+                state[k + L_ARMED] = 0.0;
+                st3(state, k + L_FROM, toe);
+                state[k + L_U] = 0.0;
+                state[k + L_T] = lift_t;
+                state[k + L_KIND] = kind;
+                state[k + L_SINCE] = select_f(in_leap && hind, 1.0, paw_roll(ph, duty, roll_w) * gom);
+            }
+        }
+        var u: f32 = 0.0;
+        if (!planted) {
+            let tt = state[k + L_T];
+            u = state[k + L_U];
+            var target = home;
+            let leap_step = in_leap && state[k + L_LEAP] > 2.5 && state[k + L_LEAP] < 4.5;
+            if (leap_step) {
+                let t_ref = leap_leg(lp, hind, side01).w + LAND_LEAD * leg_time();
+                target = bpos + fwd * (speed * (t_ref - lp.tau)) + q_rot(qyaw, home_off);
+            } else if (moving || gom > 1e-3) {
+                var stance_t = duty / max(cfreq, 0.1);
+                var ahead_s: f32 = 0.5;
+                if (in_leap && hind && lp.tau < 0.0 && lp.tau + (1.0 - u) * tt > lp.tc - 0.05) {
+                    stance_t = max(-(lp.tau + (1.0 - u) * tt), 0.0);
+                    ahead_s = LEAP_AHEAD;
+                }
+                let lead = (1.0 - u) * tt + ahead_s * stance_t;
+                let yl = yaw + omega * lead;
+                target = bpos + vel * lead + (fwd - vec3<f32>(sin(yl), 0.0, cos(yl))) * tz + q_rot(q_y(yl), home_off);
+                let top_l = leg_top(l, bpos, qyaw, state[s + D_HY_O], state[s + D_FY_O]) + vel * ((1.0 - u) * tt);
+                let rl = select_f(hind, REACH_HIND, REACH_FORE);
+                let dyl = top_l.y + max(state[s + D_LAG + 1], 0.0) * LAYERS - height(env, target.x, target.z);
+                let hml = max(mix(LAND_REACH, LAND_WALK, gw.x) * sqrt(max(rl * rl - dyl * dyl, 0.0)), LAND_MIN * rl);
+                let tv = vec2<f32>(target.x - top_l.x, target.z - top_l.z);
+                let tl = length(tv);
+                if (tl > hml && tl > 1e-4) {
+                    target.x = top_l.x + tv.x * (hml / tl);
+                    target.z = top_l.z + tv.y * (hml / tl);
+                }
+                if (!moving) { target = mix(home, target, gom); }
+            }
+            target.y = height(env, target.x, target.z);
+            if (l == 1) { target.y -= FAULT_SINK; }
+            st3(state, k + L_TO, target);
+            u = u + dt / tt;
+            var lifted = ld3(state, k + L_FROM);
+            let top = leg_top(l, bpos, qyaw, state[s + D_HY_O], state[s + D_FY_O]) + vec3<f32>(0.0, select_f(leap_step, state[s + D_LAG + 1] * LAYERS, 0.0), 0.0);
+            if (leap_step && !init) {
+                lifted += top - ld3(state, s + D_TOPO + 3 * l);
+                st3(state, k + L_FROM, lifted);
+            }
+            let rmax = select_f(hind, REACH_HIND, REACH_FORE);
+            var landed = u >= 1.0;
+            if (landed && leap_step && length(target - top) > rmax) { landed = false; u = 0.999; }
+            u = min(u, 1.0);
+            let e = smooth01(u);
+            var hgt = select_f(hind, lift_h.x, lift_h.y);
+            if (state[k + L_KIND] > 0.5 && state[k + L_KIND] < 1.5) { hgt = 0.04; }
+            var to = target;
+            if (leap_step) {
+                let rem = (1.0 - min(u, 1.0)) * tt;
+                let hv = vec2<f32>(target.x - top.x - vel.x * rem, target.z - top.z - vel.z * rem);
+                let rr = LAND_EXT * rmax;
+                let hh = min(length(hv), 0.9 * rr);
+                let hd = hv / max(length(hv), 1e-4);
+                to = top + vec3<f32>(hd.x * hh, -sqrt(rr * rr - hh * hh), hd.y * hh);
+            }
+            toe = vec3<f32>(mix(lifted.x, to.x, e), mix(lifted.y, to.y, e), mix(lifted.z, to.z, e));
+            toe.y += hgt * swing_bump(u);
+            if (leap_step) {
+                let tuck = top + q_rot(qyaw, vec3<f32>(0.0, -select_f(hind, TUCK_HIND * REACH_HIND, TUCK_FORE * REACH_FORE), select_f(hind, -TUCK_BACK, 0.08)));
+                toe = mix(toe, tuck, smooth01(u / 0.3) * (1.0 - smooth01((u - select_f(hind, UNTUCK, 0.52)) / select_f(hind, 0.97 - UNTUCK, 0.43))));
+            }
+            if (leap_step) {
+                let rv = toe - top;
+                let rl = length(rv);
+                if (rl > 1e-4) { toe = top + rv * (soft_cap(rl, rmax, 0.01) / rl); }
+            }
+            let dy = top.y - toe.y;
+            let hmax = sqrt(max(rmax * rmax - dy * dy, 0.0));
+            let hv2 = vec2<f32>(toe.x - top.x, toe.z - top.z);
+            let hl = length(hv2);
+            if (hl > 1e-4) {
+                let cap_n = soft_cap(hl, hmax, select_f(in_leap, 0.01, CAP_BAND * mix(1.5, 1.0, gw.x)));
+                if (state[k + L_U] <= 0.0) { state[s + D_CAPOFF + l] = max(hl - cap_n, 0.0); }
+                let cap_e = min(hl, cap_n + state[s + D_CAPOFF + l] * (1.0 - smooth01(u / 0.25)));
+                let hn = mix(hl, cap_e, select_f(leap_step, 1.0, max(smooth01(u / 0.2), smooth01((speed - 1.5) / 1.5))));
+                toe.x = top.x + hv2.x * (hn / hl);
+                toe.z = top.z + hv2.y * (hn / hl);
+            }
+            var gy = height(env, toe.x, toe.z);
+            if (l == 1) { gy -= FAULT_SINK; }
+            toe.y = max(toe.y, gy);
+            if (landed) {
+                toe.y = gy;
+                planted = true;
+                state[k + L_ARMED] = select_f(ph < duty || !moving, 1.0, 0.0);
+                state[k + L_SINCE] = 0.0;
+                if (leap_step) { state[k + L_LEAP] = state[k + L_LEAP] + 1.0; }
+            }
+            state[k + L_U] = u;
+        }
+        if (planted) { state[k + L_SINCE] = state[k + L_SINCE] + dt; }
+        st3(state, s + D_TOPO + 3 * l, leg_top(l, bpos, qyaw, state[s + D_HY_O], state[s + D_FY_O]) + vec3<f32>(0.0, state[s + D_LAG + 1] * LAYERS, 0.0));
+        state[k + L_PLANT] = select_f(planted, 1.0, 0.0);
+        st3(state, k + L_TOE, toe);
+        var lt: f32 = 1e3;
+        if (in_leap && hind && lp.tau >= lp.tc - 0.02) {
+            if (planted && state[k + L_LEAP] < 2.5) { lt = max(leap_leg(lp, hind, side01).z - lp.tau, 0.0); }
+        } else if (planted && in_leap && state[k + L_LEAP] > 3.5) {
+            lt = max(max(legs_done(lp), fore_down(lp) + sink_time(lp, hip_t + lp.h_stand)) - lp.tau, 0.0) + select_f(hind, duty / max(cfreq, 0.1), 0.02);
+        } else if (planted && gom > 1e-3) {
+            if (state[k + L_ARMED] > 0.5) { lt = max(duty - stance_phase(ph, duty), 0.0) / max(cfreq, 0.1); }
+            else { lt = (1.0 + duty - ph) / max(cfreq, 0.1); }
+            lt += 0.3 * (1.0 - gom) / gom;
+        }
+        left_t[l] = lt;
+        var sh: f32 = 0.0;
+        if (!planted) { let su = sin(PI * u); sh = su * su; }
+        sw[l] = sh;
+        toes[l] = toe;
+        feet[l] = toe;
+        if (!planted) { feet[l] = ld3(state, k + L_TO); }
+        if (hind) { swing_sum_hind += sh; hip_drop += LEG_SIDE[l] * sh; }
+        else { swing_sum_fore += sh; fore_load_roll -= LEG_SIDE[l] * sh; }
+        sway -= LEG_SIDE[l] * sh;
+        if (!hind && planted && moving) {
+            let sn = sin(PI * clamp(ph / max(duty, 0.1) * 2.0, 0.0, 1.0));
+            nod += sn * sn;
+        }
+    }
+
+    // --- body height plan: stealthy prowl, drinking crouch, startle flinch, sphinx lie ---
+    let lie_f = smooth01(lie * 1.15);
+    let lie_h = smooth01((lie - 0.12) / 0.88);
+    let lie_fy = lie_f * lie_f;
+    let hip_g = height(env, pos.x, pos.z);
+    let wpos = pos + fwd * WITHERS_Z;
+    let plane_c = fit_plane4(feet[0], feet[1], feet[2], feet[3], vec2<f32>(pos.x, pos.z));
+    let hind_ground = 0.5 * (feet[0].y + feet[3].y);
+    let fore_ground = 0.5 * (feet[1].y + feet[2].y);
+    // Low, slinky feline prowl crouch (`walk`) and cushioned paw steps.
+    let prowl_dip = -0.022 * gw.x * gom;
+    let bob_h = -0.010 * swing_sum_hind * gw.x + prowl_dip;
+    let bob_f = -0.008 * swing_sum_fore * gw.x + 1.15 * prowl_dip;
+
+    // Instant feline crouch-flinch in `startle`, settling into a coiled alert stance.
+    var crouch: f32 = 0.0;
+    var st_arch: f32 = 0.0;
+    if (st_t >= 0.0) {
+        let flinch = bump(clamp(st_t / 0.36, 0.0, 1.0), 0.38, 0.58);
+        let coil = smooth01((st_t - 0.18) / 0.25) * (1.0 - smooth01((st_t - 1.6) / 0.9));
+        crouch = -0.065 * flinch - 0.022 * coil;
+        st_arch = 0.22 * flinch;
+    }
+    let breath = 0.0035 * sin(TAU * 0.28 * clock + seed);
+    let caps = ceiling_caps(state, s, feet, left_t, bpos, qyaw, REACH_HIND, REACH_FORE, REACH_FORE_TOP);
+    let cap_h = caps.x;
+    let cap_f = caps.y;
+
+    let half = 0.5 * speed * duty / max(freq, 0.1);
+    let run_h = HEAD[B_PELVIS].y - (REACH_HIND - sqrt(max(REACH_HIND * REACH_HIND - half * half, 0.15)));
+    let run_f = HEAD[B_SCAPL].y - (REACH_FORE - sqrt(max(REACH_FORE * REACH_FORE - half * half, 0.15)));
+    let walk_w = gw.x;
+    let hy_plan = mix(hind_ground + run_h, smin(hind_ground + HEAD[B_PELVIS].y + bob_h, cap_h, CAP_SOFT), walk_w);
+    let fy_plan = mix(fore_ground + run_f, smin(fore_ground + HEAD[B_SCAPL].y + bob_f, cap_f, CAP_SOFT), walk_w);
+
+    // In `graze` (feline waterhole drinking / scent crouch), forelegs bend deep at
+    // the elbows (-0.175 m chest dip) while haunches crouch lightly (-0.045 m).
+    let hy_t = mix(hy_plan + crouch - 0.045 * graze + breath, hip_g + LIE_HIP, lie_h * lie_h);
+    let fy_t = mix(fy_plan + crouch - 0.175 * graze + breath, height(env, wpos.x, wpos.z) + LIE_WITHERS, lie_fy);
+    let wh: f32 = 16.0;
+    let hs = crit_step(vec2<f32>(state[s + D_HY], state[s + D_HV]), hy_t, wh, dt);
+    let fs = crit_step(vec2<f32>(state[s + D_FY], state[s + D_FV]), fy_t, wh, dt);
+    var hy = hs.x; var hv = hs.y;
+    var fy = fs.x; var fv = fs.y;
+
+    let ch_t = min(cap_h, hind_ground + HEAD[B_PELVIS].y + CAP_FADE);
+    let cf_t = min(cap_f, fore_ground + HEAD[B_SCAPL].y + CAP_FADE);
+    var chs = crit_step(vec2<f32>(state[s + D_CAP_H], state[s + D_CAP_HV]), ch_t, wh, dt);
+    var cfs = crit_step(vec2<f32>(state[s + D_CAP_F], state[s + D_CAP_FV]), cf_t, wh, dt);
+    if (init) { chs = vec2<f32>(ch_t, 0.0); cfs = vec2<f32>(cf_t, 0.0); }
+    state[s + D_CAP_H] = chs.x; state[s + D_CAP_HV] = chs.y;
+    state[s + D_CAP_F] = cfs.x; state[s + D_CAP_FV] = cfs.y;
+    let ch = chs.x; let cf = cfs.x;
+
+    let hy_sp = hy; let hv_sp = hv;
+    let fy_sp = fy; let fv_sp = fv;
+    var leap_w: f32 = 0.0;
+    if (lp.on) {
+        let hl = leap_hip(lp, hip_t);
+        let pl = leap_pitch(lp);
+        let tb = 0.3 * leg_time();
+        let w = smooth01((lp.tau - lp.tcr) / tb) * (1.0 - smooth01((lp.tau - (leap_end(lp) - tb)) / tb));
+        leap_w = w;
+        let cp = cos(pl.x);
+        let fl = hl.x - HEAD[B_PELVIS].y + HEAD[B_SCAPL].y + WITHERS_Z * tan(pl.x);
+        hy = mix(hy, hl.x, w);
+        hv = mix(hv, hl.y, w);
+        fy = mix(fy, fl, w);
+        fv = mix(fv, hl.y + WITHERS_Z * pl.y / (cp * cp), w);
+    }
+    let pitch = atan2((fy - HEAD[B_SCAPL].y) - (hy - HEAD[B_PELVIS].y), WITHERS_Z);
+    let grad_x = dot(vec2<f32>(plane_c.y, plane_c.z), vec2<f32>(left.x, left.z));
+    let roll = damp(state[s + D_ROLL], clamp(0.32 * atan(grad_x), -0.11, 0.11), 6.0, dt);
+    state[s + D_ROLL] = roll;
+    let mv = select_f(moving, 1.0, 0.0) * smooth01(speed / 0.6);
+    let sway_v = left * (0.012 * sway * gw.x);
+    var hold4: array<vec3<f32>, 4>;
+    for (var l: i32 = 0; l < 4; l += 1) {
+        let k = s + D_LEG + l * LEG_REC;
+        hold4[l] = vec3<f32>(state[k + L_PLANT], state[k + L_SINCE], left_t[l]);
+    }
+    var ls = crit_step(vec2<f32>(state[s + D_LEAN_S], state[s + D_LEAN_S + 1]), select_f(moving, (1.0 - smooth01(speed / 0.25)) * (1.0 - smooth01(vd / 0.5)), 0.0), 5.0, dt);
+    if (init) { ls = vec2<f32>(0.0); }
+    state[s + D_LEAN_S] = ls.x; state[s + D_LEAN_S + 1] = ls.y;
+    let still = clamp(ls.x, 0.0, 1.0) * (1.0 - lie);
+    let plan = vec3<f32>(pos.x, hy, pos.z) + sway_v + lean_over(toes, hold4, pos + q_rot(qyaw, ld3(state, s + D_COFF)), LEAN_MAX) * still;
+    let roll_g = mv * (gw.x + 0.6 * gw.y) * 0.016 * sin(TAU * (phase - 0.1)) * (1.0 - lie);
+
+    // --- COM dynamics through loaded paws (creature::body) -------------------------
+    let coff_p = q_rot(qyaw, 2.0 * ld3(state, s + D_COFF1) - ld3(state, s + D_COFF2));
+    var sup: Support;
+    for (var l: i32 = 0; l < 4; l += 1) {
+        let k = s + D_LEG + l * LEG_REC;
+        let hind = LEG_HIND[l] == 1;
+        let piv = leg_pivot(l);
+        let py = select_f(hind, hy - HEAD[B_PELVIS].y, fy - HEAD[B_SCAPL].y) + state[s + D_LAG + 1];
+        var f: Foot;
+        f.at = toes[l];
+        f.pivot = vec3<f32>(bpos.x, py, bpos.z) + q_rot(qyaw, piv - vec3<f32>(HEAD[B_PELVIS].x, 0.0, HEAD[B_PELVIS].z));
+        f.reach = select_f(hind, REACH_HIND, REACH_FORE);
+        f.since = state[k + L_SINCE];
+        f.left = left_t[l];
+        f.down = state[k + L_PLANT];
+        sup.f[l] = f;
+    }
+    sup.effort = leap_effort(lp);
+    sup.lead = leap_follow(lp);
+    sup.spring = TROT_SPRING * gw.y;
+    let pitch_sp = atan2((fy_sp - HEAD[B_SCAPL].y) - (hy_sp - HEAD[B_PELVIS].y), WITHERS_Z);
+    let turned = q_rot(q_x(-(pitch - pitch_sp)), ld3(state, s + D_COFF));
+    var cr = crit_step(vec2<f32>(state[s + D_COFFR], state[s + D_COFFR + 1]), state[s + D_COFF1 + 1] - turned.y, COFF_W, dt);
+    if (init) { cr = vec2<f32>(0.0); }
+    state[s + D_COFFR] = cr.x; state[s + D_COFFR + 1] = cr.y;
+    let coff_l = q_rot(qyaw, turned + vec3<f32>(0.0, cr.x * leap_w, 0.0));
+    let bd = body_step(state, s + D_BODY, plan + coff_l, 1.0 + 2.6 * gw.x, sup, init, dt);
+    probe(state, s + PROBE, 3, bd.com.y);
+    probe(state, s + PROBE, 4, plan.y + coff_l.y);
+    probe(state, s + PROBE, 5, bd.acc.y / 9.81);
+    probe(state, s + PROBE, 6, bd.load);
+    probe(state, s + PROBE, 7, coff_p.y);
+    var shift = (bd.com - coff_p - plan) * LAYERS * (1.0 - smooth01(lie * 3.0));
+
+    let ceil_y = smin(ch - hy, cf - fy, CAP_SOFT);
+    let above0 = max(shift.y - GALLOP_FREE * gw.z, 0.0);
+    let above = soft_limit(above0, 0.02, 0.03);
+    let r0 = -smin(-ceil_y, 0.0, max(above * above / 0.03, 1e-4));
+    let rp = max(r0, 0.0);
+    let rise = min(r0, 0.0) + rp * rp / (rp + RISE_IN) + GALLOP_FREE * gw.z;
+    if (!lp.on) {
+        let over = shift.y - rise;
+        let free_y = shift.y;
+        shift.y = smin(shift.y, rise, RISE_EASE);
+        if (over > 0.03) {
+            var v = bd.vel;
+            v.y = min(v.y, hv);
+            body_set(state, s + D_BODY, plan + coff_p + vec3<f32>(shift.x, min(free_y, rise + 0.03), shift.z), v);
+        }
+    }
+    let pl4 = vec4<f32>(sup.f[0].down, sup.f[1].down, sup.f[2].down, sup.f[3].down);
+    var guard: f32 = 1.0;
+    let over1 = reach_over(toes, pl4, plan, qyaw, hy, fy, shift, REACH_HIND, REACH_FORE);
+    let over0 = max(reach_over(toes, pl4, plan, qyaw, hy, fy, vec3<f32>(0.0), REACH_HIND, REACH_FORE), 0.0);
+    if (over1 > 0.0 && over1 > over0) {
+        var hi: f32 = 1.0;
+        guard = 0.0;
+        for (var it: i32 = 0; it < 6; it += 1) {
+            let m = 0.5 * (guard + hi);
+            if (reach_over(toes, pl4, plan, qyaw, hy, fy, shift * m, REACH_HIND, REACH_FORE) > over0) { hi = m; } else { guard = m; }
+        }
+    }
+    if (!init) { guard = clamp(guard, state[s + D_GUARD] - GUARD_RATE * dt, state[s + D_GUARD] + GUARD_RATE * dt); }
+    state[s + D_GUARD] = guard;
+    shift = shift * guard;
+    let up = -smin(0.0, -fold_lift(toes, pl4, plan, qyaw, hy, fy, shift, REACH_HIND, REACH_FORE), CAP_SOFT) * (1.0 - smooth01(lie * 3.0));
+    if (up > 1e-4) {
+        shift.y += up;
+        body_set(state, s + D_BODY, plan + coff_p + shift, vec3<f32>(bd.vel.x, max(bd.vel.y, hv), bd.vel.z));
+    }
+    let root = plan + shift;
+    st3(state, s + D_LAG, shift);
+    st3(state, s + D_LAGV, bd.vel - bd.tvel);
+
+    // --- supple feline spine (gather-and-reach flexion in rotary gallop & pounce) ---
+    var rel: array<vec3<f32>, NFEET>;
+    for (var l: i32 = 0; l < 4; l += 1) {
+        rel[l] = q_rot(q_conj(qyaw), toes[l] - sup.f[l].pivot) + (leg_pivot(l) - HEAD[LEG_TOP[l]]);
+    }
+    let curv = omega / max(speed, 0.8) * smooth01(speed / 0.8);
+    var bend_want = spine_want(rel, curv, speed * omega, (1.0 - smooth01(lie * 3.0)) * mix(0.35, 1.0, gom) * LAYERS);
+    bend_want.flex = bend_want.flex * mix(1.15, SPINE_GALLOP, max(gw.z, leap_w)) + st_arch * (1.0 - lie);
+    bend_want.bend = clamp(bend_want.bend * 1.25, -0.38, 0.38);
+    let bend = spine_step(state, s + D_SPINE, bend_want, bd.acc.y * LAYERS, init, dt);
+
+    // --- pose assembly, secondary follow-through & telemetry -----------------------
+    let qbody = q_mul(q_mul(qyaw, q_x(-pitch)), q_z(roll + roll_g));
+    var T = pose_head_tail(state, env, intent, s, ii, init, dt, clock, seed, yaw, phase, gw, gom, mv,
+                           lie, graze, alert, st_t, root, qbody, hip_drop, fore_load_roll, bend,
+                           pitch, fy + shift.y, leap_w, nod, HEAD_HOLD, NECK_LEVER, NOD);
+    T = solve_leopard_legs(state, env, s, T, toes, left_t, sw, phase, offs, duty, roll_w, gom,
+                           paw_flex, carpus, gw, in_leap, lp, lie_h, lie_f, FOLD_AHEAD, FOLD_EXT,
+                           FOLD_BAND, REACH_FORE_TOP, SCAP_FOLLOW, FAULT_OVERBEND);
+    finish_leopard(state, env, pose, tele, c, s, init, dt, T, qyaw, root, pos, yaw, speed, omega,
+                   phase, gw, gait, moving, hy, fy, hy_sp, hv_sp, fy_sp, fv_sp, hip_g,
+                   pitch, roll + roll_g, freq, act, lp, toes, lie_h, lie_f, mv, graze, lie,
+                   alert, HEAD_SPACE, LAYERS);
+}
