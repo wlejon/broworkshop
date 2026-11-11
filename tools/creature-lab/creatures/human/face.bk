@@ -29,13 +29,13 @@ fn inside(d: f32, w: f32) -> f32 {
 
 // The eye (body.js's eye mass): its centre on the left, seen from the
 // front, and the opening's radii.
-const EYE: vec2<f32> = vec2<f32>(0.032, 1.642);
-const EYE_R: vec2<f32> = vec2<f32>(0.0135, 0.0078);
-const BROW_Y: f32 = 1.667;
+const EYE: vec2<f32> = vec2<f32>(0.031, 1.642);
+const EYE_R: vec2<f32> = vec2<f32>(0.0132, 0.0076);
+const BROW_Y: f32 = 1.666;
 const MOUTH_Y: f32 = 1.588;
 
 // What it wears, by where a point of the skin is at rest (skeleton.js stands
-// it with the arms a little out, so an arm is what lies outside a line down
+// it with the arms 32 deg out, so an arm is what lies outside a line down
 // from the armpit): every edge of cloth a line here, not the mesh's.
 //   tunic     the trunk from the neck's opening (a shallow V in front) to a
 //             hem at the top of the thighs, and the arms to above the elbow;
@@ -43,7 +43,8 @@ const MOUTH_Y: f32 = 1.588;
 //   belt      at the waist, a buckle in front
 //   trousers  under the hem to the boots
 //   boots     to under the calf, a turned-down top
-//   hair      over the crown, down behind the ears to the nape, a fringe
+//   hair      over the crown, arched cleanly above the ears and down behind
+//             them to the nape, with a swept fringe over the brow
 fn dressed(p: vec3<f32>, w: f32, skin: vec3<f32>) -> vec3<f32> {
     let ax = abs(p.x);
     let tunic = lin(vec3<f32>(0.16, 0.4, 0.44));
@@ -51,23 +52,30 @@ fn dressed(p: vec3<f32>, w: f32, skin: vec3<f32>) -> vec3<f32> {
     let belt = lin(vec3<f32>(0.24, 0.13, 0.07));
     let trouser = lin(vec3<f32>(0.3, 0.26, 0.23));
     let boot = lin(vec3<f32>(0.15, 0.09, 0.06));
-    let hair = lin(vec3<f32>(0.17, 0.1, 0.06));
+    let strand = 0.9 + 0.12 * sin(190.0 * p.x + 45.0 * p.z) + 0.12 * smoothstep(1.67, 1.76, p.y);
+    let hair = lin(vec3<f32>(0.18, 0.11, 0.065)) * strand;
     var c = skin;
-    if (p.y > 1.52) {
-        // The head: the hairline runs over the brow (a fringe, uneven),
-        // back over the ear and down behind it to the nape.
-        let front = 1.704 + 0.006 * cos(70.0 * ax) + 0.01 * smoothstep(0.03, 0.07, ax) * -1.0;
-        let side = mix(1.672, front, smoothstep(0.02, 0.06, p.z));
-        let line = mix(1.578, side, smoothstep(-0.034, -0.004, p.z));
-        return mix(c, hair, inside(line - p.y, w));
+    if (p.y > 1.515) {
+        // The head: hairline swept across the brow, a neat temple tab in
+        // front of the ear, arched cleanly above the sculpted ear, and down
+        // behind it to the nape.
+        let front = 1.706 + 0.004 * cos(68.0 * ax) - 0.012 * smoothstep(0.032, 0.068, ax);
+        let sideburn = 0.016 * exp(-pow((p.z - 0.025) / 0.01, 2.0)) * smoothstep(0.064, 0.072, ax);
+        let over_ear = 1.662 - sideburn;
+        let side = mix(over_ear, front, smoothstep(0.032, 0.064, p.z));
+        let line = mix(1.578, side, smoothstep(-0.038, -0.018, p.z));
+        let ed = length(vec2<f32>((p.z + 0.003) / 0.018, (p.y - 1.633) / 0.025));
+        let on_ear = inside(0.075 - ax, w) * inside((ed - 1.0) * 0.018, w);
+        return mix(c, hair, inside(line - p.y, w) * (1.0 - on_ear));
     }
-    // An arm: outside the line from the armpit down along its inner side.
-    let armpit = select(p.y < 1.2, 0.185 + 0.27 * (1.2 - p.y), 0.185 - 0.1 * (p.y - 1.2));
-    let arm = inside(armpit - ax, w) * inside(p.y - 1.41, w);
-    // Along the arm from the shoulder: the sleeve ends above the elbow.
-    let along = 0.259 * (ax - 0.185) - 0.966 * (p.y - 1.435);
-    var sleeve = mix(skin, trim, inside(along - 0.262, w));
-    sleeve = mix(sleeve, tunic, inside(along - 0.246, w));
+    // An arm: outside the line from the armpit down along the 32-deg rest arm,
+    // extending seamlessly up over the shoulder cap.
+    let armpit = select(p.y < 1.36, 0.175 + 0.3 * (1.36 - p.y), 0.175);
+    let arm = inside(armpit - ax, w) * inside(p.y - 1.51, w);
+    // Along the 32-deg rest arm from the shoulder: sleeve ends above the elbow.
+    let along = 0.53 * (ax - 0.185) - 0.848 * (p.y - 1.435);
+    var sleeve = mix(skin, trim, inside(along - 0.252, w));
+    sleeve = mix(sleeve, tunic, inside(along - 0.236, w));
     // The trunk and legs, from the ground up.
     var body = boot;
     body = mix(body, mix(boot, trim, 0.22), inside(0.285 - p.y, w));
@@ -78,9 +86,10 @@ fn dressed(p: vec3<f32>, w: f32, skin: vec3<f32>) -> vec3<f32> {
     body = mix(body, belt, waist);
     let buckle = waist * inside(ax - 0.024, w) * inside(0.05 - p.z, w) * (1.0 - inside(ax - 0.014, w) * inside(1.044 - p.y, w) * inside(p.y - 1.07, w));
     body = mix(body, trim, buckle * inside(1.038 - p.y, w) * inside(p.y - 1.076, w));
-    // The neck's opening: a V in front, round behind.
-    // (About the neck only: out on the shoulders the cloth goes on up.)
-    let neck = select(p.z > 0.0, 1.462 - 0.075 * max(1.0 - ax / 0.06, 0.0), 1.472) + 0.2 * smoothstep(0.06, 0.088, ax);
+    // The neck's opening: a neat shallow V in front, smoothly curved behind;
+    // out across the clavicles and shoulders the tunic covers seamlessly.
+    let front_v = smoothstep(-0.012, 0.024, p.z) * 0.066 * max(1.0 - ax / 0.062, 0.0);
+    let neck = 1.472 + 0.014 * smoothstep(0.0, 0.062, ax) - front_v + 0.22 * smoothstep(0.06, 0.088, ax);
     body = mix(body, trim, inside(neck - 0.013 - p.y, w));
     body = mix(body, skin, inside(neck - p.y, w));
     return mix(body, sleeve, arm);
@@ -94,6 +103,31 @@ pub fn face(p: vec3<f32>, foot: f32, look: vec4<f32>, s: mesh::Surface) -> mesh:
     let q = vec2<f32>(ax, p.y);
     let skin = lin(vec3<f32>(0.83, 0.6, 0.46));
     var c = dressed(p, w, skin);
+
+    // Subtle natural facial warmth on cheeks and nose bridge, and warm shade
+    // inside the sculpted ear concha.
+    if (p.y > 1.54 && p.y < 1.68 && p.z > 0.04) {
+        let blush = exp(-pow((ax - 0.036) / 0.024, 2.0) - pow((p.y - 1.616) / 0.02, 2.0)) * smoothstep(0.05, 0.085, p.z);
+        c = mix(c, lin(vec3<f32>(0.84, 0.51, 0.4)), 0.16 * blush);
+    }
+    if (ax > 0.076 && p.y > 1.614 && p.y < 1.654 && p.z > -0.018 && p.z < 0.012) {
+        let cup = exp(-pow((p.y - 1.633) / 0.011, 2.0) - pow((p.z + 0.001) / 0.0065, 2.0)) * smoothstep(0.077, 0.083, ax);
+        let helix = exp(-pow((length(vec2<f32>((p.z + 0.002) / 0.009, (p.y - 1.635) / 0.014)) - 1.0) / 0.25, 2.0)) * smoothstep(0.0, -0.01, p.z) * smoothstep(0.079, 0.085, ax);
+        c = mix(c, lin(vec3<f32>(0.58, 0.36, 0.26)), 0.58 * cup + 0.24 * helix);
+    }
+
+    // Sculpted nose shading: alar crease, soft warm underside, and nostrils.
+    if (p.z > 0.095 && p.y > 1.602 && p.y < 1.655 && ax < 0.024) {
+        let alar = exp(-pow((ax - 0.0145) / 0.0032, 2.0) - pow((p.y - 1.614) / 0.006, 2.0));
+        c = mix(c, lin(vec3<f32>(0.64, 0.42, 0.31)), 0.38 * alar);
+        let under_nose = exp(-pow((p.y - 1.609) / 0.0035, 2.0)) * inside(ax - 0.012, 0.004) * smoothstep(0.102, 0.114, p.z);
+        c = mix(c, lin(vec3<f32>(0.62, 0.4, 0.3)), 0.35 * under_nose);
+        let nd = length((vec2<f32>(ax, p.y) - vec2<f32>(0.0062, 1.6105)) / vec2<f32>(0.0034, 0.0019));
+        let nostril = inside((nd - 1.0) * 0.0022, w) * smoothstep(0.104, 0.112, p.z);
+        c = mix(c, lin(vec3<f32>(0.26, 0.14, 0.1)), 0.72 * nostril);
+        let tip = exp(-pow(ax / 0.008, 2.0) - pow((p.y - 1.619) / 0.009, 2.0)) * smoothstep(0.112, 0.122, p.z);
+        rough = mix(rough, 0.38, 0.45 * tip);
+    }
 
     if (p.z > 0.06 && abs(p.y - EYE.y) < 0.024 && abs(ax - EYE.x) < 0.024) {
         let shut = clamp(look.z, 0.0, 1.0);
@@ -132,24 +166,34 @@ pub fn face(p: vec3<f32>, foot: f32, look: vec4<f32>, s: mesh::Surface) -> mesh:
         let crease = span * inside(abs(e.y - (1.0 - e.x * e.x) - 0.55) * R.y - 0.0004, w);
         c = mix(c, lin(vec3<f32>(0.55, 0.36, 0.27)), 0.45 * crease * (1.0 - 0.6 * wide));
     }
-    if (p.z > 0.06 && abs(p.y - BROW_Y) < 0.02 && ax > 0.008 && ax < 0.058) {
-        // The brow: from its inner end out and a little down at the tip;
-        // look.w lifts or lowers the inner end.
+    if (p.z > 0.06 && abs(p.y - BROW_Y) < 0.02 && ax > 0.008 && ax < 0.056) {
+        // Curved brow: fuller medially, gentle arch around 62% out, clean taper.
         let t = (ax - 0.012) / 0.04;
-        let y = BROW_Y + 0.004 * sin(2.6 * clamp(t, 0.0, 1.0)) - 0.002 + 0.009 * look.w * (1.0 - clamp(t, 0.0, 1.0)) + 0.004 * max(-look.z, 0.0);
-        let thick = mix(0.0031, 0.0012, clamp(t, 0.0, 1.0));
+        let u = clamp(t, 0.0, 1.0);
+        let arch = 0.0044 * sin(2.75 * pow(u, 0.85)) - 0.0018;
+        let y = BROW_Y + arch + 0.009 * look.w * (1.0 - u) + 0.004 * max(-look.z, 0.0);
+        let thick = mix(0.0028, 0.001, u * u) * smoothstep(0.0, 0.08, u);
         let brow = inside(abs(p.y - y) - thick, w) * inside(-t * 0.04, w) * inside((t - 1.0) * 0.04, w);
-        c = mix(c, lin(vec3<f32>(0.15, 0.09, 0.05)), 0.92 * brow);
+        c = mix(c, lin(vec3<f32>(0.16, 0.095, 0.055)), 0.9 * brow);
     }
-    if (p.z > 0.07 && abs(p.y - MOUTH_Y) < 0.016 && ax < 0.034) {
-        // The mouth: a line, its corners a little up; the lower lip's colour
-        // under it and a little of the upper's over.
-        let t = ax / 0.024;
-        let y = MOUTH_Y + 0.0018 * t * t;
-        let lips = inside(ax - 0.021, w) * inside((p.y - y - 0.0034 * (1.0 - t * t)) , w) * inside((y - 0.0062 * (1.0 - 0.8 * t * t) - p.y), w);
-        c = mix(c, lin(vec3<f32>(0.72, 0.4, 0.34)), 0.75 * lips);
-        let line = inside(abs(p.y - y) - 0.0006, w) * inside(ax - 0.024, w);
-        c = mix(c, lin(vec3<f32>(0.3, 0.14, 0.11)), 0.9 * line);
+    if (p.z > 0.07 && p.y > 1.572 && p.y < 1.608 && ax < 0.032) {
+        // Subtle philtrum dimple and mentolabial crease under the lower lip.
+        let phil = exp(-pow(ax / 0.0038, 2.0)) * exp(-pow((p.y - 1.601) / 0.005, 2.0));
+        c = mix(c, skin * 0.88, 0.35 * phil);
+        let mento = exp(-pow(ax / 0.014, 2.0) - pow((p.y - 1.577) / 0.0028, 2.0));
+        c = mix(c, skin * 0.84, 0.38 * mento);
+        // Upper lip with Cupid's bow, soft mouth fissure, and fuller lower lip.
+        let t = clamp(ax / 0.0225, 0.0, 1.2);
+        let seam = MOUTH_Y + 0.0014 * t * t;
+        let cupid = 0.0046 * max(1.0 - 0.92 * t * t, 0.0) - 0.0011 * exp(-pow(ax / 0.0032, 2.0));
+        let upper = inside(ax - 0.022, w) * inside(p.y - (seam + cupid), w) * inside(seam - p.y, w);
+        let lower_h = 0.0058 * max(1.0 - 0.85 * t * t, 0.0);
+        let lower = inside(ax - 0.0205, w) * inside(p.y - seam, w) * inside((seam - lower_h) - p.y, w);
+        c = mix(c, lin(vec3<f32>(0.65, 0.35, 0.3)), 0.8 * upper);
+        c = mix(c, lin(vec3<f32>(0.76, 0.43, 0.37)), 0.82 * lower);
+        rough = mix(rough, 0.32, 0.65 * max(upper, lower));
+        let line = inside(abs(p.y - seam) - 0.00055, w) * inside(ax - 0.023, w);
+        c = mix(c, lin(vec3<f32>(0.28, 0.13, 0.1)), 0.88 * line);
     }
     out.base_color = c;
     out.roughness = rough;
