@@ -40,6 +40,7 @@ A creature folder (`creatures/<name>/`) has these files, and
 | `creature.js` | `name`, `skeleton`, `body`, `rig: { file, kernel, modules }` (`modules`: the rig's own brokernel modules by name, as files in the folder), `scale`, `speeds` (its walk, trot, gallop and circling pace, which size the lab's scenarios), `space` (m a flock keeps between neighbours, 2.2 if unset), `cycles` (which scenario is each steady gait, with reference duty factors and footfall offsets), `form` (the body's reference measures), `variants` (named knob sets; the deer's broken ones are `slip`, `sink`, `overbend`, `stumble`), `scenarios` |
 | `skeleton.js` | bones (parent, head, tail, per-axis joint limits in degrees), feet, tracked points, chart joints |
 | `body.js` | the body: masses on bones built with `lab/flesh.js` (the deer splits it into `body.js`, `legs.js` and `coat.js`) |
+| `coat.bk` | its pelt, plumage or scales (`creature::coat`, named by `creature.js`'s `coat`), drawn per pixel over vertex colour before `face.bk` |
 | `face.bk` | its face (`creature::face`, named by `creature.js`'s `face`), drawn per pixel over the skin: see below |
 | `poses.js` | its keys, when it is drawn pose by pose (`creature.js`'s `keys`): see Keys below |
 | `rig.bk` | the species' rig. `@knob` constants can be overridden from the command line |
@@ -533,6 +534,48 @@ A log in the way of its hopping it flits over the same way, `FLIT_OVER`
 clear of it (scenario `leap`; `flight` is a take-off, a few bounds and a
 landing).
 
+`leopard` is an adult pantherine cat (56 kg, 0.68 m at the shoulder, 1.95 m
+with its long counterbalancing tail): a supple two-hinge spine, sliding
+scapulae that rise and sink against the withers with each forelimb's load,
+digitigrade paws, rounded ears hollowed by `carve` and marked behind with
+white ocelli, and a four-bone tail that sweeps in a travelling wave and
+whips against sharp turns. Walking, its head rides low between rolling
+shoulder blades; trotting, its diagonal pairs spring clean; galloping (8 m/s),
+it runs in a feline rotary gallop (`LH`, `RH`, `RF`, `LF`) with gathered and
+extended flights, deep lumbar flexion and extension, and leaps obstacles off
+a crouched hind coil (`leap`, `stalk-and-bolt`, `startle-bound`). Its `coat.bk` shades
+organic broken C-bean rosettes around warm amber centres over tawny gold,
+fading into solid spots on the limbs and tail rings, and its `face.bk` draws
+golden almond eyes, black tear lines, whisker pads and a pink-rimmed nose.
+
+`iguana` is a sprawling-limb green spiny reptile (5 kg, 0.27 m to its dorsal
+crest, 1.35 m snout to tail tip): humeri and femora held out from the trunk
+with the belly slung low between wide tracks, a row of twenty-one dorsal
+crest spines, a scalloped gular `dewlap` fan on its own bone, and a long
+tapering four-bone whip tail. Walking (0.55 m/s), a lateral S-wave travels
+from neck to tail tip so each girdle swings forward to lengthen its outside
+limb's reach; trotting and sprinting (up to 4.2 m/s), it lifts high on its
+sprawling limbs with rapid lateral drive; idle or startled, it flares its
+dewlap and bobs its head in territorial display, and lying down (`bask`) it
+splays flat in the sun. Its `coat.bk` shades interlocking hexagonal scales,
+transverse dark flank and tail bands, and ochre-tipped spines; its `face.bk`
+draws golden vertical-slit eyes, a pearlescent subtympanic cheek shield,
+tympanum and labial scales.
+
+`ursa` is a heavy plantigrade bear (191 kg, 0.96 m at its interscapular
+hump, 1.65 m long): a massive barrel ribcage and broad hindquarters, a
+grizzled shoulder hump over the scapulae, carved round ears, a short scut,
+and broad five-clawed paws whose hind feet carry whole `heel`-to-toe soles.
+Walking (1.25 m/s), it rolls side to side with heavy scapular heave as each
+hind sole plants on its heel and rolls forward over the ball; trotting, its
+bulk rides cushioned diagonal springs; galloping (6.8 m/s), it bounds in a
+rotary gallop (`LH`, `RH`, `RF`, `LF`), and startled or alert it rears onto
+its plantigrade hind soles or bluff-charges (`forage-and-bluff`, `leap`). Its
+`coat.bk` paints dark chocolate guard hairs, golden-grizzled shoulder and
+dorsal highlights, and a cream-gold moon-bear crescent across the brisket;
+its `face.bk` feathers a cinnamon muzzle into the dark mask around glossy
+amber eyes and a leathery black nose pad.
+
 A creature can carry its own motion oracle: its def's `motion(rec, series,
 {steadyFrom, steady, headBob})`, which `analyze` calls and whose flags join
 the run's (and whose report is the metrics' `motion`). The bunny's
@@ -609,14 +652,16 @@ the whole bird would be mostly empty, and a wing blended into the flank
 drags its skin when it opens. A piece stands through the body where they
 meet, and `build()` lists it in `pieces`.
 
-### Faces
+### Coats and faces
 
-A face's marks are smaller than any mesh carries, so they are drawn per
-pixel. The skin hooks (`lab/skin.bk`, and `lab/skin-crowd.bk` at the
-crowd's full level) pass each point's rest position to the fragment, and
-call the creature's `creature::face`:
+Fine pelt, plumage, scale and facial markings are smaller than any mesh
+carries, so they are drawn per pixel. The skin hooks (`lab/skin.bk`, and
+`lab/skin-crowd.bk` at the crowd's full level) pass each point's rest
+position to the fragment, call `creature::coat` over the vertex colour, and
+then call `creature::face`:
 
 ```
+pub fn coat(p: vec3<f32>, foot: f32, s: mesh::Surface) -> mesh::Surface
 pub fn face(p: vec3<f32>, foot: f32, look: vec4<f32>, s: mesh::Surface) -> mesh::Surface
 ```
 
@@ -1259,7 +1304,7 @@ Headless runs drive the view through `globalThis.creatureLab`
 
 ## Tests
 
-`scripts/validate.sh tools/creature-lab` runs the smoke test and seven tests:
+`scripts/validate.sh tools/creature-lab` runs the smoke test and eight tests:
 
 - `tests/test_parts.js`, the skin and the parts seen:
   - a tube of skin about an arm is the arm's own; weighted to the trunk it
@@ -1317,6 +1362,13 @@ Headless runs drive the view through `globalThis.creatureLab`
   - fleeing, nobody runs before the threat. After it, the alarm spreads
     beyond those near it, most alarmed 2 s are running away, and some gallop.
   - the neighbour grid lists every creature once, in its own cell
+- `tests/test_roster.js`, every species in `creatures/`:
+  - auto-discovery finds all thirteen species, each loads its mesh, `coat` and
+    `face`, and walks with no metric flags
+  - `human`, `finch`, `leopard`, `iguana` and `ursa` bind their limbs in their
+    own skin at rest (`boundFlags`) and run `walk` and `gallop` with no metric
+    or skin-stretch flags
+  - `leopard`, `iguana` and `ursa` step cleanly in a GPU `Flock`
 
 ## Adding a creature
 

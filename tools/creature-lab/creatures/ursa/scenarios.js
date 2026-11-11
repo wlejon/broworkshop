@@ -1,6 +1,11 @@
 // Species-specific scenarios for `ursa` alongside the lab's standard scenarios.
 
 export const scenarios = {
+    gallop: {
+        about: 'a straight rotary gallop',
+        duration: 10,
+        track: [{ t: 0, speed: 6.8 }],
+    },
     leap: {
         about: 'heavy rotary gallop run-up at 5.6 m/s, athletic bear vault over a 0.68 m fallen log, cushioned run-out',
         duration: 7,

@@ -583,8 +583,10 @@ pub fn solve_ursa_legs(st: rw_store<f32, 1>, env: read_store<f32, 1>, s: i32, T_
 
         let n = normal(env, toe.x, toe.z);
         let paw_fwd = vec3<f32>(sin(paw_yaw), 0.0, cos(paw_yaw));
-        let slope_w = select_f(planted, 1.0, smooth01((u - 0.65) / 0.35));
-        let slope = atan2(-dot(n, paw_fwd), n.y) * slope_w;
+        let heel_xz = toe - paw_fwd * 0.168;
+        let chord_slope = atan2(toe.y - height(env, heel_xz.x, heel_xz.z), 0.168);
+        let slope_w = select_f(planted, 1.0, 1.0 - 0.45 * fold_bump(u));
+        let slope = min(atan2(-dot(n, paw_fwd), n.y), chord_slope) * slope_w;
 
         let d_full = q_rot(q_conj(qp), toe - j);
         var ext_w: f32 = 1.0;

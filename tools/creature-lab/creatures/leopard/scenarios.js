@@ -1,6 +1,11 @@
 // The leopard's scenarios alongside the lab's standard suite.
 
 export const scenarios = {
+    gallop: {
+        about: 'a straight rotary gallop',
+        duration: 9,
+        track: [{ t: 0, speed: 8.0 }],
+    },
     'stalk-and-bolt': {
         about: 'crouches low to inspect prey scent, startles at a rival, and bolts in a rotary gallop',
         duration: 7.5,

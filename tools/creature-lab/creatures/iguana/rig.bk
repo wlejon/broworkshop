@@ -144,7 +144,7 @@ pub fn pose(c: i32, intent: read_store<f32, 1>, env: read_store<f32, 1>, state: 
         want = atan2(vdes.x, vdes.y) + vary * 0.035 * noise1(clock / 1.6, seed, 2.0);
     }
     let leaping = state[s + IG_LEAP] > 0.5;
-    let max_turn = mix(1.4, 3.2 / (1.0 + 0.45 * speed), smooth01(speed / 0.5));
+    let max_turn = mix(0.75, 3.2 / (1.0 + 0.45 * speed), smooth01(speed / 0.42));
     let w_t = clamp(3.4 * wrap_pi(want - yaw), -max_turn, max_turn) * select_f(leaping, 0.0, 1.0);
     let omega = approach(state[s + IG_OMEGA], w_t, 6.5, dt);
     let yaw0 = yaw;
@@ -220,7 +220,7 @@ pub fn pose(c: i32, intent: read_store<f32, 1>, env: read_store<f32, 1>, state: 
     gw.z = approach(gw.z, select_f(gait == GAIT_GALLOP, 1.0, 0.0), 2.5, dt);
     gw = gw / max(gw.x + gw.y + gw.z, 1e-4);
 
-    let veff = max(speed, abs(omega) * mix(0.32, 0.20, smooth01(speed / 0.5)));
+    let veff = max(speed, max(abs(omega), abs(w_t)) * mix(0.75, 0.20, smooth01(speed / 0.42)));
     // Cadence & duty tuned so measured sole contact duty matches 0.66 (walk), 0.48 (trot), 0.36 (gallop).
     let freq = gw.x * (0.96 + 1.36 * veff) + gw.y * (1.98 + 0.52 * veff) + gw.z * (2.68 + 0.30 * veff);
     let duty = gw.x * (clamp(0.55 - 0.03 * veff, 0.49, 0.57) + SLOW_DUTY * (1.0 - smooth01(veff / 0.55)))
@@ -240,7 +240,7 @@ pub fn pose(c: i32, intent: read_store<f32, 1>, env: read_store<f32, 1>, state: 
     let gom = clamp01(go_s.x);
 
     var offs: array<f32, 4>;
-    let pivot = (1.0 - smooth01(speed / 0.22)) * smooth01(abs(omega) / 0.15);
+    let pivot = (1.0 - smooth01(speed / 0.22)) * smooth01(max(abs(omega), abs(w_t)) / 0.15);
     for (var l: i32 = 0; l < 4; l += 1) {
         offs[l] = off_mix(OFF_WALK, OFF_TROT, OFF_GALLOP, gw, l);
         offs[l] += pivot * phase_diff(offs[l], OFF_TROT[l]);
@@ -604,7 +604,7 @@ pub fn pose(c: i32, intent: read_store<f32, 1>, env: read_store<f32, 1>, state: 
         hold4[l] = vec3<f32>(state[k + L_PLANT], state[k + L_SINCE], left_t[l]);
     }
     let lean_want = select_f(moving || any_swing, (1.0 - smooth01(speed / 0.25)) * (1.0 - smooth01(vd / 0.38)), 0.0);
-    var ls = crit_step(vec2<f32>(state[s + IG_LEAN_S], state[s + IG_LEAN_S + 1]), lean_want, 6.0, dt);
+    var ls = crit_step(vec2<f32>(state[s + IG_LEAN_S], state[s + IG_LEAN_S + 1]), lean_want, 12.0, dt);
     if (init) { ls = vec2<f32>(0.0); }
     state[s + IG_LEAN_S] = ls.x; state[s + IG_LEAN_S + 1] = ls.y;
     let still = clamp01(ls.x) * (1.0 - lie);

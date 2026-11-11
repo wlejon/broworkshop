@@ -106,7 +106,7 @@ pub const WITHERS_Z: f32 = 0.335;  // pelvis head (-0.080) to pectoral shoulder 
 pub const CAP_FADE: f32 = 0.14;
 pub const CAP_SOFT: f32 = 0.010;
 pub const CAP_BAND: f32 = 0.14;
-pub const LEAN_MAX: f32 = 0.095;
+pub const LEAN_MAX: f32 = 0.125;
 pub const BREAKOVER: f32 = 0.38;
 
 pub fn turn_z() -> f32 { return 0.5 * WITHERS_Z; }
