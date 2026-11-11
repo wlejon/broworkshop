@@ -1,0 +1,171 @@
+// creature::face — per-pixel bear face shader for `ursa` in rest-pose coordinates
+// (p: x left, y up, z forward, metres; foot: pixel footprint; look: gaze & lid).
+//
+// Features:
+//   - Classic warm tan-cinnamon bear muzzle mask blending softly into dark umber
+//     cheeks and forehead across the frontal stop
+//   - Expressive warm amber-brown eyes with dark round pupils, sky catchlight,
+//     and dark lids driven by `look` (blink / wide alert)
+//   - Broad wet-black leathery rhinarium (nose pad) with sculpted comma nostrils,
+//     glossy specular sheen, and vertical philtrum cleft
+//   - Dark leathery upper and lower lip rims along the hinged gape and soft brow ridges
+module creature::face;
+import mesh;
+
+fn lin(c: vec3<f32>) -> vec3<f32> {
+    return vec3<f32>(pow(c.x, 2.2), pow(c.y, 2.2), pow(c.z, 2.2));
+}
+
+fn inside(d: f32, w: f32) -> f32 {
+    return clamp(0.5 - d / (2.0 * w), 0.0, 1.0);
+}
+
+fn segment(q: vec2<f32>, a: vec2<f32>, b: vec2<f32>) -> f32 {
+    let ab = b - a;
+    let t = clamp(dot(q - a, ab) / max(dot(ab, ab), 1e-8), 0.0, 1.0);
+    return length(q - a - ab * t);
+}
+
+// Eye placement matching `eyeL/R` blobs in body.js: [+-0.072, 0.835, 0.816]
+const EYE: vec3<f32> = vec3<f32>(0.072, 0.835, 0.816);
+const EYE_HALF: vec2<f32> = vec2<f32>(0.0148, 0.0112);
+const EYE_SLANT: f32 = 0.14;
+
+pub fn face(p: vec3<f32>, foot: f32, look: vec4<f32>, s: mesh::Surface) -> mesh::Surface {
+    var out = s;
+    if (p.z < 0.72 || p.y < 0.63) { return out; }
+
+    let w = max(foot, 0.0003);
+    let ax = abs(p.x);
+    var c = s.base_color;
+    var rough = s.roughness;
+
+    let black = lin(vec3<f32>(0.028, 0.025, 0.024));
+    let nose_pad = lin(vec3<f32>(0.052, 0.048, 0.048));
+    let lip_dark = lin(vec3<f32>(0.065, 0.052, 0.048));
+    let muzzle_bridge = lin(vec3<f32>(0.335, 0.218, 0.138));
+    let muzzle_tan = lin(vec3<f32>(0.525, 0.372, 0.242));
+    let muzzle_pale = lin(vec3<f32>(0.645, 0.495, 0.342));
+    let brow_dark = lin(vec3<f32>(0.135, 0.085, 0.056));
+    let brow_warm = lin(vec3<f32>(0.385, 0.262, 0.165));
+
+    // --- 1. Natural blended bear muzzle mask & soft furred brow ridges ---
+    if (p.z > 0.78 && p.y > 0.64 && p.y < 0.87 && ax < 0.106) {
+        // Soft, feathered transition ahead of the orbital stop with warm darker dorsal nasal bridge
+        // and richer cinnamon-tan along the lateral flews, whisker pads, and chin.
+        let stop_blend = smoothstep(0.805, 0.905, p.z + 0.010 * sin(ax * 95.0 + p.y * 80.0));
+        let cheek_blend = 1.0 - smoothstep(0.042, 0.088, ax);
+        let crown_fade = 1.0 - smoothstep(0.800, 0.848, p.y + 0.14 * (p.z - 0.84));
+        let mask = stop_blend * cheek_blend * crown_fade;
+        let bridge_top = smoothstep(0.792, 0.832, p.y) * (1.0 - smoothstep(0.015, 0.045, ax));
+        let flew_warmth = smoothstep(0.800, 0.742, p.y) * smoothstep(0.85, 0.94, p.z);
+        var tan_col = mix(muzzle_tan, muzzle_pale, 0.45 * flew_warmth);
+        tan_col = mix(tan_col, muzzle_bridge, 0.65 * bridge_top);
+        c = mix(c, tan_col, 0.76 * mask);
+    }
+
+    // Subtle arched furred brow ridges above the eyes.
+    if (ax > 0.036 && ax < 0.102 && p.y > 0.840 && p.y < 0.880 && p.z > 0.785 && p.z < 0.848) {
+        let bx = (ax - 0.068) / 0.025;
+        let bz = (p.z - 0.814) / 0.024;
+        let arch_y = 0.858 - 0.005 * bx * bx;
+        let brow = exp(-2.5 * (bx * bx + bz * bz)) * exp(-pow((p.y - arch_y) / 0.009, 2.0));
+        c = mix(c, brow_warm, 0.42 * brow);
+        let crease = exp(-3.0 * (bx * bx + bz * bz)) * exp(-pow((p.y - 0.846) / 0.0045, 2.0));
+        c = mix(c, brow_dark, 0.45 * crease);
+    }
+
+    // --- 2. Expressive warm amber-brown bear eyes with dark round pupils & lids ---
+    if (ax > 0.052 && p.z > 0.790 && p.z < 0.846 && p.y > 0.810 && p.y < 0.862) {
+        let u = p.z - EYE.z;
+        let v = p.y - EYE.y + EYE_SLANT * u;
+        let shut = clamp(look.z, 0.0, 1.0);
+        let wide = max(-look.z, 0.0);
+
+        // Slightly rounded ursine almond aperture.
+        let a = clamp(u / EYE_HALF.x, -1.0, 1.0);
+        let h = EYE_HALF.y * (1.0 + 0.28 * wide) * sqrt(max(0.0, 1.0 - a * a)) * (1.0 - 0.10 * a * a);
+        let d = abs(v) - h;
+        let lids = inside(v - h * (1.0 - 1.55 * shut), w) * inside(-h * (1.0 - 0.45 * shut) - v, w);
+        let aperture = inside(max(d, abs(u) - EYE_HALF.x), w) * smoothstep(0.056, 0.062, ax);
+        let open = aperture * lids;
+
+        // Subtle warm tan eye-ring and dark leathery lid margin.
+        let fur_ring = inside(d - 0.0045, 0.0035 + w) * inside(abs(u) - EYE_HALF.x - 0.005, 0.0035 + w);
+        c = mix(c, muzzle_tan, 0.38 * fur_ring);
+        let lid_rim = inside(d - 0.0018, w) * inside(abs(u) - EYE_HALF.x - 0.0018, w);
+        c = mix(c, black, 0.92 * lid_rim);
+        rough = mix(rough, 0.42, lid_rim);
+
+        // Gaze offset: warm amber-brown iris filling the rounded bear eye, dark limbal ring & pupil.
+        let g = vec2<f32>(-sign(p.x) * look.x, look.y) * 0.012;
+        let ui = u - g.x;
+        let vi = v - g.y;
+        let r_iris = length(vec2<f32>(ui, vi)) / 0.0128;
+        let iris_outer = lin(vec3<f32>(0.11, 0.058, 0.026));
+        let iris_amber = lin(vec3<f32>(0.44, 0.240, 0.082));
+        var eye_col = mix(iris_amber, iris_outer, smoothstep(0.42, 0.96, r_iris));
+        // Dark ursine scleral rim (subtle warm tint only at extreme wide startle).
+        let sclera = mix(lin(vec3<f32>(0.09, 0.062, 0.046)), lin(vec3<f32>(0.36, 0.30, 0.25)), clamp(wide, 0.0, 1.0));
+        eye_col = mix(eye_col, sclera, inside(0.98 - r_iris, 0.08));
+        // Dark round ursine pupil.
+        let pupil_r = 0.0052 * (1.0 - 0.12 * wide);
+        let pupil = inside(length(vec2<f32>(ui, vi)) - pupil_r, w);
+        eye_col = mix(eye_col, lin(vec3<f32>(0.008, 0.007, 0.007)), pupil);
+        // Crisp sky specular catchlight high and forward on the cornea.
+        let catch1 = inside(length(vec2<f32>(u - 0.0038, v - 0.0036)) - 0.0019, w);
+        let catch2 = inside(length(vec2<f32>(u + 0.0032, v + 0.0028)) - 0.0010, w);
+        eye_col = mix(eye_col, vec3<f32>(1.0), 0.88 * catch1 + 0.32 * catch2);
+
+        c = mix(c, eye_col, open);
+        rough = mix(rough, 0.04, open);
+
+        // Closed / blinking upper and lower furred eyelids.
+        let lid_over = aperture * (1.0 - inside(v - h * (1.0 - 1.55 * shut) - 0.0020, w)
+                                       * inside(-h * (1.0 - 0.45 * shut) - 0.0015 - v, w));
+        c = mix(c, mix(s.base_color, black, 0.52), lid_over);
+        rough = mix(rough, 0.68, lid_over);
+    }
+
+    // --- 3. Broad wet-black leathery rhinarium, comma nostrils, philtrum & lip rims ---
+    if (p.z > 0.82 && p.y < 0.825) {
+        // Upper lip rim along the bottom of the upper muzzle (body.js muzzle bottom ~ 0.752..0.748).
+        let upper_lip_y = 0.754 - 0.04 * (p.z - 0.84);
+        let in_gape_z = smoothstep(0.830, 0.855, p.z);
+        let upper_rim = inside(abs(p.y - upper_lip_y) - 0.0042, w * 1.4) * in_gape_z;
+        c = mix(c, lip_dark, 0.88 * upper_rim);
+        rough = mix(rough, 0.36, 0.8 * upper_rim);
+
+        // Lower lip rim along the top of the hinged mandible (`jaw` rest top ~ 0.730 -> 0.678).
+        let lower_lip_y = 0.730 - 0.44 * (p.z - 0.83);
+        let lower_rim = inside(abs(p.y - lower_lip_y) - 0.0042, w * 1.4) * in_gape_z * step(p.z, 0.958);
+        c = mix(c, lip_dark, 0.86 * lower_rim);
+        rough = mix(rough, 0.38, 0.75 * lower_rim);
+
+        // Broad wet-black bear nose pad (`nose` blob at [0, 0.788, 0.978], radii [0.036, 0.027, 0.019]).
+        let pad_back = 0.957 + 0.20 * ax * ax * 80.0 - 0.004 * smoothstep(0.780, 0.804, p.y);
+        let pad_ell = length(vec2<f32>(ax / 0.036, (p.y - 0.788) / 0.027));
+        let pad = inside(pad_back - p.z, w * 1.5) * inside(pad_ell - 1.0, w / 0.030);
+        c = mix(c, nose_pad, pad);
+        // Wet leathery specular sheen across the rhinarium.
+        rough = mix(rough, 0.16, pad);
+
+        // Sculpted comma-shaped nostrils curling laterally on the front of the nose pad.
+        let nq = vec2<f32>(ax - 0.0150, p.y - 0.789);
+        let rot_n = vec2<f32>(nq.x * 0.82 - nq.y * 0.57, nq.x * 0.57 + nq.y * 0.82);
+        let core_nost = inside(length(rot_n / vec2<f32>(0.0045, 0.0085)) - 1.0, w / 0.005);
+        let wing_slit = inside(segment(vec2<f32>(ax, p.y), vec2<f32>(0.0155, 0.792), vec2<f32>(0.0275, 0.795)) - 0.0022, w);
+        let nostril = clamp(core_nost + 0.85 * wing_slit, 0.0, 1.0) * pad * smoothstep(0.966, 0.976, p.z);
+        c = mix(c, vec3<f32>(0.004, 0.003, 0.003), 0.95 * nostril);
+        rough = mix(rough, 0.92, nostril);
+
+        // Vertical median philtrum groove from the lower rhinarium down to the upper lip.
+        let philtrum = inside(ax - 0.0018, w) * smoothstep(0.962, 0.974, p.z)
+            * smoothstep(0.750, 0.758, p.y) * smoothstep(0.790, 0.778, p.y);
+        c = mix(c, black, 0.88 * philtrum);
+    }
+
+    out.base_color = c;
+    out.roughness = rough;
+    return out;
+}

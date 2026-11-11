@@ -1,0 +1,155 @@
+// creature::coat — per-pixel ursine pelage shader for `ursa` in rest-pose
+// coordinates (p: x left, y up, z forward in metres; foot: pixel footprint).
+//
+// Features:
+//   - Deep espresso-umber / dark mahogany fur base with directional guard-hair strands
+//   - Warm cinnamon-bronze grizzled sheen over the muscular shoulder hump, neck ruff,
+//     and upper dorsum
+//   - Iconic warm cream-gold V-crescent chest blaze across the anterior thorax
+//   - Darker chocolate-charcoal lower pillar limbs and leathery plantigrade paw pads
+//   - Warm tan inner-ear pinna velvet and glossy dark keratin claws
+module creature::coat;
+import mesh;
+
+fn lin(c: vec3<f32>) -> vec3<f32> {
+    return vec3<f32>(pow(c.x, 2.2), pow(c.y, 2.2), pow(c.z, 2.2));
+}
+
+fn hash21(q: vec2<f32>) -> f32 {
+    var p = fract(q * vec2<f32>(123.34, 456.21));
+    p += dot(p, p + vec2<f32>(45.32));
+    return fract(p.x * p.y);
+}
+
+fn vnoise(q: vec2<f32>) -> f32 {
+    let i = floor(q);
+    let f = fract(q);
+    let u = f * f * (3.0 - 2.0 * f);
+    let a = hash21(i);
+    let b = hash21(i + vec2<f32>(1.0, 0.0));
+    let c = hash21(i + vec2<f32>(0.0, 1.0));
+    let d = hash21(i + vec2<f32>(1.0, 1.0));
+    return mix(mix(a, b, u.x), mix(c, d, u.x), u.y);
+}
+
+// Directional fur-strand micro-variation attenuated smoothly by pixel footprint `foot`
+// so close-ups show lush guard hairs while distant views stay shimmer-free.
+fn fur_strands(p: vec3<f32>, foot: f32) -> f32 {
+    let detail_fade = 1.0 - smoothstep(0.0025, 0.012, foot);
+    if (detail_fade <= 0.001) { return 0.0; }
+    // Fur flows caudally and ventrally along the flanks and limbs.
+    let u_across = p.y * 58.0 + p.x * 46.0;
+    let v_along = p.z * 16.0 - p.y * 9.0;
+    let s1 = vnoise(vec2<f32>(u_across, v_along));
+    let s2 = vnoise(vec2<f32>(u_across * 2.15 + 7.3, v_along * 2.05 - 3.1));
+    return ((0.65 * s1 + 0.35 * s2) * 2.0 - 1.0) * detail_fade;
+}
+
+pub fn coat(p: vec3<f32>, foot: f32, s: mesh::Surface) -> mesh::Surface {
+    var out = s;
+    let w = max(foot, 0.0005);
+    let ax = abs(p.x);
+    var c = s.base_color;
+    var rough = max(s.roughness, 0.72);
+
+    let umber = lin(vec3<f32>(0.195, 0.125, 0.084));
+    let mahogany = lin(vec3<f32>(0.268, 0.168, 0.106));
+    let grizzle_bronze = lin(vec3<f32>(0.505, 0.362, 0.228));
+    let grizzle_gold = lin(vec3<f32>(0.640, 0.495, 0.335));
+    let belly_dark = lin(vec3<f32>(0.125, 0.082, 0.058));
+    let leg_charcoal = lin(vec3<f32>(0.098, 0.070, 0.054));
+    let pad_leather = lin(vec3<f32>(0.058, 0.048, 0.044));
+    let claw_keratin = lin(vec3<f32>(0.055, 0.048, 0.042));
+    let cream_gold = lin(vec3<f32>(0.925, 0.845, 0.655));
+    let cream_warm = lin(vec3<f32>(0.835, 0.715, 0.505));
+    let ear_velvet = lin(vec3<f32>(0.565, 0.415, 0.295));
+    let ear_rim = lin(vec3<f32>(0.145, 0.092, 0.062));
+
+    let strand = fur_strands(p, w);
+
+    // --- Rich espresso-mahogany fur base & grizzled cinnamon-bronze shoulder hump ---
+    if (p.y > 0.44 && p.z > -0.74 && p.z < 0.78) {
+        let dorsal = smoothstep(0.68, 0.88, p.y);
+        c = mix(c, mix(umber, mahogany, dorsal), 0.45);
+
+        // Prominent grizzled guard-hair mantle over the shoulder hump, neck ruff, and upper back.
+        let on_hump = smoothstep(0.75, 0.91, p.y)
+            * smoothstep(-0.18, 0.18, p.z)
+            * (1.0 - smoothstep(0.42, 0.68, p.z))
+            * (1.0 - smoothstep(0.14, 0.22, ax));
+        let on_ruff = smoothstep(0.74, 0.87, p.y)
+            * smoothstep(0.42, 0.56, p.z)
+            * (1.0 - smoothstep(0.68, 0.76, p.z))
+            * smoothstep(0.05, 0.13, ax);
+        let on_saddle = smoothstep(0.80, 0.87, p.y)
+            * smoothstep(-0.56, -0.05, p.z)
+            * (1.0 - smoothstep(0.08, 0.18, ax));
+        let grizzle = clamp(on_hump + 0.65 * on_ruff + 0.48 * on_saddle, 0.0, 1.0);
+        let tip_tint = mix(grizzle_bronze, grizzle_gold, clamp(0.5 + 0.5 * strand, 0.0, 1.0));
+        c = mix(c, tip_tint, grizzle * (0.58 + 0.16 * strand));
+        rough = mix(rough, 0.60, 0.5 * grizzle);
+
+        // Deep espresso belly and brisket under-fur.
+        let ventral = smoothstep(0.58, 0.49, p.y) * (1.0 - smoothstep(0.14, 0.21, ax));
+        c = mix(c, belly_dark, 0.65 * ventral);
+    }
+
+    // Subtle directional fur-strand modulation across the coat.
+    let fur_zone = smoothstep(0.035, 0.09, p.y) * (1.0 - smoothstep(0.955, 0.985, p.z));
+    c *= 1.0 + 0.11 * strand * fur_zone;
+
+    // --- Iconic warm cream-gold V-crescent chest blaze across the anterior thorax ---
+    if (p.z > 0.34 && p.z < 0.62 && p.y > 0.48 && p.y < 0.78 && ax < 0.165) {
+        // Bold symmetric moon-bear V-crescent dipping down to the proud lower brisket (x = 0, y = 0.562)
+        // and sweeping upward and outward across both pectoral walls (ax ~ 0.138, y ~ 0.700).
+        let v_center_y = 0.562 + 0.76 * ax + 1.45 * ax * ax;
+        let half_thick = mix(0.036, 0.015, smoothstep(0.01, 0.142, ax));
+        let fur_jag = 0.0038 * sin(ax * 150.0 + p.y * 115.0) + 0.0024 * strand;
+        let dy = abs(p.y - v_center_y) + fur_jag;
+        let in_v = smoothstep(half_thick + 0.008 + w, half_thick - 0.005 - w, dy);
+        let span_x = smoothstep(0.150 + w, 0.118 - w, ax);
+        // Follow the curved barrel ribcage front wall (z ~ 0.48 at x = 0, curving back to z ~ 0.39 at ax = 0.13).
+        let chest_wall_z = 0.435 - 0.38 * ax;
+        let chest_front = smoothstep(chest_wall_z - 0.030 - w, chest_wall_z + 0.012 + w, p.z);
+        let blaze = in_v * span_x * chest_front;
+        let blaze_col = mix(cream_warm, cream_gold, smoothstep(half_thick, 0.0, dy));
+        c = mix(c, blaze_col, 0.94 * blaze);
+        rough = mix(rough, 0.65, blaze);
+    }
+
+    // --- Cupped rounded ears: warm tan inner-pinna velvet & dark outer fur rim ---
+    if (p.y > 0.860 && ax > 0.076 && p.z > 0.692 && p.z < 0.760) {
+        let eu = clamp((p.y - 0.872) / 0.092, 0.0, 1.0);
+        let ear_cx = 0.088 + 0.068 * eu;
+        let front_cup = smoothstep(0.722 - w, 0.730 + w, p.z)
+            * smoothstep(0.08, 0.24, eu)
+            * (1.0 - smoothstep(0.78, 0.94, eu));
+        let rad = abs(ax - ear_cx);
+        let inner = front_cup * smoothstep(0.025 + w, 0.013 - w, rad);
+        c = mix(c, ear_velvet, 0.78 * inner);
+        let rim = max(smoothstep(0.80, 0.96, eu), smoothstep(0.024, 0.035, rad) * front_cup);
+        c = mix(c, ear_rim, 0.62 * rim);
+    }
+
+    // --- Darker chocolate-charcoal lower legs, leathery plantigrade soles & dark keratin claws ---
+    if (p.y < 0.42) {
+        let lower_dark = smoothstep(0.40, 0.12, p.y);
+        c = mix(c, leg_charcoal, 0.78 * lower_dark);
+
+        // Leathery plantar/palmar sole pads underneath the broad paws.
+        let on_sole = smoothstep(0.020 + w, 0.008 - w, p.y);
+        c = mix(c, pad_leather, 0.88 * on_sole);
+        rough = mix(rough, 0.42, on_sole);
+
+        // Curved dark keratin claws ahead of the forepaw (z > 0.506) and hindpaw (z > -0.300 on hind).
+        let fore_claw = step(0.1, p.z) * smoothstep(0.504 - w, 0.514 + w, p.z);
+        let hind_claw = (1.0 - step(0.0, p.z)) * smoothstep(-0.300 - w, -0.292 + w, p.z) * step(p.z, -0.22);
+        let claw = clamp(fore_claw + hind_claw, 0.0, 1.0) * smoothstep(0.032, 0.022, p.y);
+        c = mix(c, claw_keratin, 0.95 * claw);
+        rough = mix(rough, 0.24, claw);
+    }
+
+    out.base_color = c;
+    out.roughness = rough;
+    return out;
+}
