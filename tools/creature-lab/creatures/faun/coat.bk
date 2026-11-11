@@ -1,0 +1,73 @@
+// creature::coat — per-pixel coat refinement for the faun in rest-pose space
+// (p: x left, y up, z forward in metres; foot: pixel footprint size).
+// Adds crisp annular keratin growth rings along the swept-back horns, polished
+// dark hoof/claw coronet contrast at the paws, warm inner-ear pinna shading,
+// and crisp shaggy pelage contrast at the waist while keeping body.js vertex
+// colours intact for coarse crowd LODs.
+module creature::coat;
+import mesh;
+
+fn lin(c: vec3<f32>) -> vec3<f32> {
+    return vec3<f32>(pow(c.x, 2.2), pow(c.y, 2.2), pow(c.z, 2.2));
+}
+
+pub fn coat(p: vec3<f32>, foot: f32, s: mesh::Surface) -> mesh::Surface {
+    var out = s;
+    let w = max(foot, 0.0005);
+    let ax = abs(p.x);
+    var c = s.base_color;
+    var rough = s.roughness;
+
+    // --- Horns: subtle annular keratin growth ridges along the swept-back arc ---
+    // Gate strictly to the horn shafts above the brow/forelock (p.y > 1.326, ax > 0.018)
+    // and modulate the horn's own pale-bone base colour rather than painting stripes on skin.
+    let is_horn = smoothstep(0.38, 0.50, c.z / max(c.x, 0.001));
+    let horn_band = smoothstep(1.324, 1.338, p.y) * smoothstep(0.016, 0.026, ax) * (1.0 - smoothstep(0.112, 0.125, ax)) * max(is_horn, smoothstep(0.02, -0.03, p.z));
+    if (horn_band > 0.001) {
+        // Arc parameter along the horn curve from brow root (0) to tip (~0.27 m).
+        let dy = max(p.y - 1.322, 0.0);
+        let dz = max(0.118 - p.z, 0.0);
+        let arc = 0.65 * dy + 0.88 * dz;
+        let detail = (1.0 - smoothstep(0.0032, 0.0065, w)) * (1.0 - smoothstep(0.15, 0.23, arc));
+        // Narrow dark growth-ring grooves between broader rounded keratin segments (~9.5 mm).
+        let wave = sin(arc * 660.0 + 2.2 * ax);
+        let groove = pow(clamp(0.5 - 0.5 * wave, 0.0, 1.0), 2.2);
+        let tip = smoothstep(0.12, 0.23, arc);
+        var hc = c * mix(1.04, 0.72, groove * detail);
+        hc = mix(hc, lin(vec3<f32>(0.095, 0.072, 0.060)), 0.85 * tip);
+        c = mix(c, hc, horn_band);
+        rough = mix(rough, mix(0.42, 0.22, tip) + 0.10 * groove * detail, horn_band);
+    }
+
+    // --- Inner ear pinna hollow: warm rose-buff skin inside the carved shell ---
+    if (p.y > 1.20 && p.y < 1.285 && ax > 0.078 && ax < 0.195 && p.z > 0.052) {
+        let eu = clamp((ax - 0.075) / 0.112, 0.0, 1.0);
+        let rim = smoothstep(0.06, 0.22, eu) * (1.0 - smoothstep(0.76, 0.96, eu));
+        let front_face = smoothstep(0.15, 0.65, s.normal.z);
+        let pinna = rim * front_face;
+        c = mix(c, lin(vec3<f32>(0.83, 0.59, 0.50)), 0.45 * pinna);
+        // Subtle dark tip border on the pointed outer ear leaf.
+        let etip = smoothstep(0.80, 0.96, eu);
+        c = mix(c, lin(vec3<f32>(0.13, 0.085, 0.065)), 0.65 * etip);
+    }
+
+    // --- Hoof / digitigrade paw coronet: crisp dark keratin toes below a warm coronet band ---
+    if (p.y < 0.065) {
+        let coronet = smoothstep(0.034 + 2.0 * w, 0.020 - 2.0 * w, p.y + 0.008 * p.z);
+        let band = smoothstep(0.048, 0.034, p.y) * (1.0 - coronet);
+        c = mix(c, lin(vec3<f32>(0.22, 0.145, 0.105)), 0.55 * band);
+        c = mix(c, lin(vec3<f32>(0.055, 0.042, 0.038)), 0.85 * coronet);
+        rough = mix(rough, 0.28, coronet);
+    }
+
+    // --- Crisp shaggy pelage transition at the waist ---
+    if (p.y > 0.76 && p.y < 0.92 && ax < 0.15) {
+        let jag = 0.014 * sin(p.x * 95.0) + 0.008 * cos(p.z * 110.0 + p.x * 40.0);
+        let shag = smoothstep(0.865 + w, 0.825 - w, p.y + 0.045 * s.normal.z + jag);
+        c = mix(c, lin(vec3<f32>(0.18, 0.11, 0.075)), 0.35 * shag);
+    }
+
+    out.base_color = c;
+    out.roughness = rough;
+    return out;
+}

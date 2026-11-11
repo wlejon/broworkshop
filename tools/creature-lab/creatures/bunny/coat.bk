@@ -1,0 +1,148 @@
+// creature::coat — per-pixel wild-rabbit agouti pelage, rufous nape, pale eye-ring,
+// cupped ear lining & dark ear-tip lacing, and fluffy white cotton-tail scut
+// underside (vertex colours in coat.js remain intact for coarse crowd LODs).
+// Parameterised in rest-pose coordinates `p` (x left, y up, z forward, metres)
+// and pixel footprint `foot` so markings stay locked to the skin in motion.
+module creature::coat;
+import mesh;
+
+fn lin(c: vec3<f32>) -> vec3<f32> {
+    return vec3<f32>(pow(c.x, 2.2), pow(c.y, 2.2), pow(c.z, 2.2));
+}
+
+fn sstep(e0: f32, e1: f32, x: f32) -> f32 {
+    let t = clamp((x - e0) / (e1 - e0), 0.0, 1.0);
+    return t * t * (3.0 - 2.0 * t);
+}
+
+fn inside(d: f32, w: f32) -> f32 {
+    return clamp(0.5 - d / (2.0 * w), 0.0, 1.0);
+}
+
+fn hash3(q: vec3<f32>) -> f32 {
+    let r = fract(q * vec3<f32>(0.1031, 0.1030, 0.0973));
+    let d = dot(r, r.yxz + vec3<f32>(33.33));
+    return fract((r.x + r.y) * r.z + d);
+}
+
+// Smooth 3D value noise (non-periodic, zero contour/checker moire).
+fn vnoise3(x: vec3<f32>) -> f32 {
+    let i = floor(x);
+    let f = fract(x);
+    let u = f * f * (3.0 - 2.0 * f);
+    let n000 = hash3(i);
+    let n100 = hash3(i + vec3<f32>(1.0, 0.0, 0.0));
+    let n010 = hash3(i + vec3<f32>(0.0, 1.0, 0.0));
+    let n110 = hash3(i + vec3<f32>(1.0, 1.0, 0.0));
+    let n001 = hash3(i + vec3<f32>(0.0, 0.0, 1.0));
+    let n101 = hash3(i + vec3<f32>(1.0, 0.0, 1.0));
+    let n011 = hash3(i + vec3<f32>(0.0, 1.0, 1.0));
+    let n111 = hash3(i + vec3<f32>(1.0, 1.0, 1.0));
+    let nx0 = mix(mix(n000, n100, u.x), mix(n010, n110, u.x), u.y);
+    let nx1 = mix(mix(n001, n101, u.x), mix(n011, n111, u.x), u.y);
+    return mix(nx0, nx1, u.z);
+}
+
+// Hollow half-width along the ear u in [0..1] (mirrors ear.js HOLLOW_KEYS).
+fn ear_hollow_w(u: f32) -> f32 {
+    if (u <= 0.16 || u >= 0.93) { return 0.0; }
+    if (u < 0.30) { return mix(0.0030, 0.0085, (u - 0.16) / 0.14); }
+    if (u < 0.58) { return mix(0.0085, 0.0115, (u - 0.30) / 0.28); }
+    if (u < 0.80) { return mix(0.0115, 0.0090, (u - 0.58) / 0.22); }
+    return mix(0.0090, 0.0035, (u - 0.80) / 0.13);
+}
+
+pub fn coat(p: vec3<f32>, foot: f32, s: mesh::Surface) -> mesh::Surface {
+    var out = s;
+    let w = max(foot, 0.00025);
+    let ax = abs(p.x);
+    var c = s.base_color;
+    var rough = s.roughness;
+
+    let agouti_hi = lin(vec3<f32>(0.64, 0.53, 0.39));
+    let agouti_lo = lin(vec3<f32>(0.31, 0.24, 0.17));
+    let back_dark = lin(vec3<f32>(0.36, 0.28, 0.20));
+    let nape_rufous = lin(vec3<f32>(0.68, 0.45, 0.26));
+    let cream = lin(vec3<f32>(0.88, 0.83, 0.74));
+    let white = lin(vec3<f32>(0.96, 0.95, 0.92));
+    let ear_in = lin(vec3<f32>(0.87, 0.71, 0.67));
+    let ear_tip = lin(vec3<f32>(0.14, 0.115, 0.10));
+
+    // 1. Subtle non-periodic 3D agouti fur ticking elongated along the caudal
+    // hair flow, fading out cleanly with pixel footprint `foot`.
+    let detail_fade = 1.0 - sstep(0.00065, 0.0019, foot);
+    let lum = 0.299 * c.x + 0.587 * c.y + 0.114 * c.z;
+    let on_agouti = sstep(0.035, 0.08, lum) * sstep(0.56, 0.36, lum);
+    if (detail_fade * on_agouti > 0.01) {
+        let q1 = vec3<f32>(p.x * 520.0, p.y * 460.0 + p.z * 120.0, p.z * 210.0);
+        let tick = 0.62 * vnoise3(q1) + 0.38 * vnoise3(q1 * 2.13 + vec3<f32>(7.1, 3.4, 11.9));
+        let ticked = mix(agouti_lo, agouti_hi, tick);
+        c = mix(c, mix(c, ticked, 0.18), detail_fade * on_agouti);
+    }
+
+    // 2. Trunk & haunch countershading: rich dorsal saddle, warm rufous nape
+    // triangle behind the ears, and crisp cream-white belly/throat border.
+    if (p.z > -0.185 && p.z < 0.168 && p.y > 0.022 && p.y < 0.208) {
+        let dorsal = sstep(0.155, 0.195, p.y) * sstep(0.045, 0.012, ax) * sstep(-0.16, -0.10, p.z) * sstep(0.10, 0.04, p.z);
+        c = mix(c, back_dark, 0.32 * dorsal);
+
+        let nape = sstep(0.082, 0.125, p.z) * sstep(0.168, 0.132, p.z) * sstep(0.124, 0.150, p.y) * sstep(0.036, 0.014, ax);
+        c = mix(c, nape_rufous, 0.65 * nape);
+
+        let belly_line = 0.044 + 0.038 * sstep(0.04, 0.11, p.z);
+        let belly = inside(p.y - belly_line, max(2.2 * w, 0.0025)) * sstep(0.056, 0.028, ax) * sstep(-0.14, -0.06, p.z);
+        c = mix(c, cream, 0.70 * belly);
+    }
+
+    // 3. Head: crisp pale cottontail eye-ring annulus outside the lid margin,
+    // plus clean white chin/jaw underside.
+    if (p.z > 0.145 && p.y > 0.115 && p.y < 0.188 && ax < 0.042) {
+        let chin = inside(p.y - (0.129 - 0.12 * max(0.205 - p.z, 0.0)), max(2.0 * w, 0.002)) * sstep(0.165, 0.190, p.z);
+        c = mix(c, white, 0.78 * chin);
+
+        let eu = (p.z - 0.178) / 0.0102;
+        let ev = (p.y - 0.164) / 0.0094;
+        let er = sqrt(eu * eu + ev * ev);
+        let ring = inside((er - 1.48) * 0.0094, max(2.0 * w, 0.0018))
+                 * (1.0 - inside((er - 1.07) * 0.0094, max(1.6 * w, 0.0012)))
+                 * sstep(0.019, 0.026, ax);
+        c = mix(c, cream, 0.62 * ring);
+    }
+
+    // 4. Long V-set ears: delicate rose-pink hollow lining and crisp dark
+    // charcoal-black outer tip lacing (exact rest frame from ear.js).
+    if (p.y > 0.183 && ax > 0.012 && p.z > 0.128 && p.z < 0.178) {
+        let eb = vec3<f32>(0.020, 0.186, 0.164);
+        let ed = vec3<f32>(0.022, 0.102, -0.018);
+        let elen = length(ed);
+        let et = ed / elen;
+        let f0 = vec3<f32>(0.55, 0.0, 1.0);
+        let ef = normalize(f0 - et * dot(f0, et));
+        let eac = cross(et, ef);
+        let q = vec3<f32>(ax, p.y, p.z) - eb;
+        let u = dot(q, et) / elen;
+        if (u > 0.02 && u < 1.03) {
+            let front = dot(q, ef);
+            let off = abs(dot(q, eac));
+            let hw = ear_hollow_w(u);
+            let lining = sstep(-0.0040, -0.0028, front) * inside(off - hw, max(1.6 * w, 0.0012)) * sstep(0.16, 0.28, u) * sstep(0.95, 0.85, u);
+            c = mix(c, ear_in, 0.82 * lining);
+            let tip_lace = sstep(0.84, 0.95, u) * (1.0 - 0.92 * lining);
+            c = mix(c, ear_tip, 0.88 * tip_lace);
+        }
+    }
+
+    // 5. Cotton-tail scut: bright fluffy white underside & rear, dark dorsal root.
+    if (p.z < -0.184 && p.y > 0.110 && p.y < 0.168 && ax < 0.026) {
+        let scut_w = sstep(-0.184, -0.194, p.z);
+        let under_edge = 0.145 - 0.38 * (p.z + 0.212);
+        let under = inside(p.y - under_edge, max(2.0 * w, 0.0022));
+        let scut_c = mix(back_dark, white, under);
+        c = mix(c, scut_c, 0.90 * scut_w);
+        rough = mix(rough, 0.85, 0.5 * scut_w * under);
+    }
+
+    out.base_color = c;
+    out.roughness = rough;
+    return out;
+}

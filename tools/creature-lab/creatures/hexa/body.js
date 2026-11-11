@@ -23,7 +23,7 @@ function coat(p, n, share) {
     const LR = (k) => share(k + 'L') + share(k + 'R');
     const legs = [1, 2, 3].reduce((a, k) => a + share(`legL${k}`) + share(`legR${k}`), 0);
     const hoof = [1, 2, 3].reduce((a, k) => a + share(`hoofL${k}`) + share(`hoofR${k}`), 0);
-    const trunk = share('trunk') + share('neck');
+    const trunk = share('trunk') + share('neck') + LR('midShoulder');
     // Darker down the back.
     let c = mix(TAWNY, BACK, 0.75 * sstep(0.35, 0.95, n[1]) * (1 - legs));
     // White underneath, and the flank stripe above it.
@@ -110,15 +110,28 @@ export function body(skel, detail = {}) {
             { c: [0.085 * s, 1.72, 0.95], r: 0.010 },
             { c: [0.07 * s, 1.80, 0.90], r: 0.003 },
         ], { up: [0, 0, 1], blend: 0.008, keep: true });
-        // An ear: a long leaf out to the side, open forward.
+        // An ear: a long leaf out to the side, open forward with a cupped pinna hollow.
         const e = bn(`ear${t}`);
-        const at = (u) => e.head.map((x, i) => x + (e.tail[i] - x) * u);
+        const ef = [0, 0.287, 0.958];
+        const at = (u, f = 0) => e.head.map((x, i) => x + (e.tail[i] - x) * u + ef[i] * f);
         B.limb(`ear${t}`, [`ear${t}`], [
-            { c: at(-0.15), r: [0.018, 0.012], bone: 'head' },
-            { c: at(0.4), r: [0.036, 0.009] },
-            { c: at(0.75), r: [0.028, 0.007] },
-            { c: at(1.0), r: [0.005, 0.004] },
+            { c: at(-0.15), r: [0.018, 0.013], bone: 'head' },
+            { c: at(0.4), r: [0.036, 0.0115] },
+            { c: at(0.75), r: [0.028, 0.009] },
+            { c: at(1.0), r: [0.005, 0.005] },
         ], { up: [0, 0.3, 1], blend: 0.008 });
+        B.limb(`earHollow${t}`, [`ear${t}`], [
+            { c: at(0.20, 0.011), r: [0.012, 0.0055] },
+            { c: at(0.46, 0.0115), r: [0.022, 0.0072] },
+            { c: at(0.74, 0.0105), r: [0.015, 0.0058] },
+            { c: at(0.88, 0.0095), r: [0.006, 0.004] },
+        ], { up: [0, 0.3, 1], carve: true, blend: 0.006, keep: 0.008 });
+        // Muscular thoracic/lat swell over the middle leg pair so L2/R2 grow
+        // organically out of dorsal-lateral musculature rather than a smooth tube.
+        B.limb(`midShoulder${t}`, ['spine'], [
+            { c: [0.116 * s, 0.965, 0.095], r: [0.048, 0.090] },
+            { c: [0.134 * s, 0.885, 0.125], r: [0.054, 0.108], bone: `upper${t}2` },
+        ], { up: [0, 0, 1], blend: 0.042 });
         for (const k of [1, 2, 3]) {
             const u = bn(`upper${t}${k}`), l = bn(`lower${t}${k}`), f = bn(`foot${t}${k}`);
             const [x, , z] = u.head;

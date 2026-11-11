@@ -71,11 +71,12 @@ function stride(p, G) {
         if (q < G.duty) {
             const s = q / G.duty;
             const heel = s < 0.45 ? mix(G.heelLand, G.heelGive, smooth(s / 0.45)) : mix(G.heelGive, G.heelPush, ((s - 0.45) / 0.55) ** 2);
-            return { z: G.reach * (1 - 2 * s) + G.ahead, y: 0, heel, toe: mix(-10, 0, smooth(s / 0.12)) };
+            return { z: G.reach * (1 - 2 * s) + G.ahead, y: 0, heel, toe: mix(-10, 0, smooth(s / 0.14)) };
         }
         const u = (q - G.duty) / (1 - G.duty);
-        const heel = u < 0.3 ? mix(G.heelPush, G.heelFold, smooth(u / 0.3)) : mix(G.heelFold, G.heelLand, smooth((u - 0.3) / 0.7));
-        const toe = u < 0.3 ? mix(0, 34, smooth(u / 0.3)) : u < 0.8 ? mix(34, -16, smooth((u - 0.3) / 0.5)) : mix(-16, -10, smooth((u - 0.8) / 0.2));
+        const heel = u < 0.34 ? mix(G.heelPush, G.heelFold, smooth(u / 0.34)) : mix(G.heelFold, G.heelLand, smooth((u - 0.34) / 0.66));
+        const su = smooth(u / 0.34);
+        const toe = u < 0.34 ? 26 * su * su : u < 0.8 ? mix(26, -14, smooth((u - 0.34) / 0.46)) : mix(-14, -10, smooth((u - 0.8) / 0.2));
         // (It reaches a little past where it lands and is drawn back onto the ground.)
         const fwd = smooth(u / 0.92) + 0.06 * Math.sin(Math.PI * Math.min(1, u / 0.92)) * (u > 0.5 ? 1 : 0) * 0;
         const z = G.reach * (-1 + 2 * (u < 0.92 ? 1.04 * fwd : mix(1.04, 1, (u - 0.92) / 0.08))) + G.ahead;
@@ -123,7 +124,7 @@ function stride(p, G) {
 // land near the body's middle line.
 const WALK = {
     duty: 0.62, reach: 0.25, ahead: 0.01, lift: 0.09, inset: 0.035,
-    heelLand: -4, heelGive: -13, heelPush: 34, heelFold: 62,
+    heelLand: -4, heelGive: -13, heelPush: 34, heelFold: 56,
     down: -0.022, bob: 0.014, low: 0.06, fore: 0, sway: 0.018, yaw: 7, roll: 2.2, pitch: 1.5, nod: 1.2, curl: 0, chin: 0, headNod: 6,
     whip: 0.14, lag: 0.075, tailLift: [0, 0, 0, 0, 0], tailBob: 0.7,
     armBack: 12, armSwing: 17, armPump: 14, armWrist: 14, armBend: 108, armBeat: 4, earBack: 2, earNod: 8,
@@ -134,7 +135,7 @@ const WALK = {
 // the ground is two centimetres.)
 const RUN = {
     duty: 0.3, reach: 0.29, ahead: -0.02, lift: 0.17, inset: 0.05,
-    heelLand: 2, heelGive: -16, heelPush: 44, heelFold: 78,
+    heelLand: 2, heelGive: -16, heelPush: 42, heelFold: 62,
     down: -0.05, bob: 0.024, low: 0.15, fore: 0.02, sway: 0.008, yaw: 9, roll: 1.5, pitch: 13, nod: 2, curl: 6, chin: 3, headNod: 5,
     whip: 0.03, lag: 0.06, stream: 0.55, tailLift: [4, 5, 3, -5, -9], tailBob: 1.6,
     armBack: 24, armSwing: 30, armPump: 20, armWrist: 18, armBend: 118, armBeat: 6, earBack: 34, earNod: 5,

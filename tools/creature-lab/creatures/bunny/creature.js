@@ -16,8 +16,9 @@ export default {
     name: 'bunny',
     skeleton: { bones, feet, tracks, chartJoints },
     body,
+    coat: 'coat.bk',
     face: 'face.bk',
-    rig: { file: 'rig.bk', kernel: 'k_rig', modules: { 'bunny::legs': 'legs.bk', 'bunny::stride': 'stride.bk' } },
+    rig: { file: 'rig.bk', kernel: 'k_rig', modules: { 'bunny::legs': 'legs.bk', 'bunny::stride': 'stride.bk', 'bunny::act': 'act.bk' } },
     scale: { height: 0.2, length: 0.42 },
     speeds: { walk: 0.5, trot: 1.8, gallop: 4.5, circle: 0.4 },
     // m kept between neighbours in a flock.

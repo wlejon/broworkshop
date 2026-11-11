@@ -9,11 +9,12 @@
 // The rig moves them (rig.bk, "the eyes").
 //
 // What it shows, looking ahead:
-//   eyes    large and round: a hazel iris about a round pupil, a little
-//           white showing at the corners, heavy dark-lashed upper lids
-//   brows   a dark stroke over each eye, which says the most
-//   nose    a dark pad down the muzzle's front to a split lip
-//   mouth   a line back each side from the lip, turned up at its ends
+//   eyes    large and expressive: warm amber-hazel iris about a dark pupil,
+//           tear-line and lash rim, heavy dark-lashed upper lids
+//   brows   naturally arched, gracefully tapered strokes peaking over the
+//           outer-middle eye and feathering out toward the temples
+//   nose    a dark caprine pad with sculpted nostril rims and warm cleft
+//   mouth   warm philtrum and lip border turning gently upward at the corners
 module creature::face;
 import mesh;
 
@@ -26,8 +27,6 @@ fn inside(d: f32, w: f32) -> f32 {
     return clamp(0.5 - d / (2.0 * w), 0.0, 1.0);
 }
 
-// The eye (body.js's eye mass): its centre on the left, seen from the
-// front, and the opening's radii.
 const EYE: vec2<f32> = vec2<f32>(0.047, 1.258);
 const EYE_R: vec2<f32> = vec2<f32>(0.0175, 0.0165);
 const NOSE: vec2<f32> = vec2<f32>(0.0, 1.21);
@@ -41,63 +40,103 @@ pub fn face(p: vec3<f32>, foot: f32, look: vec4<f32>, s: mesh::Surface) -> mesh:
     var rough = s.roughness;
     let q = vec2<f32>(ax, p.y);
 
-    if (p.z > 0.13 && abs(p.y - EYE.y - 0.008) < 0.05 && abs(ax - EYE.x) < 0.045) {
+    // Subtle warm nasal bridge shading between brow and nose pad.
+    if (p.z > 0.16 && ax < 0.026 && p.y > 1.215 && p.y < 1.295) {
+        let br = (1.0 - smoothstep(0.008, 0.025, ax)) * smoothstep(1.215, 1.24, p.y) * (1.0 - smoothstep(1.27, 1.295, p.y));
+        c = mix(c, lin(vec3<f32>(0.68, 0.50, 0.33)), 0.24 * br);
+    }
+
+    if (p.z > 0.13 && abs(p.y - EYE.y - 0.009) < 0.052 && abs(ax - EYE.x) < 0.046) {
         let shut = clamp(look.z, 0.0, 1.0);
         let wide = max(-look.z, 0.0);
         let R = EYE_R * (1.0 + 0.14 * wide);
         let e = (q - EYE) / R;
         let k = length(e);
         let d = (k - 1.0) * R.x;
-        // The lids: the upper comes most of the way down, heavy even when
-        // open; the lower a little up.
-        let yu = mix(0.62 + 0.5 * wide, -0.5, shut) - 0.12 * e.x * e.x;
-        let yl = mix(-1.2, -0.5, shut * shut);
+        // Soft orbital socket shading under the brow ridge.
+        let sock = (1.0 - smoothstep(0.95, 1.55, length((q - EYE - vec2<f32>(-0.002, 0.004)) / (R * vec2<f32>(1.25, 1.35)))));
+        c = mix(c, c * 0.80, 0.55 * sock);
+        // The lids: upper comes down softly arched, lower rises to meet it.
+        let yu = mix(0.64 + 0.5 * wide, -0.5, shut) - 0.14 * (e.x - 0.1) * (e.x - 0.1);
+        let yl = mix(-1.18, -0.5, shut * shut) + 0.06 * e.x * e.x;
         let between = inside((e.y - yu) * R.y, w) * inside((yl - e.y) * R.y, w);
         let ball = inside(d, w);
         let open = ball * between;
-        // The eyeball: its white, warm and shaded under the lid; the iris
-        // and pupil go with where it looks.
-        var eye = lin(vec3<f32>(0.88, 0.84, 0.78));
+        // Eyeball: warm sclera, rich hazel-amber iris with limbal ring, dark pupil.
+        var eye = lin(vec3<f32>(0.90, 0.86, 0.80));
         let ei = e - 0.55 * vec2<f32>(sign(p.x) * look.x, look.y);
         let ki = length(ei);
-        let iris = mix(lin(vec3<f32>(0.52, 0.36, 0.14)), lin(vec3<f32>(0.22, 0.13, 0.06)), smoothstep(0.35, 0.74, ki));
+        let iris_inner = lin(vec3<f32>(0.60, 0.40, 0.15));
+        let iris_outer = lin(vec3<f32>(0.20, 0.11, 0.05));
+        let iris = mix(iris_inner, iris_outer, smoothstep(0.34, 0.74, ki));
         eye = mix(eye, iris, inside((ki - 0.74) * R.x, w));
-        eye = mix(eye, lin(vec3<f32>(0.014, 0.01, 0.01)), inside((ki - 0.36) * R.x, w));
-        eye = eye * mix(1.0, 0.5, smoothstep(-0.7, 0.1, e.y - yu));
-        // The catch-light, high and on the same side of both.
-        let hl = length(vec2<f32>(p.x, p.y) - vec2<f32>(sign(p.x) * EYE.x + 0.005, EYE.y + 0.004)) - 0.0034;
+        eye = mix(eye, lin(vec3<f32>(0.012, 0.009, 0.009)), inside((ki - 0.36) * R.x, w));
+        eye = eye * mix(1.0, 0.48, smoothstep(-0.7, 0.1, e.y - yu));
+        // Primary and subtle secondary catch-lights.
+        let hl = length(vec2<f32>(p.x, p.y) - vec2<f32>(sign(p.x) * EYE.x + 0.005, EYE.y + 0.0042)) - 0.0033;
+        let hl2 = length(vec2<f32>(p.x, p.y) - vec2<f32>(sign(p.x) * EYE.x - 0.004, EYE.y - 0.0045)) - 0.0014;
         eye = mix(eye, vec3<f32>(1.0), 0.95 * inside(hl, w) * between);
+        eye = mix(eye, vec3<f32>(0.85, 0.82, 0.78), 0.45 * inside(hl2, w) * between);
         c = mix(c, eye, open);
-        rough = mix(rough, 0.06, open);
-        // The lids are the face's fur, a shade down; the upper's edge is a
-        // dark line of lashes, thicker toward the outer corner.
+        rough = mix(rough, 0.05, open);
+        // Lids and dark upper lash line with subtle lower tear-rim warmth.
         let over = ball * (1.0 - between);
-        c = mix(c, s.base_color * 0.82, over);
+        c = mix(c, s.base_color * 0.80, over);
         rough = mix(rough, s.roughness, over);
-        let lash = inside(abs(e.y - yu) * R.y - (0.0012 + 0.0012 * smoothstep(-0.5, 1.0, e.x)), w) * inside(d - 0.002, w);
-        c = mix(c, lin(vec3<f32>(0.06, 0.04, 0.035)), lash);
-        // The brow: a dark stroke over the eye, its inner end lifted or
-        // pulled down by look.w, the whole lifted when the eyes are wide.
-        let bx = (ax - EYE.x) / 0.03;
-        let by = EYE.y + 0.031 + 0.006 * wide - 0.005 * bx * bx + 0.016 * look.w * bx - 0.004 * look.w;
-        let stroke = inside(abs(p.y - by) - 0.0032 * (1.0 - 0.45 * abs(bx)), w) * inside(abs(bx) - 1.0, w / 0.03);
-        c = mix(c, lin(vec3<f32>(0.13, 0.08, 0.055)), 0.9 * stroke);
+        let lash = inside(abs(e.y - yu) * R.y - (0.0011 + 0.0014 * smoothstep(-0.5, 1.0, e.x)), w) * inside(d - 0.0022, w);
+        let lower_rim = inside(abs(e.y - yl) * R.y - 0.0007, w) * inside(d - 0.0012, w) * (1.0 - shut);
+        c = mix(c, lin(vec3<f32>(0.24, 0.14, 0.11)), 0.55 * lower_rim);
+        c = mix(c, lin(vec3<f32>(0.055, 0.036, 0.030)), lash);
+
+        // Naturally arched and gracefully tapered eyebrow:
+        // bx runs from -1 (inner medial root) to +1 (outer temple tail), peaking
+        // gently above the outer third (bx ~ 0.22) and tapering to a fine tip.
+        let bx = (ax - (EYE.x - 0.002)) / 0.0285;
+        let arch = 0.0056 * (1.0 - (bx - 0.16) * (bx - 0.16) * 1.45);
+        let sweep = -0.0042 * max(bx - 0.20, 0.0) * max(bx - 0.20, 0.0);
+        let expr = -0.015 * look.w * bx + 0.0035 * look.w;
+        let by = EYE.y + 0.0255 + 0.006 * wide + arch + sweep + expr;
+        // Fullness peaks near the inner-middle brow and tapers smoothly at both ends.
+        let taper = smoothstep(-1.05, -0.55, bx) * (1.0 - smoothstep(0.10, 1.04, bx) * 0.88);
+        let half_h = 0.0031 * taper;
+        let stroke = inside(abs(p.y - by) - half_h, w * 1.15) * inside(abs(bx) - 1.02, w / 0.0285);
+        let brow_col = mix(lin(vec3<f32>(0.22, 0.14, 0.095)), lin(vec3<f32>(0.11, 0.068, 0.046)), taper);
+        c = mix(c, brow_col, 0.92 * stroke * smoothstep(-1.04, -0.80, bx));
     }
 
-    if (p.z > 0.2 && p.y < 1.235) {
-        // The nose: a dark pad, wide at the top, running down to the lip.
+    if (p.z > 0.195 && p.y < 1.236) {
+        // Subtle warm muzzle skin glow around nostrils, philtrum and lips.
+        let muzzle_warm = (1.0 - smoothstep(0.014, 0.042, length(q - vec2<f32>(0.0, 1.196)))) * smoothstep(0.20, 0.245, p.z);
+        c = mix(c, lin(vec3<f32>(0.76, 0.59, 0.46)), 0.22 * muzzle_warm);
+
+        // Nose pad: heart/shield caprine rhinarium tapering down into the philtrum.
         let n = q - NOSE;
-        let pd = length(n / vec2<f32>(0.021 - 0.25 * max(-n.y, 0.0), 0.0135)) - 1.0;
+        let pd = length(n / vec2<f32>(0.0205 - 0.28 * max(-n.y, 0.0), 0.0135)) - 1.0;
         let pad = inside(pd * 0.012, w);
-        c = mix(c, lin(vec3<f32>(0.075, 0.05, 0.045)), pad);
-        rough = mix(rough, 0.28, pad);
-        let nost = inside(length((q - vec2<f32>(0.0105, NOSE.y + 0.001)) / vec2<f32>(0.0052, 0.0032)) * 0.004 - 0.004, w);
+        // Subtle warm alar rim around the dark rhinarium pad.
+        let pad_rim = inside((pd - 0.14) * 0.012, w * 1.5) * (1.0 - pad);
+        c = mix(c, lin(vec3<f32>(0.34, 0.22, 0.17)), 0.40 * pad_rim);
+        c = mix(c, lin(vec3<f32>(0.072, 0.048, 0.044)), pad);
+        rough = mix(rough, 0.24, pad);
+
+        // Comma-shaped caprine nostrils angled outward, with warm inner rim.
+        let nd = q - vec2<f32>(0.0105, NOSE.y + 0.0008);
+        let nr = vec2<f32>(nd.x * 0.92 + nd.y * 0.38, -nd.x * 0.38 + nd.y * 0.92);
+        let ndist = length(nr / vec2<f32>(0.0056, 0.0029)) * 0.004 - 0.004;
+        let nost_rim = inside(ndist - 0.0012, w) * (1.0 - inside(ndist, w));
+        let nost = inside(ndist, w);
+        c = mix(c, lin(vec3<f32>(0.18, 0.10, 0.09)), 0.65 * nost_rim);
         c = mix(c, lin(vec3<f32>(0.012, 0.008, 0.008)), nost);
-        // The lip's split below it, and the mouth back each side, turned up.
-        let split = inside(ax - 0.0011, w) * inside(p.y - (NOSE.y - 0.01), w) * inside(MOUTH_Y - p.y, w);
-        let y = MOUTH_Y + 0.012 * (ax / 0.04) * (ax / 0.04) * (ax / 0.04);
-        let m = inside(abs(p.y - y) - 0.0012, w) * inside(ax - 0.041, w);
-        c = mix(c, lin(vec3<f32>(0.10, 0.06, 0.05)), 0.9 * max(m, split));
+
+        // Philtrum cleft with soft warm border, and gently upturned lip line.
+        let phil_band = inside(p.y - (NOSE.y - 0.009), w) * inside(MOUTH_Y - p.y, w);
+        let phil_glow = inside(ax - 0.0030, w * 1.3) * phil_band;
+        let split = inside(ax - 0.00095, w) * phil_band;
+        let y = MOUTH_Y + 0.0115 * (ax / 0.04) * (ax / 0.04) * (ax / 0.04);
+        let lip_warm = inside(abs(p.y - (y - 0.0016)) - 0.0020, w * 1.4) * inside(ax - 0.039, w);
+        let m = inside(abs(p.y - y) - 0.00115, w) * inside(ax - 0.041, w);
+        c = mix(c, lin(vec3<f32>(0.58, 0.40, 0.31)), 0.26 * max(phil_glow, lip_warm));
+        c = mix(c, lin(vec3<f32>(0.10, 0.058, 0.048)), 0.90 * max(m, split));
     }
     out.base_color = c;
     out.roughness = rough;

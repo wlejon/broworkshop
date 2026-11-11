@@ -79,8 +79,8 @@ const LOOSE: array<i32, NLOOSE> = [B_EAR1L, B_EAR2L, B_EAR1R, B_EAR2R, B_FOREARM
                                    B_TAIL1, B_TAIL2, B_TAIL3, B_TAIL4, B_TAIL5];
 // (The tail's are not sprung but trail, `trail`: rad/s each follows at.)
 const LOOSE_W: array<f32, NLOOSE> = [36.0, 28.0, 34.0, 26.0, 26.0, 30.0, 27.0, 31.0, 30.0, 27.0, 24.0, 22.0, 20.0];
-const LOOSE_RUN: array<f32, NLOOSE> = [0.0, 0.0, 0.0, 0.0, 10.0, 10.0, 10.0, 10.0, 0.0, 0.0, 0.0, 0.0, 0.0];
-const LOOSE_ZETA: array<f32, NLOOSE> = [0.5, 0.45, 0.5, 0.45, 0.7, 0.7, 0.7, 0.7, 0.8, 0.8, 0.8, 0.8, 0.8];
+const LOOSE_RUN: array<f32, NLOOSE> = [6.0, 5.0, 6.0, 5.0, 10.0, 10.0, 10.0, 10.0, 0.0, 0.0, 0.0, 0.0, 0.0];
+const LOOSE_ZETA: array<f32, NLOOSE> = [0.60, 0.56, 0.60, 0.56, 0.7, 0.7, 0.7, 0.7, 0.8, 0.8, 0.8, 0.8, 0.8];
 const LOOSE_MAX: array<f32, NLOOSE> = [0.4, 0.4, 0.4, 0.4, 0.22, 0.5, 0.22, 0.5, 0.3, 0.35, 0.4, 0.45, 0.5];
 
 @knob const LAYERS: f32 = 1.0;       // the head's steadying and the loose parts' share (0: the keys as they are)
@@ -103,10 +103,9 @@ const BLINK_T: f32 = 3.4;            // s to a blink, about
 @knob const LEAP_PUSH_T: f32 = 0.2;  // s the last stance is held for the push
 @knob const LEAP_DIP: f32 = 0.09;    // m the hips sink into it
 @knob const LEAP_RISE: f32 = 0.09;   // m over the stride's own they are at as the foot leaves
-const LEAP_FOLD: f32 = 0.44;         // m from its hip a foot is kept in a leap: as far as the leg folds
 const LEAP_FLIGHT: f32 = 0.6;       // s of flight it plans its take-off spot for
 @knob const LEAP_LATE: f32 = 0.07;   // s after the hips cross the log that the flight tops
-@knob const LEAP_TUCK: f32 = 0.2;   // m the feet are drawn up under it in the air
+@knob const LEAP_TUCK: f32 = 0.16;   // m the feet are drawn up under it in the air
 
 fn select_i(c: bool, a: i32, b: i32) -> i32 {
     if (c) { return a; }
@@ -327,6 +326,9 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
         // The push: down into the leg, then up out of it faster and faster.
         let up = max(push_u - 0.4, 0.0) / 0.6;
         K.root.y += -LEAP_DIP * smooth01(push_u / 0.4) + (LEAP_DIP + LEAP_RISE) * up * up;
+        // Moderate the swinging leg's hock fold during the deep push crouch.
+        let crouch = smooth01(push_u / 0.35) * (1.0 - smooth01((push_u - 0.45) / 0.4));
+        K.fa[1 - leap_leg].x -= 0.18 * crouch;
     }
     if (leap_w > 0.0) {
         // In the air: stretched out level, the arms thrown forward, the tail
@@ -338,7 +340,10 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
         // (A foot the clock has down is on the ground: only one in its swing is drawn up.)
         for (var l: i32 = 0; l < NLEGS; l += 1) {
             // (The trailing one, which pushed, more: the leading leg is high already.)
-            if (gait_stance(C_WALK, C_RUN, rw, l, phase) < 0.0) { K.foot[l].y += LEAP_TUCK * w * select_f(l == leap_leg, 1.0, 0.2); }
+            if (gait_stance(C_WALK, C_RUN, rw, l, phase) < 0.0) {
+                K.foot[l].y += LEAP_TUCK * w * select_f(l == leap_leg, 1.0, 0.42);
+                K.fa[l].x = mix(K.fa[l].x, min(K.fa[l].x, 0.68), w);
+            }
         }
     }
 
@@ -367,7 +372,6 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
     let ground_y = damp(state[s + D_GROUND], gsum / f32(NLEGS), 10.0, dt);
     state[s + D_GROUND] = ground_y;
     let org = vec3<f32>(pos.x, ground_y, pos.z);
-    let ground_now = max(ground_y, height(env, pos.x, pos.z));
     // (What its last flight left it off the keys' place, creature::keyed's air.)
     let lift = air_lift(state, s + D_AIR, dt);
 
@@ -440,11 +444,11 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
             // draw it a centimetre off for a tenth of a second.
             let since = select_f(arm < -40.0, -arm - 50.0, -arm - 1.0);
             let clear = select_f(arm < -0.5, 0.022 * smooth01(since / 0.06) * (1.0 - smooth01(u / 0.6)), 0.0);
-            // (In a leap's push the clock runs slow and the body goes on at
-            // its pace: the swinging foot leaves the ground it lifted from by
-            // the push's time, not the clock's, or it would be dragged out
-            // behind.)
-            let join = (1.0 - smooth01(u / JOIN_U)) * (1.0 - select_f(leap > 1.5, 1.0, smooth01(max(push_u, 0.0) / 0.5)));
+            let lw = smooth01(leap_w);
+            // (In a leap's push and flight the swinging foot leaves L_OFF smoothly
+            // and stays on the key's path through landing without snapping back when
+            // leap resets to 0.)
+            let join = (1.0 - smooth01(u / JOIN_U)) * (1.0 - max(lw, smooth01(max(push_u, 0.0) / 0.5)));
             // (A step on the spot, which the stand's key has no lift for, is
             // lifted here.)
             let hop = 0.045 * (1.0 - gw) * bump(u, 0.4, 0.6);
@@ -452,39 +456,21 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
             // its stance: pinned where the key has it now, the body turns on
             // over it and the leg is carried across under the hips.
             let lead_at = key_ball(K, l, org, q_y(yaw + omega * 0.5 * duty / freq * smooth01(u)));
-            // (A foot in the air comes down with the body's flight, but
-            // gives the dip of a landing no more than half its clearance.)
-            // (Joined from the ground it left, not from an offset carried
-            // with the body: it leaves at the ground's speed and gathers the
-            // swing's, with no corner in its path or in the legs' turning.)
-            ball = ball_on(env, mix(lead_at + lift * vec3<f32>(1.0, 0.0, 1.0), ld3(state, k + L_OFF), join), l, max(K.foot[l].y + hop + clear + max(lift.y, -0.5 * (K.foot[l].y + hop + clear)), 0.0));
+            // Smoothly blend flight lift into the swing arc so lift-off and
+            // touchdown have zero vertical step against the planted stance.
+            let air_y_w = (1.0 - join) * mix(1.0 - smooth01((u - 0.72) / 0.28), 1.0, lw);
+            let swing_h = K.foot[l].y + hop + clear;
+            ball = ball_on(env, mix(lead_at + lift * vec3<f32>(1.0, 0.0, 1.0), ld3(state, k + L_OFF), join), l, max(swing_h + air_y_w * max(lift.y, -0.5 * swing_h), 0.0));
             fyaw = yaw + wrap_pi(fyaw - yaw) * join;
-            if (leap_w > 0.0) {
-                // In a leap a foot's height is from the ground the body
-                // stands over, not from what passes under the foot: it is
-                // carried over the log with the body, and does not step up
-                // its side.
-                // The leg that pushed is drawn through under the hips as a
-                // hurdler's trailing leg is, not left hanging out behind.
-                if (l == leap_leg) {
-                    let under = org + lift + vec3<f32>(0.0, HEAD[LEG_TOP[l] + 3].y + 0.16, 0.0) + q_rot(qyaw, vec3<f32>(HEAD[LEG_TOP[l]].x, 0.0, -0.1));
-                    ball = mix(ball, under, 0.7 * smooth01(leap_w));
-                }
+            if (lw > 0.0) {
+                // Reference airborne feet to eased flat ground_y rather than the
+                // cylindrical obstacle surface under them, and tuck the trailing
+                // push leg cleanly in its own hip plane (including K.root.x).
                 let own = height(env, ball.x, ball.z);
-                ball.y = max(ball.y + smooth01(leap_w) * (ground_now - own), own + HEAD[LEG_TOP[l] + 3].y + 0.05);
-                // (Over the log a foot is lifted toward the hip it hangs
-                // from; nearer than the leg can fold, it is carried out
-                // ahead or behind instead, where it is already going.)
-                let hip = org + lift + vec3<f32>(0.0, HEAD[LEG_TOP[l]].y + K.root.y, 0.0) + q_rot(qyaw, vec3<f32>(HEAD[LEG_TOP[l]].x, 0.0, K.root.z));
-                let dh = vec2<f32>(ball.x - hip.x, ball.z - hip.z);
-                let need = sqrt(max(LEAP_FOLD * LEAP_FOLD - (ball.y - hip.y) * (ball.y - hip.y), 0.0));
-                let have = length(dh);
-                if (have < need) {
-                    let way = select_f(dot(dh, vec2<f32>(fwd.x, fwd.z)) >= 0.0, 1.0, -1.0);
-                    let out = mix(vec2<f32>(fwd.x, fwd.z) * way, dh / max(have, 0.0001), smooth01(have / 0.1));
-                    let to = out / max(length(out), 0.0001) * need;
-                    ball.x = hip.x + to.x;
-                    ball.z = hip.z + to.y;
+                ball.y += lw * (ground_y - own);
+                if (l == leap_leg) {
+                    let under = org + lift + vec3<f32>(0.0, HEAD[LEG_TOP[l] + 3].y + 0.16, 0.0) + q_rot(qyaw, vec3<f32>(HEAD[LEG_TOP[l]].x + K.root.x, 0.0, -0.10));
+                    ball = mix(ball, under, 0.68 * lw);
                 }
             }
             if (sp >= 0.0 && !early) {

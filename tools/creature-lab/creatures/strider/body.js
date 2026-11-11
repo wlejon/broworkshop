@@ -19,6 +19,9 @@ import { Flesh, SIDES } from "/app/lab/flesh.js";
 
 const lerp = (a, b, t) => a.map((x, i) => x + (b[i] - x) * t);
 const add = (a, b) => a.map((x, i) => x + b[i]);
+const sub = (a, b) => a.map((x, i) => x - b[i]);
+const dot = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+const norm = (a) => { const l = Math.hypot(a[0], a[1], a[2]) || 1; return a.map((x) => x / l); };
 const mix = (a, b, t) => a.map((x, i) => x + (b[i] - x) * Math.max(0, Math.min(1, t)));
 const sstep = (e0, e1, x) => { const t = Math.max(0, Math.min(1, (x - e0) / (e1 - e0))); return t * t * (3 - 2 * t); };
 const FUR = [0.66, 0.30, 0.11], BACK = [0.46, 0.19, 0.07], CREAM = [0.95, 0.88, 0.74], DARK = [0.11, 0.075, 0.06];
@@ -67,17 +70,17 @@ export function body(skel, detail = {}) {
     B.limb('trunk', ['pelvis', 'spine', 'chest'], [
         { c: [0, 0.692, -0.065], r: [0.056, 0.058] },
         { c: [0, 0.725, -0.01], r: [0.114, 0.114] },
-        { c: [0, 0.772, 0.06], r: [0.13, 0.136] },
-        { c: [0, 0.825, 0.13], r: [0.12, 0.126] },
-        { c: [0, 0.875, 0.19], r: [0.098, 0.102] },
-        { c: [0, 0.918, 0.228], r: [0.074, 0.078] },
-        { c: [0, 0.95, 0.24], r: [0.058, 0.06] },
+        { c: [0, 0.772, 0.06], r: [0.128, 0.135] },
+        { c: [0, 0.825, 0.13], r: [0.111, 0.123] },
+        { c: [0, 0.878, 0.192], r: [0.115, 0.105] },
+        { c: [0, 0.918, 0.228], r: [0.088, 0.081] },
+        { c: [0, 0.952, 0.24], r: [0.062, 0.061] },
     ], { up: BACKWARD, blend: 0.025 });
-    // The belly, slung between the knees; the breast, full in front.
-    B.blob('belly', [['spine', 0.6], ['pelvis', 0.4]], [0, 0.715, 0.1], [0.088, 0.07, 0.095], { blend: 0.03 });
-    B.blob('bib', 'chest', [0, 0.83, 0.215], [0.064, 0.07, 0.06], { blend: 0.028 });
+    // The belly, tucked cleanly above the inner-thigh crease; the breast, athletic in front.
+    B.blob('belly', [['spine', 0.55], ['pelvis', 0.45]], [0, 0.736, 0.098], [0.082, 0.066, 0.088], { blend: 0.025 });
+    B.blob('bib', 'chest', [0, 0.838, 0.218], [0.075, 0.072, 0.062], { blend: 0.028 });
     // The ruff: a collar of long fur about the neck, fuller in front.
-    B.blob('ruff', [['chest', 0.5], ['neck', 0.5]], [0, 0.945, 0.255], [0.098, 0.058, 0.086], { blend: 0.022 });
+    B.blob('ruff', [['chest', 0.5], ['neck', 0.5]], [0, 0.945, 0.255], [0.104, 0.060, 0.088], { blend: 0.022 });
     B.limb('neck', ['chest', 'neck'], [
         { c: [0, 0.925, 0.232], r: [0.056, 0.056] },
         { c: [0, 1.015, 0.246], r: [0.052, 0.054], bone: 'head' },
@@ -103,18 +106,30 @@ export function body(skel, detail = {}) {
         ], { up: [0, 1, 0], blend: 0.014 });
         B.blob(`eye${t}`, 'head', hp([0.047 * s, 1.132, 0.186]), hr([0.025, 0.027, 0.02]), { blend: 0.004, keep: true });
         // The ear: a tall leaf, open to the front and a little out, wide
-        // at its middle.
+        // at its middle, with a sculpted inner pinna hollow and cushioned hinge.
         const e1 = bn(`ear1${t}`), e2 = bn(`ear2${t}`);
+        const edir = norm(sub(e2.tail, e1.head));
+        const eraw = [0.45 * s, 0, 1];
+        const eface = norm(sub(eraw, edir.map((x) => x * dot(eraw, edir))));
+        const eoff = (p, o) => add(p, eface.map((x) => x * o));
         B.limb(`ear${t}`, [`ear1${t}`, `ear2${t}`], [
-            { c: at(e1, -0.25), r: [0.028, 0.016], bone: 'head' },
-            { c: at(e1, 0.45), r: [0.05, 0.012], bone: `ear1${t}` },
-            { c: at(e2, 0.2), r: [0.045, 0.01], bone: `ear2${t}` },
-            { c: at(e2, 1.0), r: [0.008, 0.006], bone: `ear2${t}` },
-        ], { up: [0.45 * s, 0, 1], blend: 0.008 });
-        // The arm: small and slim, a round shoulder at the breast.
+            { c: at(e1, -0.22), r: [0.032, 0.018], bone: 'head' },
+            { c: at(e1, 0.04), r: [0.040, 0.017], bone: [['head', 0.45], [`ear1${t}`, 0.55]] },
+            { c: at(e1, 0.50), r: [0.051, 0.015], bone: `ear1${t}` },
+            { c: at(e2, 0.22), r: [0.046, 0.013], bone: `ear2${t}` },
+            { c: at(e2, 1.0), r: [0.0085, 0.007], bone: `ear2${t}` },
+        ], { up: eface, blend: 0.012, keep: true });
+        B.limb(`earHollow${t}`, [`ear1${t}`, `ear2${t}`], [
+            { c: eoff(at(e1, 0.24), 0.0135), r: [0.020, 0.0085], bone: `ear1${t}` },
+            { c: eoff(at(e1, 0.58), 0.0125), r: [0.030, 0.0088], bone: `ear1${t}` },
+            { c: eoff(at(e2, 0.26), 0.011), r: [0.025, 0.0075], bone: `ear2${t}` },
+            { c: eoff(at(e2, 0.70), 0.0085), r: [0.010, 0.005], bone: `ear2${t}` },
+        ], { up: eface, carve: true, blend: 0.009 });
+        // The arm: small and slim, an athletic shoulder/lat swell at the upper chest.
         const sh = bn(`shoulder${t}`), ua = bn(`upperarm${t}`), fa = bn(`forearm${t}`), hd = bn(`hand${t}`);
+        B.blob(`lat${t}`, [['chest', 0.75], [`shoulder${t}`, 0.25]], [0.082 * s, 0.875, 0.195], [0.046, 0.054, 0.046], { blend: 0.024 });
         B.limb(`arm${t}`, [`shoulder${t}`, `upperarm${t}`, `forearm${t}`], [
-            { c: at(sh, 0.3), r: [0.032, 0.034], bone: `shoulder${t}` },
+            { c: at(sh, 0.3), r: [0.035, 0.037], bone: `shoulder${t}` },
             { c: at(ua, 0.1), r: [0.034, 0.036], bone: `upperarm${t}` },
             { c: at(ua, 0.6), r: [0.027, 0.029] },
             { c: fa.head, r: [0.022, 0.024] },
@@ -144,17 +159,16 @@ export function body(skel, detail = {}) {
         // The leg: the haunch and thigh as one heavy mass, a slim shin, the
         // hock's knob, a long slim foot.
         const th = bn(`thigh${t}`), sn = bn(`shin${t}`), ft = bn(`foot${t}`), to = bn(`toe${t}`);
-        const x = th.head[0];
         B.limb(`leg${t}`, [`thigh${t}`, `shin${t}`], [
-            { c: at(th, -0.1, [0.014 * s, 0.0, -0.02]), r: [0.07, 0.092], bone: `thigh${t}` },
-            { c: at(th, 0.4, [0.012 * s, 0, -0.012]), r: [0.066, 0.092] },
+            { c: at(th, -0.1, [0.014 * s, 0.0, -0.02]), r: [0.068, 0.090], bone: [['pelvis', 0.42], [`thigh${t}`, 0.58]] },
+            { c: at(th, 0.4, [0.014 * s, 0, -0.012]), r: [0.063, 0.090], bone: `thigh${t}` },
             { c: at(th, 0.85), r: [0.048, 0.062] },
             { c: at(sn, 0.08), r: [0.04, 0.05] },
             { c: at(sn, 0.32, [0, 0, -0.01]), r: [0.032, 0.044] },
             { c: at(sn, 0.62), r: [0.022, 0.027] },
             { c: at(sn, 0.85), r: [0.017, 0.02] },
             { c: at(sn, 1.0), r: [0.019, 0.023], bone: `shin${t}` },
-        ], { up: [0, 0, 1], blend: 0.02 });
+        ], { up: [0, 0, 1], blend: 0.022 });
         B.limb(`foot${t}`, [`foot${t}`], [
             { c: at(ft, 0.0, [0, 0.004, -0.008]), r: [0.019, 0.024], bone: `shin${t}` },
             { c: at(ft, 0.4), r: [0.0135, 0.0155] },

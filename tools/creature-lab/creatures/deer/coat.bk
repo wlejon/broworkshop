@@ -1,0 +1,119 @@
+// creature::coat — per-pixel pelage refinement for the white-tailed deer in
+// rest-pose coordinates (p: x left, y up, z forward in metres; foot: pixel
+// size). Preserves coat.js's warm russet-tawny palette (used directly at
+// coarse crowd LODs) while crisping the white throat bib border, dorsal-to-
+// ventral countershading gradient, dark dorsal tail tip & bright white flag
+// underside, inner ear pinna shading, and dark cloven hoof coronets.
+module creature::coat;
+import mesh;
+
+fn lin(c: vec3<f32>) -> vec3<f32> {
+    return vec3<f32>(pow(c.x, 2.2), pow(c.y, 2.2), pow(c.z, 2.2));
+}
+
+pub fn coat(p: vec3<f32>, foot: f32, s: mesh::Surface) -> mesh::Surface {
+    var out = s;
+    let w = max(foot, 0.0005);
+    let ax = abs(p.x);
+    var c = s.base_color;
+    var rough = s.roughness;
+
+    let back_col = lin(vec3<f32>(0.43, 0.285, 0.168));
+    let spine_col = lin(vec3<f32>(0.37, 0.235, 0.135));
+    let cream = lin(vec3<f32>(0.88, 0.82, 0.72));
+    let white = lin(vec3<f32>(0.95, 0.94, 0.90));
+    let dark_tail = lin(vec3<f32>(0.17, 0.105, 0.068));
+    let ear_in = lin(vec3<f32>(0.86, 0.74, 0.67));
+    let ear_rim = lin(vec3<f32>(0.24, 0.155, 0.105));
+    let hoof_col = lin(vec3<f32>(0.10, 0.092, 0.086));
+    let coronet_col = lin(vec3<f32>(0.26, 0.185, 0.135));
+
+    // --- Trunk countershading: rich dorsal saddle & crisp ventral cream border ---
+    if (p.z > -0.58 && p.z < 0.48 && p.y > 0.54 && p.y < 0.99) {
+        let dorsal = smoothstep(0.86, 0.95, p.y) * (1.0 - smoothstep(0.075, 0.12, ax));
+        let mid_spine = smoothstep(0.92, 0.96, p.y) * (1.0 - smoothstep(0.015, 0.042, ax));
+        c = mix(c, back_col, 0.35 * dorsal);
+        c = mix(c, spine_col, 0.30 * mid_spine);
+
+        // Clean feathered flank-to-belly line rising from brisket toward flank.
+        let belly_line = 0.605 + 0.042 * smoothstep(0.12, -0.36, p.z) - 0.015 * smoothstep(0.18, 0.40, p.z);
+        let jag = 0.003 * sin(p.z * 115.0 + ax * 40.0);
+        let ventral = smoothstep(belly_line + 0.022 + w, belly_line - 0.014 - w, p.y + jag) * (1.0 - smoothstep(0.085, 0.118, ax));
+        c = mix(c, cream, 0.65 * ventral);
+    }
+
+    // --- Crisp white throat bib shield under the jaw and upper anterior throat ---
+    if (p.y > 1.09 && p.y < 1.265 && p.z > 0.62 && p.z < 0.935 && ax < 0.056) {
+        // Anterior/ventral throat surface in rest pose: neck front runs from
+        // (y 1.10, z 0.68) up to chin/throat latch (y 1.24, z 0.77..0.92).
+        let throat_front = 0.652 + 0.44 * max(p.y - 1.10, 0.0);
+        let on_front = smoothstep(throat_front - 0.014 - w, throat_front + 0.010 + w, p.z);
+        let under_jaw = smoothstep(1.254 + w, 1.236 - w, p.y + 0.22 * max(p.z - 0.78, 0.0));
+        let low_edge = smoothstep(1.105 - w, 1.132 + w, p.y);
+        let half_w = 0.041 * (1.0 - 0.28 * clamp((1.17 - p.y) / 0.07, 0.0, 1.0)) * (1.0 - 0.35 * smoothstep(0.80, 0.92, p.z));
+        let jag = 0.0018 * sin(p.y * 190.0 + p.z * 130.0);
+        let lat_edge = smoothstep(half_w + 0.004 + w, half_w - 0.003 - w, ax + jag);
+        let bib = on_front * under_jaw * low_edge * lat_edge;
+        c = mix(c, white, 0.90 * bib);
+    }
+
+    // --- Tail & rump mirror: dark dorsal tip, white lateral fringe & bright white underside ---
+    if (p.z < -0.585 && p.y > 0.67 && p.y < 0.90 && ax < 0.072) {
+        let u = clamp((-0.585 - p.z) / 0.160, 0.0, 1.0);
+        // Rest-pose tail chord midline from root (-0.585, 0.865) to tip (-0.745, 0.740).
+        let mid_y = 0.865 - 0.075 * u - 0.050 * u * u;
+        let on_tail = smoothstep(-0.595, -0.618, p.z);
+        let under_tail = smoothstep(mid_y + 0.004 + w, mid_y - 0.004 - w, p.y);
+        let tail_w = mix(0.036, 0.048, sin(3.14159 * clamp(u * 0.85 + 0.1, 0.0, 1.0)));
+        let fringe = smoothstep(tail_w - 0.008 - w, tail_w + 0.002 + w, ax) * (1.0 - smoothstep(0.82, 0.98, u));
+        let white_flag = clamp(max(under_tail, 0.85 * fringe), 0.0, 1.0) * on_tail;
+        let tip_dark = smoothstep(0.45, 0.78, u) * (1.0 - under_tail) * on_tail;
+        c = mix(c, back_col, 0.45 * (1.0 - under_tail) * on_tail);
+        c = mix(c, dark_tail, 0.82 * tip_dark);
+        c = mix(c, white, 0.94 * white_flag);
+
+        // Crisp white rump mirror beneath the tail root.
+        let rump = (1.0 - on_tail) * smoothstep(-0.590, -0.635, p.z) * smoothstep(0.865, 0.815, p.y)
+            * smoothstep(0.685, 0.725, p.y) * smoothstep(0.062 + w, 0.032 - w, ax);
+        c = mix(c, white, 0.88 * rump);
+    }
+
+    // --- Inner ear pinna hollow & dark outer rim/tip ---
+    if (p.y > 1.325 && ax > 0.052 && p.z > 0.695 && p.z < 0.768) {
+        let eu = clamp((ax - 0.045) / 0.107, 0.0, 1.0);
+        let ear_z = 0.750 - 0.035 * eu;
+        let ear_y = 1.330 + 0.090 * eu;
+        let front_bowl = smoothstep(ear_z - 0.001 - w, ear_z + 0.004 + w, p.z)
+            * smoothstep(0.10, 0.24, eu) * (1.0 - smoothstep(0.76, 0.92, eu));
+        let across = abs(p.y - ear_y);
+        let inner = front_bowl * smoothstep(0.025 + w, 0.015 - w, across);
+        c = mix(c, ear_in, 0.65 * inner);
+
+        // Subtle dark brown border at the pointed tip and outer margin.
+        let tip_rim = max(smoothstep(0.78, 0.95, eu), smoothstep(0.024, 0.033, across) * front_bowl);
+        c = mix(c, ear_rim, 0.55 * tip_rim);
+    }
+
+    // --- Cloven hoof coronets & median cleft ---
+    if (p.y < 0.075) {
+        // Fore hooves sit around (ax 0.110, z 0.355..0.405), hind around (ax 0.105, z -0.465..-0.415).
+        let is_fore = step(0.0, p.z);
+        let cx = mix(0.105, 0.110, is_fore);
+        let z0 = mix(-0.465, 0.355, is_fore);
+        let slope_y = p.y + 0.18 * (p.z - z0);
+        let coronet = smoothstep(0.052 + 1.5 * w, 0.043 - 1.5 * w, slope_y);
+        let band = smoothstep(0.064, 0.051, slope_y) * (1.0 - coronet);
+        c = mix(c, coronet_col, 0.50 * band);
+        c = mix(c, hoof_col, 0.92 * coronet);
+        rough = mix(rough, 0.28, coronet);
+
+        // Fine dark cloven cleft down the anterior midline of the hoof wall.
+        let toe_front = smoothstep(z0 + 0.020, z0 + 0.038, p.z);
+        let cleft = smoothstep(0.0028 + w, 0.0008, abs(ax - cx)) * coronet * toe_front;
+        c = mix(c, lin(vec3<f32>(0.025, 0.022, 0.020)), 0.85 * cleft);
+    }
+
+    out.base_color = c;
+    out.roughness = rough;
+    return out;
+}

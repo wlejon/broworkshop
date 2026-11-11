@@ -47,6 +47,23 @@ pub fn face(p0: vec3<f32>, foot: f32, look: vec4<f32>, s: mesh::Surface) -> mesh
     var rough = s.roughness;
     let q = vec2<f32>(ax, p.y);
 
+    // Subtle fox-like supraorbital brow arch and soft nasal-bridge contour.
+    if (p.z > 0.145 && p.y > 1.092 && p.y < 1.182 && ax < 0.080) {
+        let bt = clamp((ax - 0.020) / 0.052, 0.0, 1.0);
+        let brow_y = 1.162 + 0.0055 * sin(3.14159265 * pow(bt, 0.80)) - 0.0035 * bt + 0.003 * clamp(-look.z, -0.5, 0.6);
+        let brow_h = 0.0034 * sin(3.14159265 * pow(bt, 0.72));
+        let bd = abs(p.y - brow_y) - brow_h;
+        let brow = inside(bd, w * 1.4) * smoothstep(0.018, 0.025, ax) * (1.0 - smoothstep(0.066, 0.074, ax));
+        c = mix(c, lin(vec3<f32>(0.24, 0.10, 0.04)), 0.55 * brow);
+        // Subtle pale supraorbital spot on the inner-upper brow ridge.
+        let spot_d = length((q - vec2<f32>(0.033, 1.165)) / vec2<f32>(0.010, 0.0048)) - 1.0;
+        let spot = inside(spot_d * 0.006, w * 2.0);
+        c = mix(c, lin(vec3<f32>(0.90, 0.76, 0.56)), 0.28 * spot * (1.0 - brow));
+        // Gentle dorsal muzzle bridge shadow framing the nose bridge.
+        let bridge = exp(-pow((ax - 0.018) / 0.0065, 2.0)) * smoothstep(1.094, 1.110, p.y) * (1.0 - smoothstep(1.128, 1.144, p.y)) * smoothstep(0.165, 0.205, p.z);
+        c = mix(c, c * 0.82, 0.30 * bridge);
+    }
+
     if (p.z > 0.15 && abs(p.y - EYE.y) < 0.045 && abs(ax - EYE.x) < 0.045) {
         // The opening: a little larger with the eyes wide.
         let shut = clamp(look.z, 0.0, 1.0);
@@ -89,21 +106,37 @@ pub fn face(p0: vec3<f32>, foot: f32, look: vec4<f32>, s: mesh::Surface) -> mesh
         rough = mix(rough, s.roughness, over);
     }
 
-    if (p.z > 0.2) {
-        // The nose pad and its nostrils.
-        let pd = length((q - NOSE) / vec2<f32>(0.019, 0.0125)) - 1.0;
+    if (p.z > 0.195) {
+        // Sculpted dark rhinarium pad with median cleft, comma nostrils and moist sheen.
+        let py = NOSE.y + 0.0020 * smoothstep(0.0, 0.016, ax);
+        let pd = length(vec2<f32>(ax / 0.0195, (p.y - py) / 0.0128)) - 1.0;
         let pad = inside(pd * 0.012, w);
-        c = mix(c, lin(vec3<f32>(0.07, 0.05, 0.045)), pad);
-        rough = mix(rough, 0.25, pad);
-        let nost = inside(length((q - vec2<f32>(0.0075, NOSE.y - 0.002)) / vec2<f32>(0.0042, 0.003)) * 0.004 - 0.004, w);
-        c = mix(c, lin(vec3<f32>(0.012, 0.008, 0.008)), nost);
+        var pad_col = mix(lin(vec3<f32>(0.055, 0.038, 0.034)), lin(vec3<f32>(0.105, 0.075, 0.068)), smoothstep(NOSE.y - 0.008, NOSE.y + 0.010, p.y));
+        let cleft = inside(ax - 0.0009, w) * smoothstep(NOSE.y + 0.004, NOSE.y - 0.009, p.y);
+        pad_col = mix(pad_col, lin(vec3<f32>(0.022, 0.015, 0.014)), 0.65 * cleft);
+        c = mix(c, pad_col, pad);
+        rough = mix(rough, 0.20, pad);
+        // Comma-shaped lateral nostrils angled slightly upward outward.
+        let nq = q - vec2<f32>(0.0082, NOSE.y - 0.0018);
+        let nr = vec2<f32>(0.90 * nq.x + 0.43 * nq.y, -0.43 * nq.x + 0.90 * nq.y);
+        let nost_d = (length(nr / vec2<f32>(0.0050, 0.0024)) - 1.0) * 0.0034;
+        let nost = inside(nost_d, w);
+        c = mix(c, lin(vec3<f32>(0.010, 0.007, 0.007)), nost);
+        rough = mix(rough, 0.45, nost);
+        // Subtle alar rim highlight under the nostril wing.
+        let wing = exp(-pow((nost_d - 0.0016) / 0.0016, 2.0)) * smoothstep(0.0, -0.002, nq.y) * pad;
+        c = mix(c, lin(vec3<f32>(0.15, 0.11, 0.10)), 0.35 * wing);
     }
-    if (p.z > 0.16 && ax < 0.045 && p.y < 1.08) {
-        // The mouth: down from the nose, then back each side, curving up.
-        let y = MOUTH_Y + 0.009 * (ax / 0.035) * (ax / 0.035);
-        let m = inside(abs(p.y - y) - 0.0011, w) * inside(ax - 0.036, w);
-        let philtrum = inside(ax - 0.001, w) * inside(p.y - 1.074, w) * inside(MOUTH_Y - p.y, w);
-        c = mix(c, lin(vec3<f32>(0.10, 0.06, 0.05)), 0.9 * max(m, philtrum));
+    if (p.z > 0.16 && ax < 0.046 && p.y < 1.082) {
+        // The mouth: philtrum cleft down from the nose, curving up into dark fox-lip corners.
+        let y = MOUTH_Y + 0.0095 * (ax / 0.035) * (ax / 0.035);
+        let taper = 1.0 - 0.35 * smoothstep(0.022, 0.038, ax);
+        let m = inside(abs(p.y - y) - 0.00115 * taper, w) * inside(ax - 0.037, w);
+        let philtrum = inside(ax - 0.00095, w) * inside(p.y - 1.075, w) * inside(MOUTH_Y - p.y, w);
+        let lip_warm = exp(-pow((p.y - (y - 0.0026)) / 0.0024, 2.0)) * inside(ax - 0.028, w * 2.0);
+        c = mix(c, lin(vec3<f32>(0.58, 0.40, 0.32)), 0.22 * lip_warm * (1.0 - m));
+        c = mix(c, lin(vec3<f32>(0.085, 0.050, 0.042)), 0.92 * max(m, philtrum));
+        rough = mix(rough, 0.42, 0.55 * max(m, lip_warm));
     }
     out.base_color = c;
     out.roughness = rough;

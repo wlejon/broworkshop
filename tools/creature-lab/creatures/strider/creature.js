@@ -17,6 +17,7 @@ export default {
     body,
     keys: { poses, cycles },
     face: 'face.bk',
+    coat: 'coat.bk',
     rig: { file: 'rig.bk', kernel: 'k_rig' },
     scale: { height: 1.2, length: 0.45 },
     speeds: { walk: 1.0, trot: 1.8, gallop: 3.0, circle: 0.8 },

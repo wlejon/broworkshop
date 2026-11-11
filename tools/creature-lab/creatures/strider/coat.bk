@@ -1,0 +1,97 @@
+// creature::coat — per-pixel coat markings for the strider in rest-pose space
+// (p: x left, y up, z forward in metres; foot: pixel footprint size).
+// Renders crisp organic countershading, dorsal russet-auburn saddle, feathered
+// cream cheek/ruff/bib/belly borders, dark fox stockings and gloves, ear-tip
+// black & warm pinna hollow, and crisp tail dark-band + luminous cream brush
+// while keeping body.js vertex colours intact for coarse crowd LODs.
+module creature::coat;
+import mesh;
+
+fn lin(c: vec3<f32>) -> vec3<f32> {
+    return vec3<f32>(pow(c.x, 2.2), pow(c.y, 2.2), pow(c.z, 2.2));
+}
+
+pub fn coat(p: vec3<f32>, foot: f32, s: mesh::Surface) -> mesh::Surface {
+    var out = s;
+    let w = max(foot, 0.0005);
+    let ax = abs(p.x);
+    let n = s.normal;
+    var c = s.base_color;
+    var rough = s.roughness;
+
+    let fur = lin(vec3<f32>(0.67, 0.305, 0.11));
+    let saddle = lin(vec3<f32>(0.42, 0.165, 0.058));
+    let cream = lin(vec3<f32>(0.955, 0.89, 0.755));
+    let dark = lin(vec3<f32>(0.095, 0.065, 0.052));
+    let ear_in = lin(vec3<f32>(0.87, 0.67, 0.57));
+
+    // Subtle fur-tuft edge modulation, faded out when pixels grow coarse so
+    // distant views never shimmer.
+    let detail = 1.0 - smoothstep(0.003, 0.007, w);
+    let tuft = detail * (0.005 * sin(p.x * 130.0 + p.y * 65.0) + 0.003 * cos(p.z * 150.0 - p.y * 80.0));
+
+    // --- Trunk, neck & tail dorsal saddle + crisp ventral cream countershading ---
+    let back_dot = n.y * 0.757 - n.z * 0.653;
+    if (p.y > 0.62 && p.y < 1.03 && p.z > -0.72 && p.z < 0.30) {
+        // Rich dorsal saddle band along neck, shoulders, spine and croup.
+        let dorsal = smoothstep(0.18, 0.72, back_dot) * (1.0 - smoothstep(0.055, 0.115, ax)) * smoothstep(0.66, 0.74, p.y);
+        c = mix(c, saddle, 0.55 * dorsal);
+
+        // Crisp cream chest bib, throat ruff and ventral belly border.
+        let belly_line = smoothstep(0.08, 0.52, -back_dot) * (1.0 - smoothstep(0.058 + tuft, 0.092 + tuft, ax)) * smoothstep(-0.01, 0.07, p.z) * (1.0 - smoothstep(0.95, 1.01, p.y));
+        let ruff_mask = smoothstep(0.89 + tuft, 0.925 + tuft, p.y) * (1.0 - smoothstep(0.985, 1.02, p.y)) * smoothstep(0.195, 0.235, p.z) * smoothstep(-0.25, 0.35, n.z);
+        c = mix(c, cream, 0.78 * max(belly_line, ruff_mask));
+    }
+
+    // --- Fox facial mask: clean russet-to-cream cheek & muzzle border ---
+    // Replaces jagged vertex-colour triangles across the cheek tufts and jaw.
+    if (p.y > 1.00 && p.y < 1.18 && p.z > 0.18 && p.z < 0.43) {
+        // Arching fox mask line rising over the muzzle and sweeping down across the cheeks.
+        let mask_y = 1.106 - 0.18 * max(ax - 0.045, 0.0) + 0.08 * max(p.z - 0.31, 0.0) + tuft;
+        let low_face = smoothstep(mask_y + 1.5 * w, mask_y - 1.5 * w, p.y) * smoothstep(0.185, 0.225, p.z);
+        // Preserve dark nose tip and eye sockets (face.bk draws over them next).
+        let not_nose = 1.0 - smoothstep(0.388, 0.405, p.z);
+        c = mix(c, cream, 0.82 * low_face * not_nose);
+        // Subtle warm russet crown & brow cap enrichment above the mask line.
+        let crown = smoothstep(mask_y + 0.012, mask_y + 0.045, p.y) * (1.0 - smoothstep(1.16, 1.19, p.y)) * not_nose;
+        c = mix(c, mix(fur, saddle, 0.35 * smoothstep(0.2, 0.85, n.y)), 0.35 * crown);
+    }
+
+    // --- Ears: warm rose-buff inner pinna hollow, dark outer rim & crisp black tips ---
+    if (p.y > 1.185) {
+        let in_face = smoothstep(0.08, 0.52, n.z + 0.35 * sign(p.x) * n.x) * smoothstep(0.185, 0.205, p.z);
+        let back_face = smoothstep(0.12, 0.58, -n.z - 0.20 * sign(p.x) * n.x) * (1.0 - smoothstep(0.200, 0.218, p.z));
+        let tip_y = 1.342 - 0.12 * max(ax - 0.12, 0.0) + tuft;
+        let is_tip = smoothstep(tip_y - 1.5 * w, tip_y + 1.5 * w, p.y);
+        c = mix(c, ear_in, 0.68 * in_face * (1.0 - is_tip) * smoothstep(1.205, 1.230, p.y));
+        c = mix(c, mix(saddle, dark, 0.45), 0.45 * back_face * (1.0 - is_tip));
+        c = mix(c, dark, 0.92 * is_tip);
+    }
+
+    // --- Forearm & hand dark fox gloves (arms rest forward at z > 0.30, y = 0.65..0.82) ---
+    if (p.y > 0.64 && p.y < 0.82 && p.z > 0.315) {
+        let glove_edge = 0.342 + 0.12 * (p.y - 0.75) + tuft;
+        let glove = smoothstep(glove_edge - 1.5 * w, glove_edge + 1.5 * w, p.z);
+        c = mix(c, dark, 0.88 * glove);
+    }
+
+    // --- Lower leg dark fox stockings & paw pads (shins/feet rest at y < 0.38) ---
+    if (p.y < 0.39 && p.z > -0.12) {
+        let sock_y = 0.315 + 0.14 * p.z + tuft;
+        let sock = smoothstep(sock_y + 1.5 * w, sock_y - 1.5 * w, p.y);
+        c = mix(c, dark, 0.90 * sock);
+        rough = mix(rough, 0.36, smoothstep(0.035, 0.015, p.y));
+    }
+
+    // --- Tail: crisp dark sub-terminal band and luminous cream brush tip ---
+    if (p.z < -0.66) {
+        let band_in = smoothstep(-0.715 + 1.5 * w, -0.748 - 1.5 * w, p.z + tuft);
+        let tip_in = smoothstep(-0.832 + 1.5 * w, -0.862 - 1.5 * w, p.z + tuft);
+        c = mix(c, dark, 0.90 * band_in * (1.0 - tip_in));
+        c = mix(c, cream, 0.95 * tip_in);
+    }
+
+    out.base_color = c;
+    out.roughness = rough;
+    return out;
+}

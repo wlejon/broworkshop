@@ -3,22 +3,14 @@
 // left, y up, z forward, metres). `foot` is a pixel's size there; every
 // edge is softened over it.
 //
-// A grazer's eye, set on the side of its head and seen from the side: large
-// and dark, an almond lying along the head's line with its fore corner the
-// lower. What it shows:
+// A grazer's eye on the side of its head, and a fine gazelle muzzle ahead:
 //   eye     a wet dark ball; an amber-brown iris about a pupil that is a
 //           level bar, as a grazer's is, thinner as it stares; the sky's
-//           light in it; its white only at the corners, and only when the
-//           lids are drawn wide (look.z under 0)
-//   lids    the upper comes down over it to blink or doze (look.z), the
-//           lower up a little to meet it; a dark rim, and dark lashes over
-//           the upper, longest toward the hind corner; look.w tilts the
-//           upper lid (over 0: its fore corner down)
-//   gaze    look.x swings the ball about its upright (to its left, so the
-//           left eye's pupil goes back and the right's forward), look.y
-//           rolls it up and down
-//   tear    a dark stripe from the eye's fore corner down the cheek toward
-//           the mouth
+//           light in it; its white only at the corners when drawn wide
+//   lids    upper and lower rims with dark upper lashes and subtle brow fold
+//   tear    a dark preorbital scent/tear stripe running down toward the mouth
+//   muzzle  a dark leathery V-shaped rhinarium pad, slanted comma nostrils
+//           with warm alar rims, median philtrum cleft, and fine mouth line
 module creature::face;
 import mesh;
 
@@ -26,9 +18,20 @@ fn lin(c: vec3<f32>) -> vec3<f32> {
     return vec3<f32>(pow(c.x, 2.2), pow(c.y, 2.2), pow(c.z, 2.2));
 }
 
+fn sstep(e0: f32, e1: f32, x: f32) -> f32 {
+    let t = clamp((x - e0) / (e1 - e0), 0.0, 1.0);
+    return t * t * (3.0 - 2.0 * t);
+}
+
 // 1 inside (d < 0), 0 outside, over w either side of the edge.
 fn inside(d: f32, w: f32) -> f32 {
     return clamp(0.5 - d / (2.0 * w), 0.0, 1.0);
+}
+
+fn segment2(q: vec2<f32>, a: vec2<f32>, b: vec2<f32>) -> f32 {
+    let ab = b - a;
+    let t = clamp(dot(q - a, ab) / max(dot(ab, ab), 1e-8), 0.0, 1.0);
+    return length(q - a - ab * t);
 }
 
 // The eye's middle (body.js's eye mass), as (y, z).
@@ -43,21 +46,28 @@ const IRIS: f32 = 0.014;
 pub fn face(p: vec3<f32>, foot: f32, look: vec4<f32>, s: mesh::Surface) -> mesh::Surface {
     var out = s;
     let w = max(foot, 0.0003);
+    let ax = abs(p.x);
     var c = s.base_color;
     var rough = s.roughness;
-    if (abs(p.x) > 0.03 && p.z > 1.09 && p.z < 1.34 && p.y > 1.31 && p.y < 1.48) {
+    let dark = lin(vec3<f32>(0.065, 0.046, 0.038));
+
+    if (ax > 0.03 && p.z > 1.09 && p.z < 1.34 && p.y > 1.31 && p.y < 1.48) {
         let side = sign(p.x);
         let dq = vec2<f32>(p.y, p.z) - EYE;
         let sa = dot(dq, ALONG);                          // forward along the head
         let ta = dq.x * ALONG.y - dq.y * ALONG.x;         // up across it
-        let dark = lin(vec3<f32>(0.07, 0.05, 0.04));
+
+        // Subtle supraorbital brow crease & warm lower-socket contour.
+        let brow_arc = 0.0155 - 0.14 * (sa / LEN) * (sa / LEN) * 0.020 - 0.08 * sa;
+        let brow = inside(abs(ta - brow_arc) - 0.0022, max(1.6 * w, 0.0016)) * sstep(-1.15, -0.75, sa / LEN) * sstep(1.20, 0.75, sa / LEN);
+        c = mix(c, c * 0.58, 0.48 * brow);
 
         // The tear stripe, thinning as it runs down the cheek.
         let run = (sa - 0.8 * LEN) / 0.11;
         if (run > 0.0 && run < 1.0) {
             let mid = -0.004 - 0.22 * (sa - LEN) - 0.02 * run * run;
             let tear = inside(abs(ta - mid) - mix(0.0055, 0.0015, run), w) * smoothstep(0.0, 0.12, run) * (1.0 - smoothstep(0.7, 1.0, run));
-            c = mix(c, dark, 0.8 * tear);
+            c = mix(c, dark, 0.82 * tear);
         }
 
         // The opening between the lids: two arcs meeting at the corners.
@@ -72,7 +82,7 @@ pub fn face(p: vec3<f32>, foot: f32, look: vec4<f32>, s: mesh::Surface) -> mesh:
         let open = inside(-m, w);
         // Its rim, and the lashes over it.
         let lash = inside(tt - upe - 0.004, w) * inside(upe - 0.0005 - tt, w) * smoothstep(0.0, 0.5, k) * mix(1.0, 0.45, smoothstep(-0.6, 0.8, sa / LEN));
-        c = mix(c, dark, 0.75 * lash);
+        c = mix(c, dark, 0.78 * lash);
         c = mix(c, dark, 0.9 * inside(abs(m) - 0.0013, w));
         // The lids' own skin over the ball, a little in its shade.
         c = mix(c, s.base_color * 0.78, open);
@@ -109,6 +119,54 @@ pub fn face(p: vec3<f32>, foot: f32, look: vec4<f32>, s: mesh::Surface) -> mesh:
         c = mix(c, dark, 0.9 * edge);
         rough = mix(rough, s.roughness, edge);
     }
+
+    // Muzzle detail: glossy dark rhinarium pad, comma-slit gazelle nostrils,
+    // median philtrum cleft, and expressive mouth line along the jaw seam.
+    if (p.z > 1.255 && p.y > 1.29 && p.y < 1.375 && ax < 0.036) {
+        let nose_pad = lin(vec3<f32>(0.075, 0.055, 0.050));
+        let cavity = lin(vec3<f32>(0.014, 0.010, 0.010));
+        let lip_warm = lin(vec3<f32>(0.18, 0.125, 0.11));
+
+        // Sculpted V-shaped rhinarium pad on the tip of the muzzle.
+        let pad_q = vec2<f32>(ax / 0.019, (p.y - 1.343) / 0.0145);
+        let pad = inside(length(pad_q) - 1.0, max(w / 0.015, 0.08)) * sstep(1.366, 1.376, p.z);
+        c = mix(c, nose_pad, 0.92 * pad);
+        rough = mix(rough, 0.22, pad);
+        // Subtle moist highlight along the upper nasal bridge of the pad.
+        let sheen = inside(length(vec2<f32>(ax / 0.012, (p.y - 1.351) / 0.0045)) - 1.0, 0.25) * sstep(1.375, 1.386, p.z);
+        c = mix(c, lin(vec3<f32>(0.30, 0.25, 0.23)), 0.38 * sheen * pad);
+
+        // Slanted comma-slit nostrils visible from both front (`face`) and side (`face-side`).
+        if (p.z > 1.356) {
+            let n_side = vec2<f32>(p.z, p.y);
+            let d_side = segment2(n_side, vec2<f32>(1.389, 1.346), vec2<f32>(1.366, 1.339));
+            let x_expected = mix(0.0155, 0.0065, clamp((p.z - 1.366) / 0.023, 0.0, 1.0));
+            let x_gate = inside(abs(ax - x_expected) - 0.0065, max(1.5 * w, 0.0015));
+            let slit_w = mix(0.0014, 0.0028, clamp((p.z - 1.366) / 0.023, 0.0, 1.0));
+            let nost = inside(d_side - slit_w, max(w, 0.0006)) * x_gate;
+            let alar = inside(abs(d_side - (slit_w + 0.0018)) - 0.0012, max(1.2 * w, 0.0009)) * x_gate * sstep(1.339, 1.346, p.y);
+            c = mix(c, c * 1.18, 0.35 * alar);
+            c = mix(c, cavity, 0.95 * nost);
+            rough = mix(rough, 0.14, nost);
+        }
+
+        // Median philtrum groove descending from the rhinarium to the upper lip.
+        if (p.z > 1.368) {
+            let phil = inside(ax - 0.0011, max(w, 0.0006)) * sstep(1.318, 1.323, p.y) * sstep(1.342, 1.336, p.y);
+            c = mix(c, cavity, 0.78 * phil);
+        }
+
+        // Expressive mouth line along the muzzle-jaw parting, softly upturned near the tip.
+        let y_mouth = 1.319 + 0.225 * max(1.366 - p.z, 0.0) + 0.0022 * sstep(1.345, 1.380, p.z);
+        let z_mouth = sstep(1.266, 1.286, p.z) * sstep(1.388, 1.376, p.z);
+        let lip_d = abs(p.y - y_mouth);
+        let mouth_line = inside(lip_d - mix(0.0007, 0.0014, sstep(1.28, 1.36, p.z)), max(w, 0.0006)) * z_mouth * sstep(0.002, 0.008, ax + max(p.z - 1.365, 0.0) * 2.0);
+        let lip_shade = inside(lip_d - 0.0032, max(1.6 * w, 0.0014)) * z_mouth;
+        c = mix(c, lip_warm, 0.32 * lip_shade);
+        c = mix(c, dark, 0.88 * mouth_line);
+        rough = mix(rough, 0.38, mouth_line);
+    }
+
     out.base_color = c;
     out.roughness = rough;
     return out;

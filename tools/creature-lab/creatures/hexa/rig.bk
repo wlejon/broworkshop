@@ -80,7 +80,15 @@ const P_GATHER: i32 = 7;   // s it gathered for
 const P_GROUND: i32 = 8;   // the ground's height it left
 const P_LEG: i32 = 9;      // per leg (8): in the air, s it has been, its hoof from its hip (3) and its speed (3)
 const P_LEG_N: i32 = 8;
-pub const PROBE: i32 = D_LEAP + P_LEG + 6 * P_LEG_N; // creature::probe's slice
+const D_SEC: i32 = D_LEAP + P_LEG + 6 * P_LEG_N; // cervical counter-pitch & ear/tail/startle lag (12)
+const S_ALERT_V: i32 = 0;  // alert crit_step velocity
+const S_THOR_Y: i32 = 1;   // slow mean thorax height
+const S_THOR_P: i32 = 2;   // slow mean thorax world pitch
+const S_NECK_L: i32 = 3;   // upper-neck pitch follow-through (2)
+const S_EAR_L: i32 = 5;    // ear secondary lag (2)
+const S_TAIL_L: i32 = 7;   // tail secondary lag (2)
+const S_ST_W: i32 = 9;     // startle impulse wave (2)
+pub const PROBE: i32 = D_SEC + 12; // creature::probe's slice
 pub const STATE: i32 = PROBE + PROBE_N;
 
 // The part of a cycle a foot is down. Walking, the six go one after another
@@ -223,6 +231,8 @@ fn place(st: rw_store<f32, 1>, env: read_store<f32, 1>, s: i32) {
         st[k + L_SINCE] = 1.0;
     }
     st[s + D_BODY_Y] = height(env, p.x, p.z) + HEAD[B_PELVIS].y;
+    for (var i: i32 = 0; i < 12; i += 1) { st[s + D_SEC + i] = 0.0; }
+    st[s + D_SEC + S_THOR_Y] = height(env, p.x, p.z) + HEAD[B_THORAX].y;
     // The rest pose's centre of mass from its root, as the body starts.
     var cr = vec3<f32>(0.0);
     for (var b: i32 = 0; b < NB; b += 1) { cr += MASS[b] * 0.5 * (HEAD[b] + TAIL[b]); }
@@ -249,10 +259,18 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
     state[s + D_CLOCK] = clock;
     let graze = approach(state[s + D_GRAZE], select_f(act == ACT_GRAZE, 1.0, 0.0), 0.8, dt);
     let lie = approach(state[s + D_LIE], select_f(act == ACT_LIE, 1.0, 0.0), 0.35, dt);
-    let alert = approach(state[s + D_ALERT], select_f(act == ACT_STARTLE || act == ACT_ALERT, 1.0, 0.0), 3.0, dt);
+    let dsec = s + D_SEC;
+    let alert_tgt = select_f(act == ACT_STARTLE || act == ACT_ALERT, 1.0, 0.0);
+    let ac1 = crit_step(vec2<f32>(state[dsec + S_ST_W], state[dsec + S_ST_W + 1]), alert_tgt, 9.5, dt);
+    let ac2 = crit_step(vec2<f32>(state[s + D_ALERT], state[dsec + S_ALERT_V]), ac1.x, 9.5, dt);
+    let alert = clamp01(ac2.x);
+    let st_wave = (ac1.x - ac2.x) * LAYERS;
     state[s + D_GRAZE] = graze;
     state[s + D_LIE] = lie;
     state[s + D_ALERT] = alert;
+    state[dsec + S_ALERT_V] = ac2.y;
+    state[dsec + S_ST_W] = ac1.x;
+    state[dsec + S_ST_W + 1] = ac1.y;
     var vdes = vec2<f32>(intent[ii + I_VEL_X], intent[ii + I_VEL_Z]);
     // A walker, however fast: three feet are always down.
     let vmax = 2.6 * (1.0 - 0.85 * graze);
@@ -719,35 +737,51 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
     state[s + D_LOOK] = look;
     // The neck: it reaches forward as it hurries and is drawn up alert; to
     // graze, its two bones swing the head down in front of the forefeet. At
-    // each step it gives a little, the upper bone a moment after the lower.
+    // each step it gives a little, the upper bone a moment after the lower,
+    // and absorbs the tripod's planned vertical bound and spine flex open-loop
+    // so the head rides steadily on the plain without ringing against body CoM.
     let hurry = smooth01((speed - 1.0) / 1.4);
-    // (Running, each tripod's landing goes up it as a deeper nod: the neck's
-    // root first, the upper bone and the head after, the head turned back
-    // against them so its gaze stays where it was.)
-    let nodn = (0.014 + 0.05 * hurry) * gs * sin(2.0 * TAU * phase - 0.6);
-    let nodh = (0.012 + 0.045 * hurry) * gs * sin(2.0 * TAU * phase - 1.7);
-    let neck_a = clamp_xyz(vec3<f32>(1.08 * graze - 0.14 * alert + 0.16 * hurry + 0.1 * lie + nodn + 0.5 * leap_pitch, 0.3 * look, 0.0), B_NECK);
+    let stab_w = (1.0 - wl) * (1.0 - lw) * LAYERS;
+    let flex_s = select_f(init, bend.flex, damp(state[dsec + S_THOR_P], bend.flex, 2.5, dt));
+    state[dsec + S_THOR_P] = flex_s;
+    let dflex = clamp(bend.flex - flex_s, -0.15, 0.15) * stab_w;
+    let bob_p = 2.0 * TAU * (phase - 0.5 * duty);
+    let bob_y = -RUN_BOB * tripod * gs * cos(bob_p) * stab_w;
+    let bob_lag = -RUN_BOB * tripod * gs * cos(bob_p - 0.65) * stab_w;
+    let nlag = crit_step(vec2<f32>(state[dsec + S_NECK_L], state[dsec + S_NECK_L + 1]), dflex, 10.5, dt);
+    state[dsec + S_NECK_L] = nlag.x;
+    state[dsec + S_NECK_L + 1] = nlag.y;
+
+    let nodn = (0.014 + 0.036 * hurry) * gs * sin(2.0 * TAU * phase - 0.6) * LAYERS;
+    let nodh = (0.012 + 0.032 * hurry) * gs * sin(2.0 * TAU * phase - 1.7) * LAYERS;
+    let neck_comp = 1.65 * bob_y - 0.42 * dflex - 0.06 * st_wave;
+    let neck2_comp = 0.75 * bob_lag - 0.30 * nlag.x + 0.18 * st_wave;
+    let head_comp = -1.75 * bob_y - 0.55 * bob_lag + 0.52 * nlag.x + 0.24 * st_wave;
+
+    let neck_a = clamp_xyz(vec3<f32>(1.08 * graze - 0.14 * alert + 0.16 * hurry + 0.1 * lie + nodn + neck_comp + 0.5 * leap_pitch, 0.3 * look, 0.0), B_NECK);
     T.q[B_NECK] = q_mul(T.q[B_THORAX], q_xyz(neck_a));
     T.p[B_NECK] = head_of(T, B_NECK);
-    let neck2_a = clamp_xyz(vec3<f32>(1.0 * graze - 0.1 * alert + 0.1 * hurry + nodh, 0.35 * look, 0.0), B_NECK2);
+    let neck2_a = clamp_xyz(vec3<f32>(1.0 * graze - 0.1 * alert + 0.1 * hurry + nodh + neck2_comp, 0.35 * look, 0.0), B_NECK2);
     T.q[B_NECK2] = q_mul(T.q[B_NECK], q_xyz(neck2_a));
     T.p[B_NECK2] = head_of(T, B_NECK2);
-    let head_a = clamp_xyz(vec3<f32>(-0.75 * graze + 0.1 * alert - 0.2 * hurry - nodn - nodh + 0.4 * leap_pitch, 0.35 * look, 0.0), B_HEAD);
+    let head_a = clamp_xyz(vec3<f32>(-0.75 * graze + 0.1 * alert - 0.2 * hurry - nodn - nodh + head_comp + 0.4 * leap_pitch, 0.35 * look, 0.0), B_HEAD);
     T.q[B_HEAD] = q_mul(T.q[B_NECK2], q_xyz(head_a));
     T.p[B_HEAD] = head_of(T, B_HEAD);
     // The ears: out to the sides at ease, each flicking on its own; turned
-    // forward and up alert, laid back as it hurries.
+    // forward and up alert, laid back as it hurries, with smooth open-loop
+    // secondary follow-through behind stride bounds and startle lifts.
+    let elag = crit_step(vec2<f32>(state[dsec + S_EAR_L], state[dsec + S_EAR_L + 1]), 0.65 * st_wave, 11.0, dt);
+    state[dsec + S_EAR_L] = elag.x;
+    state[dsec + S_EAR_L + 1] = elag.y;
     for (var e: i32 = 0; e < 2; e += 1) {
         let side = select_f(e == 0, 1.0, -1.0);
         let b = B_EARL + e;
         let ch = 20.0 + 7.0 * f32(e);
-        let flick = smooth01(4.0 * noise1(clock * 0.9, seed, ch) - 2.6) * sin(clock * 31.0 + ch);
-        let roam = noise1(clock * 0.35, seed, ch + 1.0);
-        // Laid back at a run they are not held there: each beat throws them
-        // back and they come forward again after the head has, the two a
-        // little apart.
-        let beat = 0.16 * hurry * gs * sin(2.0 * TAU * phase - 2.6 - 0.5 * f32(e));
-        let ear_a = vec3<f32>(-0.25 * alert + 0.5 * hurry + beat + 0.12 * roam, side * (0.45 * alert - 0.6 * hurry + 0.3 * roam + 0.25 * flick), side * (0.35 * alert + 0.12 * flick));
+        let flick = smooth01(4.0 * noise1(clock * 0.9, seed, ch) - 2.6) * sin(clock * 24.0 + ch) * (1.0 - 0.5 * hurry);
+        let roam = noise1(clock * 0.45, seed, ch + 1.0);
+        let listen = alert * 0.10 * sin(clock * 2.8 + 1.4 * f32(e));
+        let beat = (0.04 + 0.14 * hurry) * gs * sin(2.0 * TAU * phase - 2.5 - 0.45 * f32(e)) * LAYERS + 0.28 * elag.x;
+        let ear_a = vec3<f32>(-0.25 * alert + 0.48 * hurry + beat + 0.12 * roam, side * (0.45 * alert - 0.58 * hurry + 0.3 * roam + 0.22 * flick + listen), side * (0.35 * alert + 0.10 * flick - 0.14 * elag.x));
         T.q[b] = q_mul(T.q[B_HEAD], q_xyz(clamp_xyz(ear_a, b)));
         T.p[b] = head_of(T, b);
     }
@@ -786,24 +820,30 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
     // it trails back a little as it hurries; now and then it swishes, the
     // tuft thrown furthest. (Its angles are drawn from the stride's phase
     // and its own clock, so nothing in it rings.)
+    let tlag = crit_step(vec2<f32>(state[dsec + S_TAIL_L], state[dsec + S_TAIL_L + 1]), 0.55 * st_wave, 8.5, dt);
+    state[dsec + S_TAIL_L] = tlag.x;
+    state[dsec + S_TAIL_L + 1] = tlag.y;
     let swish = LAYERS * smooth01(3.5 * noise1(clock * 0.45, seed, 30.0) - 1.6) * sin(clock * 8.5 + seed);
+    let alert_sway = alert * 0.05 * sin(clock * 2.4 + seed);
     for (var i: i32 = 0; i < 4; i += 1) {
         let b = B_TAIL1 + i;
         let fi = f32(i);
         let wave = -(0.5 + 0.35 * fi) * SWAY * gs * sin(TAU * phase - 0.7 * (fi + 1.0)) * LAYERS;
-        let swingy = wave - 0.25 * bendt + (0.05 + 0.11 * fi) * swish;
-        // (Running, the croup's beat runs down it as a wave that grows to the tuft.)
-        // (In a leap it flies out behind, clear of what it leaps.)
-        let trail = (0.16 + 0.05 * fi) * hurry + (0.3 - 0.06 * fi) * lw +(0.012 + 0.035 * hurry) * (1.0 + fi) * gs * sin(2.0 * TAU * phase - 2.0 - 0.9 * fi) * LAYERS;
+        let swingy = wave - 0.25 * bendt + (0.05 + 0.11 * fi) * swish + (0.4 + 0.3 * fi) * alert_sway;
+        // (Running, the croup's beat and vertical lag run down it as a wave that grows to the tuft.)
+        // (In a leap or startle it lifts behind with progressive follow-through.)
+        let trail = (0.16 + 0.05 * fi) * hurry + (0.06 + 0.02 * fi) * alert + (0.3 - 0.06 * fi) * lw + (0.012 + 0.036 * hurry) * (1.0 + fi) * gs * sin(2.0 * TAU * phase - 2.0 - 0.85 * fi) * LAYERS + (0.10 + 0.05 * fi) * tlag.x;
         let a = clamp_xyz(vec3<f32>(-0.03 * (1.0 - lie) + 0.06 * lie - trail, swingy, 0.0), b);
         T.q[b] = q_mul(T.q[PARENT[b]], q_xyz(a));
         T.p[b] = head_of(T, b);
-        // Standing, it is carried over TAIL_CLEAR of the ground (met with no
-        // corner), the ground's rise lifting it within its joint's range.
+        // Carried smoothly over TAIL_CLEAR of the ground with an 8 mm softplus
+        // knee so lying/grazing entry has no corner and standing/running never clips.
         let e = T.p[b] + q_rot(T.q[b], TAIL[b] - HEAD[b]);
         let f = height(env, e.x, e.z) + TAIL_CLEAR * (1.0 - lie);
-        if (e.y < f + TAIL_CLEAR) {
-            let ql = lift_to(T.p[b], T.q[b], b, f + TAIL_CLEAR * exp((e.y - f - TAIL_CLEAR) / TAIL_CLEAR));
+        let dc = e.y - f;
+        if (dc < 0.024) {
+            let target_y = f + 0.008 * log(1.0 + exp(dc / 0.008));
+            let ql = lift_to(T.p[b], T.q[b], b, target_y);
             T.q[b] = q_mul(T.q[PARENT[b]], q_xyz(clamp_xyz(q_to_xyz(q_mul(q_conj(T.q[PARENT[b]]), ql)), b)));
         }
     }

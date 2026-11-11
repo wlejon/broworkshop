@@ -18,6 +18,7 @@ export default {
     skeleton: { bones, feet, tracks, chartJoints },
     body,
     keys: { poses, cycles },
+    coat: 'coat.bk',
     face: 'face.bk',
     rig: { file: 'rig.bk', kernel: 'k_rig' },
     scale: { height: 1.33, length: 0.5 },

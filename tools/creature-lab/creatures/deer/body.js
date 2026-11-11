@@ -108,6 +108,13 @@ function head(B) {
             { c: [0.12 * s, 1.39, 0.725], r: [0.036, 0.009] },
             { c: [0.152 * s, 1.42, 0.715], r: [0.012, 0.007] },
         ], { up: [0, 0, 1], blend: 0.008 });
+        // Shallow inner pinna hollow cupped into the front face of the ear,
+        // leaving the outer rim and >14 mm back wall lush and unperforated.
+        B.limb(`earHollow${t}`, [`ear${t}`], [
+            { c: [0.078 * s, 1.356, 0.750], r: [0.019, 0.0065] },
+            { c: [0.116 * s, 1.387, 0.736], r: [0.019, 0.0058] },
+            { c: [0.136 * s, 1.404, 0.728], r: [0.009, 0.0042] },
+        ], { up: [0, 0, 1], carve: true, blend: 0.006, keep: 0.006 });
     }
 }
 

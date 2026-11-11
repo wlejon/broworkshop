@@ -1,0 +1,154 @@
+// creature::coat — per-pixel pelage, gazelle flank stripe, leg bars, stockings,
+// horn annuli, and ear pinna shading for the hexa (vertex colours in body.js
+// remain intact for coarse crowd LODs). Parameterised in rest-pose coordinates
+// `p` (x left, y up, z forward, metres) and pixel footprint `foot` so markings
+// stay invariant under world yaw and joint animation.
+module creature::coat;
+import mesh;
+
+fn lin(c: vec3<f32>) -> vec3<f32> {
+    return vec3<f32>(pow(c.x, 2.2), pow(c.y, 2.2), pow(c.z, 2.2));
+}
+
+fn sstep(e0: f32, e1: f32, x: f32) -> f32 {
+    let t = clamp((x - e0) / (e1 - e0), 0.0, 1.0);
+    return t * t * (3.0 - 2.0 * t);
+}
+
+fn inside(d: f32, w: f32) -> f32 {
+    return clamp(0.5 - d / (2.0 * w), 0.0, 1.0);
+}
+
+pub fn coat(p: vec3<f32>, foot: f32, s: mesh::Surface) -> mesh::Surface {
+    var out = s;
+    let w = max(foot, 0.0005);
+    let ax = abs(p.x);
+    var c = s.base_color;
+    var rough = s.roughness;
+
+    let tawny = lin(vec3<f32>(0.64, 0.41, 0.19));
+    let saddle = lin(vec3<f32>(0.37, 0.21, 0.092));
+    let white = lin(vec3<f32>(0.95, 0.92, 0.84));
+    let stripe_dark = lin(vec3<f32>(0.095, 0.065, 0.050));
+    let hoof_dark = lin(vec3<f32>(0.075, 0.058, 0.048));
+    let horn_base = lin(vec3<f32>(0.18, 0.145, 0.118));
+    let horn_tip = lin(vec3<f32>(0.082, 0.068, 0.056));
+    let ear_in = lin(vec3<f32>(0.90, 0.75, 0.65));
+
+    // 1. Trunk & neck dorsal saddle, golden-tawny flank, crisp gazelle flank
+    // stripe, and warm ivory-white belly & breast.
+    let on_trunk = sstep(-0.76, -0.66, p.z) * sstep(1.09, 1.02, p.z) * sstep(0.66, 0.72, p.y) * sstep(1.46, 1.40, p.y);
+    if (on_trunk > 0.0) {
+        let neck_rise = 0.42 * max(p.z - 0.76, 0.0);
+        let y_top = 1.06 + neck_rise;
+        let dorsal = sstep(y_top - 0.14, y_top - 0.02, p.y) * sstep(0.145, 0.045, ax);
+        var body_c = mix(tawny, saddle, 0.82 * dorsal);
+
+        // Gently undulating Thomson's-gazelle flank band between fore and hind legs,
+        // arching smoothly over the middle thoracic shoulder (z ~ 0.12).
+        let arch = 0.808 + 0.014 * exp(-pow((p.z - 0.12) / 0.17, 2.0)) - 0.010 * sin((p.z + 0.15) * 3.4);
+        let z_taper = sstep(-0.43, -0.28, p.z) * sstep(0.63, 0.48, p.z);
+        let half_band = 0.022 * z_taper;
+
+        // Crisp ivory-white underbelly & lower flank below the dark flank band,
+        // continuing smoothly up the anterior breast and lower throat.
+        let belly_edge = mix(0.768, arch - half_band + 0.002, z_taper * sstep(0.06, 0.11, ax));
+        let belly = inside(p.y - belly_edge, max(2.0 * w, 0.003)) * sstep(-0.68, -0.52, p.z) * sstep(0.92, 0.82, p.z);
+        let breast = sstep(0.76, 0.84, p.z) * sstep(0.095, 0.045, ax) * inside(p.y - (0.91 + 0.82 * max(p.z - 0.78, 0.0)), max(2.5 * w, 0.004));
+        body_c = mix(body_c, white, 0.96 * max(belly, breast));
+
+        // Pale buff highlight line kissing the top border of the dark flank stripe.
+        let hi_band = inside(abs(p.y - (arch + half_band + 0.008)) - 0.006, max(1.8 * w, 0.003)) * z_taper * sstep(0.085, 0.125, ax);
+        body_c = mix(body_c, mix(tawny, white, 0.35), 0.45 * hi_band);
+
+        // Razor-sharp dark chocolate-ebony flank stripe.
+        let stripe = inside(abs(p.y - arch) - half_band, max(1.5 * w, 0.0022)) * z_taper * sstep(0.085, 0.125, ax);
+        body_c = mix(body_c, stripe_dark, 0.92 * stripe);
+
+        c = mix(c, body_c, 0.90 * on_trunk);
+    }
+
+    // 2. Legs: crisp horizontal upper-leg bars, clean white stockings below the
+    // knee (y < 0.47), and dark cloven hooves with feathered coronet contrast.
+    if (p.y < 0.77 && (ax > 0.092 || p.y < 0.67)) {
+        let leg_w = sstep(0.77, 0.72, p.y);
+        var leg_c = tawny;
+
+        // Three crisp dark horizontal bars across the upper arm/thigh (y 0.48..0.74).
+        let bar_env = sstep(0.465, 0.505, p.y) * sstep(0.755, 0.705, p.y);
+        let bar_wave = cos((p.y - 0.505) / 0.074 * 6.2831853);
+        let bar = inside(0.22 - bar_wave, max(w / 0.012, 0.12)) * bar_env;
+        leg_c = mix(leg_c, stripe_dark, 0.86 * bar);
+
+        // Crisp white stockings from the knee/hock down to the fetlock coronet.
+        let stocking = inside(p.y - 0.472, max(1.8 * w, 0.003));
+        leg_c = mix(leg_c, white, 0.97 * stocking);
+
+        // Subtle warm fetlock shadow and crisp dark hoof below y = 0.076.
+        let coronet = inside(p.y - 0.076, max(1.5 * w, 0.0022));
+        let cleft = inside(abs(ax - 0.15) - 0.0018, max(w, 0.0008)) * sstep(0.005, 0.015, p.y) * sstep(0.062, 0.046, p.y);
+        var hoof_c = mix(hoof_dark, hoof_dark * 0.42, 0.75 * cleft);
+        hoof_c = mix(hoof_c, hoof_dark * 1.45, 0.25 * sstep(0.03, 0.068, p.y));
+        leg_c = mix(leg_c, hoof_c, coronet);
+
+        c = mix(c, leg_c, leg_w);
+        rough = mix(rough, 0.28, leg_w * coronet);
+    }
+
+    // 3. Head: crisp white eye-ring, dark nasal/forehead blaze, and white jaw/chin.
+    if (p.z > 1.05 && p.y > 1.28 && p.y < 1.485 && ax < 0.09) {
+        let chin = inside(p.y - (1.334 + 0.14 * max(1.35 - p.z, 0.0)), max(2.0 * w, 0.003)) * sstep(1.10, 1.16, p.z);
+        c = mix(c, white, 0.92 * chin);
+
+        let blaze_hw = mix(0.026, 0.014, clamp((p.z - 1.12) / 0.24, 0.0, 1.0));
+        let blaze = inside(ax - blaze_hw, max(2.0 * w, 0.003)) * sstep(1.335, 1.365, p.y) * sstep(1.08, 1.13, p.z) * sstep(1.385, 1.365, p.z);
+        c = mix(c, saddle * 0.88, 0.72 * blaze);
+    }
+
+    // 4. Lyre horns: subtle annular keratin growth rings & polished dark tips,
+    // gated to the 3D horn shaft from pedicle [0.030, 1.475, 1.095] to tip [0.068, 1.79, 0.915].
+    if (p.y > 1.480 && p.z > 0.87 && p.z < 1.12 && ax > 0.014 && ax < 0.105) {
+        let ha = vec3<f32>(0.030, 1.475, 1.095);
+        let hb = vec3<f32>(0.068, 1.790, 0.915);
+        let hab = hb - ha;
+        let hq = vec3<f32>(ax, p.y, p.z) - ha;
+        let hu = clamp(dot(hq, hab) / dot(hab, hab), 0.0, 1.0);
+        let hr = length(hq - hab * hu);
+        let rad = mix(0.0235, 0.009, hu);
+        let horn_share = inside(hr - rad, max(1.5 * w, 0.002)) * sstep(1.480, 1.490, p.y);
+        if (horn_share > 0.0) {
+            let ring_fade = (1.0 - sstep(0.68, 0.88, hu)) * (1.0 - sstep(0.003, 0.010, foot));
+            let ridge = 0.5 + 0.5 * sin(hu * 88.0);
+            var hc = mix(horn_base * 0.76, horn_base * 1.24, ridge * ring_fade + 0.5 * (1.0 - ring_fade));
+            hc = mix(hc, horn_tip, sstep(0.65, 0.94, hu));
+            c = mix(c, hc, horn_share);
+            rough = mix(rough, mix(0.46, 0.22, sstep(0.60, 0.92, hu)), horn_share);
+        }
+    }
+
+    // 5. Long leaf ears: warm rose-buff cupped inner pinna, tawny rim, dark tip.
+    if (p.y > 1.455 && p.y < 1.575 && ax > 0.056 && p.z > 0.98 && p.z < 1.10) {
+        let eb = vec3<f32>(0.055, 1.47, 1.075);
+        let ed = vec3<f32>(0.135, 0.075, -0.065);
+        let q = vec3<f32>(ax, p.y, p.z) - eb;
+        let eu = clamp(dot(q, ed) / dot(ed, ed), 0.0, 1.0);
+        let ef = normalize(vec3<f32>(0.0, 0.3, 1.0));
+        let front = dot(q - ed * eu, ef);
+        let across = length(q - ed * eu - ef * front);
+        let hw = mix(0.022, 0.010, sstep(0.45, 0.92, eu)) * sstep(0.06, 0.22, eu) * sstep(0.96, 0.84, eu);
+        let inner = sstep(-0.002, 0.004, front) * inside(across - hw, max(1.5 * w, 0.002));
+        var ec = mix(tawny, ear_in, 0.88 * inner);
+        ec = mix(ec, stripe_dark, sstep(0.76, 0.92, eu) * (1.0 - 0.75 * inner));
+        c = mix(c, ec, sstep(0.056, 0.068, ax));
+    }
+
+    // 6. Tail tuft: crisp glossy dark brush tip.
+    if (p.z < -1.10 && p.y < 0.56) {
+        let tuft = sstep(0.56, 0.48, p.y) * sstep(-1.10, -1.16, p.z);
+        c = mix(c, hoof_dark, 0.92 * tuft);
+    }
+
+    out.base_color = c;
+    out.roughness = rough;
+    return out;
+}

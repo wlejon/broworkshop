@@ -16,8 +16,9 @@ export default {
     name: 'deer',
     skeleton: { bones, feet, tracks, chartJoints },
     body,
+    coat: 'coat.bk',
     face: 'face.bk',
-    rig:{ file: 'rig.bk', kernel: 'k_rig', modules: { 'deer::legs': 'legs.bk' } },
+    rig: { file: 'rig.bk', kernel: 'k_rig', modules: { 'deer::legs': 'legs.bk', 'deer::gait': 'gait.bk' } },
     scale: { height: 0.95, length: 1.6 },
     // Its walk, trot and gallop (m/s), and round a tight circle: the lab's
     // scenarios and a flock's brain go at these.

@@ -16,17 +16,7 @@
 // own, slowing over its feet's stance and running on while they swing, so
 // the trunk stretches as the hind push throws the front on and gathers as
 // the hips catch up; the back's arch is that length. In the bound's flights
-// the body falls freely. The head is carried level and steady in space, the
-// ears up and, running fast, swept back, springing with each landing.
-//
-// At rest it sits: the hind feet flat from heel to toe (the leg solved as a
-// pantograph whose heel stays on the ground, creature::limbs
-// solve_hind_flat), the back round. Alert (or startled, once it has
-// flinched) it sits up on its haunches, the fore paws lifted against its
-// chest, the trunk pitched up, the head level and the ears up. Lying, it
-// loafs: the body down on its folded legs, the ears laid back. Grazing, the
-// head goes down to the grass and the jaw works. The nose twitches, each
-// ear turns on its own, the scut flicks up as it runs.
+// the body falls freely. The head, ears, nose, and scut live in bunny::act.
 import creature::common::*;
 import creature::contract::*;
 import creature::skeleton::*;
@@ -34,63 +24,11 @@ import creature::pose::*;
 import creature::limbs::*;
 import bunny::legs::*;
 import bunny::stride::*;
-import creature::dangle::*;
+import bunny::act::*;
 import creature::probe::*;
 from creature::ground import height, normal, obstacle_ahead;
 
-// --- state layout (after the contract's header) ------------------------------
-const D_SPEED: i32 = 5;
-const D_OMEGA: i32 = 6;
-const D_CLOCK: i32 = 7;
-const D_PHASE: i32 = 8;
-const D_BW: i32 = 9;          // the bound's weight against the hop (0..1)
-const D_GAIT: i32 = 10;       // the gait chosen (contract GAIT_*)
-const D_MOVING: i32 = 11;
-const D_HY: i32 = 12;         // hip height and its speed (the plan)
-const D_HV: i32 = 13;
-const D_FY: i32 = 14;         // withers height and its speed (the plan)
-const D_FV: i32 = 15;
-const D_ROLL: i32 = 16;
-const D_LIE: i32 = 17;
-const D_GRAZE: i32 = 18;
-const D_ALERT: i32 = 19;
-const D_STARTLE_T: i32 = 20;
-const D_PREV_ACT: i32 = 21;
-const D_GAZE_YAW: i32 = 22;
-const D_GAZE_PITCH: i32 = 23;
-const D_HEAD_S: i32 = 24;     // the head's height as its posture has it, slowly smoothed
-const D_SHUF: i32 = 25;       // the shuffle's weight against the hop, eased
-const D_REAR: i32 = 26;      // sitting up: how far (0..1) and its speed
-const D_REAR_V: i32 = 27;
-const D_HY_O: i32 = 28;       // the hips' and withers' heights as placed last step
-const D_FY_O: i32 = 29;
-const D_CAP_H: i32 = 30;      // the girdles' reach ceilings, through the plan's spring,
-const D_CAP_F: i32 = 31;
-const D_CAP_HV: i32 = 32;     //   and their speeds
-const D_CAP_FV: i32 = 33;
-const D_EAR: i32 = 34;        // each ear's turn (2) and lean back (2), eased toward its whim
-const D_PITCH_O: i32 = 38;    // the trunk's pitch last step
-const D_CHEST_S: i32 = 39;    // the chest's pitch, slowly smoothed (what the head rides a share of)
-const D_EAR_NEXT: i32 = 40;   // each ear's next turn (s on the clock)
-const D_EAR_N: i32 = 42;      //   and how many it has made (its whims are hashed from it)
-const D_EAR_SPL: i32 = 44;    // each ear's splay, eased toward its whim
-const D_EAR_V: i32 = 46;      // the speeds of each ear's swivel (2) and lean back (2)
-const D_LEG: i32 = 50;        // per leg, LEG_REC floats
-const LEG_REC: i32 = 16;
-const L_PLANT: i32 = 0;
-const L_TOE: i32 = 1;         // the toe: planted point, or where the swing has it
-const L_FROM: i32 = 4;
-const L_TO: i32 = 7;
-const L_U: i32 = 10;
-const L_T: i32 = 11;
-const L_ARMED: i32 = 12;
-const L_KIND: i32 = 13;       // 0 a gait step, 1 a settling step, 2 a fore paw held up (sitting up)
-const L_SINCE: i32 = 14;      // s since it landed; in a swing, the roll onto its toe it lifted with
-const D_DANGLE: i32 = D_LEG + 4 * LEG_REC;   // the ears' mid points and tips, the scut's tip (creature::dangle)
-const D_AHEAD: i32 = D_DANGLE + 5 * DANGLE_REC;   // how far ahead of the path's point the mass stands before the recoil, slowly smoothed,
-const D_OVER: i32 = D_AHEAD + 1;                  //   and how far over the hips' planned height
-const D_LEAP: i32 = D_AHEAD + 2;      // a leap: on (0/1), s from its take-off (under 0: the push), m/s it leaves the ground at
-pub const PROBE: i32 = D_LEAP + 3;    // creature::probe's slice
+pub const PROBE: i32 = D_END;         // creature::probe's slice
 pub const STATE: i32 = PROBE + PROBE_N;
 
 const HOP_UP: f32 = 1.5;         // m/s the hop gives way to the bound
@@ -99,11 +37,10 @@ const DV_MAX: f32 = 2.7;         // m/s^2 it changes pace by at most
 const SETTLE_TRIG: f32 = 0.012;  // m a still foot may stray before it steps home
 const REACH_TRIG: f32 = 0.16;    // m a planted foot may trail its home before it must step
 const SETTLE_T: f32 = 0.16;
-const WITHERS_Z: f32 = 0.18;     // hips (pelvis head) to withers, along the back
 const CAP_FADE: f32 = 0.06;      // m a coming or going foot's reach limit is slackened by
 const CAP_SOFT: f32 = 0.003;     // m over which one reach limit hands over to another
 @knob const FORE_BAND: f32 = 0.3;   // of that reach over which a swinging fore foot eases up to it
-@knob const FORE_CARRY: f32 = 0.97;  // of its reach a swinging fore foot is carried from its girdle at most
+@knob const FORE_CARRY: f32 = 0.92;  // of its reach a swinging fore foot is carried from its girdle at most
 @knob const SWING_FOLD_F: f32 = 0.6;  // of its reach a swinging fore foot stays from its girdle at least
 @knob const SWING_FOLD_H: f32 = 0.45;  //   and a hind foot (sitting, 0.57)
 @knob const LEG_BAND: f32 = 0.15;    // rad a leg's joint eases into the ends of its range over
@@ -124,8 +61,6 @@ const CAP_SOFT: f32 = 0.003;     // m over which one reach limit hands over to a
 @knob const HOP_LAND_H: f32 = 0.02;  // m a hopping hind foot lands ahead of its home, beside the fore prints
 const HIP_RUN: f32 = 0.145;      // m the hips ride at in the bound (sitting: 0.115)
 const SCAP_RUN: f32 = 0.155;     //   and the withers
-const HOME_BACK_H: f32 = 0.055;  // m a running hind foot's home comes back under the hip
-const HOME_BACK_F: f32 = 0.045;  //   and a fore foot's under the shoulder
 @knob const HOME_HOP_F: f32 = 0.04; // m a hopping fore foot's home comes back from where it sits
 @knob const TRAVEL_H: f32 = 0.18;  // m a running foot travels in its stance at most, hind
 @knob const TRAVEL_F: f32 = 0.13;  //   and fore, bounding
@@ -138,7 +73,7 @@ const HOME_BACK_F: f32 = 0.045;  //   and a fore foot's under the shoulder
 @knob const FLEX_RUN: f32 = 0.1;       // rad the back is arched by, bounding (its mean)
 @knob const FLEX_SIT: f32 = 0.4;       // rad the back is rounded by, sitting and hopping (its mean)
 @knob const HIP_DROP: f32 = 0.01;      // m the hips sit lower than the rest pose's, sitting and hopping
-@knob const FLEX_SWING: f32 = 0.5;     // rad it flexes by per TRUNK_SWING of the girdles' spacing
+@knob const FLEX_SWING: f32 = 0.52;    // rad it flexes by per TRUNK_SWING of the girdles' spacing
 @knob const FLEX_SWING_HOP: f32 = 0.3; //   and hopping (its surges larger against its stride)
 @knob const FLIGHT: f32 = 1.0;         // share of the bound's free fall the body takes
 const REAR_PITCH: f32 = 1.0;     // rad the trunk pitches up sitting up
@@ -150,7 +85,7 @@ const LIE_WITHERS: f32 = 0.098;  //   and the withers
 @knob const NECK_HOP: f32 = -0.45;   // rad the neck lifts the head by, hopping
 @knob const SCAP_FOLLOW: f32 = 0.6;  // of the leg's swing the blade takes
 @knob const EAR_RUN: f32 = 0.8;      // rad the ears sweep back running flat out
-@knob const EAR_SNAP: f32 = 20.0;    // rad/s an ear's swivel's spring (critical) turns it toward where it listens
+@knob const EAR_SNAP: f32 = 16.0;    // rad/s an ear's swivel's spring (critical) turns it toward where it listens
 @knob const EAR_FLICK_T: f32 = 0.3;  // s an ear's flick lasts
 @knob const EAR_FLICKS: f32 = 0.07;  // share of an ear's turns that are a flick instead
 @knob const EAR_GRAZE_UP: f32 = 0.6; // rad the ears lean back grazing, against the head's pitch down
@@ -159,48 +94,11 @@ const LIE_WITHERS: f32 = 0.098;  //   and the withers
 @knob const HIND_WIDE: f32 = 0.02;   // m a hind foot's home moves out, bounding
 @knob const VARY: f32 = 1.0;        // share of the individual's wander in speed and heading
 @knob const HEAD_RIDE: f32 = 0.25;   // share of the chest's pitch about its mean the head rides
-// The ears' and the scut's tips on springs (creature::dangle): rad/s, damping,
-// share of gravity. An ear's base is stiff cartilage, its tip softer.
-@knob const EAR_W1: f32 = 80.0;
-@knob const EAR_W2: f32 = 60.0;
-@knob const EAR_ZETA: f32 = 0.4;
+// The ears' tips on springs (creature::dangle): rad/s, damping, share of gravity.
+@knob const EAR_W1: f32 = 68.0;
+@knob const EAR_W2: f32 = 52.0;
+@knob const EAR_ZETA: f32 = 0.68;
 @knob const EAR_SAG: f32 = 0.6;
-const SCUT_W: f32 = 40.0;
-const SCUT_ZETA: f32 = 0.3;
-
-// A foot's home under its girdle, from the root, as the gait (bw) carries it.
-// Bounding, the hind feet come down wide, outside the fore feet (the thighs
-// sweeping forward outside the flanks, not into them).
-fn home_of(l: i32, bw: f32, mv: f32) -> vec3<f32> {
-    let t = TAIL[LEG_B0[l] + LEG_NB[l] - 1] - HEAD[B_PELVIS];
-    let hind = LEG_HIND[l] == 1;
-    let wide = select_f(hind, bw * HIND_WIDE * sign(t.x), 0.0);
-    let back = select_f(hind, bw * HOME_BACK_H, bw * HOME_BACK_F + (1.0 - bw) * mv * HOME_HOP_F);
-    return vec3<f32>(t.x + wide, 0.0, t.z - back);
-}
-
-fn place(st: rw_store<f32, 1>, env: read_store<f32, 1>, s: i32) {
-    let p = ld3(st, s + S_POS);
-    let q = q_y(st[s + S_YAW]);
-    for (var l: i32 = 0; l < 4; l += 1) {
-        let w = q_rot(q, home_of(l, 0.0, 0.0)) + vec3<f32>(p.x, 0.0, p.z);
-        let t = vec3<f32>(w.x, height(env, w.x, w.z), w.z);
-        let k = s + D_LEG + l * LEG_REC;
-        st[k + L_PLANT] = 1.0;
-        st3(st, k + L_TOE, t);
-        st3(st, k + L_TO, t);
-        st[k + L_U] = 0.0;
-        st[k + L_ARMED] = 1.0;
-        st[k + L_SINCE] = 1.0;
-    }
-    let pf = p + q_rot(q, vec3<f32>(0.0, 0.0, WITHERS_Z));
-    st[s + D_HY] = height(env, p.x, p.z) + HEAD[B_PELVIS].y;
-    st[s + D_FY] = height(env, pf.x, pf.z) + HEAD[B_SCAPL].y;
-    st[s + D_HY_O] = st[s + D_HY];
-    st[s + D_FY_O] = st[s + D_FY];
-    st[s + D_GAIT] = GAIT_HOP as f32;
-    st[s + S_PLACED] = 1.0;
-}
 
 @kernel @grid(1)
 fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state: rw_store<f32, 1>,
@@ -209,7 +107,7 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
     let s = c * STATE;
     let ii = c * INTENT;
     let init = state[s + S_PLACED] < 0.5;
-    if (init) { place(state, env, s); }
+    if (init) { place_bunny(state, env, s, HIND_WIDE, HOME_HOP_F); }
 
     // --- intent and actions -------------------------------------------------------
     var vdes = vec2<f32>(intent[ii + I_VEL_X], intent[ii + I_VEL_Z]);
@@ -224,13 +122,15 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
     if (act == ACT_STARTLE && (state[s + D_PREV_ACT] as i32) != ACT_STARTLE) { st_t = 0.0; }
     if (st_t >= 0.0) { st_t += dt; }
     if (st_t > 3.0) { st_t = -1.0; }
-    // Alert: at once on a startle, after its flinch; slowly let go.
-    let alert_want = select_f(act == ACT_ALERT || (act == ACT_STARTLE && (st_t < 0.0 || st_t > 0.35)), 1.0, 0.0);
-    var alert = state[s + D_ALERT];
-    if (alert_want > alert) { alert = approach(alert, 1.0, 6.0, dt); } else { alert = approach(alert, 0.0, 0.8, dt); }
+    // Alert: smoothly sprung on a startle after its flinch, and smoothly let go.
+    let alert_want = select_f(act == ACT_ALERT || (act == ACT_STARTLE && (st_t < 0.0 || st_t > 0.36)), 1.0, 0.0);
+    let w_alert = select_f(alert_want > state[s + D_ALERT], 8.5, 2.2);
+    let as_ = crit_step(vec2<f32>(state[s + D_ALERT], state[s + D_SEC + S_ALERT_V]), alert_want, w_alert, dt);
+    let alert = clamp(as_.x, 0.0, 1.0);
     state[s + D_LIE] = lie;
     state[s + D_GRAZE] = graze;
     state[s + D_ALERT] = alert;
+    state[s + D_SEC + S_ALERT_V] = as_.y;
     state[s + D_STARTLE_T] = st_t;
     state[s + D_PREV_ACT] = act as f32;
     if (lie > 0.001 || act == ACT_LIE) { vdes = vec2<f32>(0.0); }
@@ -244,7 +144,6 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
     let vary = VARY * smooth01(speed / 0.3) * smooth01(1.0 - abs(vd - speed) / 0.2);
     if (intent[ii + I_HEADING_MODE] > 0.5) { want = intent[ii + I_HEADING]; }
     else if (vd > 0.03) { want = atan2(vdes.x, vdes.y) + vary * 0.05 * noise1(clock / 1.3, seed, 2.0); }
-    // Sitting up it does not turn or go (it comes down first).
     var rear = state[s + D_REAR];
     let rear_s = smooth01(rear);
     let rate = mix(1.4, 3.2 / (1.0 + 0.3 * speed), smooth01(speed / 0.4)) * (1.0 - smooth01(rear * 3.0));
@@ -256,10 +155,8 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
     speed = approach(speed, vt, min(select_f(vt > speed, 1.2 + 0.8 * speed, 3.0), DV_MAX), dt);
     let fwd = vec3<f32>(sin(yaw), 0.0, cos(yaw));
     let left = vec3<f32>(cos(yaw), 0.0, -sin(yaw));
-    // The path: the stride's even pace (each girdle surges about it below).
     var pos = ld3(state, s + S_POS);
     pos += fwd * speed * dt;
-    // The body turns about its middle, not its hips.
     let tz = turn_z();
     let yaw0 = state[s + S_YAW];
     pos += (vec3<f32>(sin(yaw0), 0.0, cos(yaw0)) - fwd) * tz;
@@ -273,19 +170,9 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
     let hw = 1.0 - bw;
     let veff = max(speed, abs(omega) * 0.12);
     let freq = hw * (1.5 + 1.0 * veff) + bw * (2.5 + 0.25 * veff);
-    // Each pair's duty: a hop's stance holds over most of the stride, a
-    // bound's lasts as long as its foot's travel under the leg allows;
-    // slower than a hop the feet stay down longer still.
     let slow = 0.18 * (1.0 - smooth01(veff / 0.35));
     let duty_h = min(min(TRAVEL_H * freq / max(veff, 0.05), 0.47) + slow, 0.8);
     let duty_f = min(min(mix(TRAVEL_F_HOP, TRAVEL_F, bw) * freq / max(veff, 0.05), 0.5) + slow, 0.78);
-    // Moving a little it shuffles rather than hops: the fore paws step one
-    // after the other, the hind feet are brought up low and quick, and the
-    // rump does not vault (gone by SHUFFLE_TOP m/s).
-    // (Eased, so a change of pace does not move the feet's timing at once.)
-    // Turning on the spot it does not shuffle: its weight is over the hind
-    // feet and one cannot leave the ground alone, so it turns as it hops,
-    // the hind feet going round together in little hops of the rump.
     let shuf_t = (1.0 - smooth01((veff - SHUFFLE_FULL) / (SHUFFLE_TOP - SHUFFLE_FULL))) * (1.0 - smooth01((abs(omega) - 0.3) / 0.5));
     var shuf_s = state[s + D_SHUF];
     if (init) { shuf_s = shuf_t; }
@@ -304,29 +191,17 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
     var offs: array<f32, 4>;
     for (var l: i32 = 0; l < 4; l += 1) { offs[l] = off_mix(bw, shuf, l); }
     if (moving && !was_moving) {
-        // Start with the fore feet's step: the clock just past the left
-        // fore's lift (the hind pair still down).
         phase = floor(phase) + 1.0 + offs[1] + duty_f;
         for (var l: i32 = 0; l < 4; l += 1) { state[s + D_LEG + l * LEG_REC + L_ARMED] = 1.0; }
     }
+
     // --- a leap ---------------------------------------------------------------------------
-    // Bounding at a log, it throws one bound high: the hind feet's stance
-    // before it is held, the body sinking into the haunches and driven up
-    // and forward off them, nose up; it sails over stretched out, tips nose
-    // down, and comes down on its fore feet with the hind feet swinging
-    // through to land past them, the body giving into the landing. The
-    // clock (and every foot's swing with it) runs at the leap's pace: slow
-    // through the push and the flight, so the feet come down as the body
-    // does.
     var leap = state[s + D_LEAP];
     var leap_s = state[s + D_LEAP + 1];
     let leap_he = max(offs[0], offs[3]) + duty_h;
     var leap_v = state[s + D_LEAP + 2];
     let php = fract01(phase - offs[0]);
     if (leap < 0.5 && bw > 0.7 && moving && !init && php + freq * dt >= 1.0) {
-        // (As the hind feet come down: thrown as high as puts the log under
-        // the middle of the flight, from the lowest that clears it, and
-        // begun at the footfall that can.)
         let ob = obstacle_ahead(env, pos.x, pos.z, vec2<f32>(fwd.x, fwd.z));
         let v_lo = sqrt(2.0 * 9.81 * (ob.y + LEAP_OVER));
         let slack = 0.5 * max(speed / freq - speed * LEAP_SPARE / 9.81, 0.0);
@@ -337,15 +212,13 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
         }
     }
     state[s + D_LEAP + 2] = leap_v;
-    let leap_up = max(leap_v * 0.3 * LEAP_PUSH_T - LEAP_DIP, 0.0);     // the hips over the stride's own at the take-off
-    // (Its flight ends LEAP_CATCH over the stride's height: the fore legs
-    // meet the ground at their length and take the fall up from there.)
+    let leap_up = max(leap_v * 0.3 * LEAP_PUSH_T - LEAP_DIP, 0.0);
     let leap_T = (leap_v + sqrt(leap_v * leap_v + 2.0 * 9.81 * max(leap_up - LEAP_CATCH, -0.4 * leap_v * leap_v / 9.81))) / 9.81;
     var cfreq = freq;
-    var leap_y: f32 = 0.0;      // the body's height over the stride's own
-    var leap_nose: f32 = 0.0;   // the withers' over that
-    var leap_air: f32 = 0.0;    // 1 in its flight
-    var leap_clear: f32 = 0.0;  // and how far its feet are held clear of what passes under them
+    var leap_y: f32 = 0.0;
+    var leap_nose: f32 = 0.0;
+    var leap_air: f32 = 0.0;
+    var leap_clear: f32 = 0.0;
     if (leap > 0.5) {
         leap_s += dt;
         if (leap_s < 0.0) {
@@ -355,8 +228,6 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
             leap_y = -LEAP_DIP * smooth01(u / 0.4) + (LEAP_DIP + leap_up) * up * up;
             leap_nose = LEAP_PITCH * smooth01(up);
         } else if (leap_s < leap_T) {
-            // (The clock comes to the fore feet's landing as the flight ends,
-            // and waits there if it is early.)
             let rem = fract01(min(offs[1], offs[2]) - php);
             cfreq = select_f(rem > 0.6, 0.0, min(rem / max(leap_T - leap_s, 0.02), 2.0 * freq));
             leap_y = leap_up + leap_v * leap_s - 4.905 * leap_s * leap_s;
@@ -364,7 +235,6 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
             leap_air = 1.0;
             leap_clear = smooth01(leap_s / 0.1) * smooth01((leap_T - leap_s) / 0.12);
         } else {
-            // Down: it gives into the landing from the speed it fell with.
             let t = leap_s - leap_T;
             let y0 = leap_up + leap_v * leap_T - 4.905 * leap_T * leap_T;
             leap_y = (y0 + (leap_v - 9.81 * leap_T + LEAP_GIVE * y0) * t) * exp(-LEAP_GIVE * t);
@@ -385,11 +255,10 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
     let p = fract01(phase);
     let dh = girdle_surge(p, mh, sa, len, true);
     let df = girdle_surge(p, mh, sa, len, false);
-    let ho = pos + fwd * dh;      // the root as the hips' surge puts it
-    let fo = pos + fwd * df;      //   and as the withers' does
+    let ho = pos + fwd * dh;
+    let fo = pos + fwd * df;
 
     // --- sitting up -------------------------------------------------------------------
-    // Alert and still, it sits up on its haunches; going, or lying, it comes down.
     let rear_want = alert * (1.0 - smooth01(vd / 0.1)) * (1.0 - lie) * (1.0 - graze) * select_f(was_moving && speed > 0.05, 0.0, 1.0);
     let rs = crit_step(vec2<f32>(rear, state[s + D_REAR_V]), rear_want, 9.0, dt);
     rear = clamp(rs.x, 0.0, 1.0);
@@ -406,15 +275,12 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
         let k = s + D_LEG + l * LEG_REC;
         if (state[k + L_PLANT] < 0.5) { any_swing = true; }
         else {
-            let home = select_v3(LEG_HIND[l] == 1, ho, fo) + q_rot(qyaw, home_of(l, bw, mv));
+            let home = select_v3(LEG_HIND[l] == 1, ho, fo) + q_rot(qyaw, home_of(l, bw, mv, HIND_WIDE, HOME_HOP_F));
             let t = ld3(state, k + L_TOE);
             let e = length(vec2<f32>(t.x - home.x, t.z - home.z));
             if (e > worst_e) { worst_e = e; worst = l; }
         }
     }
-    // Its weight is over its hind feet, and one cannot leave the ground
-    // while the other holds it: when a hind foot has strayed they both
-    // step home together, in one small shift of the rump.
     var settle_hinds = false;
     if (worst >= 0) { settle_hinds = !any_swing && LEG_HIND[worst] == 1; }
     var feet: array<vec3<f32>, 4>;
@@ -428,7 +294,7 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
         let hind = LEG_HIND[l] == 1;
         let duty = select_f(hind, duty_h, duty_f);
         let og = select_v3(hind, ho, fo);
-        let home_off = home_of(l, bw, mv);
+        let home_off = home_of(l, bw, mv, HIND_WIDE, HOME_HOP_F);
         let home = og + q_rot(qyaw, home_off);
         let ph = fract01(phase - offs[l]);
         var planted = state[k + L_PLANT] > 0.5;
@@ -443,23 +309,13 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
             let top = leg_top(l, og, qyaw, state[s + D_HY_O], state[s + D_FY_O]);
             let over = length(toe - top) > reach_of(l);
             if (!hind && rear > 0.25) {
-                // Sitting up: the fore paws come up to the chest.
-                lift = true; kind = 2.0; lift_t = 0.22;
+                lift = true; kind = 2.0; lift_t = 0.26;
             } else if (moving && state[k + L_ARMED] > 0.5 && ph >= duty) {
-                // On the clock: the swing as long as the stride leaves it,
-                // begun as far in as the clock passed its lift within the
-                // step (so a stride whose lift falls between steps swings
-                // the same as one whose lift falls on one).
                 lift = true;
                 lift_t = clamp((1.0 - duty) / max(freq, 0.1), 0.07, 0.5);
-                // (No further in than a step is long: setting off, the clock
-                // stood well past three feet's lifts, and they began their
-                // swings half way through them, 15 mm off the ground in one
-                // step.)
                 u0 = clamp(((ph - duty) / max(freq, 0.1) - dt) / lift_t, 0.0, dt / lift_t);
                 kind = 0.0;
             } else if (moving && (stray > REACH_TRIG || over)) {
-                // Out of reach early: step now, landing on the clock's beat.
                 lift = true; kind = 0.0;
                 lift_t = clamp((1.0 - ph) / max(freq, 0.1), min(0.1, 0.5 * (1.0 - duty) / max(freq, 0.1)), 0.4);
             } else if (!moving && ((!any_swing && worst == l) || (settle_hinds && hind)) && rear < 0.05 && lie < 0.05) {
@@ -480,26 +336,21 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
         var u: f32 = 0.0;
         if (!planted) {
             u = state[k + L_U];
-            // A paw held up, sitting up; let down once it sits back down.
             if (state[k + L_KIND] > 1.5 && rear < 0.2) {
                 st3(state, k + L_FROM, toe);
-                state[k + L_KIND] = 1.0; state[k + L_T] = 0.2; u = 0.0;
+                state[k + L_KIND] = 1.0; state[k + L_T] = 0.24; u = 0.0;
             }
             let held = state[k + L_KIND] > 1.5;
             let tt = state[k + L_T];
             let top = leg_top(l, og, qyaw, state[s + D_HY_O], state[s + D_FY_O]);
             var target = home;
             if (held) {
-                // Against the chest, carried with the trunk as it pitches up.
                 let qt = q_mul(qyaw, q_x(-pitch_o));
                 let rp = TAIL[LEG_B0[l] + LEG_NB[l] - 1] - HEAD[B_PELVIS];
                 let tuck = vec3<f32>(rp.x * 0.85, rp.y + 0.062, rp.z - 0.046);
                 target = vec3<f32>(ho.x, state[s + D_HY_O], ho.z) + q_rot(qt, tuck);
             } else if (moving) {
-                // Where its girdle will be by mid-stance: the path's pace,
-                // and the girdle's surge then.
                 let stance_t = duty / max(freq, 0.1);
-                // (In a leap's flight: once it is down.)
                 var lead = (1.0 - u) * tt + 0.5 * stance_t;
                 if (leap_air > 0.5) { lead += max(leap_T - leap_s, 0.0); }
                 let yl = yaw + omega * lead;
@@ -510,18 +361,14 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
             if (!held) { target.y = height(env, target.x, target.z); }
             st3(state, k + L_TO, target);
             u = min(u + warp * dt / tt, 1.0);
-            // (No foot comes down before the leap does.)
             if (leap_air > 0.5) { u = min(u, 0.9); }
             let lifted = ld3(state, k + L_FROM);
             let e = smooth01(u);
             var hgt = select_f(hind, lift_h.x, lift_h.y) + LEAP_FOLD * leap_air;
             if (state[k + L_KIND] > 0.5) { hgt = 0.012; }
-            // On an arc about its girdle (as it stood last step), folded
-            // toward it as far as clears the ground by the swing's lift.
-            toe =mix(lifted, target, vec3<f32>(e));
+            toe = mix(lifted, target, vec3<f32>(e));
             if (!held) {
                 toe = swing_arc(top, qyaw, lifted, target, e);
-                // (Through a leap's flight all the way: what is under it is the log.)
                 let w = max(swing_bump(u), leap_clear);
                 let below = top.y - toe.y;
                 if (w > 0.0 && below > 1e-3) {
@@ -530,32 +377,19 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
                 }
             }
             // Carried within the leg's reach of its girdle, eased in so it
-            // has no corner.
+            // has no corner (FORE_CARRY keeps slow-hop fore touchdowns safely
+            // flexed below SOFT_REACH so the elbow never snaps off straight).
             let rmax = reach_of(l);
             let dy = top.y - toe.y;
-            // (A fore foot short of all of it: carried out to its leg's whole
-            // length it landed on a straight leg, and the elbow, which takes
-            // up the first of the body's travel over it, turned forty degrees
-            // in the two steps after.)
-            // (Up to an easy bound: flat out, the fore legs take the landing
-            // at their length.)
             let rcar = rmax * select_f(hind, 1.0, mix(FORE_CARRY, 1.0, smooth01((veff - 2.2) / 1.5)));
             let hmax = sqrt(max(rcar * rcar - dy * dy, 0.0));
             let hv2 = vec2<f32>(toe.x - top.x, toe.z - top.z);
             let hl = length(hv2);
             if (hl > 1e-4 && !held) {
-                // (A fore paw comes to its reach over FORE_BAND of it: reaching
-                // for a mark the body has yet to come up to, it ran out to
-                // the end of its leg at a centimetre a step and stopped
-                // there in two, the elbow thrown straight with it.)
                 let hn = soft_cap(hl, hmax, select_f(hind, CAP_BAND, FORE_BAND));
                 toe.x = top.x + hv2.x * (hn / hl);
                 toe.z = top.z + hv2.y * (hn / hl);
             }
-            // In a leap's flight the legs are the leap's: the fore paws drawn
-            // up under the chest and let down ahead for the landing, the
-            // hind feet left trailing off the push, gathered under the
-            // haunches over the log and brought through.
             if (leap_clear > 0.0 && !held) {
                 let ls = clamp(leap_s / max(leap_T, 0.1), 0.0, 1.0);
                 let lat = dot(toe - top, left);
@@ -568,10 +402,6 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
                 let tuck = top + left * lat + fwd * lz - vec3<f32>(0.0, ld, 0.0);
                 toe = mix(toe, tuck, vec3<f32>(leap_clear));
             }
-            // Nor nearer its girdle than the leg folds within its joints'
-            // ranges (passing under a girdle carried low, a foot drawn up to
-            // it would turn the leg from one end of its ranges to the other):
-            // held out along its line, eased in.
             let rv = toe - top;
             let rl = length(rv);
             let rmin = select_f(hind, SWING_FOLD_H, SWING_FOLD_F) * rmax;
@@ -590,7 +420,6 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
         if (planted) { state[k + L_SINCE] = state[k + L_SINCE] + dt; }
         state[k + L_PLANT] = select_f(planted, 1.0, 0.0);
         st3(state, k + L_TOE, toe);
-        // How long until this foot lifts.
         var lt: f32 = 1e3;
         if (planted && moving) {
             if (state[k + L_ARMED] > 0.5) { lt = max(duty - stance_phase(ph, duty), 0.0) / max(freq, 0.1); }
@@ -603,9 +432,6 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
         toes[l] = toe;
         feet[l] = toe;
         if (!planted) { feet[l] = select_v3(state[k + L_KIND] > 1.5, home, ld3(state, k + L_TO)); }
-        // The ground a girdle stands over: a planted foot's, a swinging one's
-        // under its home now (its landing mark, a hop ahead and on a slope
-        // well below, is where the girdle will be, not where it is).
         grounds[l] = select_f(planted, toe.y, height(env, home.x, home.z));
         if (hind) { hind_swing += 0.5 * sh; }
         sway -= LEG_SIDE[l] * sh;
@@ -619,14 +445,10 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
     let plane_c = fit_plane4(feet[0], feet[1], feet[2], feet[3], vec2<f32>(pos.x, pos.z));
     let hind_ground = 0.5 * (grounds[0] + grounds[3]);
     let fore_ground = 0.5 * (grounds[1] + grounds[2]);
-    // The hop vaults the hips over the fore legs as the hind pair swings.
     let bob_h = HOP_ARC * hind_swing * (hw - shuf) * select_f(moving, 1.0, 0.0);
-    // Startle: a flinch, flattened to the ground, then up.
-    var crouch: f32 = 0.0;
-    if (st_t >= 0.0) { crouch = -0.022 * sin(PI * clamp(st_t / 0.35, 0.0, 1.0)); }
+    let crouch = -0.022 * startle_flinch(st_t);
     let breath = 0.0012 * sin(TAU * 0.9 * clock + seed);
-    // Reach: neither girdle may stand higher than its planted (or landing)
-    // feet can hold it.
+
     var cap_h: f32 = 1e4;
     var cap_f: f32 = 1e4;
     for (var l: i32 = 0; l < 4; l += 1) {
@@ -653,9 +475,6 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
             cap_f = smin(cap_f, cf, CAP_SOFT);
         }
     }
-    // A hop is planned at what its feet can hold; the bound at a posture its
-    // stance holds throughout (each girdle where its leg still reaches the
-    // ends of a stance), higher than it sits, the caps then a ceiling.
     let half_h = 0.5 * speed * duty_h / max(freq, 0.1);
     let half_f = 0.5 * speed * duty_f / max(freq, 0.1);
     let run_h = min(HIP_RUN, sqrt(max(0.9 * REACH_HIND * REACH_HIND - half_h * half_h, 0.0)) + HEAD[B_PELVIS].y - leg_pivot(0).y);
@@ -668,18 +487,11 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
     let wh: f32 = 26.0;
     var hs = crit_step(vec2<f32>(state[s + D_HY], state[s + D_HV]), hy_t, wh, dt);
     var fs = crit_step(vec2<f32>(state[s + D_FY], state[s + D_FV]), fy_t, wh, dt);
-    // (In a leap's flight the plan stays where it took off from: the log
-    // passing under it is not ground it stands over.)
     if (leap_air > 0.5) { hs = vec2<f32>(state[s + D_HY], 0.0); fs = vec2<f32>(state[s + D_FY], 0.0); }
-    // The bound's flights: the body falls freely between the hind push and
-    // the fore feet's landing, and between their lift and the hind landing.
     let he = max(offs[0], offs[3]) + duty_h;
     let f_s = min(offs[1], offs[2]);
     let f_e = max(offs[1], offs[2]) + duty_f;
     let fl = FLIGHT * bw * mv * flight(fract01(phase - offs[0]), 1.0 / max(freq, 0.1), he, f_s, f_e);
-    // The hop's vault rides on top, as the bound's flights do: through the
-    // height's spring it would peak late, as the hind feet come down.
-    // (A leap's push, flight and landing are over all of it.)
     let hy = hs.x + fl + bob_h + leap_y;
     var fy = fs.x + fl + leap_y + leap_nose;
     let ch_t = min(cap_h, hind_ground + HEAD[B_PELVIS].y + CAP_FADE);
@@ -689,8 +501,7 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
     if (init) { chs = vec2<f32>(ch_t, 0.0); cfs = vec2<f32>(cf_t, 0.0); }
     state[s + D_CAP_H] = chs.x; state[s + D_CAP_HV] = chs.y;
     state[s + D_CAP_F] = cfs.x; state[s + D_CAP_FV] = cfs.y;
-    // Sitting up, the trunk pitches up about the hips and the withers go
-    // where it puts them.
+
     let pitch_g = atan2((fy - HEAD[B_SCAPL].y) - (hy - HEAD[B_PELVIS].y), WITHERS_Z + df - dh);
     let pitch = mix(pitch_g, REAR_PITCH, rear_s);
     fy = mix(fy, hy - HEAD[B_PELVIS].y + HEAD[B_SCAPL].y + WITHERS_Z * tan(pitch), rear_s);
@@ -701,16 +512,11 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
     let root = vec3<f32>(ho.x, hy, ho.z) + sway_v;
 
     // --- the trunk: the back as long as the girdles are apart (bunny::stride) -------------
-    // Running the back is carried long, flexing about that with the
-    // girdles' spacing; sitting up the arch lets out. Its line from the
-    // hips to the withers.
     let run = bw * mv;
     let flex = flex_of((df - dh) + REAR_STRETCH * rear_s, mix(FLEX_SIT * (1.0 - lie) * (1.0 - rear_s), FLEX_RUN, run), TRUNK_SWING, mix(FLEX_SWING_HOP, FLEX_SWING, bw));
-    // (`pitch` is from the rest posture; the chord's own line at rest rises.)
     let c0 = chord(0.0);
     let dl = vec2<f32>(cos(pitch + atan2(c0.y, c0.x)), sin(pitch + atan2(c0.y, c0.x)));
     let tr = trunk(flex, dl);
-    // Bent a little into a turn.
     let bend_y = clamp(0.12 * omega, -0.15, 0.15) * mv;
     var T: Pose;
     T.q[B_PELVIS] = q_mul(q_mul(qyaw, q_x(tr.z)), q_z(roll));
@@ -721,348 +527,98 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
     T.p[B_LUMBAR] = head_of(T, B_LUMBAR);
     T.p[B_THORAX] = head_of(T, B_THORAX);
 
-    // Gaze: where the head would turn, smoothed; with none, a look about now and then.
-    var gyaw = 0.5 * noise1(clock / 3.1, seed, 5.0) * (1.0 - mv) * (1.0 - graze);
-    var gpitch: f32 = 0.0;
-    let gwt = intent[ii + I_GAZE_W];
-    if (gwt > 0.0) {
-        let hpos = T.p[B_THORAX] + q_rot(T.q[B_THORAX], HEAD[B_HEAD] - HEAD[B_THORAX]);
-        let d = vec3<f32>(intent[ii + I_GAZE_X], intent[ii + I_GAZE_Y], intent[ii + I_GAZE_Z]) - hpos;
-        gyaw = mix(gyaw, clamp(wrap_pi(atan2(d.x, d.z) - yaw), -1.4, 1.4), gwt);
-        gpitch = clamp(atan2(-d.y, length(vec2<f32>(d.x, d.z))), -0.7, 0.8) * gwt;
-    }
-    let gyaw_s = damp(state[s + D_GAZE_YAW], gyaw, 6.0, dt);
-    let gpitch_s = damp(state[s + D_GAZE_PITCH], gpitch, 6.0, dt);
-    state[s + D_GAZE_YAW] = gyaw_s;
-    state[s + D_GAZE_PITCH] = gpitch_s;
+    // --- head, gaze, nose, ears & scut (bunny::act) ---------------------------------------
+    let hk = HeadKnobs(
+        HEAD_HOLD, HEAD_RIDE, NECK_HOP, NECK_RUN,
+        EAR_RUN, EAR_SNAP, EAR_FLICK_T, EAR_FLICKS, EAR_GRAZE_UP, EAR_BACK,
+        EAR_W1, EAR_W2, EAR_ZETA, EAR_SAG
+    );
+    T = pose_head_ears(
+        T, intent, ii, env, state, s, init, dt,
+        clock, seed, yaw, speed, phase,
+        bw, hw, mv, lie, lie_f, graze, alert, rear_s, st_t, hk
+    );
+    T = pose_scut(T, state, s, init, dt, clock, seed, speed, phase, bw, mv, lie, alert, st_t);
 
-    // Head carriage: the head held up on the neck as it goes (higher
-    // bounding), its turn in the world set below; sitting up it reaches
-    // forward over the upright trunk. Its height is held steady in space: the
-    // neck finds the flex that puts the head where its posture's height,
-    // smoothed, has it (HEAD_HOLD of the way), so the chest's bob and pitch
-    // pass under it.
-    let n_up = alert * (1.0 - graze);
-    let n_pose = (NECK_RUN * bw + NECK_HOP * hw) * mv - 0.25 * n_up - 0.1 * lie + 0.75 * rear_s;
-    let hy_pose = head_y(T.q[B_THORAX], T.p[B_THORAX], n_pose);
-    var hy_s = state[s + D_HEAD_S];
-    if (init) { hy_s = hy_pose; }
-    hy_s = damp(hy_s, hy_pose, 1.4, dt);
-    state[s + D_HEAD_S] = hy_s;
-    let carry_n = (1.0 - graze) * (1.0 - lie) * (1.0 - rear_s) * HEAD_HOLD;
-    // Held no further than the neck reaches, eased in: past it the head
-    // goes with the body rather than the neck stopping dead at its range.
-    let hy_top = head_y(T.q[B_THORAX], T.p[B_THORAX], LIM_LO[B_NECK].x);
-    let hy_bot = head_y(T.q[B_THORAX], T.p[B_THORAX], LIM_HI[B_NECK].x);
-    let hy_want = soft_range(mix(hy_pose, hy_s, carry_n), hy_bot, hy_top, 0.02);
-    var n_lo = n_pose - 0.8;
-    var n_hi = n_pose + 0.8;
-    for (var it: i32 = 0; it < 10; it += 1) {
-        let m = 0.5 * (n_lo + n_hi);
-        if (head_y(T.q[B_THORAX], T.p[B_THORAX], m) > hy_want) { n_lo = m; } else { n_hi = m; }
-    }
-    let n_base = 0.5 * (n_lo + n_hi);
-    // Its turn in the world: level, but riding a share of the chest's
-    // pitch about its mean (carried on the neck, not pinned in space).
-    let chest = q_rot(T.q[B_THORAX], vec3<f32>(0.0, 0.0, 1.0));
-    let pitch_c = atan2(chest.y, length(vec2<f32>(chest.x, chest.z)));
-    var chest_s = state[s + D_CHEST_S];
-    if (init) { chest_s = pitch_c; }
-    chest_s = damp(chest_s, pitch_c, 2.0, dt);
-    state[s + D_CHEST_S] = chest_s;
-    let ride = -HEAD_RIDE * (pitch_c - chest_s) * (1.0 - graze);
-    let hp_world = mix(-0.05 * bw * mv - 0.1 * n_up + gpitch_s, 0.9, graze) - 0.12 * rear_s + 0.1 * lie + ride;
-    let qh = q_mul(q_y(yaw + gyaw_s), q_x(hp_world));
-    // Grazing: how far down the neck must go for the nose to reach the grass.
-    var gt: f32 = 0.0;
-    if (graze > 0.0) {
-        let mz = T.p[B_THORAX] + q_rot(T.q[B_THORAX], TAIL[B_NOSE] - HEAD[B_THORAX]);
-        let gy0 = height(env, mz.x, mz.z) + 0.008;
-        var lo: f32 = 0.0;
-        var hi: f32 = 1.0;
-        for (var it: i32 = 0; it < 7; it += 1) {
-            let m = 0.5 * (lo + hi);
-            if (nose_y(T.q[B_THORAX], T.p[B_THORAX], vec3<f32>(n_base + 1.1 * m, 0.4 * gyaw_s, 0.0), qh) > gy0) { lo = m; } else { hi = m; }
-        }
-        gt = 0.5 * (lo + hi) * graze;
-    }
-    // The jaw working as it eats: a nibble of the head.
-    let chew = graze * 0.05 * sin(TAU * 4.5 * clock) * smooth01(sin(TAU * 0.4 * clock + seed) + 0.3);
-    T.q[B_NECK] = q_mul(T.q[B_THORAX], q_xyz(soft_xyz(vec3<f32>(n_base + 1.1 * gt, 0.4 * gyaw_s, 0.0), B_NECK, 0.3)));
-    T.p[B_NECK] = head_of(T, B_NECK);
-    let hl = q_to_xyz(q_mul(q_conj(T.q[B_NECK]), qh)) + vec3<f32>(chew, 0.0, 0.0);
-    T.q[B_HEAD] = q_mul(T.q[B_NECK], q_xyz(soft_xyz(hl, B_HEAD, 0.3)));
-    T.p[B_HEAD] = head_of(T, B_HEAD);
-    // The eyes: a rabbit sees nearly all round without moving them and
-    // hardly blinks (once in ten seconds or so, quickly). It squints when it
-    // is at ease, eating or lying; startled the eye bulges and rolls back
-    // toward what it fears, and its white shows.
-    {
-        let fear = select_f(st_t >= 0.0, 1.0 - smooth01((st_t - 1.0) / 1.5), 0.0);
-        let roll = clamp(0.6 * (gyaw - gyaw_s), -0.25, 0.25) + 0.05 * noise1(clock * 0.23, seed, 41.0);
-        T.q[B_GAZE] = q_mul(T.q[B_HEAD], q_xyz(clamp_xyz(vec3<f32>(0.03 * noise1(clock * 0.17, seed, 42.0), roll - 0.22 * fear, 0.0), B_GAZE)));
-        T.p[B_GAZE] = head_of(T, B_GAZE);
-        let bt = clock / 10.5 + seed * 2.3;
-        let bk = floor(bt);
-        let bu = ((bt - bk) - 0.1 - 0.7 * hash01(bk * 3.1 + seed)) * 10.5;
-        var blink: f32 = 0.0;
-        if (bu > 0.0 && bu < 0.16) { blink = smooth01(bu / 0.05) * (1.0 - smooth01((bu - 0.06) / 0.1)); }
-        let ease = max(0.45 * graze, 0.7 * lie) * (1.0 - alert);
-        let shut = clamp(mix(0.04 + ease - 0.8 * max(alert, fear), 1.0, blink), -0.8, 1.0);
-        T.q[B_LID] = q_mul(T.q[B_HEAD], q_xyz(vec3<f32>(asin(shut), 0.0, 0.0)));
-        T.p[B_LID] = head_of(T, B_LID);
-    }
-    // The nose twitches in bursts (faster while it eats or is alert).
-    let burst = smooth01(2.0 * noise1(clock / 1.7, seed, 7.0) + 0.4 + 0.6 * graze + 0.5 * alert);
-    let tw = sin(TAU * mix(5.0, 7.0, alert) * clock);
-    T.q[B_NOSE] = q_mul(T.q[B_HEAD], q_xyz(clamp_xyz(vec3<f32>(-0.09 * burst * tw * tw, 0.0, 0.0), B_NOSE)));
-    T.p[B_NOSE] = head_of(T, B_NOSE);
-
-    // Ears: each listens on its own. An ear holds where it has turned for a
-    // while (0.35 to 3 s, shorter grazing), then turns quickly to the next:
-    // half the time toward the sound the pair attends (one direction about
-    // the field, wandering on its own beat), else on its own scan; now and
-    // then it flicks instead, a quick shake where it is. An ear turns its
-    // opening about its own length (the swivel, positive back on its own
-    // side), leaning back as it turns back, and stands splayed out relaxed.
-    // Alert both stand up close, their openings forward toward the gaze;
-    // hopping they listen mostly ahead; running they sweep back as it goes
-    // faster; laid back along the neck loafing; flattened in the flinch.
-    // Each ear's two bones then follow their tips, sprung (creature::dangle):
-    // the base stiff, the tip softer and later, so each landing, each turn
-    // of the head and each snap of its swivel runs up the ear.
-    let run_back = smooth01((speed - 0.8) / 3.0) * mv;
-    let snd_n = floor(clock * 0.23 + seed * 0.71);
-    let snd_az = PI * (2.0 * hash01(seed * 1.3 + snd_n * 4.17) - 1.0);
-    for (var e: i32 = 0; e < 2; e += 1) {
-        let side = 1.0 - 2.0 * (e as f32);
-        let fe = e as f32;
-        var nxt = state[s + D_EAR_NEXT + e];
-        var n = state[s + D_EAR_N + e];
-        if (init) { nxt = clock + 0.4 + 1.6 * hash01(seed * 2.1 + 3.0 * fe); n = 0.0; }
-        if (clock >= nxt) {
-            n += 1.0;
-            let hd = hash01(seed * 6.1 + n * 1.37 + 17.0 * fe);
-            var dur = mix(mix(0.35, 3.0, hd * hd), mix(0.25, 1.2, hd), graze);
-            if (hash01(seed * 7.7 + n * 2.53 + 5.0 * fe) > 1.0 - EAR_FLICKS) { dur = EAR_FLICK_T; }
-            nxt = clock + dur;
-        }
-        state[s + D_EAR_NEXT + e] = nxt;
-        state[s + D_EAR_N + e] = n;
-        let flicking = hash01(seed * 7.7 + n * 2.53 + 5.0 * fe) > 1.0 - EAR_FLICKS && n > 0.5;
-        // A flick keeps the whims of the turn before it.
-        let na = select_f(flicking, n - 1.0, n);
-        let h_mode = hash01(seed * 9.1 + na * 1.93 + 13.0 * fe);
-        let h_aim = hash01(seed * 8.9 + na * 3.11 + 9.0 * fe);
-        let h_lean = hash01(seed * 5.3 + na * 2.73 + 7.0 * fe);
-        // Toward the sound: on its own side the opening turns to face it;
-        // across, forward for a sound ahead and back for one behind.
-        let a_e = snd_az * side;
-        // (At most EAR_BACK back: past it the swivel nears a quarter turn,
-        // where its angles read as x, y, z turn over.)
-        let to_snd = select_f(a_e > 0.0, clamp(a_e - 0.5, -0.6, EAR_BACK), select_f(a_e < -0.5 * PI, EAR_BACK, -0.4));
-        let sw_idle = select_f(h_mode < 0.5, to_snd, mix(-0.5, EAR_BACK, h_aim));
-        let sw_alert = clamp(-0.4 + 0.5 * side * gyaw_s, -0.8, 0.8);
-        var sw_t = mix(sw_idle, sw_alert, alert);
-        sw_t = mix(sw_t, 0.35 * sw_t - 0.1, mv * (1.0 - run_back));
-        sw_t = mix(sw_t, 0.4, run_back);
-        // Grazing, the ears stay up as the head goes down: leaned back by
-        // a share of its pitch.
-        let back_t = mix(mix(0.2 * h_lean + 0.2 * max(sw_t, 0.0), -0.15, alert), EAR_RUN, run_back) + EAR_GRAZE_UP * graze;
-        let spl_t = mix(mix(0.04 + 0.16 * hash01(seed * 4.4 + na * 2.21 + 3.0 * fe), -0.08, alert), 0.02, mv);
-        // Sprung, critically: each turn starts from rest and settles without
-        // overshoot (the dangle's springs give the ear its follow-through).
-        var swv = vec2<f32>(state[s + D_EAR + e], state[s + D_EAR_V + e]);
-        var txv = vec2<f32>(state[s + D_EAR + 2 + e], state[s + D_EAR_V + 2 + e]);
-        if (init) { swv = vec2<f32>(sw_t, 0.0); txv = vec2<f32>(back_t, 0.0); }
-        swv = crit_step(swv, sw_t, EAR_SNAP, dt);
-        txv = crit_step(txv, back_t, 0.6 * EAR_SNAP, dt);
-        let sw = swv.x;
-        let tx = txv.x;
-        let spl = damp(state[s + D_EAR_SPL + e], spl_t, 5.0, dt);
-        state[s + D_EAR + e] = sw;
-        state[s + D_EAR_V + e] = swv.y;
-        state[s + D_EAR + 2 + e] = tx;
-        state[s + D_EAR_V + 2 + e] = txv.y;
-        state[s + D_EAR_SPL + e] = spl;
-        // The flick: a few fast shakes, in and out over EAR_FLICK_T.
-        var shake: f32 = 0.0;
-        if (flicking) {
-            let ft = clamp(1.0 - (nxt - clock) / EAR_FLICK_T, 0.0, 1.0);
-            shake = sin(PI * ft) * sin(TAU * 3.0 * ft);
-        }
-        var flinch: f32 = 0.0;
-        if (st_t >= 0.0) { flinch = sin(PI * clamp(st_t / 0.35, 0.0, 1.0)); }
-        let laid = max(0.9 * lie_f, 0.8 * flinch);
-        let b1 = select_i(e == 0, B_EARL1, B_EARR1);
-        // (An ear stands up: its flexion forward, so its lean back negative.)
-        let a = vec3<f32>(-mix(tx + 0.12 * shake - 0.1 * rear_s, 1.55, laid), 0.0, side * mix(spl, -0.12, laid));
-        let ax = normalize(TAIL[b1 + 1] - HEAD[b1]);
-        let swivel = side * (sw + 0.35 * shake) * (1.0 - laid);        let kd = s + D_DANGLE + 2 * e * DANGLE_REC;
-        T.q[b1] = q_mul(T.q[B_HEAD], q_mul(q_xyz(clamp_xyz(a, b1)), q_axis(ax, swivel)));
-        T.p[b1] = head_of(T, b1);
-        let along1 = TAIL[b1] - HEAD[b1];
-        let m = dangle_step(state, kd, T.p[b1] + q_rot(T.q[b1], along1), EAR_W1, EAR_ZETA, EAR_SAG, dt, init);
-        T.q[b1] = within_range(T.q[B_HEAD], aim_at(T.q[b1], T.p[b1], along1, m, 0.5), b1, 0.15);
-        let qrest2 = q_mul(T.q[b1], q_xyz(clamp_xyz(vec3<f32>(-0.25 * laid, 0.0, 0.0), b1 + 1)));
-        T.p[b1 + 1] = head_of(T, b1 + 1);
-        let along2 = TAIL[b1 + 1] - HEAD[b1 + 1];
-        let tip = dangle_step(state, kd + DANGLE_REC,T.p[b1 + 1] + q_rot(qrest2, along2), EAR_W2, EAR_ZETA, EAR_SAG, dt, init);
-        T.q[b1 + 1] = within_range(T.q[b1], aim_at(qrest2, T.p[b1 + 1], along2, tip, 0.6), b1 + 1, 0.15);
-    }
-    // The scut: carried against the rump, flicked up as it runs and in
-    // alarm, bobbing on its spring with the rump.
-    let flick = smooth01(speed / 1.5) * mv * 0.55 + 0.5 * alert;
-    T.q[B_TAIL] = q_mul(T.q[B_PELVIS], q_xyz(soft_xyz(vec3<f32>(flick - 0.1 * lie, 0.0, 0.0), B_TAIL, 0.3)));
-    T.p[B_TAIL] = head_of(T, B_TAIL);
-    let along_t = TAIL[B_TAIL] - HEAD[B_TAIL];
-    let st_tip = dangle_step(state, s + D_DANGLE + 4 * DANGLE_REC,T.p[B_TAIL] + q_rot(T.q[B_TAIL], along_t), SCUT_W, SCUT_ZETA, 0.3, dt, init);
-    T.q[B_TAIL] = within_range(T.q[B_PELVIS], aim_at(T.q[B_TAIL], T.p[B_TAIL], along_t, st_tip, 0.4), B_TAIL, 0.2);
-    T.p[B_TAIL] = head_of(T, B_TAIL);
-
-    // --- legs, to the feet from where the body is ---------------------------------------------
-    // Solved twice. A rabbit's hind legs are a large share of it: thrown
-    // forward through a flight and down to land they must send the trunk
-    // back and up, since nothing else can push it then (and on the ground
-    // the feet only push up). So once the legs are solved, the body is
-    // moved by what its mass stands off its usual place over the path's
-    // point and the hips' planned height (a slow mean of it: the mass then
-    // keeps the stride's even pace and the plan's rise and fall), and the
-    // legs are solved again to the same feet.
+    // --- legs, solved twice for hind-limb inertial trunk recoil --------------------------
     var carried = vec3<f32>(0.0);
     for (var pass: i32 = 0; pass < 2; pass += 1) {
-    for (var l: i32 = 0; l < 4; l += 1) {
-        let k = s + D_LEG + l * LEG_REC;
-        let hind = LEG_HIND[l] == 1;
-        let duty = select_f(hind, duty_h, duty_f);
-        let b0 = LEG_B0[l];
-        let nb = LEG_NB[l];
-        var par = B_THORAX; if (hind) { par = B_PELVIS; }
-        let qp = T.q[par];
-        let j = T.p[par] + q_rot(qp, HEAD[b0] - HEAD[par]);
-        let planted = state[k + L_PLANT] > 0.5;
-        // (A foot in the air is the body's to carry: it goes with the recoil,
-        // most in the middle of its swing and not at all where it leaves
-        // and meets the ground, and no lower than the ground.)
-        var toe = toes[l];
-        if (!planted) {
-            let cu = 4.0 * state[k + L_U] * (1.0 - state[k + L_U]);
-            toe += carried * (cu * cu);
-            toe.y = max(toe.y, height(env, toe.x, toe.z));
-        }
-        let d = q_rot(q_conj(qp), toe - j);
-        let held = !planted && state[k + L_KIND] > 1.5;
-        let u = state[k + L_U];
-        let ph = fract01(phase - offs[l]);
-        // The toe flat on the ground in stance (rolling onto it before
-        // lift), curled in swing; held up, the paw hangs.
-        let n = normal(env, toe.x, toe.z);
-        let fw = q_rot(qp, vec3<f32>(0.0, 0.0, 1.0));
-        let slope = atan2(-dot(n, vec3<f32>(fw.x, 0.0, fw.z)), n.y);
-        let par_pitch = atan2(fw.y, length(vec2<f32>(fw.x, fw.z)));
-        var ah = rest_angle(b0 + nb - 1) + slope - par_pitch;
-        let roll_k = select_f(hind, 0.35, 0.5);
-        // (Over a tenth of a second at least: a hop's stance is short, and
-        // in an eighth of its cycle the paw turned twenty degrees in three
-        // steps, against the way the leg was carrying it.)
-        // (Hopping: a bound's stance is four steps long and has no room for it.)
-        let roll_w = mix(0.12, min(max(0.12, 0.1 * freq), 0.6 * duty), hw);
-        if (planted && moving) { ah -= roll_k * smooth01((stance_phase(ph, duty) - (duty - roll_w)) / roll_w); }
-        var fold: f32 = 0.0;
-        if (!planted) {
-            if (state[k + L_KIND] < 0.5) { ah -= roll_k * state[k + L_SINCE] * (1.0 - smooth01(u / 0.3)); }
-            fold = select_f(held, smooth01(u), fold_bump(u));
-            ah -= select_f(held, 1.2, curl) * fold;
-        }
-        var o: Leg;
-        if (hind) { o = solve_hind_flat(b0, d, ah, SOFT_REACH, FOOT_FLAT + slope - par_pitch, 0.12); }
-        else { o = solve_front(b0, d, ah, select_f(held, 1.6, wrist) * fold, SCAP_FOLLOW, SOFT_REACH); }
-        let rho = clamp(o.rho, LIM_LO[b0].z, LIM_HI[b0].z);
-        let qr = q_mul(qp, q_z(rho));
-        var prev: f32 = 0.0;
-        for (var i: i32 = 0; i < nb; i += 1) {
-            let b = b0 + i;
-            // Eased into its range, not stopped at it (a paw curled to its
-            // limit at lift-off would turn a corner there).
-            let loc = soft_range(-(leg_angle(o, i) - rest_angle(b)) - prev, LIM_LO[b].x, LIM_HI[b].x, LEG_BAND);
-            prev = prev + loc;
-            T.q[b] = q_mul(qr, q_x(prev));
-            if (i == 0) { T.p[b] = j; }
-            else { T.p[b] = T.p[b - 1] + q_rot(T.q[b - 1], HEAD[b] - HEAD[b - 1]); }
-        }
-    }
-    if (pass == 0) {
-        let cm = com_of(T);
-        let ahead = dot(cm - pos, fwd);
-        let over = cm.y - hy;
-        let ahead_m = select_f(init, ahead, mix(state[s + D_AHEAD], ahead, 1.0 - exp(-dt / RECOIL_T)));
-        let over_m = select_f(init, over, mix(state[s + D_OVER], over, 1.0 - exp(-dt / RECOIL_T)));
-        state[s + D_AHEAD] = ahead_m;
-        state[s + D_OVER] = over_m;
-        // (The legs, solved again to feet that stay, take back a share of
-        // the move: the trunk goes that much further.)
-        // The head stays where it is held in space (with its ears and nose),
-        // the neck giving half-way between it and the trunk.
-        // (Not shuffling: there every move is slow and a foot is always down.)
-        let go_by = (fwd * (ahead_m - ahead) + vec3<f32>(0.0, over_m - over, 0.0)) * (mv * (1.0 - shuf) / RECOIL_TRUNK);
-        for (var b: i32 = 0; b < NB; b += 1) {
-            var w: f32 = 1.0;
-            if (b == B_NECK) { w = 0.5; }
-            var a = b;
-            for (var up: i32 = 0; up < 3; up += 1) {
-                if (a == B_HEAD) { w = 0.0; }
-                if (a >= 0) { a = PARENT[a]; }
+        for (var l: i32 = 0; l < 4; l += 1) {
+            let k = s + D_LEG + l * LEG_REC;
+            let hind = LEG_HIND[l] == 1;
+            let duty = select_f(hind, duty_h, duty_f);
+            let b0 = LEG_B0[l];
+            let nb = LEG_NB[l];
+            var par = B_THORAX; if (hind) { par = B_PELVIS; }
+            let qp = T.q[par];
+            let j = T.p[par] + q_rot(qp, HEAD[b0] - HEAD[par]);
+            let planted = state[k + L_PLANT] > 0.5;
+            var toe = toes[l];
+            if (!planted) {
+                let cu = 4.0 * state[k + L_U] * (1.0 - state[k + L_U]);
+                toe += carried * (cu * cu);
+                toe.y = max(toe.y, height(env, toe.x, toe.z));
             }
-            T.p[b] = T.p[b] + go_by * w;
+            let d = q_rot(q_conj(qp), toe - j);
+            let held = !planted && state[k + L_KIND] > 1.5;
+            let u = state[k + L_U];
+            let ph = fract01(phase - offs[l]);
+            let n = normal(env, toe.x, toe.z);
+            let fw = q_rot(qp, vec3<f32>(0.0, 0.0, 1.0));
+            let slope = atan2(-dot(n, vec3<f32>(fw.x, 0.0, fw.z)), n.y);
+            let par_pitch = atan2(fw.y, length(vec2<f32>(fw.x, fw.z)));
+            var ah = rest_angle(b0 + nb - 1) + slope - par_pitch;
+            let roll_k = select_f(hind, 0.35, 0.5);
+            let roll_w = mix(0.12, min(max(0.12, 0.1 * freq), 0.6 * duty), hw);
+            if (planted && moving) { ah -= roll_k * smooth01((stance_phase(ph, duty) - (duty - roll_w)) / roll_w); }
+            var fold: f32 = 0.0;
+            if (!planted) {
+                if (state[k + L_KIND] < 0.5) { ah -= roll_k * state[k + L_SINCE] * (1.0 - smooth01(u / 0.3)); }
+                fold = select_f(held, smooth01(u), fold_bump(u));
+                ah -= select_f(held, 1.2, curl) * fold;
+            }
+            var o: Leg;
+            if (hind) { o = solve_hind_flat(b0, d, ah, SOFT_REACH, FOOT_FLAT + slope - par_pitch, 0.12); }
+            else { o = solve_front(b0, d, ah, select_f(held, 1.6, wrist) * fold, SCAP_FOLLOW, SOFT_REACH); }
+            let rho = clamp(o.rho, LIM_LO[b0].z, LIM_HI[b0].z);
+            let qr = q_mul(qp, q_z(rho));
+            var prev: f32 = 0.0;
+            for (var i: i32 = 0; i < nb; i += 1) {
+                let b = b0 + i;
+                let loc = soft_range(-(leg_angle(o, i) - rest_angle(b)) - prev, LIM_LO[b].x, LIM_HI[b].x, LEG_BAND);
+                prev = prev + loc;
+                T.q[b] = q_mul(qr, q_x(prev));
+                if (i == 0) { T.p[b] = j; }
+                else { T.p[b] = T.p[b - 1] + q_rot(T.q[b - 1], HEAD[b] - HEAD[b - 1]); }
+            }
         }
-        carried = go_by;
-    }
+        if (pass == 0) {
+            let cm = com_of(T);
+            let ahead = dot(cm - pos, fwd);
+            let over = cm.y - hy;
+            let ahead_m = select_f(init, ahead, mix(state[s + D_AHEAD], ahead, 1.0 - exp(-dt / RECOIL_T)));
+            let over_m = select_f(init, over, mix(state[s + D_OVER], over, 1.0 - exp(-dt / RECOIL_T)));
+            state[s + D_AHEAD] = ahead_m;
+            state[s + D_OVER] = over_m;
+            let go_by = (fwd * (ahead_m - ahead) + vec3<f32>(0.0, over_m - over, 0.0)) * (mv * (1.0 - shuf) / RECOIL_TRUNK);
+            for (var b: i32 = 0; b < NB; b += 1) {
+                var w: f32 = 1.0;
+                if (b == B_NECK) { w = 0.5; }
+                var a = b;
+                for (var up: i32 = 0; up < 3; up += 1) {
+                    if (a == B_HEAD) { w = 0.0; }
+                    if (a >= 0) { a = PARENT[a]; }
+                }
+                T.p[b] = T.p[b] + go_by * w;
+            }
+            carried = go_by;
+        }
     }
 
-    // --- out --------------------------------------------------------------------------
-    put(pose, c, T);
-    st3(state, s + S_POS, vec3<f32>(pos.x, hy, pos.z));
-    state[s + S_YAW] = yaw;
-    state[s + D_SPEED] = speed;
-    state[s + D_OMEGA] = omega;
-    state[s + D_PHASE] = phase;
-    state[s + D_BW] = bw;
-    state[s + D_GAIT] = gait as f32;
-    state[s + D_MOVING] = select_f(moving, 1.0, 0.0);
-    state[s + D_HY_O] = hy;
-    state[s + D_FY_O] = fy;
-    state[s + D_HY] = hs.x;
-    state[s + D_HV] = hs.y;
-    state[s + D_FY] = fs.x;
-    state[s + D_FV] = fs.y;
-    state[s + D_PITCH_O] = pitch;
-
-    let t0 = c * TELE;
-    tele[t0 + T_POS] = pos.x;
-    tele[t0 + T_POS + 1] = hy;
-    tele[t0 + T_POS + 2] = pos.z;
-    tele[t0 + T_YAW] = yaw;
-    tele[t0 + T_SPEED] = speed;
-    var gshow = gait;
-    if (!moving) { gshow = GAIT_STAND; }
-    tele[t0 + T_GAIT] = gshow as f32;
-    tele[t0 + T_PHASE] = fract01(phase);
-    tele[t0 + T_ACTION] = act as f32;
-    tele[t0 + T_HEIGHT] = hy - hip_g;
-    tele[t0 + T_PITCH] = pitch;
-    tele[t0 + T_ROLL] = roll;
-    tele[t0 + T_FREQ] = freq * select_f(moving, 1.0, 0.0);
-    tele[t0 + T_LEAP] = 0.0;
-    for (var l: i32 = 0; l < 4; l += 1) {
-        let k = s + D_LEG + l * LEG_REC;
-        let f0 = t0 + T_FOOT + 4 * l;
-        var pl = state[k + L_PLANT];
-        if (select_f(LEG_HIND[l] == 1, lie_h, lie_f) > 0.05) { pl = 0.0; }
-        tele[f0] = pl;
-        var at = toes[l];
-        if (state[k + L_PLANT] < 0.5) { at = ld3(state, k + L_TO); }
-        tele[f0 + 1] = at.x; tele[f0 + 2] = at.y; tele[f0 + 3] = at.z;
-    }
+    // --- out ------------------------------------------------------------------------------
+    write_bunny_out(
+        T, pose, tele, state, c, s, pos, hy, fy, hip_g, hs, fs,
+        yaw, speed, omega, phase, bw, gait, moving, pitch, roll, freq, act,
+        lie_h, lie_f, toes
+    );
 }
-
-fn select_i(c: bool, a: i32, b: i32) -> i32 { if (c) { return a; } return b; }

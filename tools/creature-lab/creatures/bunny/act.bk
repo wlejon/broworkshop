@@ -1,0 +1,386 @@
+// bunny::act — state layout, placement, steady head carriage, gaze & blink,
+// continuous respiratory/stride nose twitch, pre-smoothed non-ringing ear
+// swivels & tips, post-recoil cotton-tail scut follow-through, and telemetry.
+module bunny::act;
+import creature::common::*;
+import creature::contract::*;
+import creature::skeleton::*;
+import creature::pose::*;
+import creature::limbs::*;
+import bunny::legs::*;
+import creature::dangle::*;
+from creature::ground import height;
+
+// --- state layout (after the contract's header) ------------------------------
+pub const D_SPEED: i32 = 5;
+pub const D_OMEGA: i32 = 6;
+pub const D_CLOCK: i32 = 7;
+pub const D_PHASE: i32 = 8;
+pub const D_BW: i32 = 9;          // the bound's weight against the hop (0..1)
+pub const D_GAIT: i32 = 10;       // the gait chosen (contract GAIT_*)
+pub const D_MOVING: i32 = 11;
+pub const D_HY: i32 = 12;         // hip height and its speed (the plan)
+pub const D_HV: i32 = 13;
+pub const D_FY: i32 = 14;         // withers height and its speed (the plan)
+pub const D_FV: i32 = 15;
+pub const D_ROLL: i32 = 16;
+pub const D_LIE: i32 = 17;
+pub const D_GRAZE: i32 = 18;
+pub const D_ALERT: i32 = 19;
+pub const D_STARTLE_T: i32 = 20;
+pub const D_PREV_ACT: i32 = 21;
+pub const D_GAZE_YAW: i32 = 22;
+pub const D_GAZE_PITCH: i32 = 23;
+pub const D_HEAD_S: i32 = 24;     // the head's height as its posture has it, slowly smoothed
+pub const D_SHUF: i32 = 25;       // the shuffle's weight against the hop, eased
+pub const D_REAR: i32 = 26;       // sitting up: how far (0..1) and its speed
+pub const D_REAR_V: i32 = 27;
+pub const D_HY_O: i32 = 28;       // the hips' and withers' heights as placed last step
+pub const D_FY_O: i32 = 29;
+pub const D_CAP_H: i32 = 30;      // the girdles' reach ceilings, through the plan's spring,
+pub const D_CAP_F: i32 = 31;
+pub const D_CAP_HV: i32 = 32;     //   and their speeds
+pub const D_CAP_FV: i32 = 33;
+pub const D_EAR: i32 = 34;        // each ear's turn (2) and lean back (2), eased toward its whim
+pub const D_PITCH_O: i32 = 38;    // the trunk's pitch last step
+pub const D_CHEST_S: i32 = 39;    // the chest's pitch, slowly smoothed (what the head rides a share of)
+pub const D_EAR_NEXT: i32 = 40;   // each ear's next turn (s on the clock)
+pub const D_EAR_N: i32 = 42;      //   and how many it has made (its whims are hashed from it)
+pub const D_EAR_SPL: i32 = 44;    // each ear's splay, eased toward its whim
+pub const D_EAR_V: i32 = 46;      // the speeds of each ear's swivel (2) and lean back (2)
+pub const D_LEG: i32 = 50;        // per leg, LEG_REC floats
+pub const LEG_REC: i32 = 16;
+pub const L_PLANT: i32 = 0;
+pub const L_TOE: i32 = 1;         // the toe: planted point, or where the swing has it
+pub const L_FROM: i32 = 4;
+pub const L_TO: i32 = 7;
+pub const L_U: i32 = 10;
+pub const L_T: i32 = 11;
+pub const L_ARMED: i32 = 12;
+pub const L_KIND: i32 = 13;       // 0 a gait step, 1 a settling step, 2 a fore paw held up (sitting up)
+pub const L_SINCE: i32 = 14;      // s since it landed; in a swing, the roll onto its toe it lifted with
+pub const D_DANGLE: i32 = D_LEG + 4 * LEG_REC;        // the ears' mid points and tips, the scut's tip (creature::dangle)
+pub const D_AHEAD: i32 = D_DANGLE + 5 * DANGLE_REC;   // how far ahead of the path's point the mass stands before the recoil, slowly smoothed,
+pub const D_OVER: i32 = D_AHEAD + 1;                  //   and how far over the hips' planned height
+pub const D_LEAP: i32 = D_AHEAD + 2;                  // a leap: on (0/1), s from its take-off (under 0: the push), m/s it leaves the ground at
+pub const D_SEC: i32 = D_LEAP + 3;                    // alert crit_step vel (1) + pre-smoothed ear whim targets (4)
+pub const S_ALERT_V: i32 = 0;
+pub const S_EAR_PRE: i32 = 1;                         // sw_pre (2), back_pre (2)
+pub const D_END: i32 = D_SEC + 5;
+
+pub const WITHERS_Z: f32 = 0.18;  // hips (pelvis head) to withers, along the back
+const HOME_BACK_H: f32 = 0.055;   // m a running hind foot's home comes back under the hip
+const HOME_BACK_F: f32 = 0.045;   //   and a fore foot's under the shoulder
+const SCUT_W: f32 = 26.0;
+const SCUT_ZETA: f32 = 0.72;
+
+fn select_i(c: bool, a: i32, b: i32) -> i32 { if (c) { return a; } return b; }
+
+pub struct HeadKnobs {
+    head_hold: f32,
+    head_ride: f32,
+    neck_hop: f32,
+    neck_run: f32,
+    ear_run: f32,
+    ear_snap: f32,
+    ear_flick_t: f32,
+    ear_flicks: f32,
+    ear_graze_up: f32,
+    ear_back: f32,
+    ear_w1: f32,
+    ear_w2: f32,
+    ear_zeta: f32,
+    ear_sag: f32,
+}
+
+// A foot's home under its girdle, from the root, as the gait (bw) carries it.
+// Bounding, the hind feet come down wide, outside the fore feet.
+pub fn home_of(l: i32, bw: f32, mv: f32, hind_wide: f32, home_hop_f: f32) -> vec3<f32> {
+    let t = TAIL[LEG_B0[l] + LEG_NB[l] - 1] - HEAD[B_PELVIS];
+    let hind = LEG_HIND[l] == 1;
+    let wide = select_f(hind, bw * hind_wide * sign(t.x), 0.0);
+    let back = select_f(hind, bw * HOME_BACK_H, bw * HOME_BACK_F + (1.0 - bw) * mv * home_hop_f);
+    return vec3<f32>(t.x + wide, 0.0, t.z - back);
+}
+
+pub fn place_bunny(st: rw_store<f32, 1>, env: read_store<f32, 1>, s: i32, hind_wide: f32, home_hop_f: f32) {
+    let p = ld3(st, s + S_POS);
+    let q = q_y(st[s + S_YAW]);
+    for (var l: i32 = 0; l < 4; l += 1) {
+        let w = q_rot(q, home_of(l, 0.0, 0.0, hind_wide, home_hop_f)) + vec3<f32>(p.x, 0.0, p.z);
+        let t = vec3<f32>(w.x, height(env, w.x, w.z), w.z);
+        let k = s + D_LEG + l * LEG_REC;
+        st[k + L_PLANT] = 1.0;
+        st3(st, k + L_TOE, t);
+        st3(st, k + L_TO, t);
+        st[k + L_U] = 0.0;
+        st[k + L_ARMED] = 1.0;
+        st[k + L_SINCE] = 1.0;
+    }
+    let pf = p + q_rot(q, vec3<f32>(0.0, 0.0, WITHERS_Z));
+    st[s + D_HY] = height(env, p.x, p.z) + HEAD[B_PELVIS].y;
+    st[s + D_FY] = height(env, pf.x, pf.z) + HEAD[B_SCAPL].y;
+    st[s + D_HY_O] = st[s + D_HY];
+    st[s + D_FY_O] = st[s + D_FY];
+    for (var i: i32 = 0; i < 5; i += 1) { st[s + D_SEC + i] = 0.0; }
+    st[s + D_GAIT] = GAIT_HOP as f32;
+    st[s + S_PLACED] = 1.0;
+}
+
+// Smooth zero-corner startle flinch envelope over [0, 0.40] s.
+pub fn startle_flinch(st_t: f32) -> f32 {
+    if (st_t < 0.0 || st_t >= 0.40) { return 0.0; }
+    return bump(clamp(st_t / 0.40, 0.0, 1.0), 0.38, 0.62);
+}
+
+// Gaze, steady head carriage, grazing reach, eyes/blink, continuous + stride-linked
+// nose twitch, and pre-smoothed non-ringing ears.
+pub fn pose_head_ears(
+    T_in: Pose, intent: read_store<f32, 1>, ii: i32, env: read_store<f32, 1>,
+    state: rw_store<f32, 1>, s: i32, init: bool, dt: f32,
+    clock: f32, seed: f32, yaw: f32, speed: f32, phase: f32,
+    bw: f32, hw: f32, mv: f32, lie: f32, lie_f: f32, graze: f32, alert: f32, rear_s: f32, st_t: f32,
+    K: HeadKnobs
+) -> Pose {
+    var T = T_in;
+    // Gaze: where the head would turn, smoothed; with none, a look about now and then.
+    var gyaw = 0.5 * noise1(clock / 3.1, seed, 5.0) * (1.0 - mv) * (1.0 - graze);
+    var gpitch: f32 = 0.0;
+    let gwt = intent[ii + I_GAZE_W];
+    if (gwt > 0.0) {
+        let hpos = T.p[B_THORAX] + q_rot(T.q[B_THORAX], HEAD[B_HEAD] - HEAD[B_THORAX]);
+        let d = vec3<f32>(intent[ii + I_GAZE_X], intent[ii + I_GAZE_Y], intent[ii + I_GAZE_Z]) - hpos;
+        gyaw = mix(gyaw, clamp(wrap_pi(atan2(d.x, d.z) - yaw), -1.4, 1.4), gwt);
+        gpitch = clamp(atan2(-d.y, length(vec2<f32>(d.x, d.z))), -0.7, 0.8) * gwt;
+    }
+    let gyaw_s = damp(state[s + D_GAZE_YAW], gyaw, 6.0, dt);
+    let gpitch_s = damp(state[s + D_GAZE_PITCH], gpitch, 6.0, dt);
+    state[s + D_GAZE_YAW] = gyaw_s;
+    state[s + D_GAZE_PITCH] = gpitch_s;
+
+    // Head carriage: held steady in space (HEAD_HOLD of the way) so the chest's
+    // bob and pitch pass under it.
+    let n_up = alert * (1.0 - graze);
+    let n_pose = (K.neck_run * bw + K.neck_hop * hw) * mv - 0.25 * n_up - 0.1 * lie + 0.75 * rear_s;
+    let hy_pose = head_y(T.q[B_THORAX], T.p[B_THORAX], n_pose);
+    var hy_s = state[s + D_HEAD_S];
+    if (init) { hy_s = hy_pose; }
+    hy_s = damp(hy_s, hy_pose, 1.4, dt);
+    state[s + D_HEAD_S] = hy_s;
+    let carry_n = (1.0 - graze) * (1.0 - lie) * (1.0 - rear_s) * K.head_hold;
+    let hy_top = head_y(T.q[B_THORAX], T.p[B_THORAX], LIM_LO[B_NECK].x);
+    let hy_bot = head_y(T.q[B_THORAX], T.p[B_THORAX], LIM_HI[B_NECK].x);
+    let hy_want = soft_range(mix(hy_pose, hy_s, carry_n), hy_bot, hy_top, 0.02);
+    var n_lo = n_pose - 0.8;
+    var n_hi = n_pose + 0.8;
+    for (var it: i32 = 0; it < 10; it += 1) {
+        let m = 0.5 * (n_lo + n_hi);
+        if (head_y(T.q[B_THORAX], T.p[B_THORAX], m) > hy_want) { n_lo = m; } else { n_hi = m; }
+    }
+    let n_base = 0.5 * (n_lo + n_hi);
+
+    let chest = q_rot(T.q[B_THORAX], vec3<f32>(0.0, 0.0, 1.0));
+    let pitch_c = atan2(chest.y, length(vec2<f32>(chest.x, chest.z)));
+    var chest_s = state[s + D_CHEST_S];
+    if (init) { chest_s = pitch_c; }
+    chest_s = damp(chest_s, pitch_c, 2.0, dt);
+    state[s + D_CHEST_S] = chest_s;
+    let ride = -K.head_ride * (pitch_c - chest_s) * (1.0 - graze);
+    let hp_world = mix(-0.05 * bw * mv - 0.1 * n_up + gpitch_s, 0.9, graze) - 0.12 * rear_s + 0.1 * lie + ride;
+    let qh = q_mul(q_y(yaw + gyaw_s), q_x(hp_world));
+
+    var gt: f32 = 0.0;
+    if (graze > 0.0) {
+        let mz = T.p[B_THORAX] + q_rot(T.q[B_THORAX], TAIL[B_NOSE] - HEAD[B_THORAX]);
+        let gy0 = height(env, mz.x, mz.z) + 0.008;
+        var lo: f32 = 0.0;
+        var hi: f32 = 1.0;
+        for (var it: i32 = 0; it < 7; it += 1) {
+            let m = 0.5 * (lo + hi);
+            if (nose_y(T.q[B_THORAX], T.p[B_THORAX], vec3<f32>(n_base + 1.1 * m, 0.4 * gyaw_s, 0.0), qh) > gy0) { lo = m; } else { hi = m; }
+        }
+        gt = 0.5 * (lo + hi) * graze;
+    }
+    let chew = graze * 0.05 * sin(TAU * 4.5 * clock) * smooth01(sin(TAU * 0.4 * clock + seed) + 0.3);
+    T.q[B_NECK] = q_mul(T.q[B_THORAX], q_xyz(soft_xyz(vec3<f32>(n_base + 1.1 * gt, 0.4 * gyaw_s, 0.0), B_NECK, 0.3)));
+    T.p[B_NECK] = head_of(T, B_NECK);
+    let hl = q_to_xyz(q_mul(q_conj(T.q[B_NECK]), qh)) + vec3<f32>(chew, 0.0, 0.0);
+    T.q[B_HEAD] = q_mul(T.q[B_NECK], q_xyz(soft_xyz(hl, B_HEAD, 0.3)));
+    T.p[B_HEAD] = head_of(T, B_HEAD);
+
+    // Eyes & lids (fear rises smoothly over 0.14 s so startle onset never snaps B_GAZE/B_LID).
+    let fear = select_f(st_t >= 0.0, smooth01(st_t / 0.14) * (1.0 - smooth01((st_t - 1.0) / 1.5)), 0.0);
+    let eroll = clamp(0.6 * (gyaw - gyaw_s), -0.25, 0.25) + 0.05 * noise1(clock * 0.23, seed, 41.0);
+    T.q[B_GAZE] = q_mul(T.q[B_HEAD], q_xyz(clamp_xyz(vec3<f32>(0.03 * noise1(clock * 0.17, seed, 42.0), eroll - 0.22 * fear, 0.0), B_GAZE)));
+    T.p[B_GAZE] = head_of(T, B_GAZE);
+    let bt = clock / 10.5 + seed * 2.3;
+    let bk = floor(bt);
+    let bu = ((bt - bk) - 0.1 - 0.7 * hash01(bk * 3.1 + seed)) * 10.5;
+    var blink: f32 = 0.0;
+    if (bu > 0.0 && bu < 0.16) { blink = smooth01(bu / 0.05) * (1.0 - smooth01((bu - 0.06) / 0.1)); }
+    let ease = max(0.45 * graze, 0.7 * lie) * (1.0 - alert);
+    let shut = clamp(mix(0.04 + ease - 0.8 * max(alert, fear), 1.0, blink), -0.8, 1.0);
+    T.q[B_LID] = q_mul(T.q[B_HEAD], q_xyz(vec3<f32>(asin(shut), 0.0, 0.0)));
+    T.p[B_LID] = head_of(T, B_LID);
+
+    // Nose & whisker pads: bursts when still, plus continuous respiratory sniff
+    // and stride-linked nostril flare while hopping/bounding or startled.
+    let run_back = smooth01((speed - 0.8) / 3.0) * mv;
+    let burst_idle = smooth01(2.0 * noise1(clock / 1.7, seed, 7.0) + 0.4 + 0.6 * graze + 0.5 * alert);
+    let burst = max(burst_idle, max(0.45 * mv + 0.20 * run_back, 0.65 * max(alert, fear)));
+    let tw = sin(TAU * mix(5.0, 7.2, max(alert, 0.6 * run_back)) * clock);
+    let breath_n = -0.055 * mv * sin(TAU * (phase - 0.18));
+    T.q[B_NOSE] = q_mul(T.q[B_HEAD], q_xyz(clamp_xyz(vec3<f32>(-0.11 * burst * tw * tw + breath_n, 0.0, 0.0), B_NOSE)));
+    T.p[B_NOSE] = head_of(T, B_NOSE);
+
+    // Ears: whim targets pre-filtered before crit_step so random ear turns are C2
+    // smooth and never inject jerk impulses that ring earR2 against its range.
+    let flinch = startle_flinch(st_t);
+    let snd_n = floor(clock * 0.23 + seed * 0.71);
+    let snd_az = PI * (2.0 * hash01(seed * 1.3 + snd_n * 4.17) - 1.0);
+    for (var e: i32 = 0; e < 2; e += 1) {
+        let side = 1.0 - 2.0 * (e as f32);
+        let fe = e as f32;
+        var nxt = state[s + D_EAR_NEXT + e];
+        var n = state[s + D_EAR_N + e];
+        if (init) { nxt = clock + 0.4 + 1.6 * hash01(seed * 2.1 + 3.0 * fe); n = 0.0; }
+        if (clock >= nxt) {
+            n += 1.0;
+            let hd = hash01(seed * 6.1 + n * 1.37 + 17.0 * fe);
+            var dur = mix(mix(0.35, 3.0, hd * hd), mix(0.25, 1.2, hd), graze);
+            if (hash01(seed * 7.7 + n * 2.53 + 5.0 * fe) > 1.0 - K.ear_flicks) { dur = K.ear_flick_t; }
+            nxt = clock + dur;
+        }
+        state[s + D_EAR_NEXT + e] = nxt;
+        state[s + D_EAR_N + e] = n;
+        let flicking = hash01(seed * 7.7 + n * 2.53 + 5.0 * fe) > 1.0 - K.ear_flicks && n > 0.5;
+        let na = select_f(flicking, n - 1.0, n);
+        let h_mode = hash01(seed * 9.1 + na * 1.93 + 13.0 * fe);
+        let h_aim = hash01(seed * 8.9 + na * 3.11 + 9.0 * fe);
+        let h_lean = hash01(seed * 5.3 + na * 2.73 + 7.0 * fe);
+        let a_e = snd_az * side;
+        let to_snd = select_f(a_e > 0.0, clamp(a_e - 0.5, -0.6, K.ear_back), select_f(a_e < -0.5 * PI, K.ear_back, -0.4));
+        let sw_idle = select_f(h_mode < 0.5, to_snd, mix(-0.5, K.ear_back, h_aim));
+        let sw_alert = clamp(-0.4 + 0.5 * side * gyaw_s, -0.8, 0.8);
+        var sw_t = mix(sw_idle, sw_alert, alert);
+        sw_t = mix(sw_t, 0.35 * sw_t - 0.1, mv * (1.0 - run_back));
+        sw_t = mix(sw_t, 0.4, run_back);
+        let back_t = mix(mix(0.2 * h_lean + 0.2 * max(sw_t, 0.0), -0.15, alert), K.ear_run, run_back) + K.ear_graze_up * graze;
+        let spl_t = mix(mix(0.04 + 0.16 * hash01(seed * 4.4 + na * 2.21 + 3.0 * fe), -0.08, alert), 0.02, mv);
+
+        let pre_i = s + D_SEC + S_EAR_PRE;
+        let sw_pre = select_f(init, sw_t, damp(state[pre_i + e], sw_t, 8.5, dt));
+        let back_pre = select_f(init, back_t, damp(state[pre_i + 2 + e], back_t, 6.5, dt));
+        state[pre_i + e] = sw_pre;
+        state[pre_i + 2 + e] = back_pre;
+
+        var swv = vec2<f32>(state[s + D_EAR + e], state[s + D_EAR_V + e]);
+        var txv = vec2<f32>(state[s + D_EAR + 2 + e], state[s + D_EAR_V + 2 + e]);
+        if (init) { swv = vec2<f32>(sw_t, 0.0); txv = vec2<f32>(back_t, 0.0); }
+        swv = crit_step(swv, sw_pre, K.ear_snap, dt);
+        txv = crit_step(txv, back_pre, 0.6 * K.ear_snap, dt);
+        let sw = swv.x;
+        let tx = txv.x;
+        let spl = damp(state[s + D_EAR_SPL + e], spl_t, 5.0, dt);
+        state[s + D_EAR + e] = sw;
+        state[s + D_EAR_V + e] = swv.y;
+        state[s + D_EAR + 2 + e] = tx;
+        state[s + D_EAR_V + 2 + e] = txv.y;
+        state[s + D_EAR_SPL + e] = spl;
+
+        var shake: f32 = 0.0;
+        if (flicking) {
+            let ft = clamp(1.0 - (nxt - clock) / K.ear_flick_t, 0.0, 1.0);
+            shake = bump(ft, 0.32, 0.68) * sin(TAU * 2.5 * ft);
+        }
+        let laid = max(0.9 * lie_f, 0.8 * flinch);
+        let b1 = select_i(e == 0, B_EARL1, B_EARR1);
+        let a = vec3<f32>(-mix(tx + 0.10 * shake - 0.1 * rear_s, 1.55, laid), 0.0, side * mix(spl, -0.12, laid));
+        let ax = normalize(TAIL[b1 + 1] - HEAD[b1]);
+        let swivel = side * (sw + 0.28 * shake) * (1.0 - laid);
+        let kd = s + D_DANGLE + 2 * e * DANGLE_REC;
+        T.q[b1] = q_mul(T.q[B_HEAD], q_mul(q_xyz(clamp_xyz(a, b1)), q_axis(ax, swivel)));
+        T.p[b1] = head_of(T, b1);
+        let along1 = TAIL[b1] - HEAD[b1];
+        let m = dangle_step(state, kd, T.p[b1] + q_rot(T.q[b1], along1), K.ear_w1, K.ear_zeta, K.ear_sag, dt, init);
+        T.q[b1] = within_range(T.q[B_HEAD], aim_at(T.q[b1], T.p[b1], along1, m, 0.45), b1, 0.18);
+        let qrest2 = q_mul(T.q[b1], q_xyz(clamp_xyz(vec3<f32>(-0.25 * laid, 0.0, 0.0), b1 + 1)));
+        T.p[b1 + 1] = head_of(T, b1 + 1);
+        let along2 = TAIL[b1 + 1] - HEAD[b1 + 1];
+        let tip = dangle_step(state, kd + DANGLE_REC, T.p[b1 + 1] + q_rot(qrest2, along2), K.ear_w2, K.ear_zeta, K.ear_sag, dt, init);
+        T.q[b1 + 1] = within_range(T.q[b1], aim_at(qrest2, T.p[b1 + 1], along2, tip, 0.50), b1 + 1, 0.18);
+    }
+    return T;
+}
+
+// Cotton-tail scut: carried against the rump, with smooth stride-phase bound
+// bobbing and startle follow-through so it never locks rigid at speed.
+pub fn pose_scut(
+    T_in: Pose, state: rw_store<f32, 1>, s: i32, init: bool, dt: f32,
+    clock: f32, seed: f32, speed: f32, phase: f32, bw: f32, mv: f32, lie: f32, alert: f32, st_t: f32
+) -> Pose {
+    var T = T_in;
+    let flinch = startle_flinch(st_t);
+    let stride_bob = mv * ((0.14 + 0.08 * bw) * sin(TAU * (phase - 0.30)) + 0.04 * bw * sin(2.0 * TAU * (phase - 0.08)));
+    let st_bob = -0.24 * flinch + 0.10 * alert * sin(TAU * 2.1 * clock + seed);
+    let flick = smooth01(speed / 1.5) * mv * 0.52 + 0.46 * alert + stride_bob + st_bob;
+    T.q[B_TAIL] = q_mul(T.q[B_PELVIS], q_xyz(soft_xyz(vec3<f32>(flick - 0.1 * lie, 0.0, 0.0), B_TAIL, 0.3)));
+    T.p[B_TAIL] = head_of(T, B_TAIL);
+    let along_t = TAIL[B_TAIL] - HEAD[B_TAIL];
+    let st_tip = dangle_step(state, s + D_DANGLE + 4 * DANGLE_REC, T.p[B_TAIL] + q_rot(T.q[B_TAIL], along_t), SCUT_W, SCUT_ZETA, 0.3, dt, init);
+    T.q[B_TAIL] = within_range(T.q[B_PELVIS], aim_at(T.q[B_TAIL], T.p[B_TAIL], along_t, st_tip, 0.38), B_TAIL, 0.2);
+    T.p[B_TAIL] = head_of(T, B_TAIL);
+    return T;
+}
+
+pub fn write_bunny_out(
+    T: Pose, pose: write_store<vec4<f32>, 1>, tele: write_store<f32, 1>, state: rw_store<f32, 1>,
+    c: i32, s: i32, pos: vec3<f32>, hy: f32, fy: f32, hip_g: f32,
+    hs: vec2<f32>, fs: vec2<f32>, yaw: f32, speed: f32, omega: f32, phase: f32,
+    bw: f32, gait: i32, moving: bool, pitch: f32, roll: f32, freq: f32, act: i32,
+    lie_h: f32, lie_f: f32, toes: array<vec3<f32>, 4>
+) {
+    put(pose, c, T);
+    st3(state, s + S_POS, vec3<f32>(pos.x, hy, pos.z));
+    state[s + S_YAW] = yaw;
+    state[s + D_SPEED] = speed;
+    state[s + D_OMEGA] = omega;
+    state[s + D_PHASE] = phase;
+    state[s + D_BW] = bw;
+    state[s + D_GAIT] = gait as f32;
+    state[s + D_MOVING] = select_f(moving, 1.0, 0.0);
+    state[s + D_HY_O] = hy;
+    state[s + D_FY_O] = fy;
+    state[s + D_HY] = hs.x;
+    state[s + D_HV] = hs.y;
+    state[s + D_FY] = fs.x;
+    state[s + D_FV] = fs.y;
+    state[s + D_PITCH_O] = pitch;
+
+    let t0 = c * TELE;
+    tele[t0 + T_POS] = pos.x;
+    tele[t0 + T_POS + 1] = hy;
+    tele[t0 + T_POS + 2] = pos.z;
+    tele[t0 + T_YAW] = yaw;
+    tele[t0 + T_SPEED] = speed;
+    var gshow = gait;
+    if (!moving) { gshow = GAIT_STAND; }
+    tele[t0 + T_GAIT] = gshow as f32;
+    tele[t0 + T_PHASE] = fract01(phase);
+    tele[t0 + T_ACTION] = act as f32;
+    tele[t0 + T_HEIGHT] = hy - hip_g;
+    tele[t0 + T_PITCH] = pitch;
+    tele[t0 + T_ROLL] = roll;
+    tele[t0 + T_FREQ] = freq * select_f(moving, 1.0, 0.0);
+    tele[t0 + T_LEAP] = 0.0;
+    for (var l: i32 = 0; l < 4; l += 1) {
+        let k = s + D_LEG + l * LEG_REC;
+        let f0 = t0 + T_FOOT + 4 * l;
+        var pl = state[k + L_PLANT];
+        if (select_f(LEG_HIND[l] == 1, lie_h, lie_f) > 0.05) { pl = 0.0; }
+        tele[f0] = pl;
+        var at = toes[l];
+        if (state[k + L_PLANT] < 0.5) { at = ld3(state, k + L_TO); }
+        tele[f0 + 1] = at.x; tele[f0 + 2] = at.y; tele[f0 + 3] = at.z;
+    }
+}

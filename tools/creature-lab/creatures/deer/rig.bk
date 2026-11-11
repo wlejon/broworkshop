@@ -16,20 +16,20 @@
 // it (the rig places the bones about it), creature::spine bends the back with
 // the legs' spread and the turn, and creature::secondary carries the neck,
 // head, ears and tail as masses on springs, the head holding part of its
-// gaze in space. Legs are solved in their plane (deer::legs) to the hooves
-// from where the body is. Every joint is held within its limits.
+// gaze in space. Legs are solved in their plane (deer::legs, deer::gait) to
+// the hooves from where the body is. Every joint is held within its limits.
 import creature::common::*;
 import creature::contract::*;
 import creature::skeleton::*;
 import creature::pose::*;
-import creature::secondary::*;
 import creature::body::*;
 import creature::spine::*;
 import creature::leap::*;
 import creature::limbs::*;
 import creature::probe::*;
 import deer::legs::*;
-from creature::ground import height, normal, terrain, obstacle_ahead;
+import deer::gait::*;
+from creature::ground import height, terrain, obstacle_ahead;
 
 // Deliberate faults, for testing the lab's measures (0 is the deer).
 @knob const FAULT_SLIP: f32 = 0.0;      // planted hooves slide back at this share of the body's speed
@@ -37,66 +37,8 @@ from creature::ground import height, normal, terrain, obstacle_ahead;
 @knob const FAULT_OVERBEND: f32 = 0.0;  // radians the left hock is driven past its limit in swing
 @knob const FAULT_STUMBLE: f32 = 0.0;   // cycles the right hind's phase jumps every other stride
 
-// --- state layout (after the contract's header) ------------------------------
-const D_SPEED: i32 = 5;
-const D_OMEGA: i32 = 6;
-const D_CLOCK: i32 = 7;
-const D_PHASE: i32 = 8;
-const D_GW: i32 = 9;          // gait weights walk, trot, gallop (3)
-const D_GAIT: i32 = 12;       // the gait chosen (contract GAIT_*)
-const D_MOVING: i32 = 13;
-const D_HY: i32 = 14;         // hip height and its speed (the plan)
-const D_HV: i32 = 15;
-const D_FY: i32 = 16;         // withers height and its speed (the plan)
-const D_FV: i32 = 17;
-const D_ROLL: i32 = 18;
-const D_LIE: i32 = 19;
-const D_GRAZE: i32 = 20;
-const D_ALERT: i32 = 21;
-const D_STARTLE_T: i32 = 22;
-const D_PREV_ACT: i32 = 23;
-const D_GAZE_YAW: i32 = 24;
-const D_GAZE_PITCH: i32 = 25;
-const D_GRAZE_T: i32 = 26;
-const D_GUARD: i32 = 27;      // the share of the body's lag the reach guard lets through
-const D_PITCH_S: i32 = 28;   // the body's pitch and withers height, slowly smoothed
-const D_FY_S: i32 = 29;       //   (what the neck holds the head against)
-const D_LAG: i32 = 30;        // the body's centre against the plan's, last step (3)
-const D_LAGV: i32 = 33;       //   and its velocity against the path's (3)
-const D_HY_O: i32 = 36;       // the hips' and withers' heights as placed last step
-const D_FY_O: i32 = 37;       //   (the plan's, or a leap's)
-const D_CAP_H: i32 = 38;      // the hips' and withers' reach ceilings, through the plan's spring
-const D_CAP_F: i32 = 39;
-const D_CAP_HV: i32 = 113;    //   and their speeds
-const D_CAP_FV: i32 = 114;
-const D_STILL: i32 = 115;     // going (1) or not (0), through a spring,
-const D_STILL_V: i32 = 129;   //   and its speed
-const D_LEG: i32 = 40;        // per leg, LEG_REC floats
-const LEG_REC: i32 = 16;
-const L_PLANT: i32 = 0;
-const L_TOE: i32 = 1;         // the toe: planted point, or where the swing has it
-const L_FROM: i32 = 4;
-const L_TO: i32 = 7;
-const L_U: i32 = 10;
-const L_T: i32 = 11;
-const L_ARMED: i32 = 12;
-const L_KIND: i32 = 13;       // 0 a gait step, 1 a settling step, 2..3 a flight swing begun in the air (2 + its fold)
-const L_SINCE: i32 = 14;      // s since it landed; in a swing, the roll onto its toe it lifted with
-const L_LEAP: i32 = 15;       // its steps in a leap: 1 the gather step's swing, 2 down, 3 the flight, 4 down, 5 a fore hoof stepped on in the landing
-const D_COFF: i32 = 104;     // the pose's centre of mass from the root, in the yaw frame: slow mean (3),
-const D_COFF1: i32 = 107;     //   last step's (3)
-const D_COFF2: i32 = 110;     //   and the step's before (3)
-const D_BODY: i32 = 116;      // creature::body (BODY_STATE)
-const D_SPINE: i32 = 130;     // creature::spine (SPINE_STATE)
-const D_SEC: i32 = 136;       // creature::secondary (SEC_STATE)
-const D_LEAP: i32 = D_SEC + SEC_STATE;   // creature::leap (LEAP_STATE)
-const D_SHORT: i32 = D_LEAP + LEAP_STATE;   // per leg, how far short of its toe the posed leg hung last step
-const D_COFFR: i32 = D_SHORT + 4;   // how far the pose's centre stands over the turned mean's, smoothed (height, its speed)
-const D_TOPO: i32 = D_COFFR + 2;    // per leg, where its girdle stood last step (3)
-const D_LEAN_S: i32 = D_TOPO + 12;  // how much it leans over its carrying hooves (going slowly), through a spring, and its speed
-pub const PROBE: i32 = D_LEAN_S + 2; // creature::probe's slice
-const D_CAPOFF: i32 = PROBE + PROBE_N; // per leg, how far past the swing's reach cap its hoof lifted
-pub const STATE: i32 = D_CAPOFF + 4;
+pub const PROBE: i32 = D_PROBE;
+pub const STATE: i32 = D_STATE;
 
 const WALK_UP: f32 = 1.9;
 const TROT_DOWN: f32 = 1.5;
@@ -107,128 +49,42 @@ const SETTLE_TRIG: f32 = 0.05;   // m a still hoof may stray before it steps hom
 const REACH_TRIG: f32 = 0.52;    // m a planted hoof may trail its home before it must step
 const SETTLE_T: f32 = 0.34;
 @knob const FOLD_AHEAD: f32 = 0.8;     // how far a leg's lower joints run ahead of its top one, folding to lie
-@knob const HEAD_HOLD: f32 = 0.6;     // share of the body's bob and pitch the neck takes up
+@knob const HEAD_HOLD: f32 = 0.6;      // share of the body's bob and pitch the neck takes up
 @knob const HEAD_SPACE: f32 = 0.6;     // share of its gaze in space the head holds (the rest it is carried)
 @knob const NECK_LEVER: f32 = 0.35;    // m the head rises per radian of neck extension
 @knob const REACH_FORE: f32 = 0.90;    // m from that pivot to the toe the fore leg can hold
 @knob const SHORT_LET: f32 = 0.004;    // m the posed leg may hang short of a planted hoof before it steps
 @knob const REACH_FORE_TOP: f32 = 0.965; // m from the blade's top to the toe, the fore leg near straight
-@knob const LIE_HIP: f32 = 0.36;     // m the hips rest over the ground, lying
+@knob const LIE_HIP: f32 = 0.36;       // m the hips rest over the ground, lying
 @knob const LIE_WITHERS: f32 = 0.53;   // m the withers rest over the ground, lying
 @knob const REACH_HIND: f32 = 0.835;   // m from the femur head to the toe the hind leg can hold
-@knob const SCAP_FOLLOW: f32 = 0.6;  // of the leg's swing the scapula takes
-@knob const NOD: f32 = 0.0;          // rad the neck dips per loaded fore hoof in a walk
-@knob const VARY: f32 = 1.0;         // share of the individual's wander in speed and heading (0: none)
-@knob const LAYERS: f32 = 1.0;       // the motion layers' share (0: the rig's plan as it is)
-const BREAKOVER: f32 = 0.55;     // rad the hoof rolls onto its toe before lift
-const WITHERS_Z: f32 = 0.69;     // hips (pelvis head) to withers, along the back
-@knob const RISE_IN: f32 = 0.002;     // m of the ceiling's height over the plan it takes hold over
-const RISE_EASE: f32 = 0.015;   // m over which the body's rise eases into the legs' reach
-@knob const LAND_REACH: f32 = 0.8;   // share of the leg's reach along the ground a swing's landing mark may lie from where its girdle will be
-@knob const LAND_WALK: f32 = 0.9;  //   and walking (at all of it the fore hoof landed on a straight leg, and the body was drawn on to it)
-@knob const TROT_SPRING: f32 = 0.7; // how much of a spring the legs are under a trot's landing (creature::body's Support.spring)
-@knob const GALLOP_FREE: f32 = 0.06;  // m a galloping body may rise past what its planted hooves hold
-const CAP_FADE: f32 = 0.25;      // m a coming or going hoof's reach limit is slackened by
-const CAP_SOFT: f32 = 0.01;      // m over which one reach limit hands over to another
-@knob const TUCK_HIND: f32 = 0.37;    // of its reach a leg folds to in a leap's flight
+@knob const SCAP_FOLLOW: f32 = 0.6;    // of the leg's swing the scapula takes
+@knob const NOD: f32 = 0.0;            // rad the neck dips per loaded fore hoof in a walk
+@knob const VARY: f32 = 1.0;           // share of the individual's wander in speed and heading (0: none)
+@knob const LAYERS: f32 = 1.0;         // the motion layers' share (0: the rig's plan as it is)
+@knob const RISE_IN: f32 = 0.002;      // m of the ceiling's height over the plan it takes hold over
+const RISE_EASE: f32 = 0.015;          // m over which the body's rise eases into the legs' reach
+@knob const LAND_REACH: f32 = 0.8;     // share of the leg's reach along the ground a swing's landing mark may lie from where its girdle will be
+@knob const LAND_WALK: f32 = 0.9;      //   and walking (at all of it the fore hoof landed on a straight leg, and the body was drawn on to it)
+@knob const TROT_SPRING: f32 = 0.7;    // how much of a spring the legs are under a trot's landing (creature::body's Support.spring)
+@knob const GALLOP_FREE: f32 = 0.06;   // m a galloping body may rise past what its planted hooves hold
+@knob const TUCK_HIND: f32 = 0.37;     // of its reach a leg folds to in a leap's flight
 @knob const TUCK_FORE: f32 = 0.24;
-const GUARD_RATE: f32 = 20.0;  // /s the reach guard's hold eases at
-@knob const LEAP_AHEAD: f32 = 0.5;  // share of the hind feet's last stance before a leap they land ahead of the hips by
-@knob const SLOW_DUTY: f32 = 0.1;  // of the stride a hoof stays down longer, slower than a walk (at 0.2 a first step's swing was a fifth of a second, the hoof snatched up 85 mm and dropped in 50 ms)
-@knob const LAND_MIN: f32 = 0.3;  // of its length a landing hoof's mark may always be ahead of its girdle
-@knob const SPENT: f32 = 1.5;     // steps of the take-off's rise before its full length a pushing hind leg lets go
-@knob const FOLD_EXT: f32 = 0.97;  // of the fore leg's whole length: stretched that far its knee does not fold in a swing,
-@knob const FOLD_BAND: f32 = 0.35; //   and this much shorter it folds as far as the gait asks
-@knob const TUCK_BACK: f32 = -0.3; // m behind its hip a hind hoof is drawn up to in the flight (ahead of it: under the belly, the highest the leg folds, and the first of it over a log)
-@knob const LAND_EXT: f32 = 0.97;  // of its reach: how far a leg is let out coming down from a leap
-@knob const UNTUCK: f32 = 0.7;    // of its flight swing: when the hind leg begins to unfold for the landing
-@knob const LAG_FREE: f32 = 0.03;  // m the body may trail its path before the path's speed waits for it
-@knob const LAG_BAND: f32 = 0.08;  //   and the m over which it comes to wait (all but a fifth of its rate)
-@knob const GALLOP_ACC: f32 = 0.6; // of the push a walk's feet give the path's speed, what a gallop's give it
-@knob const COFF_W: f32 = 20.0;   // 1/s the leap's centre follows its pose's own offset
-@knob const LAND_LEAD: f32 = 0.17; // leg times from a leap's touchdown to the hoof's mid-stance
-
-// The first moment (a leap's tau) past the flight's top at which leg l's
-// landing mark is within its reach from where its girdle will be, the body
-// on its arc: a leg comes down as soon as it reaches the ground past the
-// obstacle.
-fn reach_time(env: read_store<f32, 1>, lp: Leap, l: i32, pos: vec3<f32>, fwd: vec3<f32>, speed: f32, qyaw: vec4<f32>) -> f32 {
-    let hind = LEG_HIND[l] == 1;
-    // (With a margin: the hips ride a little off the centre of mass's arc
-    // as the legs reach down for the ground.)
-    let r = 0.97 * select_f(hind, REACH_HIND, REACH_FORE);
-    let toe0 = TAIL[LEG_B0[l] + LEG_NB[l] - 1] - HEAD[B_PELVIS];
-    let home_off = vec3<f32>(toe0.x, 0.0, toe0.z);
-    for (var i: i32 = 0; i < 60; i += 1) {
-        let t = 0.5 * lp.tf + 0.01 * f32(i);
-        let hy = flight_hip(lp, t);
-        let fy = hy - HEAD[B_PELVIS].y + HEAD[B_SCAPL].y + WITHERS_Z * tan(flight_pitch(lp, t));
-        let top = leg_top(l, pos + fwd * (speed * (t - lp.tau)), qyaw, hy, fy);
-        var m = pos + fwd * (speed * (t + LAND_LEAD * leg_time() - lp.tau)) + q_rot(qyaw, home_off);
-        m.y = height(env, m.x, m.z);
-        // (Never on the obstacle: the leg comes down beyond it.)
-        if (length(m - top) <= r && m.y < terrain(env, m.x, m.z) + 0.05) { return t; }
-    }
-    return 0.5 * lp.tf + 0.6;
-}
-
-// How far a swinging leg is folded (the hoof and carpus flex), 0 to 1: a
-// swing restarted in the air (kind 2 + the fold it had) eases from that
-// fold into its own, so the hoof never snaps straight.
-// The hoof's roll onto its toe, 0 to 1 over the stance's last `w` of the
-// cycle. (Its own window: a trot's stance is short, and over an eighth of
-// its cycle the hoof turned thirty degrees in eight steps and back.)
-fn hoof_roll(ph: f32, duty: f32, w: f32) -> f32 { return smooth01((stance_phase(ph, duty) - (duty - w)) / w); }
-fn swing_fold(st: rw_store<f32, 1>, k: i32) -> f32 {
-    let u = st[k + L_U];
-    let kind = st[k + L_KIND];
-    if (kind < 1.5) { return fold_bump(u); }
-    return mix(kind - 2.0, fold_bump(u), smooth01(u / 0.3));
-}
-
-// A hoof in the air starts the leap's flight swing, from where it is, to
-// land `t` s from now.
-fn flight_swing(st: rw_store<f32, 1>, k: i32, t: f32) {
-    st[k + L_KIND] = 2.0 + swing_fold(st, k);
-    st3(st, k + L_FROM, ld3(st, k + L_TOE));
-    st[k + L_U] = 0.0; st[k + L_T] = max(t, 0.06); st[k + L_LEAP] = 3.0;
-}
-
-fn place(st: rw_store<f32, 1>, env: read_store<f32, 1>, s: i32) {
-    let p = ld3(st, s + S_POS);
-    let yaw = st[s + S_YAW];
-    let q = q_y(yaw);
-    for (var l: i32 = 0; l < 4; l += 1) {
-        let toe0 = TAIL[LEG_B0[l] + LEG_NB[l] - 1] - HEAD[B_PELVIS];
-        let w = q_rot(q, vec3<f32>(toe0.x, 0.0, toe0.z)) + vec3<f32>(p.x, 0.0, p.z);
-        let t = vec3<f32>(w.x, height(env, w.x, w.z), w.z);
-        let k = s + D_LEG + l * LEG_REC;
-        st[k + L_PLANT] = 1.0;
-        st3(st, k + L_TOE, t);
-        st3(st, k + L_TO, t);
-        st[k + L_U] = 0.0;
-        st[k + L_ARMED] = 1.0;
-        st[k + L_SINCE] = 1.0;
-    }
-    let gp = height(env, p.x, p.z);
-    let pf = p + q_rot(q, vec3<f32>(0.0, 0.0, WITHERS_Z));
-    st[s + D_HY] = gp + HEAD[B_PELVIS].y;
-    st[s + D_FY] = height(env, pf.x, pf.z) + HEAD[B_SCAPL].y;
-    st[s + D_HY_O] = st[s + D_HY];
-    st[s + D_FY_O] = st[s + D_FY];
-    st[s + D_HV] = 0.0;
-    st[s + D_FV] = 0.0;
-    st[s + D_GW] = 1.0;
-    st[s + D_GAIT] = GAIT_WALK as f32;
-    // The rest pose's centre of mass from its root, as the body starts.
-    var cr = vec3<f32>(0.0);
-    for (var b: i32 = 0; b < NB; b += 1) { cr += MASS[b] * 0.5 * (HEAD[b] + TAIL[b]); }
-    let coff = cr / TOTAL_MASS - HEAD[B_PELVIS];
-    st3(st, s + D_COFF, coff);
-    st3(st, s + D_COFF1, coff);
-    st3(st, s + D_COFF2, coff);
-    st[s + S_PLACED] = 1.0;
-}
+const GUARD_RATE: f32 = 20.0;          // /s the reach guard's hold eases at
+@knob const LEAP_AHEAD: f32 = 0.5;     // share of the hind feet's last stance before a leap they land ahead of the hips by
+@knob const SLOW_DUTY: f32 = 0.1;      // of the stride a hoof stays down longer, slower than a walk
+@knob const LAND_MIN: f32 = 0.3;       // of its length a landing hoof's mark may always be ahead of its girdle
+@knob const SPENT: f32 = 1.5;          // steps of the take-off's rise before its full length a pushing hind leg lets go
+@knob const FOLD_EXT: f32 = 0.97;      // of the fore leg's whole length: stretched that far its knee does not fold in a swing,
+@knob const FOLD_BAND: f32 = 0.35;     //   and this much shorter it folds as far as the gait asks
+@knob const TUCK_BACK: f32 = -0.3;     // m behind its hip a hind hoof is drawn up to in the flight
+@knob const LAND_EXT: f32 = 0.97;      // of its reach: how far a leg is let out coming down from a leap
+@knob const UNTUCK: f32 = 0.7;         // of its flight swing: when the hind leg begins to unfold for the landing
+@knob const LAG_FREE: f32 = 0.03;      // m the body may trail its path before the path's speed waits for it
+@knob const LAG_BAND: f32 = 0.08;      //   and the m over which it comes to wait (all but a fifth of its rate)
+@knob const GALLOP_ACC: f32 = 0.6;     // of the push a walk's feet give the path's speed, what a gallop's give it
+@knob const COFF_W: f32 = 20.0;        // 1/s the leap's centre follows its pose's own offset
+@knob const LAND_LEAD: f32 = 0.17;     // leg times from a leap's touchdown to the hoof's mid-stance
 
 @kernel @grid(1)
 fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state: rw_store<f32, 1>,
@@ -237,7 +93,7 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
     let s = c * STATE;
     let ii = c * INTENT;
     let init = state[s + S_PLACED] < 0.5;
-    if (init) { place(state, env, s); }
+    if (init) { place_deer(state, env, s); }
 
     // --- intent and actions -------------------------------------------------------
     var vdes = vec2<f32>(intent[ii + I_VEL_X], intent[ii + I_VEL_Z]);
@@ -249,8 +105,11 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
     var lie = approach(state[s + D_LIE], select_f(act == ACT_LIE, 1.0, 0.0), 0.42, dt);
     var graze = approach(state[s + D_GRAZE], select_f(act == ACT_GRAZE, 1.0, 0.0), 1.1, dt);
     let alert_want = select_f(act == ACT_STARTLE || act == ACT_ALERT, 1.0, 0.0);
-    var alert = state[s + D_ALERT];
-    if (alert_want > alert) { alert = approach(alert, 1.0, 9.0, dt); } else { alert = approach(alert, 0.0, 0.7, dt); }
+    // Smooth critically damped spring on alert (zero velocity corner at startle onset or top).
+    let aw = select_f(alert_want > state[s + D_ALERT], 14.0, 2.0);
+    var als = crit_step(vec2<f32>(state[s + D_ALERT], state[s + D_ALERT_V]), alert_want, aw, dt);
+    if (init) { als = vec2<f32>(alert_want, 0.0); }
+    let alert = clamp(als.x, 0.0, 1.0);
     var st_t = state[s + D_STARTLE_T];
     if (act == ACT_STARTLE && (state[s + D_PREV_ACT] as i32) != ACT_STARTLE) { st_t = 0.0; }
     if (st_t >= 0.0) { st_t += dt; }
@@ -258,6 +117,7 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
     state[s + D_LIE] = lie;
     state[s + D_GRAZE] = graze;
     state[s + D_ALERT] = alert;
+    state[s + D_ALERT_V] = als.y;
     state[s + D_STARTLE_T] = st_t;
     state[s + D_PREV_ACT] = act as f32;
     if (lie > 0.001 || act == ACT_LIE) { vdes = vec2<f32>(0.0); }
@@ -265,11 +125,6 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
     vdes *= graze_slow;
 
     // --- heading and speed ---------------------------------------------------------
-    // The individual wanders a little in speed (4%) and heading (0.04 rad)
-    // about what the intent asks, slowly (over a second or two): the
-    // variation from stride to stride comes from the body's own response to
-    // it, not from the strides themselves. It belongs to steady going: it
-    // fades out under 0.6 m/s and while the speed is still changing.
     var yaw = state[s + S_YAW];
     var speed = state[s + D_SPEED];
     var want = yaw;
@@ -277,12 +132,6 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
     let vary = VARY * smooth01(speed / 0.6) * smooth01(1.0 - abs(vd - speed) / 0.4);
     if (intent[ii + I_HEADING_MODE] > 0.5) { want = intent[ii + I_HEADING]; }
     else if (vd > 0.05) { want = atan2(vdes.x, vdes.y) + vary * 0.04 * noise1(clock / 1.7, seed, 2.0); }
-    // The turn's rate comes and goes within an angular acceleration (no
-    // corner in any joint's speed), and on the spot it is what the hooves
-    // can step round: the girdle turns about half the angle between its
-    // two hooves in a stride, or a hoof would land on its pair's.
-    // In a leap the body neither turns nor changes speed (in the air it
-    // cannot; the push is spent going up).
     let leaping = state[s + D_LEAP] > 0.5;
     let rate = mix(0.45, 2.1 / (1.0 + 0.3 * speed), smooth01(speed / 0.8));
     let w_t = clamp(3.0 * wrap_pi(want - yaw), -rate, rate) * select_f(leaping, 0.0, 1.0);
@@ -290,16 +139,8 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
     yaw = wrap_pi(yaw + omega * dt);
     let err = wrap_pi(want - yaw);
     let vt = vd * clamp(cos(err), 0.15, 1.0) * (1.0 + vary * 0.04 * noise1(clock / 1.3, seed, 1.0));
-    // The path asks only for what the feet can do: speed changes within the
-    // push they can give across their legs (creature::body MU_T).
     let dv_max = 0.8 * MU_T * 9.81;
-    // (And no faster than the body is following: galloping, its feet on
-    // the ground a fifth of the time, it gathers speed more slowly than
-    // that, and a path that drew away from it dragged it along at the end
-    // of its tether (creature::body STRAY), every bone jolted each step.
-    // The path waits for a body that has fallen behind it, or run ahead.)
     let lag_f = dot(ld3(state, s + D_LAG), vec3<f32>(sin(yaw), 0.0, cos(yaw)));
-    // (Its wander about a steady speed is too little to leave the body behind, and is not held up.)
     let wait = 1.0 - 0.8 * smooth01((select_f(vt > speed, -lag_f, lag_f) - LAG_FREE) / LAG_BAND) * smooth01((abs(vt - speed) - 0.3) / 0.5);
     let gallop_w = state[s + D_GW + 2];
     if (!leaping) { speed = approach(speed, vt, min(select_f(vt > speed, 1.6 + 0.6 * speed, 3.5), dv_max) * mix(1.0, GALLOP_ACC, gallop_w) * wait, dt); }
@@ -307,16 +148,9 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
     let left = vec3<f32>(cos(yaw), 0.0, -sin(yaw));
     var pos = ld3(state, s + S_POS);
     pos += fwd * speed * dt;
-    // The body turns about its middle (halfway between the girdles' swing
-    // joints), not its hips: the root is moved by what the turn swings it
-    // round that point, so in a tight circle or a turn on the spot both
-    // girdles step round and neither sweeps its hooves out from under it.
     let tz = turn_z();
     let yaw0 = state[s + S_YAW];
     pos += (vec3<f32>(sin(yaw0), 0.0, cos(yaw0)) - fwd) * tz;
-    // The feet go where the body is and as it moves (the body's centre and
-    // its velocity against the plan's, last step): a body that lags its path
-    // is stepped under, not braked by hooves planted ahead of it.
     let lag = ld3(state, s + D_LAG) * vec3<f32>(1.0, 0.0, 1.0) * LAYERS;
     let bpos = pos + lag;
     let vel = fwd * speed + ld3(state, s + D_LAGV) * vec3<f32>(1.0, 0.0, 1.0) * LAYERS;
@@ -326,39 +160,18 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
     let hip_t = terrain(env, pos.x, pos.z);
     if (lp.on) {
         lp.tau += dt;
-        // (The crouch starts from where the body is, not where the gait's
-        // plan had it: a galloping body rides under its plan, and a crouch
-        // begun from the plan's height took it that much deeper.)
         if (lp.tau >= lp.tcr && lp.tau - dt < lp.tcr) { lp.h0 = state[s + D_HY] + state[s + D_LAG + 1]; lp.v0 = state[s + D_HV] + state[s + D_LAGV + 1]; }
-        // (And the landing from where the body comes down: its hips have
-        // risen off the arc as the legs folded under it, and a landing
-        // planned from the arc let it fall that much further before any
-        // leg pushed, the fore feet gone again by then.)
         let fd_t = fore_down(lp);
-        // (The hips as the leap placed them and the body's own fall: the
-        // gait's plan, running on under the leap, stands still on the
-        // ground, and a landing begun at its speed was planned for a body
-        // that was not falling.)
         if (lp.tau >= fd_t && lp.tau - dt < fd_t) { lp.h0 = state[s + D_HY_O] + state[s + D_LAG + 1]; lp.v0 = state[s + D_BODY + 4]; }
-        // At take-off the flight is the body's own (creature::leap
-        // leap_takeoff); the feet come down when they reach the ground.
         let at_tc = lp.tau >= lp.tc && lp.tau - dt < lp.tc;
         let at_off = lp.tau >= 0.0 && lp.tau - dt < 0.0;
         if (at_off) {
             lp = leap_takeoff(lp, state[s + D_BODY + 1] - state[s + D_COFF1 + 1], state[s + D_BODY + 4]);
             state[s + D_BODY + 4] = lp.vy;
-            // (Along the path too: the push leaves the body a little faster
-            // or slower than the path asked, and in the air nothing changes
-            // that; a path kept at its own speed drew away from the body
-            // through the flight, and the landing was planned for a place
-            // the body was not at.)
             speed = max(speed + dot(ld3(state, s + D_LAGV), fwd), 0.5 * speed);
-            lp.fl = reach_time(env, lp, 1, pos, fwd, speed, q_y(yaw));
-            lp.hl = max(reach_time(env, lp, 0, pos, fwd, speed, q_y(yaw)), lp.fl + 0.25 * leg_time());
+            lp.fl = reach_time(env, lp, 1, pos, fwd, speed, q_y(yaw), REACH_HIND, REACH_FORE, LAND_LEAD);
+            lp.hl = max(reach_time(env, lp, 0, pos, fwd, speed, q_y(yaw), REACH_HIND, REACH_FORE, LAND_LEAD), lp.fl + 0.25 * leg_time());
         }
-        // From the hind feet's landing the fore feet in the air are in the
-        // leap's flight (they fold up through the push); at take-off every
-        // hoof in the air is retimed to its landing.
         for (var l: i32 = 0; l < 4; l += 1) {
             let k = s + D_LEG + l * LEG_REC;
             if (state[k + L_PLANT] < 0.5 && (at_off || (at_tc && LEG_HIND[l] == 0))) {
@@ -380,15 +193,8 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
     gw.y = approach(gw.y, select_f(gait == GAIT_TROT, 1.0, 0.0), 2.2, dt);
     gw.z = approach(gw.z, select_f(gait == GAIT_GALLOP, 1.0, 0.0), 2.2, dt);
     gw = gw / max(gw.x + gw.y + gw.z, 1e-4);
-    // A turn steps as fast as its hooves go round, and quicker on the spot,
-    // where the strides are short.
     let veff = max(speed, abs(omega) * mix(1.5, 0.9, smooth01(speed / 0.8)));
     let freq = gw.x * (0.62 + 0.45 * veff) + gw.y * (1.55 + 0.12 * veff) + gw.z * (2.0 + 0.06 * veff);
-    // The clock's duty: the measured one is longer by the eased ends of a
-    // swing's lift (deer::legs swing_bump), so the clock's is set that much
-    // shorter.
-    // Slower than a walk (a turn on the spot, a first step) the hooves stay
-    // down longer, so three bear the body at every moment.
     let duty = gw.x * (clamp(0.67 - 0.05 * veff, 0.57, 0.67) + SLOW_DUTY * (1.0 - smooth01(veff / 1.1))) + gw.y * 0.39 + gw.z * 0.22;
     let lift_h = gw.x * vec2<f32>(0.065, 0.085) + gw.y * vec2<f32>(0.10, 0.14) + gw.z * vec2<f32>(0.14, 0.18);
     let carpus = gw.x * 1.3 + gw.y * 1.75 + gw.z * 2.0;
@@ -400,11 +206,6 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
     var moving = vd > 0.06 || speed > 0.06 || abs(err) > 0.12;
     if (was_moving) { moving = moving || speed > 0.03 || vd > 0.03 || abs(err) > 0.05; }
     if (lie > 0.001) { moving = false; }
-    // Going or not, through a spring: what belongs to going (the lean over
-    // the carrying hooves, the hooves' roll, the tail's swish, the spine's
-    // bend, the breath's stillness) comes and goes with it. (Switched with
-    // `moving`, the plan jumped 8 cm, the breath 8 mm and a rolled hoof
-    // thirty degrees in the step the deer set off or came to rest.)
     var go_s = crit_step(vec2<f32>(state[s + D_STILL], state[s + D_STILL_V]), select_f(moving, 1.0, 0.0), 7.0, dt);
     if (init) { go_s = vec2<f32>(0.0); }
     state[s + D_STILL] = go_s.x; state[s + D_STILL_V] = go_s.y;
@@ -413,64 +214,38 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
     let pivot = (1.0 - smooth01(speed / 0.3)) * smooth01(abs(omega) / 0.15);
     for (var l: i32 = 0; l < 4; l += 1) {
         offs[l] = off_mix(OFF_WALK, OFF_TROT, OFF_GALLOP, gw, l);
-        // Wheeling on the spot it steps in diagonal pairs, as it trots:
-        // its hooves go nowhere ahead to make the walk's triangles under
-        // it, and with one hoof up the three left do not hold its weight;
-        // a diagonal pair does, the weight on the line between them.
         offs[l] += pivot * phase_diff(offs[l], OFF_TROT[l]);
     }
-    // A stumble: the right hind's beat jumps every other stride.
     let cyc = floor(phase);
     if (cyc - 2.0 * floor(cyc * 0.5) > 0.5) { offs[3] += FAULT_STUMBLE; }
     if (moving && !was_moving) {
-        // Start with the left hind's lift.
         phase = floor(phase) + 1.0 + offs[0] + duty;
         for (var l: i32 = 0; l < 4; l += 1) {
-            let k = s + D_LEG + l * LEG_REC;
-            state[k + L_ARMED] = 1.0;   // a leg the clock has in swing lifts now
+            state[s + D_LEG + l * LEG_REC + L_ARMED] = 1.0;
         }
     }
-    // A leap: over a log in the path (from a gallop), or stride after stride
-    // when bounding. Its take-off is the clock's right-hind lift (the hind
-    // feet's last stance ending), the clock run a little faster or slower
-    // over the strides before so that beat comes where the arc's top will
-    // be over the log; the hips' take-off height is what the hind leg
-    // reaches trailing by half its stance. A bound begins only while the
-    // hind feet's last stance is still ahead (its whole push, and a crouch
-    // before it).
     if (!lp.on && !init && moving && gw.z > 0.7 && lie < 0.001) {
-        var c = fract01(duty - (phase - offs[3]));
-        if (c < 0.05) { c += 1.0; }
+        var c_rem = fract01(duty - (phase - offs[3]));
+        if (c_rem < 0.05) { c_rem += 1.0; }
         let trail = 0.5 * speed * duty / freq;
         let h_take = hip_t + sqrt(max(REACH_HIND * REACH_HIND - trail * trail, 0.1)) + HEAD[B_PELVIS].y - leg_pivot(0).y - 0.02;
         let ob = obstacle_ahead(env, pos.x, pos.z, vec2<f32>(fwd.x, fwd.z));
-        // The hind feet's last stance: from the left hind's landing to the
-        // right hind's lift, held longer for the push (creature::leap PUSH_T).
         let dc = duty + fract01(offs[3] - offs[0]);
         let held = max(PUSH_T * leg_time() - dc / freq, 0.0);
         let dist = ob.x - leap_lead(flight_time(leap_rise(ob.y, hip_t, h_take)), speed, turn_z()) - speed * held;
-        var st_c = vec2<f32>(0.0, c);
+        var st_c = vec2<f32>(0.0, c_rem);
         var obst = ob.y;
-        if (ob.y > 0.0 && dist < speed * (c + 3.0) / freq) { st_c = leap_stride(c, dist, speed, freq); }
-        else if (act == ACT_BOUND && lp.since > 0.05 && c > dc + 0.25 && ob.x > 4.0 * speed / freq) { st_c.x = 1.0; obst = 0.0; }
+        if (ob.y > 0.0 && dist < speed * (c_rem + 3.0) / freq) { st_c = leap_stride(c_rem, dist, speed, freq); }
+        else if (act == ACT_BOUND && lp.since > 0.05 && c_rem > dc + 0.25 && ob.x > 4.0 * speed / freq) { st_c.x = 1.0; obst = 0.0; }
         if (st_c.x > 0.0) {
             lp = leap_begin(lp, obst, hip_t, state[s + D_HY] - hip_t, h_take, state[s + D_HY] + state[s + D_LAG + 1], state[s + D_HV] + state[s + D_LAGV + 1], st_c.y, dc, freq, st_c.x);
             for (var l: i32 = 0; l < 4; l += 1) { state[s + D_LEG + l * LEG_REC + L_LEAP] = 0.0; }
             in_leap = true;
         }
     }
-    // The clock's own rate (a leap's run-up and push run it slower or faster).
     let cfreq = freq * select_f(in_leap && lp.tau < 0.0, select_f(lp.tau < lp.tc, lp.rate, lp.prate), 1.0);
     if (moving) { phase += cfreq * dt; }
-    // Out of a leap the gait takes the legs back from the hind feet's
-    // landing: the right hind (down last) at the start of its stance, every
-    // leg armed, so the fore feet, down longest, lift first. (Their landing
-    // itself, not its planned time: a hoof that could not yet reach the
-    // ground then is still in the leap's swing, and comes down as one.)
     let hind_air = state[s + D_LEG + L_PLANT] < 0.5 || state[s + D_LEG + 3 * LEG_REC + L_PLANT] < 0.5;
-    // (And not before the landing has stopped the body's fall: the gait's
-    // next stride lifts every hoof for its flight, and a body still coming
-    // down fell on through it to the end of its legs' fold.)
     let sunk = lp.tau >= fore_down(lp) + sink_time(lp, hip_t + lp.h_stand);
     if (in_leap && lp.tau >= legs_done(lp) && sunk && (!hind_air || lp.tau >= legs_done(lp) + 0.25)) {
         lp.legs_back = true;
@@ -488,6 +263,7 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
     probe(state, s + PROBE, 8, select_f(lp.on, lp.v0, 0.0));
     probe(state, s + PROBE, 9, select_f(lp.on, lp.h0, 0.0));
     probe(state, s + PROBE, 10, select_f(lp.on, fore_down(lp), 0.0));
+
     // --- feet --------------------------------------------------------------------------
     let qyaw = q_y(yaw);
     var any_swing = false;
@@ -509,7 +285,6 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
     var toes: array<vec3<f32>, 4>;
     var left_t: array<f32, 4>;
     var swing_sum_hind: f32 = 0.0;
-    var swing_max: f32 = 0.0;
     var sway: f32 = 0.0;
     var hip_drop: f32 = 0.0;
     var nod: f32 = 0.0;
@@ -530,32 +305,15 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
             if (FAULT_SLIP > 0.0) { toe -= vel * (FAULT_SLIP * dt); }
             if (ph < duty) { state[k + L_ARMED] = 1.0; }
             let stray = length(vec2<f32>(toe.x - home.x, toe.z - home.z));
-            // A hoof the leg no longer reaches from its girdle (as it stood
-            // last step: a long stance up a slope) steps too, rather than the
-            // leg hanging short of it. (The girdle with the body's rise on
-            // it: a galloping body lifts off a hoof its legs still reach
-            // from where the plan has them.)
             let top = leg_top(l, bpos, qyaw, state[s + D_HY_O], state[s + D_FY_O]) + vec3<f32>(0.0, max(state[s + D_LAG + 1], 0.0) * LAYERS, 0.0);
             let over = length(toe - top) > select_f(hind, REACH_HIND, REACH_FORE) || (state[s + D_SHORT + l] > SHORT_LET && !init);
             let lev = leap_leg(lp, hind, side01);
-            // (A hind foot down a little before its time is there for the
-            // push too: let go again for a leg folded short in the crouch, it
-            // left the body to fall through the push it was to give.)
             let early = lp.tau >= lp.tc - 0.1 && state[k + L_SINCE] < lp.tau - (lp.tc - 0.1);
             if (in_leap && ((hind && (lp.tau >= lp.tc - 0.02 || early)) || lp.tau >= lev.z)) {
-                // In a leap the hind feet stay down from their last landing
-                // until the take-off (or, in its last moments, their legs
-                // straight), and every foot still down leaves for the flight at its time.
-                // (Straight a step ahead: the body rises a step's worth of
-                // the take-off's speed before a leg found at its length lets go.)
                 let spent = length(toe - top) > REACH_HIND - SPENT * lp.vy * dt;
                 if (state[k + L_LEAP] < 2.5 && (lp.tau >= lev.z || (hind && (over || spent) && lp.tau > -0.05))) {
                     lift = true; lift_t = lev.w - lp.tau; kind = 0.0; state[k + L_LEAP] = 3.0;
                 } else if (!hind && state[k + L_LEAP] > 3.5 && state[k + L_LEAP] < 4.5 && over) {
-                    // A fore hoof down from the flight steps on once the body
-                    // has run past its reach (the hind feet take the landing
-                    // from it), as a stride's step: held to the hand-back, it
-                    // was dragged along behind.
                     lift = true; kind = 0.0; state[k + L_LEAP] = 5.0;
                     lift_t = clamp(0.6 * (1.0 - duty) / max(cfreq, 0.1), 0.12, 0.3);
                 }
@@ -564,10 +322,6 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
                 lift_t = clamp((1.0 - ph) / max(cfreq, 0.1), 0.12, 0.6);
                 kind = 0.0;
             } else if (moving && (stray > REACH_TRIG || over)) {
-                // Out of reach early: step now, but land on the clock's beat so
-                // the leg falls back into the gait instead of keeping the lead
-                // (in a gait a stride's step, lifted and folded like one; in a
-                // leap's gather, crouched too low to fold, a short shuffle).
                 lift = true; kind = select_f(in_leap, 1.0, 0.0);
                 lift_t = clamp((1.0 - ph) / max(cfreq, 0.1), min(0.2, 0.5 * (1.0 - duty) / max(cfreq, 0.1)), 0.5);
             } else if (!moving && !any_swing && worst == l) {
@@ -581,7 +335,6 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
                 state[k + L_U] = 0.0;
                 state[k + L_T] = lift_t;
                 state[k + L_KIND] = kind;
-                // The roll onto its toe it lifts with (a leap's push ends fully rolled).
                 state[k + L_SINCE] = select_f(in_leap && hind, 1.0, hoof_roll(ph, duty, roll_w) * gom);
             }
         }
@@ -592,37 +345,18 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
             var target = home;
             let leap_step = in_leap && state[k + L_LEAP] > 2.5 && state[k + L_LEAP] < 4.5;
             if (leap_step) {
-                // The flight's swing lands a little short of where the hoof
-                // will be under its home.
                 let t_ref = leap_leg(lp, hind, side01).w + LAND_LEAD * leg_time();
                 target = bpos + fwd * (speed * (t_ref - lp.tau)) + q_rot(qyaw, home_off);
             } else if (moving || gom > 1e-3) {
-                // Half the coming stance ahead: a hind foot's last stance
-                // before a leap (the swing landing at tc) lasts to the take-off.
                 var stance_t = duty / max(cfreq, 0.1);
-                // (That one further ahead than half: the push is strongest
-                // late in it, and from a hoof behind the hips it throws the
-                // body forward instead of up.)
                 var ahead_s: f32 = 0.5;
-                // (Until the take-off, whenever in the push it comes down: a
-                // mark that fell back to the gait's as the push began moved
-                // a quarter of a metre under a hoof on its way to it.)
                 if (in_leap && hind && lp.tau < 0.0 && lp.tau + (1.0 - u) * tt > lp.tc - 0.05) { stance_t = max(-(lp.tau + (1.0 - u) * tt), 0.0); ahead_s = LEAP_AHEAD; }
                 let lead = (1.0 - u) * tt + ahead_s * stance_t;
                 let yl = yaw + omega * lead;
                 target = bpos + vel * lead + (fwd - vec3<f32>(sin(yl), 0.0, cos(yl))) * tz + q_rot(q_y(yl), home_off);
-                // No further ahead than the leg will reach from where its
-                // girdle will be when it lands: a mark past that is one the
-                // hoof never gets to, carried along short of it at the
-                // body's speed until it is stamped down.
                 let top_l = leg_top(l, bpos, qyaw, state[s + D_HY_O], state[s + D_FY_O]) + vel * ((1.0 - u) * tt);
                 let rl = select_f(hind, REACH_HIND, REACH_FORE);
                 let dyl = top_l.y + max(state[s + D_LAG + 1], 0.0) * LAYERS - height(env, target.x, target.z);
-                // (Walking it steps out further: its stance is most of the
-                // stride, and the body, no faster than the leg swings, does
-                // not outrun it.)
-                // (Never nearer than half its length: down a slope the ground
-                // ahead lies further below the girdle than the leg is long.)
                 let hml = max(mix(LAND_REACH, LAND_WALK, gw.x) * sqrt(max(rl * rl - dyl * dyl, 0.0)), LAND_MIN * rl);
                 let tv = vec2<f32>(target.x - top_l.x, target.z - top_l.z);
                 let tl = length(tv);
@@ -630,9 +364,6 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
                     target.x = top_l.x + tv.x * (hml / tl);
                     target.z = top_l.z + tv.y * (hml / tl);
                 }
-                // (A hoof in the air as the deer comes to rest is brought
-                // round to its home as the going runs out: its mark went
-                // there in one step, and the leg with it, twelve degrees.)
                 if (!moving) { target = mix(home, target, gom); }
             }
             target.y = height(env, target.x, target.z);
@@ -640,20 +371,12 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
             st3(state, k + L_TO, target);
             u = u + dt / tt;
             var lifted = ld3(state, k + L_FROM);
-            // (A leap's swing is held from the girdle where the body has it,
-            // which rises off its plan through the push.)
             let top = leg_top(l, bpos, qyaw, state[s + D_HY_O], state[s + D_FY_O]) + vec3<f32>(0.0, select_f(leap_step, state[s + D_LAG + 1] * LAYERS, 0.0), 0.0);
-            // (And swung from where the hoof left the ground as the leg has
-            // it, carried with its girdle: left behind in the world, the
-            // body at a gallop's speed drew the leg out to its joints' ends
-            // in a few steps, and the fold under the body then snapped it
-            // forward from there.)
             if (leap_step && !init) {
                 lifted += top - ld3(state, s + D_TOPO + 3 * l);
                 st3(state, k + L_FROM, lifted);
             }
             let rmax = select_f(hind, REACH_HIND, REACH_FORE);
-            // A leap's hoof lands once it reaches the ground from the falling body.
             var landed = u >= 1.0;
             if (landed && leap_step && length(target - top) > rmax) { landed = false; u = 0.999; }
             u = min(u, 1.0);
@@ -662,11 +385,6 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
             if (state[k + L_KIND] > 0.5 && state[k + L_KIND] < 1.5) { hgt = 0.05; }
             var to = target;
             if (leap_step) {
-                // The flight's swing ends where the leg will hold its mark
-                // from the girdle as it comes down, near its full length:
-                // toward the mark itself, metres ahead in the world, the
-                // leg was thrown out straight as soon as it unfolded, and
-                // hung there until the ground came.
                 let rem = (1.0 - min(u, 1.0)) * tt;
                 let hv = vec2<f32>(target.x - top.x - vel.x * rem, target.z - top.z - vel.z * rem);
                 let rr = LAND_EXT * rmax;
@@ -677,20 +395,9 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
             toe = vec3<f32>(mix(lifted.x, to.x, e), mix(lifted.y, to.y, e), mix(lifted.z, to.z, e));
             toe.y += hgt * swing_bump(u);
             if (leap_step) {
-                // In the air the leg folds up under the body: over the middle
-                // of the flight's swing the hoof is drawn toward its girdle.
                 let tuck = top + q_rot(qyaw, vec3<f32>(0.0, -select_f(hind, TUCK_HIND * REACH_HIND, TUCK_FORE * REACH_FORE), select_f(hind, -TUCK_BACK, -0.04)));
-                // (The hind hooves, behind the hips, are the last thing over
-                // a log: they stay drawn up until they are past it.)
                 toe = mix(toe, tuck, smooth01(u / 0.3) * (1.0 - smooth01((u - select_f(hind, UNTUCK, 0.55)) / select_f(hind, 0.97 - UNTUCK, 0.4))));
             }
-            // A swinging hoof is carried within the leg's reach of its
-            // girdle (as it stood last step): one ahead of what the leg
-            // can hold hangs back over its mark instead of being dragged
-            // through the ground by a stretched leg, eased in so it has
-            // no corner, and lands where it is held.
-            // In the flight the leg reaches toward its landing (its hoof held
-            // on the line to it), rather than hanging under its girdle.
             if (leap_step) {
                 let rv = toe - top;
                 let rl = length(rv);
@@ -701,29 +408,13 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
             let hv2 = vec2<f32>(toe.x - top.x, toe.z - top.z);
             let hl = length(hv2);
             if (hl > 1e-4) {
-                // (Taken up over the swing's first fifth: a hoof leaves the
-                // ground at the end of its leg's reach, inside the cap's
-                // band, and capped from its first step in the air it jumped
-                // 7 mm forward in that step, at every hind lift.)
-                // (Half as wide again off a walk: a galloping hind hoof
-                // swung out to its leg's reach at 4 cm a step and stopped
-                // there in two, the hock with it.)
                 let cap_n = soft_cap(hl, hmax, select_f(in_leap, 0.01, CAP_BAND * mix(1.5, 1.0, gw.x)));
-                // (At a walk's pace: faster, it is capped from the first,
-                // for there the body outruns a hoof left a moment longer,
-                // shuts its leg's joints and draws it through the ground.)
-                // (What the cap would take from it in its first step in the
-                // air is taken over the swing's first quarter instead: a hoof
-                // lifting at speed from the end of its reach was drawn 30 mm
-                // in under the cap in that step.)
                 if (state[k + L_U] <= 0.0) { state[s + D_CAPOFF + l] = max(hl - cap_n, 0.0); }
                 let cap_e = min(hl, cap_n + state[s + D_CAPOFF + l] * (1.0 - smooth01(u / 0.25)));
                 let hn = mix(hl, cap_e, select_f(leap_step, 1.0, max(smooth01(u / 0.2), smooth01((speed - 1.5) / 1.5))));
                 toe.x = top.x + hv2.x * (hn / hl);
                 toe.z = top.z + hv2.y * (hn / hl);
             }
-            // Never through the ground under it (a hoof held back over
-            // ground that falls away ahead, or a bump in its path).
             var gy = height(env, toe.x, toe.z);
             if (l == 1) { gy -= FAULT_SINK; }
             toe.y = max(toe.y, gy);
@@ -740,22 +431,14 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
         st3(state, s + D_TOPO + 3 * l, leg_top(l, bpos, qyaw, state[s + D_HY_O], state[s + D_FY_O]) + vec3<f32>(0.0, state[s + D_LAG + 1] * LAYERS, 0.0));
         state[k + L_PLANT] = select_f(planted, 1.0, 0.0);
         st3(state, k + L_TOE, toe);
-        // How long until this hoof lifts (for the body's loading).
         var lt: f32 = 1e3;
         if (in_leap && hind && lp.tau >= lp.tc - 0.02) {
             if (planted && state[k + L_LEAP] < 2.5) { lt = max(leap_leg(lp, hind, side01).z - lp.tau, 0.0); }
         } else if (planted && in_leap && state[k + L_LEAP] > 3.5) {
-            // Down from the flight: it bears the landing until the gait
-            // takes the legs back (the fore feet lift then, the hind stand a
-            // stance more). By the gait's clock, which ran on through the
-            // leap, it was already due up, and bore nothing.
             lt = max(max(legs_done(lp), fore_down(lp) + sink_time(lp, hip_t + lp.h_stand)) - lp.tau, 0.0) + select_f(hind, duty / max(cfreq, 0.1), 0.02);
         } else if (planted && gom > 1e-3) {
             if (state[k + L_ARMED] > 0.5) { lt = max(duty - stance_phase(ph, duty), 0.0) / max(cfreq, 0.1); }
             else { lt = (1.0 + duty - ph) / max(cfreq, 0.1); }
-            // (Coming to rest it runs out as the going does: a hoof about to
-            // lift as the deer stopped bore nothing, then its full share the
-            // step after, and the body jumped 11 mm onto it.)
             lt += 0.3 * (1.0 - gom) / gom;
         }
         left_t[l] = lt;
@@ -766,7 +449,6 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
         feet[l] = toe;
         if (!planted) { feet[l] = ld3(state, k + L_TO); }
         if (hind) { swing_sum_hind += sh; hip_drop += LEG_SIDE[l] * sh; }
-        swing_max = max(swing_max, sh);
         sway -= LEG_SIDE[l] * sh;
         if (!hind && planted && moving) { let sn = sin(PI * clamp(ph / max(duty, 0.1) * 2.0, 0.0, 1.0)); nod += sn * sn; }
     }
@@ -779,57 +461,16 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
     let plane_c = fit_plane4(feet[0], feet[1], feet[2], feet[3], vec2<f32>(pos.x, pos.z));
     let hind_ground = 0.5 * (feet[0].y + feet[3].y);
     let fore_ground = 0.5 * (feet[1].y + feet[2].y);
-    // The walk vaults over its legs (lowest while a hind swings); a trot's
-    // and a gallop's rise and fall are the body's own, from its flights and
-    // pushes (creature::body), so the plan holds them level.
-    var bob_h = -0.012 * swing_sum_hind * gw.x;
-    var bob_f: f32 = 0.0;
-    // Startle: a crouch, then a lift as it gathers.
+    let bob_h = -0.012 * swing_sum_hind * gw.x;
+    let bob_f: f32 = 0.0;
+    // Startle crouch: quintic bump (zero slope at onset and recovery) + gather lift.
     var crouch: f32 = 0.0;
-    if (st_t >= 0.0) { crouch = -0.05 * sin(PI * clamp(st_t / 0.3, 0.0, 1.0)) + 0.02 * smooth01((st_t - 0.25) / 0.2) * (1.0 - smooth01((st_t - 1.2) / 0.8)); }
+    if (st_t >= 0.0) { crouch = -0.05 * bump(clamp(st_t / 0.34, 0.0, 1.0), 0.42, 0.58) + 0.02 * smooth01((st_t - 0.25) / 0.2) * (1.0 - smooth01((st_t - 1.2) / 0.8)); }
     let breath = 0.004 * sin(TAU * 0.33 * clock + seed);
-    // Reach: neither girdle may stand higher than its planted (or landing)
-    // hooves can hold it, so a long stride lowers the body instead of
-    // pulling the hoof off its mark.
-    var cap_h: f32 = 1e4;
-    var cap_f: f32 = 1e4;
-    for (var l: i32 = 0; l < 4; l += 1) {
-        let k = s + D_LEG + l * LEG_REC;
-        // A hoof holds the body down the more surely the nearer it is to
-        // landing or the further from lifting: its limit comes in over the
-        // last part of its swing and goes over the last of its stance, so
-        // the ceiling moves without a jump as hooves come and go.
-        var w = smooth01((state[k + L_U] - 0.5) / 0.4);
-        if (state[k + L_PLANT] > 0.5) { w = smooth01(left_t[l] / 0.12); }
-        if (w <= 0.0) { continue; }
-        // (Its last sixth runs out without bound: a body the fading limit
-        // still held as its hoof left, the last one down before a flight,
-        // sprang 3 mm up in the step it was let go.)
-        let slack = (1.0 - w) * CAP_FADE + CAP_FADE * max(0.15 / max(w, 1e-3) - 1.0, 0.0);
-        let hind = LEG_HIND[l] == 1;
-        // The fore leg swings about the middle of its shoulder blade (the
-        // blade turns with it), the hind about the femur head.
-        let b0 = LEG_B0[l];
-        let piv = leg_pivot(l);
-        var rmax = select_f(hind, REACH_HIND, REACH_FORE);
-        let top = bpos + q_rot(qyaw, piv - HEAD[B_PELVIS]);
-        let hd = length(vec2<f32>(feet[l].x - top.x, feet[l].z - top.z));
-        let ymax = feet[l].y + sqrt(max(rmax * rmax - hd * hd, 0.49 * rmax * rmax));
-        if (hind) { cap_h = smin(cap_h, ymax + HEAD[B_PELVIS].y - piv.y + slack, CAP_SOFT); }
-        else {
-            var c = ymax + HEAD[B_SCAPL].y - piv.y + slack;
-            // And the whole leg straight from the blade's top: a trailing
-            // fore leg runs out of length there before its swing pivot says so.
-            let top0 = bpos + q_rot(qyaw, HEAD[b0] - HEAD[B_PELVIS]);
-            let hd0 = length(vec2<f32>(feet[l].x - top0.x, feet[l].z - top0.z));
-            c = smin(c, feet[l].y + sqrt(max(REACH_FORE_TOP * REACH_FORE_TOP - hd0 * hd0, 0.49 * REACH_FORE_TOP * REACH_FORE_TOP)) + HEAD[B_SCAPL].y - HEAD[b0].y + slack, CAP_SOFT);
-            cap_f = smin(cap_f, c, CAP_SOFT);
-        }
-    }
-    // A walk is planned at what its hooves can hold (the caps); a run at a
-    // posture its stance can hold throughout: each girdle lowered to where
-    // its leg still reaches the hoof at the ends of a stance (half the
-    // stance's travel ahead and behind), the caps then only a ceiling.
+    let caps = ceiling_caps(state, s, feet, left_t, bpos, qyaw, REACH_HIND, REACH_FORE, REACH_FORE_TOP);
+    let cap_h = caps.x;
+    let cap_f = caps.y;
+
     let half = 0.5 * speed * duty / max(freq, 0.1);
     let run_h = HEAD[B_PELVIS].y - (REACH_HIND - sqrt(max(REACH_HIND * REACH_HIND - half * half, 0.25)));
     let run_f = HEAD[B_SCAPL].y - (REACH_FORE - sqrt(max(REACH_FORE * REACH_FORE - half * half, 0.25)));
@@ -841,15 +482,9 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
     let wh: f32 = 16.0;
     let hs = crit_step(vec2<f32>(state[s + D_HY], state[s + D_HV]), hy_t, wh, dt);
     let fs = crit_step(vec2<f32>(state[s + D_FY], state[s + D_FV]), fy_t, wh, dt);
-    var hy = hs.x;
-    var hv = hs.y;
-    var fy = fs.x;
-    var fv = fs.y;
-    // The ceilings the body's own rise is held under, through the same
-    // spring as the plan that rides them: a hoof's limit coming or going
-    // moves them as it moves the plan, smoothly, and the body meets them
-    // where the plan is (no higher than CAP_FADE over standing with no hoof
-    // to hold them).
+    var hy = hs.x; var hv = hs.y;
+    var fy = fs.x; var fv = fs.y;
+
     let ch_t = min(cap_h, hind_ground + HEAD[B_PELVIS].y + CAP_FADE);
     let cf_t = min(cap_f, fore_ground + HEAD[B_SCAPL].y + CAP_FADE);
     var chs = crit_step(vec2<f32>(state[s + D_CAP_H], state[s + D_CAP_HV]), ch_t, wh, dt);
@@ -857,11 +492,8 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
     if (init) { chs = vec2<f32>(ch_t, 0.0); cfs = vec2<f32>(cf_t, 0.0); }
     state[s + D_CAP_H] = chs.x; state[s + D_CAP_HV] = chs.y;
     state[s + D_CAP_F] = cfs.x; state[s + D_CAP_FV] = cfs.y;
-    let ch = chs.x;
-    let cf = cfs.x;
-    // In a leap the hips follow its plan and the trunk its pitch, blended in
-    // over its first moments and out over its last (the springs above run on
-    // under it, so the gait's plan is there to hand back to).
+    let ch = chs.x; let cf = cfs.x;
+
     let hy_sp = hy; let hv_sp = hv;
     let fy_sp = fy; let fv_sp = fv;
     var leap_w: f32 = 0.0;
@@ -880,24 +512,15 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
     }
     let pitch = atan2((fy - HEAD[B_SCAPL].y) - (hy - HEAD[B_PELVIS].y), WITHERS_Z);
     let grad_x = dot(vec2<f32>(plane_c.y, plane_c.z), vec2<f32>(left.x, left.z));
-    var roll = damp(state[s + D_ROLL], clamp(0.3 * atan(grad_x), -0.1, 0.1), 6.0, dt);
+    let roll = damp(state[s + D_ROLL], clamp(0.3 * atan(grad_x), -0.1, 0.1), 6.0, dt);
     state[s + D_ROLL] = roll;
-    // The trunk's sway over the supporting hooves and its roll with each hind step.
     let mv = select_f(moving, 1.0, 0.0) * smooth01(speed / 0.6);
     let sway_v = left * (0.012 * sway * gw.x);
-    // Stepping in place, the body leans over the hooves that carry it (deer::legs lean_over).
     var hold4: array<vec3<f32>, 4>;
     for (var l: i32 = 0; l < 4; l += 1) {
         let k = s + D_LEG + l * LEG_REC;
         hold4[l] = vec3<f32>(state[k + L_PLANT], state[k + L_SINCE], left_t[l]);
     }
-    // (Leaning over the carrying hooves as it slows comes in through a
-    // spring: by the speed alone, a deer braking to a halt swept its plan
-    // 8 cm back in a tenth of a second, the body could not follow, and a
-    // hoof in the air, placed by the body's speed against that plan, was
-    // thrown ahead and snatched back. And not setting off, when it is asked
-    // for more than a slow walk: it leaned for the tenth of a second it took
-    // to gather that speed, and was thrown off it again.)
     var ls = crit_step(vec2<f32>(state[s + D_LEAN_S], state[s + D_LEAN_S + 1]), select_f(moving, (1.0 - smooth01(speed / 0.25)) * (1.0 - smooth01(vd / 0.5)), 0.0), 5.0, dt);
     if (init) { ls = vec2<f32>(0.0); }
     state[s + D_LEAN_S] = ls.x; state[s + D_LEAN_S + 1] = ls.y;
@@ -906,21 +529,12 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
     let roll_g = mv * (gw.x + 0.6 * gw.y) * 0.014 * sin(TAU * (phase - 0.1)) * (1.0 - lie);
 
     // --- the body: its centre of mass as the feet move it (creature::body) ------------------
-    // The plan's centre is its root plus the pose's centre of mass from the
-    // root, slowly averaged (the legs' swing moves the trunk against it, not
-    // the centre); the bones go where this step's pose puts the centre at the
-    // body's (last two steps' offsets carried on).
-    let coff_m = q_rot(qyaw, ld3(state, s + D_COFF));
     let coff_p = q_rot(qyaw, 2.0 * ld3(state, s + D_COFF1) - ld3(state, s + D_COFF2));
     var sup: Support;
     for (var l: i32 = 0; l < 4; l += 1) {
         let k = s + D_LEG + l * LEG_REC;
         let hind = LEG_HIND[l] == 1;
         let piv = leg_pivot(l);
-        // (The joint where the body has it, last step: under a body fallen
-        // below its plan the legs are folded, not straight, and can push;
-        // taken at the plan's height they could not, and a hard landing
-        // fell on through.)
         let py = select_f(hind, hy - HEAD[B_PELVIS].y, fy - HEAD[B_SCAPL].y) + state[s + D_LAG + 1];
         var f: Foot;
         f.at = toes[l];
@@ -933,15 +547,7 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
     }
     sup.effort = leap_effort(lp);
     sup.lead = leap_follow(lp);
-    // Trotting its legs are springs: the body sinks through each stance
-    // and is thrown up out of it.
     sup.spring = TROT_SPRING * gw.y;
-    // (A leap is planned at the hips, for what the hind legs reach: its
-    // centre is the plan's root plus the offset as the leap's pose has it,
-    // so the trunk pitching up through the push does not press the hips
-    // down under it, nor the legs stretched out behind lift them over it:
-    // the mean offset turned by the pitch the leap gives the trunk, and
-    // what the pose's own stands over that, smoothed.)
     let pitch_sp = atan2((fy_sp - HEAD[B_SCAPL].y) - (hy_sp - HEAD[B_PELVIS].y), WITHERS_Z);
     let turned = q_rot(q_x(-(pitch - pitch_sp)), ld3(state, s + D_COFF));
     var cr = crit_step(vec2<f32>(state[s + D_COFFR], state[s + D_COFFR + 1]), state[s + D_COFF1 + 1] - turned.y, COFF_W, dt);
@@ -949,38 +555,16 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
     state[s + D_COFFR] = cr.x; state[s + D_COFFR + 1] = cr.y;
     let coff_l = q_rot(qyaw, turned + vec3<f32>(0.0, cr.x * leap_w, 0.0));
     let bd = body_step(state, s + D_BODY, plan + coff_l, 1.0 + 3.0 * gw.x, sup, init, dt);
-    // (Lying, and lying down or getting up, the body rests on the ground and
-    // folded legs, not on hooves: it goes where the plan has it.)
     probe(state, s + PROBE, 3, bd.com.y);
     probe(state, s + PROBE, 4, plan.y + coff_l.y);
     probe(state, s + PROBE, 5, bd.acc.y / 9.81);
     probe(state, s + PROBE, 6, bd.load);
     probe(state, s + PROBE, 7, coff_p.y);
     var shift = (bd.com - coff_p - plan) * LAYERS * (1.0 - smooth01(lie * 3.0));
-    // Within the legs' reach: no higher than the planted hooves can hold the
-    // girdles: the body's rise and that room joined by a soft minimum, so
-    // the body meets the ceiling, rides it and leaves it without a corner
-    // (a walk's plan rides it all stride long); a body that runs well past it
-    // is put back.
-    // (Galloping it may rise GALLOP_FREE past that: held to it, the push of
-    // each stride was cut short and the body drawn down faster than it
-    // could fall. The reach guard below still keeps the hooves' legs within
-    // their length.)
-    // (Its floor at the plan is eased for a body coming down onto it from
-    // above, by as much as it is above: riding the ceiling down as a
-    // stretched hind leg left, out of a gallop into a trot, it stopped in
-    // one step where the ceiling met a hard floor. A walk's body, on the
-    // ceiling all stride, is not above it and keeps the floor as it was.)
+
     let ceil_y = smin(ch - hy, cf - fy, CAP_SOFT);
-    // (Levelling off at 3 cm without a corner: clamped there, the room it
-    // gives stopped growing in the step the body passed 3 cm, and the hips,
-    // rising under it at 3 mm a step, stopped with it.)
     let above0 = max(shift.y - GALLOP_FREE * gw.z, 0.0);
     let above = soft_limit(above0, 0.02, 0.03);
-    // (What the ceiling gives over the plan comes in from nothing, with no
-    // slope at first: the ceiling comes up through the plan at half a metre
-    // a second as the legs come under a trotting body already above it, and
-    // the root, let go from the plan, went up 3 mm in that step.)
     let r0 = -smin(-ceil_y, 0.0, max(above * above / 0.03, 1e-4));
     let rp = max(r0, 0.0);
     let rise = min(r0, 0.0) + rp * rp / (rp + RISE_IN) + GALLOP_FREE * gw.z;
@@ -988,21 +572,13 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
         let over = shift.y - rise;
         let free_y = shift.y;
         shift.y = smin(shift.y, rise, RISE_EASE);
-        // (Put back to the 3 cm it passed, not onto the ceiling: as a
-        // gallop's room goes in the change to a trot the body crosses that
-        // line, and set down on the ceiling it fell 35 mm in a step.)
         if (over > 0.03) {
             var v = bd.vel;
             v.y = min(v.y, hv);
             body_set(state, s + D_BODY, plan + coff_p + vec3<f32>(shift.x, min(free_y, rise + 0.03), shift.z), v);
         }
     }
-    // And no further than they reach any way: a body the planted hooves
-    // would have to stretch past their length to follow is held where they
-    // still reach (only as far as the plan's own place allows).
     let pl4 = vec4<f32>(sup.f[0].down, sup.f[1].down, sup.f[2].down, sup.f[3].down);
-    // The share let through moves at most GUARD_RATE a second, so a guard
-    // that starts or stops holding eases in and out over a few steps.
     var guard: f32 = 1.0;
     let over1 = reach_over(toes, pl4, plan, qyaw, hy, fy, shift, REACH_HIND, REACH_FORE);
     let over0 = max(reach_over(toes, pl4, plan, qyaw, hy, fy, vec3<f32>(0.0), REACH_HIND, REACH_FORE), 0.0);
@@ -1017,7 +593,6 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
     if (!init) { guard = clamp(guard, state[s + D_GUARD] - GUARD_RATE * dt, state[s + D_GUARD] + GUARD_RATE * dt); }
     state[s + D_GUARD] = guard;
     shift = shift * guard;
-    // Nor lower than they fold (a leap's gather): held over it, eased in, its fall stopped.
     let up = -smin(0.0, -fold_lift(toes, pl4, plan, qyaw, hy, fy, shift, REACH_HIND, REACH_FORE), CAP_SOFT) * (1.0 - smooth01(lie * 3.0));
     if (up > 1e-4) {
         shift.y += up;
@@ -1028,7 +603,6 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
     st3(state, s + D_LAGV, bd.vel - bd.tvel);
 
     // --- spine (creature::spine) ------------------------------------------------------------
-    // Each hoof from its leg's top joint, in the yaw frame.
     var rel: array<vec3<f32>, NFEET>;
     for (var l: i32 = 0; l < 4; l += 1) {
         rel[l] = q_rot(q_conj(qyaw), toes[l] - sup.f[l].pivot) + (leg_pivot(l) - HEAD[LEG_TOP[l]]);
@@ -1037,263 +611,16 @@ fn k_rig(g: grid<1>, intent: read_store<f32, 1>, env: read_store<f32, 1>, state:
     let bend_want = spine_want(rel, curv, speed * omega, (1.0 - smooth01(lie * 3.0)) * mix(0.3, 1.0, gom) * LAYERS);
     let bend = spine_step(state, s + D_SPINE, bend_want, bd.acc.y * LAYERS, init, dt);
 
-    // --- trunk, neck and head (the rig's targets) ---------------------------------------------
-    var T: Pose;
+    // --- pose, secondary follow-through, and telemetry (deer::gait) -------------------------
     let qbody = q_mul(q_mul(qyaw, q_x(-pitch)), q_z(roll + roll_g));
-    let drop = -0.05 * hip_drop * gw.x;
-    T.q[B_PELVIS] = q_mul(qbody, q_mul(q_z(drop), q_xyz(spine_angles(bend, 0))));
-    T.p[B_PELVIS] = root;
-    let breath_x = 0.01 * sin(TAU * 0.33 * clock + seed) * (1.0 - gw.x * gom);
-    T.q[B_LUMBAR] = q_mul(T.q[B_PELVIS], q_xyz(clamp_xyz(spine_angles(bend, 1) + vec3<f32>(0.0, 0.0, -0.5 * drop), B_LUMBAR)));
-    T.q[B_THORAX] = q_mul(T.q[B_LUMBAR], q_xyz(clamp_xyz(spine_angles(bend, 2) + vec3<f32>(breath_x, 0.0, -0.5 * drop), B_THORAX)));
-    T.p[B_LUMBAR] = head_of(T, B_LUMBAR);
-    T.p[B_THORAX] = head_of(T, B_THORAX);
-
-    // Gaze: where the head would turn, smoothed.
-    var gyaw: f32 = 0.0;
-    var gpitch: f32 = 0.0;
-    let gwt = intent[ii + I_GAZE_W];
-    if (gwt > 0.0) {
-        let hpos = T.p[B_THORAX] + q_rot(T.q[B_THORAX], HEAD[B_HEAD] - HEAD[B_THORAX]);
-        let d = vec3<f32>(intent[ii + I_GAZE_X], intent[ii + I_GAZE_Y], intent[ii + I_GAZE_Z]) - hpos;
-        gyaw = clamp(wrap_pi(atan2(d.x, d.z) - yaw), -1.5, 1.5) * gwt;
-        gpitch = clamp(atan2(-d.y, length(vec2<f32>(d.x, d.z))), -0.8, 0.9) * gwt;
-    }
-    let gyaw_s = damp(state[s + D_GAZE_YAW], gyaw, 7.0, dt);
-    let gpitch_s = damp(state[s + D_GAZE_PITCH], gpitch, 7.0, dt);
-    state[s + D_GAZE_YAW] = gyaw_s;
-    state[s + D_GAZE_PITCH] = gpitch_s;
-
-    // Head carriage: the neck takes up part of the body's pitch and the
-    // withers' bob against their slow means (HEAD_HOLD), and the head holds
-    // part of its gaze in space (HEAD_SPACE, through creature::secondary),
-    // so the head rides steadier than the trunk without being pinned. A
-    // leap's arc it rides with the trunk (the means follow it closely).
-    let pitch_t = pitch - bend.flex * 0.5;
-    var pitch_s = state[s + D_PITCH_S];
-    var fy_s = state[s + D_FY_S];
-    let fy_a = fy + shift.y;
-    if (init) { pitch_s = pitch_t; fy_s = fy_a; }
-    pitch_s = damp(pitch_s, pitch_t, mix(2.5, 25.0, leap_w), dt);
-    fy_s = damp(fy_s, fy_a, mix(2.5, 25.0, leap_w), dt);
-    state[s + D_PITCH_S] = pitch_s;
-    state[s + D_FY_S] = fy_s;
-    let carry_n = (1.0 - graze) * (1.0 - lie) * HEAD_HOLD;
-    let steady = carry_n * ((pitch_t - pitch_s) + (fy_a - fy_s) / NECK_LEVER);
-    let n_up = alert * (1.0 - graze);
-    let n1_base = gw.x * 0.18 + gw.y * 0.12 + gw.z * 0.38 + NOD * nod * gw.x - 0.42 * n_up - 0.15 * lie + steady;
-    let n2_base = gw.x * 0.05 + gw.y * 0.0 + gw.z * 0.12 - 0.22 * n_up;
-    let hp_world = mix(gw.x * 0.12 + gw.y * 0.06 + gw.z * 0.2 - 0.15 * n_up + gpitch_s, 1.15, graze);
-    let qh = q_mul(q_y(yaw + gyaw_s), q_x(hp_world));
-    // Grazing: how far down the neck must go for the muzzle to reach the ground.
-    var gt: f32 = 0.0;
-    if (graze > 0.0) {
-        let mz = T.p[B_THORAX] + q_rot(T.q[B_THORAX], TAIL[B_HEAD] - HEAD[B_THORAX]);
-        let gy0 = height(env, mz.x, mz.z) + 0.03;
-        var lo: f32 = 0.0;
-        var hi: f32 = 1.0;
-        for (var it: i32 = 0; it < 7; it += 1) {
-            let m = 0.5 * (lo + hi);
-            let y = muzzle_y(T.q[B_THORAX], T.p[B_THORAX], vec3<f32>(n1_base + 1.3 * m, 0.3 * gyaw_s, 0.0),
-                             vec3<f32>(n2_base + 0.75 * m, 0.3 * gyaw_s, 0.0), qh);
-            if (y > gy0) { lo = m; } else { hi = m; }
-        }
-        gt = 0.5 * (lo + hi) * graze;
-    }
-    let nib = graze * 0.05 * sin(TAU * 1.7 * clock);
-    T.q[B_NECK1] = q_mul(T.q[B_THORAX], q_xyz(clamp_xyz(vec3<f32>(n1_base + 1.3 * gt, 0.3 * gyaw_s, 0.0), B_NECK1)));
-    T.p[B_NECK1] = head_of(T, B_NECK1);
-    T.q[B_NECK2] = q_mul(T.q[B_NECK1], q_xyz(clamp_xyz(vec3<f32>(n2_base + 0.75 * gt + nib, 0.3 * gyaw_s, 0.0), B_NECK2)));
-    T.p[B_NECK2] = head_of(T, B_NECK2);
-    let hl = q_to_xyz(q_mul(q_conj(T.q[B_NECK2]), qh));
-    T.q[B_HEAD] = q_mul(T.q[B_NECK2], q_xyz(clamp_xyz(hl, B_HEAD)));
-    T.p[B_HEAD] = head_of(T, B_HEAD);
-
-    // Ears: up and forward when alert, toward the gaze, and an idle flick now and then.
-    for (var e: i32 = 0; e < 2; e += 1) {
-        let b = B_EARL + e;
-        let side = 1.0 - 2.0 * (e as f32);
-        let fl = fract01(clock * 0.21 + seed * 0.37 + 0.5 * (e as f32));
-        var flick: f32 = 0.0;
-        if (fl < 0.035) { let f2 = sin(PI * fl / 0.035); flick = f2 * f2 * f2 * f2; }
-        let a = vec3<f32>(-0.5 * alert + 0.25 * lie, side * (0.4 * gyaw_s - 0.35 * alert) + side * 0.7 * flick, side * (0.35 * alert - 0.15 * lie));
-        T.q[b] = q_mul(T.q[B_HEAD], q_xyz(clamp_xyz(a, b)));
-        T.p[b] = head_of(T, b);
-    }
-    // Eyes: a deer's are dark and on the sides of its head, and it turns its
-    // head and ears to a thing before its eyes; they drift a little, and
-    // roll toward what it turns to. Its lids say more: an unhurried blink
-    // every several seconds, half shut grazing and heavier lying, and wide
-    // in alarm, when the white shows.
-    {
-        let drift = vec2<f32>(noise1(clock * 0.19, seed, 31.0), noise1(clock * 0.16, seed, 32.0));
-        let lead = clamp(0.7 * (gyaw - gyaw_s), -0.3, 0.3);
-        T.q[B_GAZE] = q_mul(T.q[B_HEAD], q_xyz(clamp_xyz(vec3<f32>(0.1 * drift.y + 0.12 * graze, 0.16 * drift.x + lead, 0.0), B_GAZE)));
-        T.p[B_GAZE] = head_of(T, B_GAZE);
-        let bt = clock / 5.3 + seed * 3.9;
-        let bk = floor(bt);
-        let bu = ((bt - bk) - 0.1 - 0.7 * hash01(bk * 5.9 + seed)) * 5.3 / (1.0 + lie);
-        var blink: f32 = 0.0;
-        if (bu > 0.0 && bu < 0.3) { blink = smooth01(bu / 0.09) * (1.0 - smooth01((bu - 0.12) / 0.18)); }
-        let rest_lid = 0.08 + 0.3 * graze + 0.5 * lie - 0.75 * alert;
-        let shut = clamp(mix(rest_lid, 1.0, blink), -0.7, 1.0);
-        T.q[B_LID] = q_mul(T.q[B_HEAD], q_xyz(vec3<f32>(asin(shut), 0.0, 0.0)));
-        T.p[B_LID] = head_of(T, B_LID);
-    }
-    // Tail: a swish with the stride, raised in the gallop, flagged in alarm.
-    // (In the gallop, held up, it carries a wave behind the pelvis's rock.)
-    let swish = (gw.x + gw.y) * 0.22 * sin(TAU * (phase + 0.25)) * gom;
-    let wave = gw.z * mv * 0.14;
-    T.q[B_TAIL1] = q_mul(T.q[B_PELVIS], q_xyz(clamp_xyz(vec3<f32>(0.6 * gw.z + 1.75 * alert + wave * sin(TAU * (phase - 0.55)), swish, 0.0), B_TAIL1)));
-    T.p[B_TAIL1] = head_of(T, B_TAIL1);
-    T.q[B_TAIL2] = q_mul(T.q[B_TAIL1], q_xyz(clamp_xyz(vec3<f32>(0.2 * gw.z + 0.5 * alert + wave * sin(TAU * (phase - 0.75)), 0.6 * swish, 0.0), B_TAIL2)));
-    T.p[B_TAIL2] = head_of(T, B_TAIL2);
-
-    // --- legs, to the hooves from where the body is ---------------------------------------------
-    for (var l: i32 = 0; l < 4; l += 1) {
-        let k = s + D_LEG + l * LEG_REC;
-        let hind = LEG_HIND[l] == 1;
-        let b0 = LEG_B0[l];
-        let nb = LEG_NB[l];
-        var par = B_THORAX; if (hind) { par = B_PELVIS; }
-        let qp = T.q[par];
-        let j = T.p[par] + q_rot(qp, HEAD[b0] - HEAD[par]);
-        let toe = toes[l];
-        let d = q_rot(q_conj(qp), toe - j);
-        let planted = state[k + L_PLANT] > 0.5;
-        let u = state[k + L_U];
-        let ph = fract01(phase - offs[l]);
-        // The hoof flat on the ground in stance (rolling onto the toe before
-        // lift), hanging flexed in swing.
-        let n = normal(env, toe.x, toe.z);
-        let fw = q_rot(qp, vec3<f32>(0.0, 0.0, 1.0));
-        // (The ground's slope is for a hoof on it or coming down to it: one
-        // carried over a log took the log's edge for its footing as it
-        // passed, and turned right over in a step.)
-        let slope = atan2(-dot(n, vec3<f32>(fw.x, 0.0, fw.z)), n.y) * select_f(planted, 1.0, smooth01((u - 0.7) / 0.3));
-        let par_pitch = atan2(fw.y, length(vec2<f32>(fw.x, fw.z)));
-        var roll: f32 = 0.0;
-        if (planted && in_leap && hind && lp.tau >= lp.tc - 0.02) { roll = BREAKOVER * (1.0 - smooth01(left_t[l] / (0.35 * leg_time()))); }
-        // (Not a hoof down from a leap's flight: the gait's clock, which ran
-        // on through the leap, has nothing to say about its stance.)
-        else if (planted && !(in_leap && state[k + L_LEAP] > 3.5)) { roll = BREAKOVER * hoof_roll(ph, duty, roll_w) * gom; }
-        if (!planted) {
-            // The toe-off roll the hoof lifted with carries into the lift,
-            // then the hoof folds.
-            // (A hoof that leaves before the clock's stance ends is still
-            // rolling: the roll runs on to its end in the air. Held at what
-            // it had come to, the hoof stopped turning in the step it lifted.)
-            if (state[k + L_KIND] < 0.5) { roll = BREAKOVER * max(state[k + L_SINCE], hoof_roll(ph, duty, roll_w) * gom) * (1.0 - smooth01(u / 0.3)); }
-            roll += hoof_flex * swing_fold(state, k);
-        }
-        let ah = rest_angle(b0 + nb - 1) + slope - par_pitch - roll;
-        var o: Leg;
-        if (hind) { o = solve_hind(b0, d, ah, SOFT_REACH); }
-        else {
-            var kf: f32 = 0.0;
-            // (The knee folds as far as the leg has length to spare: a
-            // fore hoof still trailing at the leg's reach, the body gone on
-            // ahead of where it lifted, is held by a straight leg, and one
-            // folded by the clock alone was too short for it, stretched
-            // flat until the hoof came near and then bent all at once.)
-            // (Galloping: slower, the hoof never trails so far.)
-            if (!planted) { kf = carpus * swing_fold(state, k) * mix(1.0, smooth01((FOLD_EXT - length(d) / REACH_FORE_TOP) / FOLD_BAND), gw.z); }
-            o = solve_front(b0, d, ah, kf, SCAP_FOLLOW, SOFT_REACH);
-        }
-        // Rotations from the limb angles, each joint held within its limits.
-        var lie_l = select_f(hind, lie_h, lie_f);
-        let rho = mix(clamp(o.rho, LIM_LO[b0].z, LIM_HI[b0].z), 0.0, lie_l);
-        let qr = q_mul(qp, q_z(rho));
-        var prev: f32 = 0.0;
-        for (var i: i32 = 0; i < nb; i += 1) {
-            let b = b0 + i;
-            let abs_t = -(leg_angle(o, i) - rest_angle(b));
-            var loc = abs_t - prev;
-            // The joints below the top one fold ahead of it (and unfold after
-            // it, getting up): a leg turned toward its fold at full length
-            // puts its hoof through the ground, one that shortens first
-            // lifts it clear.
-            var fw = lie_l;
-            if (i > 0) { fw = min(lie_l + FOLD_AHEAD * lie_l * (1.0 - lie_l), 1.0); }
-            if (hind) { loc = mix(loc, FOLD_HIND[i], fw); } else { loc = mix(loc, FOLD_FRONT[i], fw); }
-            if (l == 0 && i == 2 && FAULT_OVERBEND > 0.0) {
-                loc -= FAULT_OVERBEND * sw[l];
-            } else {
-                loc = clamp(loc, LIM_LO[b].x, LIM_HI[b].x);
-            }
-            prev = prev + loc;
-            T.q[b] = q_mul(qr, q_x(prev));
-            if (i == 0) { T.p[b] = j; }
-            else { T.p[b] = T.p[b - 1] + q_rot(T.q[b - 1], HEAD[b] - HEAD[b - 1]); }
-        }
-        // How far short of its toe the leg hangs, kept for the next step.
-        let e = b0 + nb - 1;
-        state[s + D_SHORT + l] = length(T.p[e] + q_rot(T.q[e], TAIL[e] - HEAD[e]) - toe);
-    }
-
-    // --- the parts that hang carry their momentum (creature::secondary) ----------------------
-    var hold: array<f32, NB>;
-    for (var b: i32 = 0; b < NB; b += 1) { hold[b] = 0.0; }
-    hold[B_HEAD] = HEAD_SPACE * (1.0 - graze) * (1.0 - lie);
-    // The tail, raised in the gallop or flagged in alarm, is held up, not flung.
-    var firm = hold;
-    for (var b: i32 = 0; b < NB; b += 1) { firm[b] = select_f(b == B_TAIL1 || b == B_TAIL2, min(gw.z * mv + alert, 1.0), 0.0); }
-    let A = carry_held(state, env, s + D_SEC, T, hold, firm, LAYERS, init, dt);
-
-    // The pose's centre of mass from the root, kept for the next step.
-    let coff = q_rot(q_conj(qyaw), com_of(A) - root);
-    st3(state, s + D_COFF2, select_v3(init, coff, ld3(state, s + D_COFF1)));
-    st3(state, s + D_COFF1, coff);
-    st3(state, s + D_COFF, select_v3(init, coff, mix(ld3(state, s + D_COFF), coff, 1.0 - exp(-dt / 0.4))));
-
-    // --- out --------------------------------------------------------------------------
-    put(pose, c, A);
-    st3(state, s + S_POS, vec3<f32>(pos.x, hy, pos.z));
-    state[s + S_YAW] = yaw;
-    state[s + D_SPEED] = speed;
-    state[s + D_OMEGA] = omega;
-    state[s + D_PHASE] = phase;
-    st3(state, s + D_GW, gw);
-    state[s + D_GAIT] = gait as f32;
-    state[s + D_MOVING] = select_f(moving, 1.0, 0.0);
-    state[s + D_HY_O] = hy;
-    state[s + D_FY_O] = fy;
-    state[s + D_HY] = hy_sp;
-    state[s + D_HV] = hv_sp;
-    state[s + D_FY] = fy_sp;
-    state[s + D_FV] = fv_sp;
-    leap_store(state, s + D_LEAP, lp);
-
-    // The telemetry's position is the creature's place, its planned path
-    // (the frame its body moves about).
-    let t0 = c * TELE;
-    tele[t0 + T_POS] = pos.x;
-    tele[t0 + T_POS + 1] = hy;
-    tele[t0 + T_POS + 2] = pos.z;
-    tele[t0 + T_YAW] = yaw;
-    tele[t0 + T_SPEED] = speed;
-    var gshow = gait;
-    if (!moving) { gshow = GAIT_STAND; }
-    tele[t0 + T_GAIT] = gshow as f32;
-    tele[t0 + T_PHASE] = fract01(phase);
-    tele[t0 + T_ACTION] = act as f32;
-    tele[t0 + T_HEIGHT] = hy - hip_g;
-    tele[t0 + T_PITCH] = pitch;
-    tele[t0 + T_ROLL] = roll + roll_g;
-    tele[t0 + T_FREQ] = freq * select_f(moving, 1.0, 0.0);
-    tele[t0 + T_LEAP] = select_f(lp.on, lp.tau + 10.0, 0.0);    for (var l: i32 = 0; l < 4; l += 1) {
-        let k = s + D_LEG + l * LEG_REC;
-        let f0 = t0 + T_FOOT + 4 * l;
-        var pl = state[k + L_PLANT];
-        let lie_l = select_f(LEG_HIND[l] == 1, lie_h, lie_f);
-        // A leg that has begun to fold is not a stance: its hoof is drawn
-        // in under it, and the brisket and haunch take the weight.
-        if (lie_l > 0.004) { pl = 0.0; }
-        tele[f0] = pl;
-        var at = toes[l];
-        if (state[k + L_PLANT] < 0.5) { at = ld3(state, k + L_TO); }
-        tele[f0 + 1] = at.x; tele[f0 + 2] = at.y; tele[f0 + 3] = at.z;
-    }
+    var T = pose_head_tail(state, env, intent, s, ii, init, dt, clock, seed, yaw, phase, gw, gom, mv,
+                           lie, graze, alert, st_t, root, qbody, hip_drop, bend, pitch, fy + shift.y,
+                           leap_w, nod, HEAD_HOLD, NECK_LEVER, NOD);
+    T = solve_deer_legs(state, env, s, T, toes, left_t, sw, phase, offs, duty, roll_w, gom,
+                        hoof_flex, carpus, gw, in_leap, lp, lie_h, lie_f, FOLD_AHEAD, FOLD_EXT,
+                        FOLD_BAND, REACH_FORE_TOP, SCAP_FOLLOW, FAULT_OVERBEND);
+    finish_deer(state, env, pose, tele, c, s, init, dt, T, qyaw, root, pos, yaw, speed, omega,
+                phase, gw, gait, moving, hy, fy, hy_sp, hv_sp, fy_sp, fv_sp, hip_g,
+                pitch, roll + roll_g, freq, act, lp, toes, lie_h, lie_f, mv, graze, lie,
+                alert, HEAD_SPACE, LAYERS);
 }
-
-fn select_v(c: bool, a: vec3<f32>, b: vec3<f32>) -> vec3<f32> { if (c) { return a; } return b; }
