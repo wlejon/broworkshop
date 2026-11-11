@@ -1,0 +1,204 @@
+// creature::coat — per-pixel reptilian scale, countershading, saddle-bar, and
+// tail-banding shader for the green spiny iguana (Iguana iguana), evaluated in
+// rest-pose coordinates (p: x left, y up, z forward in metres; foot: pixel size).
+//
+// Features:
+//   - Rich emerald-green to turquoise-cyan dorsal & flank shading
+//   - Warm pale chartreuse-cream ventral countershading
+//   - Procedural hexagonal/imbricate reptilian scale-cell micro-shading & gloss
+//   - Smoky charcoal dorsal saddle bars edged with pale jade highlights
+//   - Bold alternating charcoal-slate and pale-jade rings along the whip tail
+//   - Warm terracotta-amber breeding blush on the dewlap fan & dorsal crest tips
+//   - Glossy dark keratin claws on all digits
+module creature::coat;
+import mesh;
+
+fn lin(c: vec3<f32>) -> vec3<f32> {
+    return vec3<f32>(pow(c.x, 2.2), pow(c.y, 2.2), pow(c.z, 2.2));
+}
+
+fn hash2(p: vec2<f32>) -> f32 {
+    var q = fract(p * vec2<f32>(127.1, 311.7));
+    q += dot(q, q + vec2<f32>(34.23, 19.17));
+    return fract(q.x * q.y);
+}
+
+// Offset imbricate hexagonal scale lattice returning (edge groove 0..1, per-scale id 0..1, crown dome 0..1).
+fn hex_scales(uv: vec2<f32>) -> vec3<f32> {
+    let s = vec2<f32>(1.0, 1.7320508);
+    let h = s * 0.5;
+    let a = (uv - s * floor(uv / s)) - h;
+    let b = (uv - h - s * floor((uv - h) / s)) - h;
+    let use_a = dot(a, a) < dot(b, b);
+    var gv = b;
+    var cell = floor((uv - h) / s) + vec2<f32>(0.5, 0.5);
+    if (use_a) {
+        gv = a;
+        cell = floor(uv / s);
+    }
+    let hex_d = max(abs(gv.x), abs(gv.x) * 0.5 + abs(gv.y) * 0.8660254);
+    let edge = smoothstep(0.38, 0.50, hex_d);
+    let crown = 1.0 - smoothstep(0.0, 0.44, length(gv));
+    let id = hash2(cell);
+    return vec3<f32>(edge, id, crown);
+}
+
+pub fn coat(p: vec3<f32>, foot: f32, s: mesh::Surface) -> mesh::Surface {
+    var out = s;
+    let w = max(foot, 0.0004);
+    let ax = abs(p.x);
+    let n = normalize(s.normal);
+
+    // Palette in linear RGB.
+    let emerald_deep = lin(vec3<f32>(0.11, 0.42, 0.18));
+    let emerald_bright = lin(vec3<f32>(0.20, 0.58, 0.26));
+    let turquoise = lin(vec3<f32>(0.14, 0.57, 0.48));
+    let head_cyan = lin(vec3<f32>(0.24, 0.62, 0.56));
+    let chartreuse = lin(vec3<f32>(0.76, 0.82, 0.50));
+    let cream_belly = lin(vec3<f32>(0.84, 0.86, 0.64));
+    let charcoal = lin(vec3<f32>(0.085, 0.105, 0.092));
+    let slate_ring = lin(vec3<f32>(0.065, 0.078, 0.074));
+    let jade_ring = lin(vec3<f32>(0.54, 0.75, 0.47));
+    let terracotta = lin(vec3<f32>(0.80, 0.35, 0.13));
+    let amber_tip = lin(vec3<f32>(0.88, 0.54, 0.19));
+    let claw_col = lin(vec3<f32>(0.055, 0.050, 0.046));
+
+    // --- 1. Base emerald-to-turquoise dorsal & lateral shading ---
+    let dorsal_h = smoothstep(0.14, 0.23, p.y);
+    var c = mix(emerald_bright, emerald_deep, 0.55 * dorsal_h * smoothstep(0.06, 0.01, ax));
+
+    // Iridescent turquoise-cyan wash along mid-flanks, shoulders, neck and head.
+    let flank_band = smoothstep(0.115, 0.165, p.y) * (1.0 - smoothstep(0.185, 0.228, p.y))
+        * smoothstep(-0.08, 0.04, p.z);
+    let cranial_cyan = smoothstep(0.28, 0.37, p.z) * smoothstep(0.185, 0.235, p.y);
+    c = mix(c, turquoise, clamp(0.58 * flank_band + 0.45 * cranial_cyan, 0.0, 0.78));
+    c = mix(c, head_cyan, 0.48 * cranial_cyan * smoothstep(0.015, 0.036, ax));
+
+    // --- 2. Warm chartreuse-cream ventral countershading ---
+    let belly_line = 0.142 + 0.038 * smoothstep(0.24, 0.36, p.z) - 0.010 * smoothstep(0.05, 0.15, p.z);
+    let ripple = 0.003 * sin(p.z * 95.0 + ax * 55.0);
+    let on_trunk = smoothstep(-0.12, -0.03, p.z) * (1.0 - smoothstep(0.058, 0.085, ax));
+    let ventral = smoothstep(belly_line + 0.020 + w, belly_line - 0.016 - w, p.y + ripple) * on_trunk;
+    c = mix(c, chartreuse, 0.78 * ventral);
+    c = mix(c, cream_belly, 0.52 * ventral * smoothstep(0.132, 0.112, p.y) * smoothstep(0.045, 0.012, ax));
+
+    // Inner/ventral limb & sole countershading.
+    let on_limb = smoothstep(0.068, 0.098, ax);
+    let limb_under = on_limb * smoothstep(0.055, 0.010, p.y) * clamp(0.45 - 0.55 * n.y, 0.0, 1.0);
+    c = mix(c, chartreuse, 0.48 * limb_under);
+
+    // --- 3. Smoky charcoal dorsal saddle bars with pale-jade borders ---
+    if (p.z > -0.09 && p.z < 0.295 && p.y > 0.132 && ax < 0.082) {
+        // Slanted organic transverse bars sweeping forward & down the flanks.
+        let slant_z = p.z + 0.26 * (0.22 - p.y) + 0.008 * sin(p.y * 85.0 + p.z * 30.0);
+        let phase = (slant_z + 0.08) * 78.0;
+        let wave = cos(phase);
+        let saddle_mask = smoothstep(0.135, 0.175, p.y) * (1.0 - smoothstep(0.265, 0.292, p.z))
+            * smoothstep(-0.088, -0.055, p.z) * (1.0 - smoothstep(0.056, 0.076, ax));
+        let bar = smoothstep(0.32 - 12.0 * w, 0.64 + 12.0 * w, wave) * saddle_mask;
+        let rim = smoothstep(0.05, 0.34, wave) * (1.0 - smoothstep(0.34, 0.62, wave)) * saddle_mask;
+        c = mix(c, jade_ring, 0.42 * rim);
+        c = mix(c, charcoal, 0.72 * bar);
+    }
+
+    // Dark shoulder bar ("epaulette") characteristic of adult Iguana iguana.
+    if (p.z > 0.245 && p.z < 0.305 && p.y > 0.155 && p.y < 0.228 && ax > 0.018 && ax < 0.066) {
+        let ep_d = abs((p.z - 0.276) + 0.24 * (p.y - 0.190));
+        let ep_rim = smoothstep(0.016 + w, 0.009, ep_d) * (1.0 - smoothstep(0.008, 0.004, ep_d));
+        let ep_bar = smoothstep(0.009 + w, 0.004 - w, ep_d);
+        c = mix(c, cream_belly, 0.55 * ep_rim);
+        c = mix(c, charcoal, 0.80 * ep_bar);
+    }
+
+    // --- 4. Bold alternating charcoal-slate & pale-jade whip-tail rings ---
+    if (p.z < -0.095 && ax < 0.052) {
+        let on_tail = smoothstep(-0.095, -0.135, p.z);
+        let u = clamp((-0.11 - p.z) / 0.805, 0.0, 1.0);
+        // Slightly widening caudal rings with subtle forward chevron slant.
+        let ring_coord = (-0.10 - p.z) * (46.0 - 8.0 * u) + 0.25 * (p.y - 0.12) * 16.0
+            + 0.18 * sin(p.y * 90.0);
+        let rw = sin(ring_coord);
+        let dark_band = smoothstep(-0.06 - 10.0 * w, 0.22 + 10.0 * w, rw);
+        let tail_under = smoothstep(0.145 - 0.075 * u + 0.008, 0.145 - 0.075 * u - 0.010, p.y);
+        let light_col = mix(jade_ring, cream_belly, 0.45 * tail_under * (1.0 - 0.7 * u));
+        let ring_col = mix(light_col, slate_ring, dark_band);
+        c = mix(c, ring_col, on_tail * (0.82 + 0.16 * u));
+        // Distal whip tip darkens toward smoky slate.
+        c = mix(c, slate_ring, 0.55 * smoothstep(0.76, 0.98, u) * on_tail);
+    }
+
+    // --- 5. Terracotta-amber blush on gular dewlap fan & dorsal crest spines ---
+    // Dewlap sits in rest pose around ax < 0.010, y in [0.108, 0.212], z in [0.318, 0.422].
+    if (ax < 0.012 && p.z > 0.315 && p.z < 0.425 && p.y < 0.208) {
+        let in_dew = smoothstep(0.208, 0.194, p.y) * smoothstep(0.011 + w, 0.007 - w, ax);
+        let fan_edge = smoothstep(0.185, 0.125, p.y) + 0.55 * smoothstep(0.355, 0.405, p.z);
+        c = mix(c, chartreuse, 0.45 * in_dew);
+        c = mix(c, terracotta, clamp(in_dew * (0.35 + 0.58 * fan_edge), 0.0, 0.88));
+        c = mix(c, amber_tip, 0.42 * in_dew * smoothstep(0.388, 0.412, p.z));
+
+        // Radiating dusky gular fan striations on the dewlap web.
+        let ray_ang = atan2(0.205 - p.y, p.z - 0.345);
+        let ray = smoothstep(0.55, 0.88, sin(ray_ang * 19.0));
+        c = mix(c, charcoal, 0.38 * in_dew * ray * smoothstep(0.130, 0.185, p.y));
+    }
+
+    // Dorsal crest blades stand along ax < 0.008 above the dorsal back/neck/tail line.
+    if (ax < 0.009 && p.z > -0.44 && p.z < 0.358) {
+        var base_y: f32 = 0.233;
+        if (p.z > 0.292) { base_y = 0.224 + 0.42 * min(p.z - 0.292, 0.06); }
+        else if (p.z < -0.090) { base_y = 0.204 - 0.165 * (-0.090 - p.z); }
+        else if (p.z < 0.040) { base_y = 0.216 + 0.14 * (p.z + 0.090); }
+        let h_above = p.y - base_y;
+        if (h_above > 0.002) {
+            let on_crest = smoothstep(0.002, 0.009, h_above) * smoothstep(0.008 + w, 0.0045 - w, ax);
+            let tip_t = smoothstep(0.008, 0.026, h_above);
+            let crest_col = mix(amber_tip, terracotta, smoothstep(0.016, 0.032, h_above));
+            c = mix(c, crest_col, 0.85 * on_crest * tip_t);
+        }
+    }
+
+    // --- 6. Procedural imbricate reptilian scale-cell micro-shading ---
+    var cell_m: f32 = 0.0040;
+    if (p.z < -0.12) { cell_m = 0.0052; }      // keeled caudal whorl scales
+    else if (p.y < 0.135 && ax < 0.065) { cell_m = 0.0032; } // finer ventral scales
+    else if (ax > 0.08) { cell_m = 0.0036; }   // limb scales
+
+    // Anti-alias scale contrast smoothly to zero before Nyquist pixel size.
+    let detail_vis = 1.0 - smoothstep(cell_m * 0.28, cell_m * 0.82, w);
+    var rough: f32 = 0.44;
+    if (detail_vis > 0.01) {
+        // Triplanar-blended tangent projection so scales neither stretch on flanks nor on dorsum.
+        let wy = abs(n.y);
+        let uv_side = vec2<f32>(p.z, p.y + 0.12 * p.z) / cell_m;
+        let uv_top = vec2<f32>(p.z, p.x) / cell_m;
+        let sc_s = hex_scales(uv_side);
+        let sc_t = hex_scales(uv_top);
+        let sc = mix(sc_s, sc_t, smoothstep(0.45, 0.80, wy));
+
+        let groove = sc.x * detail_vis;
+        let var_id = (sc.y - 0.5) * detail_vis;
+        let crown = sc.z * detail_vis;
+
+        // Subtle per-scale hue/value variation, crisp dark interstitial sulcus, glossy scale crown.
+        c *= 1.0 + 0.11 * var_id + 0.09 * crown;
+        c = mix(c, c * 0.46, 0.58 * groove);
+        rough = clamp(0.46 - 0.13 * crown + 0.24 * groove, 0.24, 0.78);
+    }
+
+    // --- 7. Dark glossy keratin claws on distal toe tips ---
+    if (p.y < 0.0085 && ax > 0.125) {
+        let is_fore = step(0.10, p.z);
+        let palm_z = mix(-0.064, 0.322, is_fore);
+        let palm_x = mix(0.171, 0.159, is_fore);
+        let rad = length(vec2<f32>(ax - palm_x, p.z - palm_z));
+        let claw_r = mix(0.046, 0.033, is_fore);
+        let on_claw = smoothstep(claw_r - 0.006 - w, claw_r + 0.002 + w, rad)
+            * smoothstep(0.0072 + w, 0.0048 - w, p.y);
+        c = mix(c, claw_col, 0.94 * on_claw);
+        rough = mix(rough, 0.22, on_claw);
+    }
+
+    out.base_color = c;
+    out.roughness = rough;
+    return out;
+}

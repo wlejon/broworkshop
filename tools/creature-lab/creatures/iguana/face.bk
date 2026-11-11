@@ -1,0 +1,184 @@
+// creature::face — per-pixel diapsid reptilian head shader for the green spiny
+// iguana (Iguana iguana), drawn in rest-pose coordinates (p: x left, y up,
+// z forward in metres; foot: pixel size; look: eye gaze & blink state).
+//
+// Features:
+//   - Golden-amber reptilian iris with copper inner ring & crisp vertical slit pupil
+//   - Scaly tuberculate upper and lower palpebral eyelid rims (`look.z` blink)
+//   - Fierce keeled supraorbital brow ridge shading
+//   - Circular translucent tympanum (eardrum) behind the jaw articulation
+//   - Signature green-iguana large pearlescent subtympanic shield scale on lower cheek
+//   - Sculpted fleshy nostril rim & deep naris near the snout tip
+//   - Segmented supralabial & infralabial scale plates along the mouth cleft
+module creature::face;
+import mesh;
+
+fn lin(c: vec3<f32>) -> vec3<f32> {
+    return vec3<f32>(pow(c.x, 2.2), pow(c.y, 2.2), pow(c.z, 2.2));
+}
+
+fn inside(d: f32, w: f32) -> f32 {
+    return clamp(0.5 - d / (2.0 * w), 0.0, 1.0);
+}
+
+// Rest-pose landmarks matching body.js.
+const EYE: vec3<f32> = vec3<f32>(0.031, 0.244, 0.384);
+const EYE_HALF: vec2<f32> = vec2<f32>(0.0096, 0.0068);
+const TYMP: vec3<f32> = vec3<f32>(0.034, 0.236, 0.354);
+const SHIELD: vec3<f32> = vec3<f32>(0.039, 0.215, 0.362);
+const NARIS: vec3<f32> = vec3<f32>(0.013, 0.234, 0.423);
+
+pub fn face(p: vec3<f32>, foot: f32, look: vec4<f32>, s: mesh::Surface) -> mesh::Surface {
+    var out = s;
+    if (p.z < 0.335) { return out; }
+
+    let w = max(foot, 0.00025);
+    let ax = abs(p.x);
+    var c = s.base_color;
+    var rough = s.roughness;
+
+    let dark_sulcus = lin(vec3<f32>(0.035, 0.042, 0.036));
+    let lid_olive = lin(vec3<f32>(0.12, 0.28, 0.16));
+    let lid_bead = lin(vec3<f32>(0.42, 0.62, 0.40));
+    let brow_dark = lin(vec3<f32>(0.07, 0.20, 0.10));
+    let iris_gold = lin(vec3<f32>(0.90, 0.64, 0.14));
+    let iris_copper = lin(vec3<f32>(0.68, 0.34, 0.07));
+    let pupil_black = lin(vec3<f32>(0.010, 0.010, 0.012));
+    let pearl_shield = lin(vec3<f32>(0.76, 0.86, 0.78));
+    let pearl_core = lin(vec3<f32>(0.88, 0.93, 0.86));
+    let tymp_col = lin(vec3<f32>(0.24, 0.29, 0.21));
+    let labial_pale = lin(vec3<f32>(0.52, 0.74, 0.56));
+
+    // --- 1. Supraorbital brow ridge shading ---
+    if (ax > 0.018 && p.z > 0.368 && p.z < 0.402 && p.y > 0.249 && p.y < 0.261) {
+        let bu = (p.z - 0.385) / 0.015;
+        let arch_y = 0.2545 - 0.0022 * bu * bu;
+        let brow = inside(abs(p.y - arch_y) - 0.0028, 0.0016 + w) * inside(abs(bu) - 1.0, 0.15);
+        let keel_plates = 0.5 + 0.5 * sin(p.z * 1650.0);
+        c = mix(c, brow_dark * (0.85 + 0.30 * keel_plates), 0.70 * brow);
+        rough = mix(rough, 0.36, 0.5 * brow);
+    }
+
+    // --- 2. Golden-amber reptilian eye, vertical slit pupil & scaly palpebral rims ---
+    if (ax > 0.022 && p.z > 0.371 && p.z < 0.397 && p.y > 0.233 && p.y < 0.255) {
+        let u = p.z - EYE.z;
+        let v = p.y - EYE.y + 0.08 * u;
+        let shut = clamp(look.z, 0.0, 1.0);
+        let wide = max(-look.z, 0.0);
+
+        let a = clamp(u / EYE_HALF.x, -1.2, 1.2);
+        let h_open = EYE_HALF.y * (1.0 + 0.22 * wide) * sqrt(max(0.0, 1.0 - a * a));
+        let d_socket = max(abs(v) - EYE_HALF.y * sqrt(max(0.0, 1.0 - a * a)), abs(u) - EYE_HALF.x);
+
+        // Scaly beaded palpebral outer ring around the eye socket.
+        let outer_ring = inside(d_socket - 0.0024, 0.0012 + w) * (1.0 - inside(d_socket + 0.0005, w));
+        let bead = smoothstep(0.2, 0.85, cos(atan2(v, u) * 22.0));
+        c = mix(c, mix(lid_olive, lid_bead, 0.65 * bead), 0.85 * outer_ring);
+
+        // Upper & lower scaly lids closing smoothly toward the horizontal palpebral fissure.
+        let top_edge = h_open * (1.0 - 1.35 * shut);
+        let bot_edge = -h_open * (1.0 - 0.65 * shut);
+        let socket_mask = inside(d_socket, w);
+        let open_mask = socket_mask * inside(v - top_edge, w) * inside(bot_edge - v, w);
+        let closed_lid = socket_mask * (1.0 - open_mask);
+
+        // Closed / blinking scaly eyelid surface + dark palpebral rim line.
+        let lid_tex = 0.85 + 0.25 * sin(u * 2200.0) * sin(v * 2200.0);
+        c = mix(c, lid_olive * lid_tex, 0.90 * closed_lid);
+        let rim_line = socket_mask * (inside(abs(v - top_edge) - 0.0007, w) + inside(abs(v - bot_edge) - 0.0007, w));
+        c = mix(c, dark_sulcus, clamp(rim_line, 0.0, 1.0));
+
+        // Open eyeball: golden-amber iris, radial stroma, copper inner ring, crisp vertical slit pupil.
+        let g = vec2<f32>(-sign(p.x) * look.x, look.y) * 0.008;
+        let ui = u - g.x;
+        let vi = v - g.y;
+        let r_iris = length(vec2<f32>(ui / 0.0082, vi / 0.0074));
+        let radial = 0.90 + 0.16 * sin(atan2(vi, ui) * 28.0 + r_iris * 6.0);
+        var eye_col = mix(iris_copper, iris_gold, smoothstep(0.22, 0.72, r_iris)) * radial;
+        // Dark limbal ring around the outer iris margin.
+        eye_col = mix(eye_col, dark_sulcus, 0.78 * smoothstep(0.82, 1.02, r_iris));
+
+        // Razor-sharp vertical elliptical/spindle slit pupil.
+        let vy_norm = clamp(vi / 0.0058, -1.2, 1.2);
+        let slit_half_w = (0.00135 + 0.0007 * wide) * sqrt(max(0.0, 1.0 - vy_norm * vy_norm));
+        let in_pupil = inside(abs(ui) - slit_half_w, w) * inside(abs(vi) - 0.0058, w);
+        eye_col = mix(eye_col, pupil_black, in_pupil);
+
+        // Crisp sky specular catchlight high and forward on the glossy cornea.
+        let catch1 = inside(length(vec2<f32>(u - 0.0024, v - 0.0022)) - 0.0011, w);
+        let catch2 = inside(length(vec2<f32>(u + 0.0020, v + 0.0016)) - 0.0006, w);
+        eye_col = mix(eye_col, vec3<f32>(1.0), 0.92 * catch1 + 0.35 * catch2);
+
+        c = mix(c, eye_col, open_mask);
+        rough = mix(rough, 0.035, open_mask);
+    }
+
+    // --- 3. Circular tympanum (eardrum) behind the eye ---
+    if (ax > 0.024 && p.z > 0.344 && p.z < 0.365 && p.y > 0.226 && p.y < 0.246) {
+        let dt = length(vec2<f32>((p.z - TYMP.z) / 0.0058, (p.y - TYMP.y) / 0.0068)) - 1.0;
+        let in_tymp = inside(dt * 0.006, w);
+        let tymp_rim = inside((dt - 0.16) * 0.006, w) * (1.0 - in_tymp);
+        // Subtle pale columella streak at the centre of the translucent membrane.
+        let columella = inside(length(vec2<f32>(p.z - TYMP.z, (p.y - TYMP.y) * 0.6)) - 0.0014, w);
+        let mem_col = mix(tymp_col, pearl_shield, 0.32 * columella);
+        c = mix(c, dark_sulcus, 0.72 * tymp_rim);
+        c = mix(c, mem_col, 0.86 * in_tymp);
+        rough = mix(rough, 0.24, in_tymp);
+    }
+
+    // --- 4. Signature green-iguana large pearlescent subtympanic shield scale ---
+    if (ax > 0.026 && p.z > 0.348 && p.z < 0.378 && p.y > 0.201 && p.y < 0.229) {
+        let su = (p.z - SHIELD.z) / 0.0105;
+        let sv = (p.y - SHIELD.y) / 0.0098;
+        let ds = length(vec2<f32>(su, sv)) - 1.0;
+        let in_shield = inside(ds * 0.010, w);
+        let shield_border = inside((ds - 0.15) * 0.010, w) * (1.0 - in_shield);
+        let dome = 1.0 - clamp(length(vec2<f32>(su + 0.18, sv - 0.20)), 0.0, 1.0);
+        let sh_col = mix(pearl_shield, pearl_core, 0.65 * dome);
+        c = mix(c, dark_sulcus, 0.82 * shield_border);
+        c = mix(c, sh_col, 0.90 * in_shield);
+        rough = mix(rough, 0.26, in_shield);
+
+        // Smaller satellite tuberculate cheek scales anterior/superior to the main shield.
+        let sat1 = length(vec2<f32>(p.z - 0.376, p.y - 0.217)) - 0.0036;
+        let sat2 = length(vec2<f32>(p.z - 0.372, p.y - 0.225)) - 0.0030;
+        let in_sat = clamp(inside(sat1, w) + inside(sat2, w), 0.0, 1.0);
+        c = mix(c, pearl_shield, 0.65 * in_sat);
+    }
+
+    // --- 5. Sculpted nostril rim & deep naris near the snout tip ---
+    if (ax > 0.006 && p.z > 0.414 && p.z < 0.432 && p.y > 0.226 && p.y < 0.242) {
+        let nu = (p.z - NARIS.z) * 0.92 + (p.y - NARIS.y) * 0.38;
+        let nv = -(p.z - NARIS.z) * 0.38 + (p.y - NARIS.y) * 0.92;
+        let d_rim = length(vec2<f32>(nu / 0.0046, nv / 0.0038)) - 1.0;
+        let d_hole = length(vec2<f32>((nu - 0.0005) / 0.0024, nv / 0.0019)) - 1.0;
+        let rim_mask = inside(d_rim * 0.004, w) * (1.0 - inside(d_hole * 0.0022, w));
+        let hole_mask = inside(d_hole * 0.0022, w);
+        c = mix(c, labial_pale, 0.50 * rim_mask);
+        c = mix(c, pupil_black, 0.95 * hole_mask);
+        rough = mix(rough, 0.85, hole_mask);
+    }
+
+    // --- 6. Segmented labial scale border & crisp mouth commissure ---
+    if (p.z > 0.360 && p.y > 0.206 && p.y < 0.232) {
+        // Mouth cleft curves gently from jaw corner (z 0.362, y 0.219) to rostral tip (z 0.435, y 0.221).
+        let cleft_y = 0.219 + 0.032 * (p.z - 0.362) - 0.0022 * sin(((p.z - 0.362) / 0.073) * 3.14159);
+        let dy = p.y - cleft_y;
+        let on_jaw_side = smoothstep(0.004, 0.011, ax + 0.25 * max(p.z - 0.415, 0.0));
+
+        // Enlarged rectangular supralabial & infralabial scale plates with vertical sutures.
+        let in_labial = inside(abs(dy) - 0.0048, 0.0010 + w) * on_jaw_side;
+        let suture = inside(abs(sin(p.z * 820.0)) - 0.11, 80.0 * w) * in_labial;
+        c = mix(c, labial_pale, 0.38 * in_labial);
+        c = mix(c, dark_sulcus, 0.55 * suture);
+
+        // Crisp dark mouth line along the labial commissure.
+        let mouth_line = inside(abs(dy) - 0.00085, w) * on_jaw_side;
+        c = mix(c, dark_sulcus, 0.90 * mouth_line);
+        rough = mix(rough, 0.32, in_labial);
+    }
+
+    out.base_color = c;
+    out.roughness = rough;
+    return out;
+}
