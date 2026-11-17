@@ -148,7 +148,6 @@ export function createProveTab(app) {
     }
     kv.set('status', r.status || '—', !cex);
     kv.set('domain', arity === 1 ? 'every int32' : `every int32 ${arity}-tuple`);
-    kv.set('guards', `${r.provenGuards ?? '—'} of ${r.totalGuards ?? '—'}`, r.provenGuards === r.totalGuards);
     kv.set('cert', short(r.proofHash, 16));
     kv.set('time', `${wall} ms`);
 
