@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>Voxel World (SVDAG)</title>
+    <link rel="stylesheet" href="/lib/kit/kit.css">
+    <style>
+        #stage { cursor: crosshair; }
+        #panel { width: 312px; }
+        #presets { display: flex; flex-wrap: wrap; gap: 4px; }
+        #presets > button { flex: 1 1 46%; text-align: left; }
+        #sculptTool, #layers, #tod { display: flex; flex-wrap: wrap; gap: 4px; }
+        #sculptTool > button, #layers > button, #tod > button { flex: 1 1 44%; }
+        .help { color: var(--k-dim); font-size: 11px; line-height: 1.45; }
+        .k-viewport > #unavailable {
+            position: absolute; left: 24px; right: 24px; top: 44%;
+            padding: 14px 18px; text-align: center; border-radius: 8px;
+            background: rgba(16, 20, 28, 0.92); border: 1px solid var(--k-border-hi);
+            color: var(--k-warn); font-family: var(--k-font-ui); font-size: 13px;
+        }
+    </style>
+</head>
+<body class="k-app">
+    <header class="k-header">
+        <h1>Voxel World (SVDAG)</h1>
+        <span class="k-sub">Stacked additive + subtractive Sparse Voxel DAG over heightfield terrain: instancing, O(1) GPU animation, 3D carve caves &amp; recursive fractals</span>
+    </header>
+    <div class="k-body">
+        <main class="k-main">
+            <div class="k-viewport">
+                <canvas id="stage"></canvas>
+                <div id="unavailable" hidden>bro.voxeldag / GPU scene backend is unavailable in this runtime build.</div>
+            </div>
+        </main>
+        <aside class="k-side right" id="panel">
+            <div class="k-panel fold">
+                <h2>Camera Tour</h2>
+                <div id="presets"></div>
+                <div class="help">1–6 presets · Left-click sculpts · Right-drag look · WASD move · Space/C up/down · Shift boost · Tab panel</div>
+            </div>
+            <div class="k-panel fold">
+                <h2>SVDAG Telemetry</h2>
+                <div id="telemetry"></div>
+            </div>
+            <div class="k-panel fold">
+                <h2>Live Sculpt</h2>
+                <div id="sculptTool"></div>
+                <div class="k-row">
+                    <button id="resetSculpt" class="small">Reset Edits</button>
+                    <span id="sculptInfo" class="help"></span>
+                </div>
+            </div>
+            <div class="k-panel fold">
+                <h2>Layers &amp; Quality</h2>
+                <div id="layers">
+                    <button id="btn-svdag" class="small">SVDAG</button>
+                    <button id="btn-terrain" class="small">Terrain</button>
+                    <button id="btn-carve" class="small">Carve Cutouts</button>
+                    <button id="btn-anim" class="small">Animate</button>
+                </div>
+                <div class="k-col" id="quality"></div>
+            </div>
+            <div class="k-panel fold folded">
+                <h2>Atmosphere &amp; Camera</h2>
+                <div id="tod"></div>
+                <h3>Sun</h3>
+                <div class="k-col" id="sun"></div>
+                <h3>Camera</h3>
+                <div class="k-col" id="camera"></div>
+                <button id="resetPos" class="small">Reset View</button>
+            </div>
+        </aside>
+    </div>
+    <footer class="k-statusbar">
+        <span id="status">initializing…</span>
+        <span class="k-stats" id="stats"></span>
+    </footer>
+    <script type="module" src="/app/main.js"></script>
+</body>
+</html>

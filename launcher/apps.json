@@ -104,6 +104,7 @@
         { "dir": "demos/video_demo" },
         { "dir": "demos/vision-lab" },
         { "dir": "demos/vlm-lab" },
+        { "dir": "demos/voxeldag-world" },
         { "dir": "demos/waapi-lab" },
         { "dir": "demos/window-lab" },
         { "dir": "demos/yue2-lab" },
