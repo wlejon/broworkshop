@@ -16,7 +16,7 @@ fn sample_region_state<BReg, BN, BC, BB>(
     children: BC,
     bricks: BB
 ) -> u32 {
-    let base = (ri * 5u) as i32;
+    let base = (ri * voxeldag::REGION_STRIDE) as i32;
     let r0 = regions[base];
     let r4 = regions[base + 4];
     let flags = bitcast<u32>(r4.z);
