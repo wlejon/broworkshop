@@ -62,6 +62,7 @@
         { "dir": "demos/image-kernels" },
         { "dir": "demos/input-lab" },
         { "dir": "demos/instanced-crowd" },
+        { "dir": "demos/karst-world" },
         { "dir": "demos/kokoro-lab" },
         { "dir": "demos/krea2-lab" },
         { "dir": "demos/kws-lab" },

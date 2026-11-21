@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>Karst World (Smooth SVDAG)</title>
+    <link rel="stylesheet" href="/lib/kit/kit.css">
+    <style>
+        #stage { cursor: crosshair; }
+        #panel { width: 312px; }
+        #presets, #viewMode, #sculptTool, #tod, #layers { display: flex; flex-wrap: wrap; gap: 4px; }
+        #presets > button { flex: 1 1 46%; text-align: left; }
+        #viewMode > button, #layers > button, #tod > button { flex: 1 1 46%; }
+        #sculptTool > button { flex: 1 1 30%; }
+        .help { color: var(--k-dim); font-size: 11px; line-height: 1.45; }
+        .k-viewport > #unavailable {
+            position: absolute; left: 24px; right: 24px; top: 44%;
+            padding: 14px 18px; text-align: center; border-radius: 8px;
+            background: rgba(16, 20, 28, 0.92); border: 1px solid var(--k-border-hi);
+            color: var(--k-warn); font-family: var(--k-font-ui); font-size: 13px;
+        }
+    </style>
+</head>
+<body class="k-app">
+    <header class="k-header">
+        <h1>Karst World (Smooth SVDAG)</h1>
+        <span class="k-sub">Stacked additive + subtractive SVDAG storage extracted on GPU into continuous non-voxel limestone caves, arches &amp; overhangs</span>
+    </header>
+    <div class="k-body">
+        <main class="k-main">
+            <div class="k-viewport">
+                <canvas id="stage"></canvas>
+                <div id="unavailable" hidden>bro.voxeldag, bro.kernel, or Mesh.surfaceNets is unavailable in this build.</div>
+            </div>
+        </main>
+        <aside class="k-side right" id="panel">
+            <div class="k-panel fold">
+                <h2>Camera Tour</h2>
+                <div id="presets"></div>
+                <div class="help">1–6 presets · Left-click sculpts · Right-drag look · WASD move · Space/C up/down · Shift boost · Tab panel</div>
+            </div>
+            <div class="k-panel fold">
+                <h2>Storage &amp; Rendering</h2>
+                <div id="viewMode"></div>
+                <div id="layers">
+                    <button id="btn-caves" class="small">Caves Layer</button>
+                    <button id="btn-flora" class="small">Flora</button>
+                </div>
+            </div>
+            <div class="k-panel fold">
+                <h2>SVDAG &amp; Surface Telemetry</h2>
+                <div id="telemetry"></div>
+            </div>
+            <div class="k-panel fold">
+                <h2>Live 3D Sculpt</h2>
+                <div id="sculptTool"></div>
+                <div class="k-row">
+                    <button id="resetSculpt" class="small">Reset Edits</button>
+                    <span id="sculptInfo" class="help"></span>
+                </div>
+            </div>
+            <div class="k-panel fold folded">
+                <h2>Atmosphere &amp; Camera</h2>
+                <div id="tod"></div>
+                <h3>Sun</h3>
+                <div class="k-col" id="sun"></div>
+                <h3>Camera</h3>
+                <div class="k-col" id="camera"></div>
+                <button id="resetPos" class="small">Reset View</button>
+            </div>
+        </aside>
+    </div>
+    <footer class="k-statusbar">
+        <span id="status">initializing…</span>
+        <span class="k-stats" id="stats"></span>
+    </footer>
+    <script type="module" src="/app/main.js"></script>
+</body>
+</html>
