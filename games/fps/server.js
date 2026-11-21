@@ -1,6 +1,6 @@
 // FPS Arena — authoritative server.
 //
-//   bro-server games/fps games/fps/server.js --tickrate 60
+//   bro-server --grant net games/fps games/fps/server.js --tickrate 60
 //
 // The launcher runs this same file in a Worker (launcher/apps.json "server").
 // Clients send 60 Hz input; the match (sim.js) moves everyone, resolves

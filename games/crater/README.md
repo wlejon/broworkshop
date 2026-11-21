@@ -43,7 +43,7 @@ From the launcher, the server starts automatically (`launcher/apps.json`).
 Standalone:
 
 ```
-bro-server games/crater games/crater/server.js
+bro-server --grant net games/crater games/crater/server.js
 bro games/crater
 ```
 

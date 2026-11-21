@@ -1,6 +1,6 @@
 // Crater — authoritative server.
 //
-//   bro-server games/crater games/crater/server.js
+//   bro-server --grant net games/crater games/crater/server.js
 //
 // The launcher runs this same file in a Worker (launcher/apps.json "server").
 // Connections, the hello/welcome handshake and JSON framing are
