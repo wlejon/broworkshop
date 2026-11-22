@@ -127,6 +127,8 @@ function boundsOf(m) {
  * A species' meshes at each level: [{ bark, leaves, tris, area, barkGeometry,
  * leavesGeometry }], the geometries shared by every tree drawn at that level
  * (scene.createGeometry: made and uploaded once). `sp` is { world, k (draw scale) }.
+ * A level is { from, L, sides } and optionally `area` and `minRadius` (m,
+ * drawn: the thinnest branch kept, else half a pixel where it begins).
  *
  * A level's cards hold the crown's leaf area times `area`. Left unset, it is
  * measured: L^2 fewer cards L times larger cover more of the crown than the
@@ -166,10 +168,33 @@ export function speciesLevels(sp, levels = LEVELS) {
                 leaves = emit(lv, area);
             }
         }
-        // The branches at least half a pixel wide where the level begins.
-        const bark = barkMesh(sp.world.emitBranchTubes({ minRadius: 0.25 * lv.from * PX / sp.k }), lv.sides);
+        // The branches at least half a pixel wide where the level begins
+        // (or `minRadius` m in radius, drawn, when the level sets one).
+        const bark = barkMesh(sp.world.emitBranchTubes({ minRadius: (lv.minRadius ?? 0.25 * lv.from * PX) / sp.k }), lv.sides);
         return { bark, leaves, area, tris: (bark.indices.length + leaves.indices.length) / 3,
             barkGeometry: scene.createGeometry(bark), leavesGeometry: scene.createGeometry(leaves) };
+    });
+}
+
+/**
+ * Write `levels` (speciesLevels') for another app to draw:
+ * `<dir>/<name>_L<L>_<bark|leaves>.bin` each, a mesh as little-endian words:
+ * the vertex count, the index count, then the positions (3 floats a vertex),
+ * the normals (3 floats a vertex) and the indices (uint32), in the grown
+ * tree's metres.
+ */
+export function saveLevels(levels, dir, name, lvDefs = LEVELS) {
+    const fs = require('fs');
+    levels.forEach((lv, i) => {
+        for (const part of ['bark', 'leaves']) {
+            const m = lv[part], nv = m.positions.length / 3, ni = m.indices.length;
+            const buf = new ArrayBuffer(8 + nv * 24 + ni * 4);
+            new Uint32Array(buf, 0, 2).set([nv, ni]);
+            new Float32Array(buf, 8, nv * 3).set(m.positions);
+            new Float32Array(buf, 8 + nv * 12, nv * 3).set(m.normals);
+            new Uint32Array(buf, 8 + nv * 24, ni).set(m.indices);
+            fs.writeFileSync(`${dir}/${name}_L${lvDefs[i].L}_${part}.bin`, new Uint8Array(buf));
+        }
     });
 }
 

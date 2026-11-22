@@ -104,11 +104,11 @@ ground distance seen from 12 and 30 m up, the rings either side of the
 250 m handoff (230-340 m) are within 0.93-1.06, as near as the meshes'
 own rings inside it (0.93-1.08): the handoff adds no step of its own.
 
-`saveImpostor(imp, dir, name, height)` writes a bake for another app to
-draw: two PNG atlases, the views tiled 8 across and 4 down (`<name>_albedo`:
-the albedo's square root and the coverage; `<name>_normal`: the normal and
-the crown's occlusion), and `<name>.json` with the box, the grown height and
-each view's octagon. The page draws a tree of its own at the origin, so a
+`saveImpostor(imp, dir, name, measureTree(world))` writes a bake for
+another app to draw: two PNG atlases, the views tiled 8 across and 4 down
+(`<name>_albedo`: the albedo's square root and the coverage;
+`<name>_normal`: the normal and the crown's occlusion), and `<name>.json`
+with the box, the grown height and crown width, and each view's octagon. The page draws a tree of its own at the origin, so a
 script baking clears it first (`clear()`), or it is baked into every view.
 Against the meshes' own shadow (every level casting, no proxies) the
 proxies' ground is 0.996, 1.025 and 1.045 from 2, 30 and 150 m up. No

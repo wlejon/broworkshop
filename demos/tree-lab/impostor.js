@@ -353,10 +353,10 @@ export function bakeImpostor(sp, o = IMPOSTOR) {
  * (rgb the normal as 0.5 + 0.5 n, a the crown's occlusion), each the views
  * tiled nAz across and nEl down (view vi at column vi % nAz, row vi / nAz),
  * and `<name>.json`: { box (centre and radius, the grown tree's metres),
- * height (the grown tree's), W, nAz, nEl, elStep (degrees), shape (each
- * view's octagon, 8 numbers), area, L }.
+ * height and crownW (the grown tree's, measureTree's), W, nAz, nEl, elStep
+ * (degrees), shape (each view's octagon, 8 numbers), area, L }.
  */
-export function saveImpostor(imp, dir, name, height) {
+export function saveImpostor(imp, dir, name, { height, crownW }) {
     const { alb, nrm, W, V, o } = imp;
     const AW = o.nAz * W, AH = o.nEl * W;
     const A = new Uint8Array(AW * AH * 4), N = new Uint8Array(AW * AH * 4);
@@ -372,7 +372,7 @@ export function saveImpostor(imp, dir, name, height) {
     }
     bro.image.encodePngFile(`${dir}/${name}_albedo.png`, A, AW, AH, 4);
     bro.image.encodePngFile(`${dir}/${name}_normal.png`, N, AW, AH, 4);
-    const meta = { box: imp.box, height, W, nAz: o.nAz, nEl: o.nEl, elStep: o.elStep, shape: Array.from(imp.shape), area: imp.area, L: o.L };
+    const meta = { box: imp.box, height, crownW, W, nAz: o.nAz, nEl: o.nEl, elStep: o.elStep, shape: Array.from(imp.shape), area: imp.area, L: o.L };
     require('fs').writeFileSync(`${dir}/${name}.json`, JSON.stringify(meta));
 }
 
