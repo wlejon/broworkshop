@@ -48,6 +48,17 @@ mesh tree's shadow to its voxels, cached and not redrawn as the tree sways:
 a millisecond cheaper with ten mesh trees, the shadows stepped at the
 voxels' 0.17 m.
 
+`speciesLevels` and `plantLod` (lod.js) draw the same laid-out forest as
+the grown trees themselves at every distance, each tree a mesh node pair
+(bark, leaves) at a level of detail picked by its distance: from 0, 40, 100
+and 250 m the leaf cards are 3, 6, 12 and 24 times the lab's leaf with
+1/L² as many (the crown's leaf area kept), and the branches thinner than
+half a pixel where the level begins are dropped, the rest 6 to 3 sided and
+mitred at the joints. Every level carries the tree's vegetation records,
+so every tree at every distance sways and shades as foliage, and every
+level casts. 726 trees on 600 m square: 1.8 ms from eye height, 1.7 from
+30 m, 1.3 from 150 m, 1.1-1.4 from 1 km (GPU frame, 4090).
+
 ## Files
 
 ```
@@ -57,6 +68,8 @@ lab.js                scene, sky, ground, the post; growSpecies, measureTree,
 voxel.js              voxelTree: the tree as a voxeldag archetype and region
 forest.js             growStand, layout, plant: a mixed stand, mesh near,
                       voxels beyond
+lod.js                speciesLevels, plantLod: the grown trees at every
+                      distance, reduced per level, all swaying
 sheet.js              runSheet: each species' size, a still from eye height,
                       and its GPU ms over the bare frame at given distances
 ```
