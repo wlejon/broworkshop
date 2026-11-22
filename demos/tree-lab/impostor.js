@@ -284,10 +284,11 @@ function pullCards(m, half, per = 6) {
 /**
  * The trees' shadow, for impostors (whose cut the shadow pass does not run):
  * species `sp`'s crown as L-times leaf cards pulled into it and its limbs
- * (branches past `minRadius` m), instanced over `trees`, shadowOnly. Returns
- * the nodes.
+ * (branches past `minRadius` m) in one mesh, instanced over `trees`,
+ * shadowOnly, each page view drawing only the trees whose sphere reaches it
+ * (setInstanceCullSpheres). Returns the node.
  */
-export function shadowProxyNodes(sp, trees, { L = 48, minRadius = 0.15 } = {}) {
+export function shadowProxyNode(sp, trees, { L = 48, minRadius = 0.15 } = {}) {
     const kk = 1.5 * L / sp.k;
     const leaves = pullCards(sp.world.emitFoliageMesh(leafCard(kk, [1, 2]), { seed: 0x1eaf, perArea: 90 / (kk * kk) }), 0.06 * kk);
     const bark = barkMesh(sp.world.emitBranchTubes({ minRadius: minRadius / sp.k }), 3);
@@ -296,9 +297,24 @@ export function shadowProxyNodes(sp, trees, { L = 48, minRadius = 0.15 } = {}) {
         const s = sp.k * t.size, c = Math.cos(t.yaw) * s, n = Math.sin(t.yaw) * s;
         inst.set([c, 0, n, t.x, 0, s, 0, 0, -n, 0, c, t.z, 1, 1, 1, 1], i * 16);
     });
-    return [leaves, new Mesh({ positions: bark.positions, normals: bark.normals, indices: bark.indices })].map((mesh) =>
-        scene.createInstancedMesh({ mesh, instances: inst, color: [0.1, 0.1, 0.1], doubleSided: true,
-            castsShadow: true, shadowOnly: true, receivesShadow: false, vertexColorTint: false }));
+    return scene.createInstancedMesh({ mesh: mergeMeshes(leaves, bark), instances: inst, color: [0.1, 0.1, 0.1],
+        doubleSided: true, castsShadow: true, shadowOnly: true, receivesShadow: false, vertexColorTint: false })
+        .setInstanceCullSpheres(cullSpheres(sp, trees));
+}
+
+// Two meshes' positions, normals and triangles as one.
+function mergeMeshes(a, b) {
+    const na = a.positions.length / 3;
+    const pos = new Float32Array(a.positions.length + b.positions.length);
+    pos.set(a.positions);
+    pos.set(b.positions, a.positions.length);
+    const nrm = new Float32Array(pos.length);
+    nrm.set(a.normals);
+    nrm.set(b.normals, a.normals.length);
+    const idx = new Uint32Array(a.indices.length + b.indices.length);
+    idx.set(a.indices);
+    for (let i = 0; i < b.indices.length; i++) idx[a.indices.length + i] = b.indices[i] + na;
+    return new Mesh({ positions: pos, normals: nrm, indices: idx });
 }
 
 const QUAD = () => new Mesh({
@@ -314,6 +330,19 @@ const QUAD = () => new Mesh({
  * the impostors in over it, for a handoff from mesh trees fading out over the
  * same band. Returns the node (destroy() to drop it).
  */
+// Each tree's bounding sphere (its baked box's centre and radius, a little
+// over for the quad drawn toward the eye), for setInstanceCullSpheres: the
+// camera and every shadow page view draw only the trees that reach them.
+function cullSpheres(sp, trees) {
+    const [bx, by, bz, R] = sp.imp.box;
+    const out = new Float32Array(trees.length * 4);
+    trees.forEach((t, i) => {
+        const s = sp.k * t.size, c = Math.cos(t.yaw), n = Math.sin(t.yaw);
+        out.set([t.x + (c * bx + n * bz) * s, by * s, t.z + (-n * bx + c * bz) * s, 1.1 * R * s], i * 4);
+    });
+    return bro.kernel.createBuffer(out);
+}
+
 export function impostorNode(sp, trees, { band = [0, 0], castsShadow = false, gain = IMPOSTOR.gain, front = IMPOSTOR.front } = {}) {
     const inst = new Float32Array(trees.length * 16), data = new Float32Array(trees.length * 4);
     trees.forEach((t, i) => {
@@ -328,5 +357,6 @@ export function impostorNode(sp, trees, { band = [0, 0], castsShadow = false, ga
     n.setShaderTexture('albedo', { data: alb, width: W, height: W, layers: V, channels: 4, mipmap: true });
     n.setShaderTexture('normals', { data: nrm, width: W, height: W, layers: V, channels: 4, mipmap: true });
     n.setShaderBuffer('trees', bro.kernel.createBuffer(data));
+    n.setInstanceCullSpheres(cullSpheres(sp, trees));
     return n;
 }

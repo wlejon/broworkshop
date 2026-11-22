@@ -72,15 +72,28 @@ pixel's footprint), tinted by the tree's own leaf tone, lit as foliage
 (`s.leaf`) through the baked normal, and cut by its coverage against a
 per-pixel dither; nearer than the band it collapses to nothing. The quad
 sits 0.4 of the crown's radius toward the eye, where the leaves seen are.
-`shadowProxyNodes` casts their shadow: each species' crown as L48 cards
-pulled into it and its limbs, instanced over the trees as `shadowOnly`
-meshes (the shadow pass does not run the impostors' cut). Measured on the
-same trees as meshes and as impostors, the canopy's mean colour agrees
-within 0.87-1.19 per channel at noon, golden hour and dawn from 150 m and
-600 m up, after a blue gain of 0.87. With meshes to 250 m and impostors
-beyond, 9476 trees on a 3.2 km square cost 1.3 ms from eye height and 30 m,
-0.8 from 150 m, 0.4 from 1 km, the impostors and their shadow 0.16-0.3 of
-it, with the camera still. The impostors do not sway.
+`shadowProxyNode` casts their shadow: each species' crown as L48 cards
+pulled into it and its limbs in one mesh, instanced over the trees as a
+`shadowOnly` mesh (the shadow pass does not run the impostors' cut), each
+shadow page drawing only the trees whose sphere reaches it
+(`setInstanceCullSpheres`; without it every page drew all of them, 17 ms a
+frame of page redraws while the camera moved). Measured on the same trees
+as meshes and as impostors, the canopy's mean colour agrees within
+0.87-1.19 per channel at noon, golden hour and dawn from 150 m and 600 m
+up, after a blue gain of 0.87. With meshes to 250 m and impostors beyond,
+9476 trees on a 3.2 km square cost 1.3 ms from eye height and 30 m, 0.8
+from 150 m, 0.4 from 1 km, the impostors and their shadow 0.16-0.3 of it,
+with the camera still.
+
+Moving is another matter for the shadow. The mesh trees' level swaps
+(`plantLod` destroys a tree's nodes and makes the next level's) redraw
+the cached shadow pages they touch the frame they happen: a 25 m/s dolly at
+eye height costs 3 ms a frame on average and 7 ms at worst, a climb from
+30 m to 1 km 1.7 and 4.9. With the shadow cast by the proxies alone
+(`plantLod`'s `castUntil: 0`) nothing the camera does changes a caster:
+the dolly is 1.3 ms on average and 2.1 at worst, the climb 0.8 and 1.3.
+But near the eye the proxies' cards cast large still blocks where the mesh
+trees cast dappled, swaying light. The impostors do not sway.
 
 ## Files
 
@@ -93,7 +106,7 @@ forest.js             growStand, layout, plant: a mixed stand, mesh near,
                       voxels beyond
 lod.js                speciesLevels, plantLod: the grown trees at every
                       distance, reduced per level, all swaying
-impostor.js           bakeImpostor, impostorNode, shadowProxyNodes: far
+impostor.js           bakeImpostor, impostorNode, shadowProxyNode: far
                       trees as baked view-atlas quads and their shadow
 sheet.js              runSheet: each species' size, a still from eye height,
                       and its GPU ms over the bare frame at given distances
