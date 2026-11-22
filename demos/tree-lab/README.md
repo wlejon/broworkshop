@@ -158,9 +158,13 @@ layer beyond): 2.0 ms mean below 30 m (2.6 worst), 1.0 to 300 m, 1.35 to 3
 km (2.7 worst, the proxies' shadow pages redrawing), 0.6 to 10 km, 0.33
 above. Its texture takes 2 s to make for that square. A 25 m/s dolly at eye
 height through that forest (some 580 mesh trees within reach) is 2.13-2.19
-ms on average, 2.2-2.25 at the 95th percentile and 2.3-3.5 at worst; some
-runs of the same dolly are 2.3-2.4 on average with a 95th percentile near
-4, every pass slower together, as the GPU's clocks are.
+ms on average, 2.2-2.25 at the 95th percentile and 2.3-3.5 at worst, in
+the page's 1620 x 970 view. With the view at 2560 x 1364 (`--width 2860
+--height 1470`) it is 3.2-3.6 ms on average and 3.3-4.0 at the 95th
+percentile: over a 2.8 ms frame before anything else is drawn. On the
+Vulkan device that also drives the desktop, one run in three of the same
+dolly is slower in every pass (4.3-4.5 on average, 7.6 at the 95th); on
+the other it never is (3.4-3.6 each run).
 
 On the CPU, each species' level is a `scene.createGeometry` made once
 (`speciesLevels`), so a swap makes two nodes and uploads nothing; making
