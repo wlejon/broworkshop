@@ -73,6 +73,8 @@ ai/birds/tests/test_process_ml.js           ml
 
 # --- slow to boot ---------------------------------------------------------------
 demos/forest                                timeout=240
+demos/metropolis                            timeout=240
+demos/metropolis/tests/test_tier4_scenarios_eye.js timeout=300
 # renders a dozen GPU sheets (about 12 s on a desktop GPU)
 tools/creature-lab/tests/test_sheets.js     timeout=180
 

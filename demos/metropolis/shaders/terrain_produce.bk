@@ -1,0 +1,199 @@
+// GPU tile production kernels for 150.99 km^2 city terrain, roads, curbs, and tile-binned parcel pads.
+// Noise, district, road, and height math matches world/city_layout.js bit-for-bit.
+import tiles;
+
+const BLOCK_SIZE: f32 = 128.0;
+const CURB_HEIGHT: f32 = 0.15;
+const ROAD_SKIRT: f32 = 6.0;
+const DOWNTOWN_DATUM_Y: f32 = 2.0;
+const URBAN_RING_R2: f32 = 2560.0 * 2560.0;
+
+fn sstep(a: f32, b: f32, x: f32) -> f32 {
+    let t = clamp((x - a) / (b - a), 0.0, 1.0);
+    return t * t * (3.0 - 2.0 * t);
+}
+
+fn hash2f(ix: i32, iz: i32, seed: i32) -> f32 {
+    var h: u32 = ((ix as u32) * 0x27d4eb2du) ^ ((iz as u32) * 0x165667b1u) ^ ((seed as u32) * 0x85ebca6bu);
+    h = (h ^ (h >> 15u)) * 0x2c1b3c6du;
+    h = (h ^ (h >> 12u)) * 0x297a2d39u;
+    h = h ^ (h >> 15u);
+    return ((h >> 8u) as f32) * (1.0 / 16777216.0);
+}
+
+fn value_noise_2d(x: f32, z: f32, cell_size: f32, seed: i32) -> f32 {
+    let gx = x / cell_size;
+    let gz = z / cell_size;
+    let flx = floor(gx);
+    let flz = floor(gz);
+    let ix = flx as i32;
+    let iz = flz as i32;
+    let fx = gx - flx;
+    let fz = gz - flz;
+    let ux = fx * fx * fx * (fx * (fx * 6.0 - 15.0) + 10.0);
+    let uz = fz * fz * fz * (fz * (fz * 6.0 - 15.0) + 10.0);
+    let a = hash2f(ix, iz, seed);
+    let b = hash2f(ix + 1, iz, seed);
+    let c = hash2f(ix, iz + 1, seed);
+    let d = hash2f(ix + 1, iz + 1, seed);
+    let ab = a + (b - a) * ux;
+    let cd = c + (d - c) * ux;
+    return ab + (cd - ab) * uz;
+}
+
+fn block_zone(bx: i32, bz: i32) -> i32 {
+    if (bx >= 2 && bx <= 4 && bz >= -2 && bz <= 1) {
+        return 0;
+    }
+    let cx = ((bx as f32) + 0.5) * BLOCK_SIZE;
+    let cz = ((bz as f32) + 0.5) * BLOCK_SIZE;
+    let r = length(vec2<f32>(cx, cz));
+    if (r < 1150.0 || (abs(cx) < 384.0 && r < 1600.0)) {
+        return 3;
+    }
+    let on_ave = (((bx & 3) == 0) || ((bz & 3) == 0)) && r < 4600.0 && hash2f(bx, bz, 71) < 0.22;
+    if (r < 2450.0 || on_ave) {
+        return 2;
+    }
+    if (hash2f(bx, bz, 97) < 0.09) {
+        return 0;
+    }
+    return 1;
+}
+
+fn road_kind_for_line(line_idx: i32, perp_idx: i32) -> i32 {
+    if ((line_idx & 3) == 0) {
+        return 2;
+    }
+    let lx = (line_idx as f32) * BLOCK_SIZE;
+    let lz = (perp_idx as f32) * BLOCK_SIZE;
+    return (lx * lx + lz * lz) < URBAN_RING_R2 ? 1 : 0;
+}
+
+fn road_half_w(kind: i32) -> f32 {
+    if (kind == 2) { return 10.0; }
+    if (kind == 1) { return 6.0; }
+    return 4.5;
+}
+
+fn sidewalk_w(kind: i32) -> f32 {
+    if (kind == 2) { return 3.5; }
+    if (kind == 1) { return 2.5; }
+    return 2.0;
+}
+
+fn base_terrain_height(x: f32, z: f32) -> f32 {
+    let r = length(vec2<f32>(x, z));
+    let urban_flat = 1.0 - sstep(950.0, 1550.0, r);
+    let hill_amp = (1.0 - urban_flat) * (10.0 + 28.0 * sstep(2200.0, 5600.0, r));
+    let n1 = value_noise_2d(x, z, 512.0, 101) * 2.0 - 1.0;
+    let n2 = value_noise_2d(x, z, 256.0, 202) * 2.0 - 1.0;
+    let n3 = value_noise_2d(x, z, 128.0, 303) * 2.0 - 1.0;
+    let ridge = (1.0 - urban_flat) * 6.0 * sstep(2600.0, 5800.0, r);
+    let h = DOWNTOWN_DATUM_Y + hill_amp * (0.62 * n1 + 0.28 * n2 + 0.10 * n3) + ridge;
+    return clamp(h, -4.0, 58.0);
+}
+
+fn snap_coord(coord: f32, line_center: f32, flat_half: f32, skirt: f32) -> f32 {
+    let d = coord - line_center;
+    let ad = abs(d);
+    if (ad <= flat_half) { return line_center; }
+    if (ad >= flat_half + skirt) { return coord; }
+    return line_center + d * sstep(flat_half, flat_half + skirt, ad);
+}
+
+fn unorm8(x: f32) -> u32 {
+    return (clamp(x, 0.0, 1.0) * 255.0 + 0.5) as u32;
+}
+
+@kernel @grid(3)
+fn k_tile(
+    g: grid<3>,
+    table: read_store<vec4<i32>, 1>,
+    pos_out: write_store<vec4<f32>, 3>,
+    surf_out: write_store<u32, 3>,
+    h_span: rw_store<i32, 1>,
+    tile_spans: read_store<vec4<i32>, 1>,
+    parcels: read_store<vec4<f32>, 1>,
+    border: f32,
+    inv_size: f32,
+    bottom: f32
+) {
+    let rec = tiles::record(table, g.z());
+    let s = ((g.x() as f32) - border) * inv_size;
+    let t = ((g.y() as f32) - border) * inv_size;
+    let d = tiles::frame_offset(rec, s, t);
+    let wx = rec.anchor.x + d.x;
+    let wz = rec.anchor.z + d.z;
+    let local_xz = d.xz + rec.point.xz;
+
+    let rx = floor(wx / BLOCK_SIZE + 0.5) as i32;
+    let rz = floor(wz / BLOCK_SIZE + 0.5) as i32;
+    let bx = floor(wx / BLOCK_SIZE) as i32;
+    let bz = floor(wz / BLOCK_SIZE) as i32;
+
+    let x_kind = road_kind_for_line(rx, rz);
+    let z_kind = road_kind_for_line(rz, rx);
+    let half_x = road_half_w(x_kind);
+    let half_z = road_half_w(z_kind);
+    let sw_x = half_x + sidewalk_w(x_kind);
+    let sw_z = half_z + sidewalk_w(z_kind);
+
+    let sx = snap_coord(wx, (rx as f32) * BLOCK_SIZE, sw_x + 0.5, ROAD_SKIRT);
+    let sz = snap_coord(wz, (rz as f32) * BLOCK_SIZE, sw_z + 0.5, ROAD_SKIRT);
+    let dx = abs(wx - (rx as f32) * BLOCK_SIZE);
+    let dz = abs(wz - (rz as f32) * BLOCK_SIZE);
+    let curb_x = sstep(half_x - 0.15, half_x + 0.15, dx);
+    let curb_z = sstep(half_z - 0.15, half_z + 0.15, dz);
+
+    var h = base_terrain_height(sx, sz) + CURB_HEIGHT * min(curb_x, curb_z);
+    var pad_mask: f32 = 0.0;
+
+    let span = tile_spans[g.z()];
+    let p_end = span.x + span.y;
+    for (var k: i32 = span.x; k < p_end; k += 1) {
+        let p0 = parcels[k * 2];
+        let p1 = parcels[k * 2 + 1];
+        let qx = max(0.0, abs(wx - p0.x) - p0.z);
+        let qz = max(0.0, abs(wz - p0.y) - p0.w);
+        let dist = length(vec2<f32>(qx, qz));
+        if (dist < p1.y) {
+            let w = 1.0 - sstep(0.0, p1.y, dist);
+            h += (p1.x - h) * w;
+            pad_mask = max(pad_mask, w);
+        }
+    }
+
+    let on_road = (dx <= half_x || dz <= half_z) ? 1.0 : 0.0;
+    let on_sw = (on_road < 0.5 && (dx <= sw_x || dz <= sw_z)) ? 1.0 : 0.0;
+    let zone_id = block_zone(bx, bz);
+
+    pos_out[g.x(), g.y(), rec.slot] = vec4<f32>(local_xz.x, h, local_xz.y, h);
+    surf_out[g.x(), g.y(), rec.slot] =
+        unorm8(on_road) | (unorm8(on_sw) << 8u) | (unorm8(pad_mask) << 16u) | (unorm8((zone_id as f32) / 3.0) << 24u);
+
+    let over = max(h - bottom, 0.0);
+    let bits = bitcast<i32>(over);
+    h_span.atomic_max(2 * g.z(), 2147483647 - bits);
+    h_span.atomic_max(2 * g.z() + 1, bits);
+}
+
+@kernel @grid(1)
+fn k_range(
+    g: grid<1>,
+    table: read_store<vec4<i32>, 1>,
+    h_span: rw_store<i32, 1>,
+    ranges: write_store<f32, 1>,
+    top: f32,
+    bottom: f32
+) {
+    let rec = tiles::record(table, g.x());
+    let slot = rec.slot;
+    let lo = bitcast<f32>(2147483647 - h_span[2 * g.x()]) + bottom;
+    let hi = bitcast<f32>(h_span[2 * g.x() + 1]) + bottom;
+    h_span[2 * g.x()] = 0;
+    h_span[2 * g.x() + 1] = 0;
+    let margin = rec.level < 3 ? 2.0 : 0.5;
+    ranges[2 * slot] = max(lo - margin, bottom);
+    ranges[2 * slot + 1] = min(hi + margin, top);
+}

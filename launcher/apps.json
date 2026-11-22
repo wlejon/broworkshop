@@ -72,6 +72,7 @@
         { "dir": "demos/listen-lab" },
         { "dir": "demos/lm-playground" },
         { "dir": "demos/mechanical-sandbox" },
+        { "dir": "demos/metropolis" },
         { "dir": "demos/mic-chunks" },
         { "dir": "demos/millrace" },
         { "dir": "demos/nav-carving" },

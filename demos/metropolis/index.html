@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Metropolis — 120 km² Streamed City</title>
+  <link rel="stylesheet" href="/lib/kit/kit.css">
+  <style>
+    html, body { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background: #0a0d14; }
+    #stage { display: block; width: 100vw; height: 100vh; }
+    #unavailable {
+      position: fixed; inset: 0; display: flex; align-items: center; justify-content: center;
+      background: #0a0d14; color: #f8fafc; font: 15px/1.5 system-ui, sans-serif; z-index: 40;
+    }
+    #unavailable[hidden] { display: none; }
+    #hud {
+      position: fixed; top: 14px; left: 14px; right: 14px; display: flex; justify-content: space-between;
+      align-items: flex-start; gap: 12px; pointer-events: none; z-index: 10;
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace; color: #f8fafc;
+    }
+    #hud[hidden] { display: none; }
+    .metro-card {
+      pointer-events: auto; background: rgba(10, 14, 22, 0.92); border: 1px solid rgba(148, 163, 184, 0.35);
+      border-radius: 10px; padding: 10px 14px;
+    }
+    .metro-controls { display: flex; flex-direction: column; gap: 8px; align-items: flex-end; }
+    .metro-title { font: 700 14px/1.2 system-ui, sans-serif; letter-spacing: 0.08em; margin-bottom: 4px; color: #ffffff; }
+    .metro-sub { font-size: 11px; color: #cbd5e1; margin-bottom: 6px; }
+    #perfStats { font-size: 11.5px; line-height: 1.45; white-space: pre; color: #f1f5f9; }
+    #todButtons, #modeButtons { display: flex; gap: 6px; align-items: center; }
+    .tod-btn, .mode-btn {
+      min-height: 28px; min-width: 52px; padding: 5px 11px; border-radius: 6px;
+      border: 1px solid #64748b; background: #1e293b; color: #f8fafc;
+      font-size: 12px; font-weight: 600; line-height: 1.2; cursor: pointer;
+    }
+    .tod-btn.active, .mode-btn.active {
+      background: #1d4ed8; color: #ffffff; border-color: #93c5fd;
+    }
+    .metro-hint {
+      position: fixed; left: 14px; bottom: 14px; font: 11.5px/1.35 system-ui, sans-serif; z-index: 10;
+      color: #f1f5f9; background: rgba(10, 14, 22, 0.92); padding: 6px 10px;
+      border-radius: 8px; border: 1px solid rgba(148, 163, 184, 0.32); pointer-events: none;
+    }
+  </style>
+</head>
+<body>
+  <canvas id="stage"></canvas>
+  <div id="unavailable" hidden>bro.tiles / bro.voxeldag / GPU scene backend is unavailable in this runtime.</div>
+
+  <div id="hud">
+    <div class="metro-card">
+      <div class="metro-title">METROPOLIS <span id="status" style="font-weight:500;font-size:11px;color:#cbd5e1;">booting…</span></div>
+      <div class="metro-sub">120 km² Streamed City &amp; Horizon</div>
+      <div id="perfStats">initializing…</div>
+    </div>
+    <div class="metro-controls">
+      <div class="metro-card" id="modeButtons" role="group" aria-label="Traversal Mode">
+        <button class="mode-btn" id="btnWalk" data-mode="walk">Walk</button>
+        <button class="mode-btn" id="btnDrive" data-mode="drive">Drive</button>
+        <button class="mode-btn active" id="btnFly" data-mode="fly">Fly</button>
+      </div>
+      <div class="metro-card" id="todButtons" role="group" aria-label="Time of Day">
+        <button class="tod-btn active" data-tod="day">1 Day</button>
+        <button class="tod-btn" data-tod="dusk">2 Dusk</button>
+        <button class="tod-btn" data-tod="night">3 Night</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="metro-hint" id="hudHint">WASD move · F mode · E enter/exit car · Space/C up/down · 1/2/3 Day/Dusk/Night · H HUD</div>
+  <script type="module" src="/app/main.js"></script>
+</body>
+</html>

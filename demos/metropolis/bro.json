@@ -1,0 +1,11 @@
+{
+    "id": "metropolis",
+    "name": "Metropolis",
+    "title": "Metropolis — 120 km² Streamed City",
+    "width": 1600,
+    "height": 960,
+    "vsync": false,
+    "maxFps": 0,
+    "lib": "../../lib",
+    "permissions": []
+}
