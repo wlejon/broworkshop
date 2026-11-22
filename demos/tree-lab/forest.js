@@ -24,7 +24,7 @@ function mulberry32(a) {
 }
 
 /** The species grown once: { name, world, m, k (draw scale), arch (voxels) }. */
-export function growStand(mix = MIX, { seconds = 50, depth = 5 } = {}) {
+export function growStand(mix = MIX, { seconds = 50, depth = 6 } = {}) {
     return mix.map((s) => {
         const { world } = growSpecies(s.name, { seconds });
         const m = measureTree(world);

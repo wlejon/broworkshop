@@ -17,11 +17,20 @@ page draws every species at its mature height with 1.5x leaves.
 
 `voxelTree(world, { scale, leaf, depth })` (voxel.js) voxelizes the same
 tree, bark and leaf cards, into one bro.voxeldag archetype over its bounding
-cube and stands it in a region where the mesh tree stands. The 22 m oak at
-depth 5 is 0.35 m voxels, 3.9k bricks; against the mesh tree (bro.eye
-compare) it holds SSIM 0.90 at 60 m (denser and darker: a voxel is solid
-or empty, so no light comes through the crown), 0.99 from 150 m, for
-0.1-0.5 ms where the mesh tree takes 1.5-3.5.
+cube and stands it in a `foliage` region where the mesh tree stands (lit
+two-sided, the sun through the leaves). Each leaf voxel's opacity is what
+its leaves cover: leaf area A in a voxel of side s passes exp(-0.5 A / s^2)
+of the light, so rays see sky through the crown and the region's shadow on
+the ground is dappled as the mesh tree's is. The 22 m oak at depth 6 is
+0.17 m voxels, 21k bricks; against the mesh tree (bro.eye compare) it holds
+SSIM 0.91 at 60 m and 0.99 from 150 m, for 0.3-0.7 ms where the mesh tree
+takes 1.5-3.5.
+
+`growStand`, `layout` and `plant` (forest.js) make a forest: the mix of
+species grown and voxelized once, the trees laid out by dart throwing so
+each keeps clear of its neighbours' crowns by a share of their radii, the
+nearest stood as swaying meshes and the rest as voxel trees, each a region
+of its own (any position, turn and size).
 
 ## Files
 
@@ -30,6 +39,8 @@ index.html, main.js   page + entry: a button per species, time of day
 lab.js                scene, sky, ground, the post; growSpecies, measureTree,
                       draw, clear, lookFrom
 voxel.js              voxelTree: the tree as a voxeldag archetype and region
+forest.js             growStand, layout, plant: a mixed stand, mesh near,
+                      voxels beyond
 sheet.js              runSheet: each species' size, a still from eye height,
                       and its GPU ms over the bare frame at given distances
 ```
