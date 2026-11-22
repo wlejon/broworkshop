@@ -92,6 +92,9 @@ export class EngineController {
     for (const c of this.rig.cutaways) {
       c.cutCy.visible = this.cutaway;
       c.fullCy.visible = !this.cutaway;
+      if (c.headSteam) c.headSteam.visible = this.cutaway;
+      if (c.crankSteam) c.crankSteam.visible = this.cutaway;
+      if (c.dValve) c.dValve.visible = this.cutaway;
     }
   }
 
@@ -131,6 +134,26 @@ export class EngineController {
       b.pistonAssembly.setPosition(xP, CONSTANTS.SHAFT_Y, b.zC);
       b.conRod.setPosition(cx, cy, b.zC);
       b.conRod.rotationZ = Math.atan2(dy, cx - xCH);
+
+      // Active internal cutaway thermodynamics: chamber length + pressure vs exhaust glow + D-valve quadrature
+      const headLen = Math.max(0.04, (xP - 0.145) - (-2.77));
+      const crankStart = xP + 0.145;
+      const crankLen = Math.max(0.04, -1.39 - crankStart);
+      b.headSteam.setPosition(-2.77, CONSTANTS.SHAFT_Y, b.zC);
+      b.headSteam.setScale(headLen, 1, 1);
+      b.crankSteam.setPosition(crankStart, CONSTANTS.SHAFT_Y, b.zC);
+      b.crankSteam.setScale(crankLen, 1, 1);
+
+      const pressHead = 0.5 + 0.5 * Math.sin(ang);
+      const pressCrank = 1.0 - pressHead;
+      const mixCol = (p) => [0.28 + 0.72 * p, 0.45 + 0.34 * p, 0.85 - 0.58 * p];
+      b.headSteam.color = mixCol(pressHead);
+      b.headSteam.emissiveColor = mixCol(pressHead);
+      b.headSteam.emissive = 0.08 + 0.46 * pressHead;
+      b.crankSteam.color = mixCol(pressCrank);
+      b.crankSteam.emissiveColor = mixCol(pressCrank);
+      b.crankSteam.emissive = 0.08 + 0.46 * pressCrank;
+      b.dValve.setPosition(-2.08 + 0.16 * Math.sin(ang), 1.94, b.zC);
     }
 
     // 2. Meshed 5-gear front involute spur train
@@ -138,7 +161,7 @@ export class EngineController {
       g.node.rotationZ = th * g.ratio + g.phase;
     }
 
-    // 3. Overhead camshaft (1:3 speed) & compressing 3D helical valve springs + Lubricator Eccentric Pump
+    // 3. Overhead camshaft (1:3 speed), valve springs seated flush on tappet disc up to overhead bridge + Lubricator Pump
     const camAngle = th / 3.0;
     rig.camShaftPivot.rotationZ = camAngle;
     for (const cu of rig.camUnits) {
@@ -154,8 +177,8 @@ export class EngineController {
       const footY = CONSTANTS.CAM_Y + camTop + 0.007;
       cu.fNode.setPosition(CONSTANTS.CAM_X, footY, cu.fNode.position[2]);
       const baseH = 0.26;
-      const topAnchor = CONSTANTS.CAM_Y + 0.456;
-      const springBottom = footY + 0.192;
+      const topAnchor = CONSTANTS.CAM_Y + 0.568;
+      const springBottom = footY + 0.140;
       const curH = Math.max(0.06, topAnchor - springBottom);
       cu.spNode.setScale(1, curH / baseH, 1);
       cu.spNode.setPosition(CONSTANTS.CAM_X, springBottom, cu.spNode.position[2]);
@@ -194,7 +217,7 @@ export class EngineController {
       const dy = elbowY - startY;
       const dist = Math.hypot(dx, dy);
       l.linkRod.setPosition(startX, startY, 0);
-      l.linkRod.setScale(1, Math.max(0.25, (dist - 0.048) / 0.40), 1);
+      l.linkRod.setScale(1, Math.max(0.20, (dist - 0.060) / 0.40), 1);
       l.linkRod.rotationZ = -Math.atan2(dx, dy);
     }
 

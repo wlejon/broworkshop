@@ -114,7 +114,7 @@ export function createTubeAlongPoints(pts, radiusOrFn, segs = 14, closedCaps = t
       const b = a + stride;
       const c = a + 1;
       const d = b + 1;
-      idx.push(a, b, d, a, d, c);
+      idx.push(a, c, d, a, d, b);
     }
   }
   if (closedCaps && nPts >= 2) {
@@ -451,29 +451,43 @@ export function createCamLobe(baseR = 0.11, lift = 0.095, thick = 0.075) {
   return buildMesh(pos, norm, uv, idx);
 }
 
-/** Open U-shaped cast bearing pedestal saddle embracing a Z-axis shaft at `centerY` with `boreR`. */
-export function createBearingSaddle(w = 0.42, baseY = 0.34, centerY = 1.48, depthZ = 0.22, boreR = 0.10) {
+/** Open curved journal bearing saddle hugging bottom semicircle `boreR` around `centerY`. */
+export function createBearingSaddle(w = 0.42, baseY = 0.34, centerY = 1.48, depthZ = 0.22, boreR = 0.094) {
   const pos = [], norm = [], uv = [], idx = [];
   const hw = w * 0.5, hz = depthZ * 0.5;
-  const pts = [[-hw, baseY], [hw, baseY], [hw, centerY - 0.008], [boreR, centerY - 0.008]];
-  for (let i = 0; i <= 12; ++i) {
-    const a = (i / 12) * Math.PI;
-    pts.push([Math.cos(a) * boreR, centerY - Math.sin(a) * boreR]);
+  const yLug = centerY - boreR - 0.03;
+  appendExtrudedPoly(pos, norm, uv, idx, [[-hw, baseY], [hw, baseY], [hw, yLug], [-hw, yLug]], -hz, hz);
+  const segs = 16;
+  for (let i = 0; i < segs; ++i) {
+    const a0 = Math.PI + (i / segs) * Math.PI;
+    const a1 = Math.PI + ((i + 1) / segs) * Math.PI;
+    const ix0 = Math.cos(a0) * boreR, iy0 = centerY + Math.sin(a0) * boreR;
+    const ix1 = Math.cos(a1) * boreR, iy1 = centerY + Math.sin(a1) * boreR;
+    const o0 = [Math.abs(Math.cos(a0)) > 0.7 ? Math.sign(Math.cos(a0)) * hw : Math.cos(a0) * hw * 0.85,
+                Math.sin(a0) < -0.55 ? yLug : Math.max(yLug, centerY + Math.sin(a0) * boreR * 1.45)];
+    const o1 = [Math.abs(Math.cos(a1)) > 0.7 ? Math.sign(Math.cos(a1)) * hw : Math.cos(a1) * hw * 0.85,
+                Math.sin(a1) < -0.55 ? yLug : Math.max(yLug, centerY + Math.sin(a1) * boreR * 1.45)];
+    appendExtrudedPoly(pos, norm, uv, idx, [[ix0, iy0], [ix1, iy1], [o1[0], o1[1]], [o0[0], o0[1]]], -hz, hz);
   }
-  pts.push([-hw, centerY - 0.008]);
-  // Decompose into left leg, right leg, and center below bore for clean convex extrusions
-  appendExtrudedPoly(pos, norm, uv, idx, [[-hw, baseY], [hw, baseY], [hw, centerY - boreR - 0.01], [-hw, centerY - boreR - 0.01]], -hz, hz);
-  appendExtrudedPoly(pos, norm, uv, idx, [[-hw, centerY - boreR - 0.01], [-boreR - 0.005, centerY - boreR - 0.01], [-boreR - 0.005, centerY - 0.01], [-hw, centerY - 0.01]], -hz, hz);
-  appendExtrudedPoly(pos, norm, uv, idx, [[boreR + 0.005, centerY - boreR - 0.01], [hw, centerY - boreR - 0.01], [hw, centerY - 0.01], [boreR + 0.005, centerY - 0.01]], -hz, hz);
   return buildMesh(pos, norm, uv, idx);
 }
 
-/** Upper arched brass bearing cap clearing a Z-axis shaft of radius `boreR` around `centerY`. */
-export function createBearingCap(w = 0.40, centerY = 1.48, topY = 1.66, depthZ = 0.22, boreR = 0.10) {
+/** Curved upper brass bearing cap hugging top semicircle `boreR` around `centerY`. */
+export function createBearingCap(w = 0.38, centerY = 1.48, topY = 1.66, depthZ = 0.22, boreR = 0.094) {
   const pos = [], norm = [], uv = [], idx = [];
   const hw = w * 0.5, hz = depthZ * 0.5;
-  appendExtrudedPoly(pos, norm, uv, idx, [[-hw, centerY + boreR + 0.01], [hw, centerY + boreR + 0.01], [hw, topY], [-hw, topY]], -hz, hz);
-  appendExtrudedPoly(pos, norm, uv, idx, [[-hw, centerY + 0.01], [-boreR - 0.005, centerY + 0.01], [-boreR - 0.005, centerY + boreR + 0.01], [-hw, centerY + boreR + 0.01]], -hz, hz);
-  appendExtrudedPoly(pos, norm, uv, idx, [[boreR + 0.005, centerY + 0.01], [hw, centerY + 0.01], [hw, centerY + boreR + 0.01], [boreR + 0.005, centerY + boreR + 0.01]], -hz, hz);
+  const segs = 16;
+  const capOutR = Math.max(boreR + 0.055, topY - centerY);
+  for (let i = 0; i < segs; ++i) {
+    const a0 = (i / segs) * Math.PI;
+    const a1 = ((i + 1) / segs) * Math.PI;
+    const ix0 = Math.cos(a0) * boreR, iy0 = centerY + Math.sin(a0) * boreR;
+    const ix1 = Math.cos(a1) * boreR, iy1 = centerY + Math.sin(a1) * boreR;
+    const ox0 = Math.max(-hw, Math.min(hw, Math.cos(a0) * hw * 1.05));
+    const ox1 = Math.max(-hw, Math.min(hw, Math.cos(a1) * hw * 1.05));
+    const oy0 = Math.min(topY, centerY + Math.sin(a0) * capOutR + 0.015);
+    const oy1 = Math.min(topY, centerY + Math.sin(a1) * capOutR + 0.015);
+    appendExtrudedPoly(pos, norm, uv, idx, [[ix0, iy0], [ix1, iy1], [ox1, oy1], [ox0, oy0]], -hz, hz);
+  }
   return buildMesh(pos, norm, uv, idx);
 }

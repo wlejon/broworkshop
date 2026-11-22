@@ -21,6 +21,24 @@ test('3D kinematic clearance sweep across full revolution', () => {
   eq(clearance.ok, true, 'bro.eye.clearance ok === true');
 });
 
+test('3D structural winding, grounding, and gear-meshing audit', () => {
+  const { scene } = window.engine;
+  window.engine.setPhase(0, 0.68);
+  const st = bro.eye.structure(scene, {
+    watchPairs: [
+      ['Crank Bevel Drive', 'Governor Driven Bevel'],
+      ['Crank Pinion (24T)', 'Intermediate Bull Gear (36T)'],
+      ['Compound Transfer Pinion (18T)', 'Camshaft Drive Gear (36T)'],
+      ['Crank Pinion (24T)', 'Lubricator Drive Pinion (16T)'],
+    ],
+  });
+  eq(st.invertedCount, 0, '0 inverted winding meshes');
+  eq(st.floatingCount, 0, '0 floating disconnected meshes');
+  eq(st.overhangCount, 0, '0 overhanging base footings');
+  eq(st.gapCount, 0, '0 unmeshed watched gear pairs');
+  eq(st.ok, true, 'bro.eye.structure ok === true');
+});
+
 test('continuous motion cadence via bro.eye.motion', () => {
   const { scene, ctrl } = window.engine;
   window.engine.snapView('crank');
