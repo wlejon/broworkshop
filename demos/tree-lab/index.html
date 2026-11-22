@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>Tree Lab</title>
+    <link rel="stylesheet" href="/lib/kit/kit.css">
+</head>
+<body class="k-app">
+    <header class="k-header">
+        <h1>Tree Lab</h1>
+        <span class="k-sub">bro.flora's species grown to full size, swaying in bro.scene's wind</span>
+    </header>
+    <div class="k-body">
+        <aside class="k-side">
+            <div class="k-panel">
+                <h2>Species</h2>
+                <div class="k-col" id="species"></div>
+            </div>
+            <div class="k-panel">
+                <h2>Light</h2>
+                <div class="k-row" id="tod"></div>
+            </div>
+        </aside>
+        <main class="k-main">
+            <div class="k-viewport"><canvas id="stage"></canvas></div>
+        </main>
+    </div>
+    <footer class="k-statusbar">
+        <span id="status">starting…</span>
+    </footer>
+    <script type="module" src="/app/main.js"></script>
+</body>
+</html>
