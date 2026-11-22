@@ -43,7 +43,33 @@ function merge(parts, scale, toUnit) {
  * size) at `depth` ((4 << depth)^3 voxels over its bounding cube) and stand
  * it at (x, z). Returns { region, archetype, voxelSize, ms }.
  */
-export function voxelTree(world, { scale = 1, leaf = 1, depth = 5, x = 0, z = 0, minDist = 0, maxDist = 0 } = {}) {
+export function voxelTree(world, opts = {}) {
+    const t = voxelArchetype(world, opts);
+    const region = standVoxelTree(t, opts);
+    return { region, archetype: t.archetype, voxelSize: t.voxelSize, ms: t.ms, tris: t.tris };
+}
+
+/**
+ * Stand an archetype from voxelArchetype at (x, z), turned `yaw` radians
+ * about its trunk and `size` times as big: a region of its own, so it stands
+ * anywhere, not on a lattice of cells.
+ */
+export function standVoxelTree(t, { x = 0, z = 0, yaw = 0, size = 1, minDist = 0, maxDist = 0, castShadow = true } = {}) {
+    const cs = Math.cos(yaw), sn = Math.sin(yaw);
+    const right = [cs, 0, -sn], fwd = [sn, 0, cs];
+    const [cx, cy, cz] = t.centre;
+    const v = voxelWorld();
+    const region = v.addRegion({
+        center: [x + size * (cx * right[0] + cz * fwd[0]), size * cy, z + size * (cx * right[2] + cz * fwd[2])],
+        right, up: [0, 1, 0], forward: fwd,
+        voxelSize: t.voxelSize * size, maxDepth: t.depth, minDist, maxDist, castShadow,
+    });
+    v.place(region, 0, 0, 0, t.archetype, 0);
+    return region;
+}
+
+/** The tree as an archetype: { archetype, centre (its cube's, from the root, m), voxelSize, depth, ms, tris }. */
+export function voxelArchetype(world, { scale = 1, leaf = 1, depth = 5 } = {}) {
     const t0 = Date.now();
     const k = leaf / scale;
     const bark = world.emitMesh(6);
@@ -63,10 +89,5 @@ export function voxelTree(world, { scale = 1, leaf = 1, depth = 5, x = 0, z = 0,
     const v = voxelWorld();
     const archetype = v.addArchetypeFromMesh(mesh, depth, { unitBounds: true, roughness: 0.8 });
     const voxelSize = (2 * half) / (4 << depth);
-    const region = v.addRegion({
-        center: [x + c[0], c[1], z + c[2]], right: [1, 0, 0], up: [0, 1, 0], forward: [0, 0, 1],
-        voxelSize, maxDepth: depth, minDist, maxDist, castShadow: true,
-    });
-    v.place(region, 0, 0, 0, archetype, 0);
-    return { region, archetype, voxelSize, ms: Date.now() - t0, tris: mesh.indices.length / 3 };
+    return { archetype, centre: c, voxelSize, depth, ms: Date.now() - t0, tris: mesh.indices.length / 3 };
 }
