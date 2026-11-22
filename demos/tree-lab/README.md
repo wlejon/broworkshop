@@ -159,7 +159,14 @@ forest, so they cull nothing up there. A climb from 2 m to 40 km in 15 s
 over 55754 trees on a 6 km square (meshes to 250 m, impostors to 3 km, the
 layer beyond): 2.0 ms mean below 30 m (2.6 worst), 1.0 to 300 m, 1.35 to 3
 km (2.7 worst, the proxies' shadow pages redrawing), 0.6 to 10 km, 0.33
-above. Its texture takes 2 s to make for that square. A 25 m/s dolly at eye
+above, in the page's view. At 2560 x 1364 with the 150 m handoff and the
+impostors as one mesh: 2.55 ms mean below 30 m (2.83 at the 95th
+percentile), 1.56 to 300 m (1.93), 1.46 to 3 km (2.00), 0.57 to 10 km
+(1.01), 0.22 above (0.25). Its worst frames (3-4 ms, from 600 m up) are
+shadow pages drawn on the world service's 8 ms settling budget: above
+there the climb moves the eye more than 10 m a frame (5 km/s at 360 fps),
+which the engine takes for a jump to a new view. Its texture takes 2 s to
+make for that square. A 25 m/s dolly at eye
 height through that forest (some 580 mesh trees within reach) is 2.13-2.19
 ms on average, 2.2-2.25 at the 95th percentile and 2.3-3.5 at worst, in
 the page's 1620 x 970 view. With the view at 2560 x 1364 (`--width 2860
