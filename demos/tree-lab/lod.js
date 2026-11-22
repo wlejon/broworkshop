@@ -91,10 +91,12 @@ export function speciesLevels(sp, levels = LEVELS) {
  * (`follow(vp)` does it each frame). `until` (m, 0: none) ends the meshes:
  * each dithers out over [until, 1.35 until] from the eye (fadeOutDist), for
  * what draws the trees beyond to dither in over the same band. The levels
- * from `castFrom` up to (not including) `castUntil` cast shadows.
+ * from `castFrom` up to (not including) `castUntil` cast shadows, the part
+ * `castRange` names (bro.scene shadowRange: 'near' with a stand-in casting
+ * 'far', so a level's swap redraws no cached shadow page).
  * Returns { update, follow, clear, stats }.
  */
-export function plantLod(trees, { levels = LEVELS, castFrom = 0, castUntil = Infinity, until = 0 } = {}) {
+export function plantLod(trees, { levels = LEVELS, castFrom = 0, castUntil = Infinity, castRange = 'all', until = 0 } = {}) {
     const shown = new Array(trees.length).fill(-1), nodes = new Array(trees.length).fill(null);
     let tris = 0, cleared = false;
     const counts = levels.map(() => 0);
@@ -119,8 +121,8 @@ export function plantLod(trees, { levels = LEVELS, castFrom = 0, castUntil = Inf
             const lv = t.sp.levels[li], s = t.sp.k * t.size;
             const cast = li >= castFrom && li < castUntil;
             nodes[i] = [
-                scene.createMesh(Object.assign({ data: lv.bark, castsShadow: cast, receivesShadow: true }, BARK)),
-                scene.createMesh(Object.assign({ data: lv.leaves, castsShadow: cast, receivesShadow: true }, LEAF)),
+                scene.createMesh(Object.assign({ data: lv.bark, castsShadow: cast, shadowRange: castRange, receivesShadow: true }, BARK)),
+                scene.createMesh(Object.assign({ data: lv.leaves, castsShadow: cast, shadowRange: castRange, receivesShadow: true }, LEAF)),
             ].map((n) => {
                 n.position = [t.x, 0, t.z];
                 n.scale = [s, s, s];

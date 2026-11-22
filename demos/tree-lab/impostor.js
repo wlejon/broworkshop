@@ -283,14 +283,19 @@ function pullCards(m, half, per = 6) {
 
 /**
  * The trees' shadow, for impostors (whose cut the shadow pass does not run):
- * species `sp`'s crown as L-times leaf cards pulled into it and its limbs
- * (branches past `minRadius` m) in one mesh, instanced over `trees`,
- * shadowOnly, each page view drawing only the trees whose sphere reaches it
- * (setInstanceCullSpheres). Returns the node.
+ * species `sp`'s crown as L-times leaf cards (`cover` of the crown's leaf
+ * area, each pulled `pull` of its size toward the crown's centre) and its
+ * limbs (branches past `minRadius` m) in one mesh, instanced over `trees`,
+ * shadowOnly, casting `range` of the sun's shadow (shadowRange), each page
+ * view drawing only the trees whose sphere reaches it
+ * (setInstanceCullSpheres). The defaults match the mesh trees' own shadow
+ * on the ground within 0.97-1.06 from eye height, 30 m and 150 m in wind,
+ * soft-edged as theirs (half the cards: a swaying crown's flutter lets more
+ * light through than a still card does). Returns the node.
  */
-export function shadowProxyNode(sp, trees, { L = 48, minRadius = 0.15 } = {}) {
+export function shadowProxyNode(sp, trees, { L = 12, minRadius = 0.15, range = 'all', pull = 0, cover = 0.5 } = {}) {
     const kk = 1.5 * L / sp.k;
-    const leaves = pullCards(sp.world.emitFoliageMesh(leafCard(kk, [1, 2]), { seed: 0x1eaf, perArea: 90 / (kk * kk) }), 0.06 * kk);
+    const leaves = pullCards(sp.world.emitFoliageMesh(leafCard(kk, [1, 2]), { seed: 0x1eaf, perArea: cover * 90 / (kk * kk) }), pull * kk);
     const bark = barkMesh(sp.world.emitBranchTubes({ minRadius: minRadius / sp.k }), 3);
     const inst = new Float32Array(trees.length * 16);
     trees.forEach((t, i) => {
@@ -298,7 +303,7 @@ export function shadowProxyNode(sp, trees, { L = 48, minRadius = 0.15 } = {}) {
         inst.set([c, 0, n, t.x, 0, s, 0, 0, -n, 0, c, t.z, 1, 1, 1, 1], i * 16);
     });
     return scene.createInstancedMesh({ mesh: mergeMeshes(leaves, bark), instances: inst, color: [0.1, 0.1, 0.1],
-        doubleSided: true, castsShadow: true, shadowOnly: true, receivesShadow: false, vertexColorTint: false })
+        doubleSided: true, castsShadow: true, shadowOnly: true, shadowRange: range, receivesShadow: false, vertexColorTint: false })
         .setInstanceCullSpheres(cullSpheres(sp, trees));
 }
 
