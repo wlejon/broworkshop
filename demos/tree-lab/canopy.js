@@ -106,7 +106,7 @@ const hash = (x, z) => {
  * scales its coverage (as the impostors' from above), `gain` its colour.
  * Returns { node, ms } (ms: the texture's build).
  */
-export function canopyNode(species, bySp, { half, cell = 4, band = [3000, 4050], cover = 0.9, gain = [1.06, 0.96, 0.95], occluder = 0.5, slant = 1 } = {}) {
+export function canopyNode(species, bySp, { half, cell = 4, band = [3000, 4050], cover = 1.2, gain = [1.06, 0.96, 0.95], occluder = 0.5, slant = 2 } = {}) {
     const t0 = perf.now();
     const N = Math.ceil(2 * half / cell);
     const T = new Float32Array(N * N).fill(1);   // what the trees leave uncovered

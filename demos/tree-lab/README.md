@@ -93,8 +93,17 @@ shadow page drawing only the trees whose sphere reaches it
 frame of page redraws while the camera moved). Against the truth (the
 same 2282 trees all drawn at L3, casting their own shadow, in wind), the
 mesh trees to 250 m with impostors and proxies beyond give the frame's
-mean linear colour within 0.94-1.08 per channel at noon and golden hour
-from 30 m, 150 m and 600 m up, the ground alone 0.96-1.03. The impostors'
+mean linear colour within 0.94-1.08 per channel at noon, golden hour and
+dawn from 30 m, 150 m and 600 m up, the ground alone 0.96-1.03. By rings of
+ground distance seen from 12 and 30 m up, the rings either side of the
+250 m handoff (230-340 m) are within 0.93-1.06, as near as the meshes'
+own rings inside it (0.93-1.08): the handoff adds no step of its own.
+Against the meshes' own shadow (every level casting, no proxies) the
+proxies' ground is 0.996, 1.025 and 1.045 from 2, 30 and 150 m up. From
+1.5 km at golden hour and dawn the proxies darken the ground to 0.81-0.84
+of the truth's (0.25 would give 0.91-0.93 there, too light nearer); a
+cached page is not redrawn as the eye moves, so its shadow cannot thin
+with distance. The impostors'
 0.8 coverage and L6 bake, their blue gain of 0.95 and the proxies' 0.4
 were swept for it: with an L24 bake at full coverage the frame was 0.80
 from 600 m at noon, and plantLod's meshes at full leaf area alone were
@@ -128,20 +137,30 @@ ground's agreement above. The impostors do not sway.
 quad over the forest's ground at its crowns' mean height, textured with 4 m
 cells of what the trees cover seen from above (each tree's coverage by
 radius from its bake's top views, a cell's coverage 1 - prod(1 - a) of the
-trees over it, times 0.9) and the colour covering it, mipmapped, lit as
+trees over it, times 1.2) and the colour covering it, mipmapped, lit as
 foliage facing up. Seen at a slant the crowns' sides hide the gaps between
-them, so its coverage is that of a layer 1 / sin(elevation) as deep. Past a
+them, so its coverage is that of a layer 1 + 2 (1 / sin(elevation) - 1)
+as deep. Past a
 few kilometres a crown is a few pixels and the impostors spend their quads
 on sub-pixel triangles that hit the pixels' samples less and less: from 8
 km up the impostor forest had faded into the ground, from 20 km it was
-gone. Against the impostors at 3 km the layer's frame is within 1% per
-channel (its colour gain 1.06, 0.96, 0.95 found for it). `hideBeyond` hides
+gone. Its coverage and slant were swept against the truth (4934 trees on 2
+km all at L3, with the layer alone in their place and the proxies' shadow):
+from 3 km up the frame is 0.99-1.02 at noon, 1.02-1.09 at golden hour and
+0.90-0.91 at dawn; from 1.5 km, where the impostors still have most of the
+frame, 1.06-1.10, 0.90-0.94 and 0.79-0.82 (the proxies' shadow above). A
+normal leaning toward the sun, or the half way between sun and eye, put the
+noon and dawn errors right only by making golden hour 1.2-1.5. `hideBeyond` hides
 the impostor nodes while the eye is farther than their band from the whole
 forest, so they cull nothing up there. A climb from 2 m to 40 km in 15 s
 over 55754 trees on a 6 km square (meshes to 250 m, impostors to 3 km, the
 layer beyond): 2.0 ms mean below 30 m (2.6 worst), 1.0 to 300 m, 1.35 to 3
 km (2.7 worst, the proxies' shadow pages redrawing), 0.6 to 10 km, 0.33
-above. Its texture takes 2 s to make for that square.
+above. Its texture takes 2 s to make for that square. A 25 m/s dolly at eye
+height through that forest (some 580 mesh trees within reach) is 2.13-2.19
+ms on average, 2.2-2.25 at the 95th percentile and 2.3-3.5 at worst; some
+runs of the same dolly are 2.3-2.4 on average with a 95th percentile near
+4, every pass slower together, as the GPU's clocks are.
 
 On the CPU, each species' level is a `scene.createGeometry` made once
 (`speciesLevels`), so a swap makes two nodes and uploads nothing; making
