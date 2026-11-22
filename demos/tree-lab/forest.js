@@ -70,19 +70,26 @@ export function layout(species, { half = 300, seed = 7, crowding = 0.42, tries =
 }
 
 /**
- * Stand the trees: the `near` nearest (x0, z0) as swaying meshes, the rest as
- * voxel trees. Returns { meshes, regions }.
+ * Stand the trees, every one a voxel tree; the `near` nearest (x0, z0) are
+ * also swaying meshes, handed to their voxels from `handoff` metres off (the
+ * mesh dithers out over [handoff, 1.35 handoff] as the voxels dither in, pixel
+ * for pixel) and not drawn at all once wholly past that. Returns { meshes, regions }.
  */
-export function plant(trees, { x0 = 0, z0 = 0, near = 6 } = {}) {
+export function plant(trees, { x0 = 0, z0 = 0, near = 6, handoff = 50 } = {}) {
     const byDist = trees.slice().sort((a, b) => Math.hypot(a.x - x0, a.z - z0) - Math.hypot(b.x - x0, b.z - z0));
     const meshes = [], regions = [];
     byDist.forEach((t, i) => {
-        if (i < near) {
-            // (A mesh tree is not turned: draw places it as grown.)
-            meshes.push(draw(t.sp.world, { x: t.x, z: t.z, scale: t.sp.k * t.size, leaf: 1.5 }));
-        } else {
-            regions.push(standVoxelTree(t.sp.arch, { x: t.x, z: t.z, yaw: t.yaw, size: t.size }));
+        const mesh = i < near;
+        if (mesh) {
+            // (A mesh tree is not turned: its voxel tree turns with it.)
+            const m = draw(t.sp.world, { x: t.x, z: t.z, scale: t.sp.k * t.size, leaf: 1.5 });
+            for (const n of [m.bark, m.leaves]) {
+                n.fadeOutDist = handoff;
+                n.setVisibilityRange(0, handoff * 1.35 + t.r + t.sp.k * t.size * t.sp.m.height);
+            }
+            meshes.push(m);
         }
+        regions.push(standVoxelTree(t.sp.arch, { x: t.x, z: t.z, yaw: mesh ? 0 : t.yaw, size: t.size, minDist: mesh ? handoff : 0 }));
     });
     return { meshes, regions, pool: voxelWorld().stats() };
 }

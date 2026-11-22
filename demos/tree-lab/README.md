@@ -24,13 +24,17 @@ of the light, so rays see sky through the crown and the region's shadow on
 the ground is dappled as the mesh tree's is. The 22 m oak at depth 6 is
 0.17 m voxels, 21k bricks; against the mesh tree (bro.eye compare) it holds
 SSIM 0.91 at 60 m and 0.99 from 150 m, for 0.3-0.7 ms where the mesh tree
-takes 1.5-3.5.
+takes 1.5-3.5. The region is given the tree's plant (root, height and trunk
+word from its vegetation records), so it sways in the wind as the mesh
+tree's trunk does.
 
 `growStand`, `layout` and `plant` (forest.js) make a forest: the mix of
 species grown and voxelized once, the trees laid out by dart throwing so
-each keeps clear of its neighbours' crowns by a share of their radii, the
-nearest stood as swaying meshes and the rest as voxel trees, each a region
-of its own (any position, turn and size).
+each keeps clear of its neighbours' crowns by a share of their radii, every
+tree a voxel tree in a region of its own (any position, turn and size). The
+nearest are swaying meshes as well, handed to their voxels from `handoff`
+metres (50): the mesh's `fadeOutDist` and the region's `minDist` dither over
+the same band pixel for pixel, and past it the mesh is not drawn.
 
 ## Files
 
