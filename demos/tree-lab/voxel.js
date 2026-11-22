@@ -35,6 +35,10 @@ export function voxelWorld() {
     if (!vd) {
         vd = bro.voxeldag.createWorld(scene);
         vd.setLodScale(1.0);
+        // (A ray short of steps ends on coarser cells: the forest's voxel
+        // pass at 24 is 3.5 / 4.1 / 5.2 ms at 1.7 / 30 / 150 m, 4.3 / 4.9 /
+        // 8.0 at the default 128, the crowns a little smoother from afar.)
+        vd.setMaxRaySteps(24);
     }
     return vd;
 }
