@@ -163,9 +163,12 @@ above, in the page's view. At 2560 x 1364 with the 150 m handoff and the
 impostors as one mesh: 2.55 ms mean below 30 m (2.83 at the 95th
 percentile), 1.56 to 300 m (1.93), 1.46 to 3 km (2.00), 0.57 to 10 km
 (1.01), 0.22 above (0.25). Its worst frames (3-4 ms, from 600 m up) are
-shadow pages drawn on the world service's 8 ms settling budget: above
-there the climb moves the eye more than 10 m a frame (5 km/s at 360 fps),
-which the engine takes for a jump to a new view. Its texture takes 2 s to
+shadow pages drawn while the world service's budget was its 8 ms for
+settling a new view: above there the climb moves the eye more than 10 m
+a frame (3.6 km/s at 360 fps), the distance the engine takes for a jump
+to a new view. The same climb in 45 s (under 10 m a frame to 2 km up)
+keeps the budget at the frames' slack, about 1.3 ms, and its worst frame
+from 300 m to 3 km is 2.84 ms (1.36 mean, 1.64 at the 95th percentile). Its texture takes 2 s to
 make for that square. A 25 m/s dolly at eye
 height through that forest (some 580 mesh trees within reach) is 2.13-2.19
 ms on average, 2.2-2.25 at the 95th percentile and 2.3-3.5 at worst, in
