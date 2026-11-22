@@ -180,19 +180,22 @@ export function speciesLevels(sp, levels = LEVELS) {
  * Write `levels` (speciesLevels') for another app to draw:
  * `<dir>/<name>_L<L>_<bark|leaves>.bin` each, a mesh as little-endian words:
  * the vertex count, the index count, then the positions (3 floats a vertex),
- * the normals (3 floats a vertex) and the indices (uint32), in the grown
- * tree's metres.
+ * the normals (3 floats a vertex), the indices (uint32), then, for a mesh
+ * with them (the leaves: each card's own 0-1 square), the uvs (2 floats a
+ * vertex), in the grown tree's metres.
  */
 export function saveLevels(levels, dir, name, lvDefs = LEVELS) {
     const fs = require('fs');
     levels.forEach((lv, i) => {
         for (const part of ['bark', 'leaves']) {
             const m = lv[part], nv = m.positions.length / 3, ni = m.indices.length;
-            const buf = new ArrayBuffer(8 + nv * 24 + ni * 4);
+            const uvs = m.uvs?.length === nv * 2 ? m.uvs : null;
+            const buf = new ArrayBuffer(8 + nv * 24 + ni * 4 + (uvs ? nv * 8 : 0));
             new Uint32Array(buf, 0, 2).set([nv, ni]);
             new Float32Array(buf, 8, nv * 3).set(m.positions);
             new Float32Array(buf, 8 + nv * 12, nv * 3).set(m.normals);
             new Uint32Array(buf, 8 + nv * 24, ni).set(m.indices);
+            if (uvs) new Float32Array(buf, 8 + nv * 24 + ni * 4, nv * 2).set(uvs);
             fs.writeFileSync(`${dir}/${name}_L${lvDefs[i].L}_${part}.bin`, new Uint8Array(buf));
         }
     });
