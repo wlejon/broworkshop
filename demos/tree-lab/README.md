@@ -40,7 +40,10 @@ while it holds it (the region's `castShadow` off). A tree gives its mesh back
 only once wholly past the band, so no swap is seen; with every slot held, a
 tree coming nearer stays voxels. The meshes draw a 1 x 2 segment leaf card,
 five times cheaper than the lab's 3 x 5 and as light (bro.eye, calm). `maxDist`
-ends the voxel trees that far off (0: never).
+ends the voxel trees that far off (0: never). `meshShadow: false` leaves a
+mesh tree's shadow to its voxels, cached and not redrawn as the tree sways:
+a millisecond cheaper with ten mesh trees, the shadows stepped at the
+voxels' 0.17 m.
 
 ## Files
 
