@@ -14,7 +14,7 @@ test('3D structural winding and grounding audit', () => {
   window.sylvan.setPhase(0, 0.52);
   const st = bro.eye.structure(scene, {
     groundY: 0.08,
-    ignoreFloating: ['Koi', 'Dragonfly', 'Drifting Leaf', 'Water', 'Cascade', 'Side Spring', 'Lantern Warm Ember'],
+    ignoreFloating: ['Koi', 'Dragonfly', 'Drifting Leaf', 'Water', 'Trickle', 'Cascade', 'Side Spring', 'Lantern Warm Ember'],
   });
   eq(st.invertedCount, 0, '0 inverted winding meshes');
   eq(st.floatingCount, 0, '0 unintended floating disconnected meshes');
@@ -22,24 +22,46 @@ test('3D structural winding and grounding audit', () => {
   eq(st.ok, true, 'bro.eye.structure ok === true');
 });
 
-test('3D macro close-up inspection across key subjects', () => {
+test('3D inventory closeup, PBR lookdev & leaf-to-water trajectory checks', () => {
   const { scene } = window.sylvan;
-  window.sylvan.setPhase(0.15, 0.52);
+  window.sylvan.setPhase(0.18, 0.52);
+
   const cu = bro.eye.closeup(scene, {
-    targets: [
-      'Kohaku Matriarch',
-      'Japanese Maple',
-      'Main Cascade',
-      'Water Lily 1',
-      'Carved Basalt Lantern',
-      'Forest Fern Tussock 1',
-    ],
-    angles: ['threeQuarter', 'grazing'],
-    maxPanelDim: 380,
+    mode: 'inventory',
+    angles: ['threeQuarter'],
+    maxPanels: 9,
+    sheetWidth: 768,
+    sheetHeight: 768,
   });
-  eq(cu.ok, true, 'bro.eye.closeup ok === true');
-  check(cu.panelCount >= 6, 'captured >= 6 macro close-up panels');
-  eq(cu.targets.length, 6, 'matched all 6 requested close-up subjects');
+  eq(cu.ok, true, 'inventory closeup ok === true');
+  eq(cu.width, 768, 'inventory native width 768');
+  eq(cu.height, 768, 'inventory native height 768');
+  check(cu.panelCount >= 6, 'inventory discovered >= 6 distinct asset classes');
+
+  const ld = bro.eye.lookdev(scene, {
+    target: 'Kohaku Matriarch',
+    isolate: true,
+    sheetWidth: 768,
+    sheetHeight: 768,
+  });
+  eq(ld.ok, true, 'koi lookdev ok === true');
+  check(ld.roughnessMean > 0.35 && ld.roughnessMean < 0.75, 'koi satin skin roughness balanced: ' + ld.roughnessMean.toFixed(2));
+  check(ld.glossyFrac < 0.15, 'koi not plastic-glossy: glossyFrac=' + ld.glossyFrac.toFixed(2));
+
+  const tr = bro.eye.trace(scene, {
+    steps: 24,
+    waterY: 0.006,
+    minTravel: 0.05,
+    filter: 'Drifting Leaf',
+    sheetWidth: 768,
+    sheetHeight: 432,
+    stepFn: (k, n) => { window.sylvan.setPhase(k / n, 0.52); },
+  });
+  eq(tr.ok, true, 'leaf trace ok === true');
+  check(tr.trackCount >= 10, 'traced all drifting leaves: ' + tr.trackCount);
+  check(tr.tracks.every((t) => t.touchesWater), 'every falling leaf touches water surface');
+  check(tr.tracks.every((t) => t.maxY > 0.72), 'every leaf originates at maple canopy height');
+  check(tr.tracks.some((t) => t.nearestStartStatic.includes('Maple')), 'leaf 1 starts directly on maple twig');
 });
 
 test('3D living clearance sweep across cyclic phase', () => {

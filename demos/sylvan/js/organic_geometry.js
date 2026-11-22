@@ -485,3 +485,43 @@ export function createCarvedLanternMeshes() {
     ember: Mesh.sphere(0.060, 12, 10).translate(0, 0.60, 0),
   };
 }
+
+/**
+ * Watertight slender dragonfly anatomy pointing along -X nose-to-tail (Wait: head = +X = nose toward velocity!)
+ * Actually Koi/Dragonfly both travel along +X (`atan2(-vz, vx)` aligns local +X to forward velocity (vx, vz)).
+ * Mesh.leafCard extends along +Z, which is ALREADY perpendicular to local X!
+ */
+export function createDragonflyMeshes() {
+  const head = Mesh.sphere(0.011, 10, 8).scale(1.05, 0.9, 1.15).translate(0.012, 0.004, 0);
+  const eyeL = Mesh.sphere(0.0055, 8, 6).translate(0.016, 0.006, 0.007);
+  const eyeR = Mesh.sphere(0.0055, 8, 6).translate(0.016, 0.006, -0.007);
+  const bodyTube = Mesh.tube([
+    [0.004, 0.003, 0],
+    [-0.018, 0.009, 0],
+    [-0.040, 0.004, 0],
+    [-0.085, 0.001, 0],
+    [-0.135, -0.001, 0],
+  ], [0.0085, 0.011, 0.0055, 0.0042, 0.0028], 8, { capStart: true, capEnd: true });
+  const body = Mesh.merge([head, eyeL, eyeR, bodyTube]);
+
+  const paintWhite = (m) => {
+    const c = new Float32Array(m.vertexCount * 4);
+    for (let i = 0; i < m.vertexCount; ++i) { c[i * 4] = 1; c[i * 4 + 1] = 1; c[i * 4 + 2] = 1; c[i * 4 + 3] = 1; }
+    m.colors = c;
+    return m;
+  };
+  // Forewing + hindwing pair: leafCard already extends along +Z (lateral left), rotate PI around Y for right (-Z)
+  const foreL = paintWhite(Mesh.leafCard('oval', { width: 0.016, length: 0.115, bend: 0.04, cup: 0.04, shapedSilhouette: true })
+    .rotate(0, 1, 0, -0.18));
+  const hindL = paintWhite(Mesh.leafCard('oval', { width: 0.019, length: 0.105, bend: 0.03, cup: 0.04, shapedSilhouette: true })
+    .rotate(0, 1, 0, -0.42).translate(-0.018, -0.002, 0));
+  const wingL = Mesh.merge([foreL, hindL]);
+
+  const foreR = paintWhite(Mesh.leafCard('oval', { width: 0.016, length: 0.115, bend: 0.04, cup: 0.04, shapedSilhouette: true })
+    .rotate(0, 1, 0, Math.PI + 0.18));
+  const hindR = paintWhite(Mesh.leafCard('oval', { width: 0.019, length: 0.105, bend: 0.03, cup: 0.04, shapedSilhouette: true })
+    .rotate(0, 1, 0, Math.PI + 0.42).translate(-0.018, -0.002, 0));
+  const wingR = Mesh.merge([foreR, hindR]);
+
+  return { body, wingL, wingR };
+}

@@ -25,10 +25,10 @@ export const MOOD_PRESETS = {
     fillColor: [0.74, 0.94, 0.96],
     fillIntensity: 2.4,
     lanternIntensity: 2.0,
-    fireflyRate: 6,
+    fireflyRate: 0,
     sunBoost: 1.0,
-    exposure: 0.42,
-    bloom: { threshold: 1.22, intensity: 0.18, radius: 0.68 },
+    exposure: 0.40,
+    bloom: { enabled: false },
   },
   sunbeam: {
     label: 'Golden Sunbeam',
@@ -45,10 +45,10 @@ export const MOOD_PRESETS = {
     fillColor: [0.96, 0.84, 0.62],
     fillIntensity: 2.8,
     lanternIntensity: 2.4,
-    fireflyRate: 8,
+    fireflyRate: 2,
     sunBoost: 1.35,
-    exposure: 0.46,
-    bloom: { threshold: 1.15, intensity: 0.22, radius: 0.72 },
+    exposure: 0.44,
+    bloom: { enabled: false },
   },
   dusk: {
     label: 'Firefly Dusk',
@@ -68,7 +68,7 @@ export const MOOD_PRESETS = {
     fireflyRate: 24,
     sunBoost: 0.55,
     exposure: 0.34,
-    bloom: { threshold: 0.96, intensity: 0.32, radius: 0.76 },
+    bloom: { enabled: true, threshold: 1.85, intensity: 0.24, radius: 0.62 },
   },
 };
 
@@ -130,10 +130,11 @@ export class SylvanController {
     const t = this.time;
     const br = this.breezeSmooth;
 
-    // 1. Living translucent water waves, waterfalls & underwater caustic time
+    // 1. Living translucent water waves, rock trickles & underwater caustic time
     rig.pondWater.setShaderUniform('time', t);
     rig.pondWater.setShaderUniform('breeze', br);
     rig.fallMain.setShaderUniform('time', t);
+    if (rig.fallMid) rig.fallMid.setShaderUniform('time', t);
     rig.fallSide.setShaderUniform('time', t);
     for (const rn of rig.rockNodes) rn.node.setShaderUniform('time', t);
 
@@ -183,15 +184,62 @@ export class SylvanController {
       df.wR.rotationX = -flap;
     }
 
-    // 6. Helical drifting palmate crimson leaves cleanly between pond surface & lower boughs
+    // 6. True twig-to-pond lifecycle: detach from maple twig -> flutter down -> touch & float around lilies
+    const repelPads = (px, pz) => {
+      for (let pass = 0; pass < 2; ++pass) {
+        for (const [cx, cz, rad] of rig.lilyPads || []) {
+          const dx = px - cx, dz = pz - cz;
+          const d = Math.hypot(dx, dz);
+          const minD = rad + 0.16;
+          if (d < minD) {
+            const s = d > 1e-4 ? (minD / d) : 1.0;
+            px = cx + (d > 1e-4 ? dx * s : minD);
+            pz = cz + (d > 1e-4 ? dz * s : 0.0);
+          }
+        }
+      }
+      const r = Math.hypot(px, pz);
+      if (r > 1.50) { px *= 1.50 / r; pz *= 1.50 / r; }
+      return [px, pz];
+    };
     for (const dl of rig.driftingLeaves) {
-      const cyc = ((t * 0.08 + dl.phase) % 1 + 1) % 1;
-      const y = 0.72 - cyc * 0.50;
-      const x = dl.bx + Math.sin(t * 1.1 + dl.phase * 6.28) * 0.22 * (0.3 + br);
-      const z = dl.bz + Math.cos(t * 0.95 + dl.phase * 6.28) * 0.20 * (0.3 + br);
-      dl.node.setPosition(x, y, z);
-      dl.node.rotationY = t * 0.8 + dl.phase * 12;
-      dl.node.rotationX = Math.sin(t * 2.0 + dl.phase * 9) * 0.45;
+      const cyc = ((t * 0.045 + dl.phase) % 1 + 1) % 1;
+      const [landX, landZ] = repelPads(dl.lx, dl.lz);
+      if (cyc < 0.34) {
+        const f = cyc / 0.34;
+        const ease = f * f * (3.0 - 2.0 * f);
+        const sway = Math.sin(f * Math.PI * 3.0) * (1.0 - f * 0.5) * 0.14 * (0.4 + 0.6 * br);
+        const [x, z] = repelPads(
+          dl.sx + (landX - dl.sx) * ease + sway,
+          dl.sz + (landZ - dl.sz) * ease + Math.cos(f * Math.PI * 2.5) * 0.08 * (1.0 - f),
+        );
+        const y = dl.sy + (0.006 - dl.sy) * (f * f * 0.8 + f * 0.2);
+        dl.node.setPosition(x, y, z);
+        dl.node.scale = [0.95, 0.95, 0.95];
+        dl.node.rotationY = t * 0.7 + dl.phase * 12.0;
+        dl.node.rotationX = Math.sin(f * 10.0 + dl.phase * 8.0) * 0.42 * (1.0 - f);
+        dl.node.rotationZ = Math.cos(f * 8.0 + dl.phase * 6.0) * 0.28 * (1.0 - f);
+      } else if (cyc < 0.90) {
+        const u = (cyc - 0.34) / 0.56;
+        const curX = -0.32 * u + Math.sin(u * 4.0 + dl.phase * 6.0) * 0.05;
+        const curZ = 0.48 * u + Math.cos(u * 3.5 + dl.phase * 5.0) * 0.04;
+        const [px, pz] = repelPads(landX + curX, landZ + curZ);
+        const waveBob = Math.sin(px * 6.8 + pz * 4.8 + t * 2.2) * 0.002;
+        dl.node.setPosition(px, 0.005 + waveBob, pz);
+        dl.node.scale = [1.0, 1.0, 1.0];
+        dl.node.rotationY = dl.phase * 12.0 + u * 1.4;
+        dl.node.rotationX = 0.0;
+        dl.node.rotationZ = 0.0;
+      } else {
+        const u = (cyc - 0.90) / 0.10;
+        const [px, pz] = repelPads(landX - 0.32, landZ + 0.48);
+        dl.node.setPosition(px, 0.005 - u * 0.04, pz);
+        const s = 1.0 - u * 0.85;
+        dl.node.scale = [s, s, s];
+        dl.node.rotationY = dl.phase * 12.0 + 1.4;
+        dl.node.rotationX = 0.0;
+        dl.node.rotationZ = 0.0;
+      }
     }
   }
 }

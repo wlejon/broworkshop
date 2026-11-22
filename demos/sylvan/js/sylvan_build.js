@@ -10,13 +10,16 @@ import {
   TREE_SWAY_BK,
 } from './shaders.js';
 import {
-  makeMossyBasalt,
-  makeMapleBark,
-  makePalmateMapleLeaf,
-  makeFernFrondTex,
   makePondBedTexture,
-  makeKoiTexture,
 } from './textures.js';
+import {
+  makeRockPbrSet,
+  makeBarkPbrSet,
+  makeLeafPbrSet,
+  makeFernPbrSet,
+  makeKoiPbrSet,
+  makeSoftGlowTex,
+} from './pbr_textures.js';
 import {
   islandHeightAt,
   createSculptedIslandTerrain,
@@ -28,6 +31,7 @@ import {
   createSmoothTube,
   createSedgeClumpGeo,
   createCarvedLanternMeshes,
+  createDragonflyMeshes,
 } from './organic_geometry.js';
 
 function paintUniformColor(mesh, r = 1, g = 1, b = 1, a = 1) {
@@ -70,60 +74,74 @@ function paintLotusColors(mesh, baseRgb, tipRgb) {
   return mesh;
 }
 
-function bakeLeafColors(mesh, vertsPerLeaf) {
-  const palette = [
-    [0.48, 0.05, 0.04], // deep oxblood crimson
-    [0.66, 0.09, 0.05], // true Japanese maple scarlet
-    [0.80, 0.16, 0.05], // fiery vermilion
-    [0.88, 0.28, 0.06], // copper autumn orange
-    [0.84, 0.42, 0.09], // warm amber tip
-  ];
+function bakeLeafColors(mesh, crownCenter) {
+  const pos = mesh.positions;
   const vc = mesh.vertexCount;
   const cols = new Float32Array(vc * 4);
   for (let i = 0; i < vc; ++i) {
-    const leafIdx = (i / Math.max(1, vertsPerLeaf)) | 0;
-    const h = Math.sin(leafIdx * 12.9898) * 43758.5453;
+    const px = pos[i * 3 + 0], py = pos[i * 3 + 1], pz = pos[i * 3 + 2];
+    const h = Math.sin(px * 19.3 + py * 37.7 + pz * 11.1) * 43758.5453;
     const f = h - Math.floor(h);
-    const p = palette[(f * palette.length) | 0];
-    const jitter = 0.88 + 0.22 * ((h * 7.13) - Math.floor(h * 7.13));
-    cols[i * 4 + 0] = Math.min(1, p[0] * jitter);
-    cols[i * 4 + 1] = Math.min(1, p[1] * jitter);
-    cols[i * 4 + 2] = Math.min(1, p[2] * jitter);
+    // True 3D crown-depth AO: shadowed deep burgundy inside & low vs sunlit crimson-vermilion on upper outer rim
+    const dOut = Math.min(1.0, Math.hypot(px - crownCenter[0], pz - crownCenter[2]) / 1.35);
+    const up = Math.max(0.0, Math.min(1.0, (py - (crownCenter[1] - 0.55)) / 1.25));
+    const sunlit = Math.max(0.0, Math.min(1.0, dOut * 0.45 + up * 0.65 + (f - 0.5) * 0.25));
+
+    const r = 0.24 + sunlit * 0.54;
+    const g = 0.03 + sunlit * (sunlit * 0.16);
+    const b = 0.03 + sunlit * 0.03;
+    cols[i * 4 + 0] = Math.min(0.88, r);
+    cols[i * 4 + 1] = Math.min(0.24, g);
+    cols[i * 4 + 2] = Math.min(0.09, b);
     cols[i * 4 + 3] = 1.0;
   }
   mesh.colors = cols;
   return mesh;
 }
 
-function buildJapaneseMaple(add, barkTex, leafCutoutTex, rootPos, registerPick) {
+function buildJapaneseMaple(add, barkSet, leafSet, rootPos, registerPick) {
   const [rx, ry, rz] = rootPos;
   const rootY = ry - 0.12;
 
-  // Lush multi-tiered asymmetric maple crown filling fine branching twig network
+  // Layered asymmetric horticultural Acer palmatum: 5 tiered horizontal cloud pads leaning over pond
+  const tierCenters = [
+    [rx + 0.34, rootY + 1.02, rz + 0.18, 0.92, 0.20],
+    [rx + 0.98, rootY + 1.24, rz + 0.68, 1.12, 0.22],
+    [rx + 1.32, rootY + 0.96, rz + 0.88, 0.78, 0.16],
+    [rx + 0.56, rootY + 1.56, rz + 0.05, 1.10, 0.24],
+    [rx + 0.14, rootY + 1.76, rz + 0.54, 0.86, 0.20],
+  ];
   const attractors = [];
-  for (let i = 0; i < 320; ++i) {
-    const u = ((i * 0.6180339887) % 1);
-    const v = ((i * 0.3819660112) % 1);
-    const w = ((i * 0.7548776662) % 1);
-    const th = u * Math.PI * 2;
-    const rXZ = 0.20 + Math.pow(v, 0.62) * 1.45;
-    const tierY = 0.92 + w * 1.38 - rXZ * 0.12;
-    attractors.push([
-      rx + 0.56 + Math.cos(th) * rXZ,
-      rootY + tierY,
-      rz + 0.48 + Math.sin(th) * rXZ * 0.92,
-    ]);
+  for (let ti = 0; ti < tierCenters.length; ++ti) {
+    const [tx, ty, tz, radXZ, flatY] = tierCenters[ti];
+    for (let i = 0; i < 110; ++i) {
+      const u = ((i * 0.6180339887 + ti * 0.17) % 1);
+      const v = ((i * 0.3819660112 + ti * 0.31) % 1);
+      const w = ((i * 0.7548776662) % 1) - 0.5;
+      const th = u * Math.PI * 2;
+      const rr = (0.14 + Math.pow(v, 0.55) * 0.86) * radXZ;
+      attractors.push([tx + Math.cos(th) * rr, ty + w * flatY, tz + Math.sin(th) * rr * 0.88]);
+    }
   }
 
   const trunkSegs = Mesh.spaceColonize(
     attractors,
     [[rx, rootY, rz]],
-    [0.24, 0.95, 0.20],
-    { attractionRadius: 2.3, killRadius: 0.16, segmentLength: 0.13, maxIterations: 115, tropism: [0.24, 0.18, 0.20], tropismWeight: 0.16 },
+    [0.32, 0.90, 0.24],
+    { attractionRadius: 2.4, killRadius: 0.14, segmentLength: 0.12, maxIterations: 120, tropism: [0.34, 0.10, 0.28], tropismWeight: 0.18 },
   );
-  const thickened = Mesh.thickenBranches(trunkSegs, 0.008, 2.3);
+  const thickened = Mesh.thickenBranches(trunkSegs, 0.007, 2.3);
 
-  // Merge 4 surface buttress roots gripping gently into terrain contour
+  // Extract real overhanging outer branch tips for tree-to-water falling leaf lifecycle
+  const twigTips = [];
+  for (const seg of thickened) {
+    if (seg.radius < 0.022 && seg.to[0] > -1.35 && seg.to[2] > -1.05 && seg.to[1] > 0.72) {
+      twigTips.push(seg.to.slice());
+    }
+  }
+  if (twigTips.length === 0) twigTips.push([rx + 0.85, rootY + 1.25, rz + 0.65]);
+
+  // Merge 4 gnarled surface buttress roots gripping gently into terrain contour
   const woodParts = [Mesh.meshBranches(thickened, 8)];
   for (let i = 0; i < 4; ++i) {
     const ang = (i / 4) * Math.PI * 2 + 0.45;
@@ -142,68 +160,68 @@ function buildJapaneseMaple(add, barkTex, leafCutoutTex, rootPos, registerPick) 
   const barkMesh = Mesh.merge(woodParts);
 
   const treeUniforms = { time: 0.0, breeze: 0.52, rootPos: [rx, rootY, rz], flutterAmp: 0.0 };
-  const leafUniforms = { time: 0.0, breeze: 0.52, rootPos: [rx, rootY, rz], flutterAmp: 0.016 };
+  const leafUniforms = { time: 0.0, breeze: 0.52, rootPos: [rx, rootY, rz], flutterAmp: 0.014 };
 
   const trunkNode = add({
     name: 'Japanese Maple Wood',
     mesh: barkMesh,
-    texture: barkTex,
-    color: '#63483b', roughness: 0.90, metallic: 0.02,
+    texture: barkSet.albedo, normalTexture: barkSet.normal, metallicRoughnessTexture: barkSet.mr,
+    color: '#6e5042', roughness: 1.0, metallic: 0.02,
   });
   trunkNode.setShader({ module: TREE_SWAY_BK, file: 'tree_wood.bk', uniforms: treeUniforms });
 
   const leafCard = Mesh.leafCard('oval', {
-    width: 0.22, length: 0.24, bend: 0.34, cup: 0.24,
+    width: 0.155, length: 0.170, bend: 0.24, cup: 0.18,
     fullUV: true, shapedSilhouette: false, widthSegments: 3, lengthSegments: 4,
   });
   const scatteredLeaves = Mesh.scatterLeaves(thickened, leafCard, {
-    maxRadius: 0.062, minDepth: 2, perUnitLength: 290,
-    upBias: 0.18, tiltJitter: 1.05, rollJitter: 1.2,
-    baseScale: 1.04, scaleJitter: 0.42, dedupRadius: 0.018,
+    maxRadius: 0.056, minDepth: 2, perUnitLength: 430,
+    upBias: 0.72, tiltJitter: 0.38, rollJitter: 0.9,
+    baseScale: 1.04, scaleJitter: 0.34, dedupRadius: 0.015,
     avoid: Mesh.capsuleFieldFromSegments(thickened, 1.02),
-    obstaclePushout: 0.018, seed: 1892,
+    obstaclePushout: 0.016, seed: 1892,
   });
-  bakeLeafColors(scatteredLeaves, leafCard.vertexCount);
+  bakeLeafColors(scatteredLeaves, [rx + 0.55, rootY + 1.45, rz + 0.38]);
 
   const leavesNode = add({
     name: 'Japanese Maple Canopy',
     mesh: scatteredLeaves,
-    texture: leafCutoutTex,
-    color: '#ffffff', roughness: 0.58, metallic: 0.0,
-    alphaCutoff: 0.42, twoSided: true, subsurface: 0.68, vertexColorTint: true,
+    texture: leafSet.albedo, normalTexture: leafSet.normal, metallicRoughnessTexture: leafSet.mr,
+    color: '#ffffff', roughness: 1.0, metallic: 0.0,
+    alphaCutoff: 0.42, twoSided: true, subsurface: 0.52, vertexColorTint: true,
     castsShadow: true, receivesShadow: true,
   });
   leavesNode.setShader({ module: TREE_SWAY_BK, file: 'tree_leaves.bk', uniforms: leafUniforms });
 
   registerPick(trunkNode, {
-    id: 'maple', name: 'Gnarled Crimson Japanese Maple', kind: 'Acer palmatum · Space-Colonized',
-    desc: 'Organic pipe-model maple trunk & twigs bearing cupped 5-lobed palmate leaf cards synchronized in the GPU breeze field.',
+    id: 'maple', name: 'Gnarled Crimson Japanese Maple', kind: 'Acer palmatum · Tiered Cloud Canopy',
+    desc: 'Layered space-colonized maple leaning over the spring basin with shaded oxblood interior and crimson outer tiers.',
   });
   registerPick(leavesNode, {
-    id: 'maple_leaves', name: 'Palmate Autumn Maple Foliage', kind: 'Subsurface Translucent Crown',
-    desc: 'Hundreds of serrated autumn crimson & amber leaf cards growing directly from outer twig tips with backlit translucency.',
+    id: 'maple_leaves', name: 'Palmate Autumn Maple Foliage', kind: 'Tiered Subsurface Crown',
+    desc: 'Layered horizontal palmate leaf fans detaching in the breeze to fall onto the pond surface below.',
   });
 
-  return { trunkNode, leavesNode };
+  return { trunkNode, leavesNode, twigTips };
 }
 
-function buildFernRosette(add, frondMesh, fernTex, fx, fz, seed, fi) {
+function buildFernRosette(add, frondMesh, fernSet, fx, fz, seed, fi) {
   const fy = islandHeightAt(fx, fz);
   const fronds = [];
-  for (let k = 0; k < 10; ++k) {
-    const a = (k / 10) * Math.PI * 2 + seed * 0.5;
-    // Negative X rotation lifts +Z leaf card upward out of the ground!
-    const tilt = -(0.34 + (k % 2) * 0.24);
+  for (let k = 0; k < 12; ++k) {
+    const a = (k / 12) * Math.PI * 2 + seed * 0.5;
+    const tilt = -(0.32 + (k % 3) * 0.19);
     const f = frondMesh.clone();
-    f.rotate(1, 0, 0, tilt).rotate(0, 1, 0, a).scale(0.90 + (k % 3) * 0.15);
+    f.rotate(1, 0, 0, tilt).rotate(0, 1, 0, a).scale(0.86 + (k % 3) * 0.14);
     fronds.push(f);
   }
   const tuft = add({
     name: `Forest Fern Tussock ${fi + 1}`,
     mesh: Mesh.merge(fronds),
     position: [fx, fy + 0.01, fz],
-    texture: fernTex, color: '#6cb858', roughness: 0.68, metallic: 0.0,
-    alphaCutoff: 0.40, twoSided: true, subsurface: 0.55,
+    texture: fernSet.albedo, normalTexture: fernSet.normal, metallicRoughnessTexture: fernSet.mr,
+    color: '#6ec052', roughness: 1.0, metallic: 0.0,
+    alphaCutoff: 0.40, twoSided: true, subsurface: 0.48,
   });
   tuft.setShader({
     module: PLANT_SWAY_BK, file: `fern_${fi}.bk`,
@@ -213,23 +231,26 @@ function buildFernRosette(add, frondMesh, fernTex, fx, fz, seed, fi) {
 }
 
 export function buildSylvanScene(scene, registerPick) {
-  const basaltTex = makeMossyBasalt();
-  const barkTex = makeMapleBark();
-  const leafCutoutTex = makePalmateMapleLeaf(128, 128);
-  const fernTex = makeFernFrondTex(128, 256);
+  const rockSet = makeRockPbrSet();
+  const barkSet = makeBarkPbrSet();
+  const leafSet = makeLeafPbrSet();
+  const fernSet = makeFernPbrSet();
+  const softGlowTex = makeSoftGlowTex(64);
   const bedTex = makePondBedTexture(256, 256);
-  const koiTextures = {
-    kohaku: makeKoiTexture('kohaku'),
-    yamabuki: makeKoiTexture('yamabuki'),
-    showa: makeKoiTexture('showa'),
+  const koiSets = {
+    kohaku: makeKoiPbrSet('kohaku'),
+    tancho: makeKoiPbrSet('tancho'),
+    yamabuki: makeKoiPbrSet('yamabuki'),
+    showa: makeKoiPbrSet('showa'),
+    asagi: makeKoiPbrSet('asagi'),
   };
 
-  // Ecosystem HDR sky, reflection probe, SSAO & MSAA
+  // Ecosystem HDR sky, SSR, SSAO & MSAA (pure-sky IBL handles distant outdoor specular cleanly)
   skyEnvironment(scene, { hdri: 'kloofendal_43d_clear_puresky', intensity: 0.48, rotation: 0.6 });
   scene.setGroundBounce([0.10, 0.14, 0.07]);
   scene.setSSAO({ radius: 0.36, bias: 0.02, intensity: 1.0 });
+  scene.setSSR({ enabled: true, maxDistance: 8, steps: 28, thickness: 0.18, intensity: 0.35, edgeFade: 0.16 });
   scene.setMSAA(4);
-  scene.createReflectionProbe({ position: [0, 0.48, 0.12], size: [8.5, 5.5, 8.5], resolution: 128 });
 
   const add = (opts) => (opts.mesh ? scene.createMesh({ castsShadow: true, receivesShadow: true, ...opts }) : scene.createNode(opts));
   const rockNodes = [];
@@ -266,38 +287,42 @@ export function buildSylvanScene(scene, registerPick) {
     attachTerrainShader(cob, 0.0);
   }
 
-  // 2. Sculpted Waterfall Gorge & Natural Perimeter Basalt Boulders (icosphere-subdivided, zero UV pinch)
+  // 2. Sculpted Mossy Garden Gorge & Natural Perimeter Basalt Boulders (PBR stratified normal + MR maps)
   const cascadeCliff = add({
     name: 'Cascade Recessed Cliff',
     mesh: createSculptedBoulder(1.12, 0.86, 0.56, 2.3),
     position: [0.85, islandHeightAt(0.85, -1.78) - 0.04, -1.78],
-    texture: basaltTex, color: '#747d7a', roughness: 0.72, metallic: 0.04,
+    texture: rockSet.albedo, normalTexture: rockSet.normal, metallicRoughnessTexture: rockSet.mr,
+    color: '#747d7a', roughness: 1.0, metallic: 0.04,
   });
   attachTerrainShader(cascadeCliff, 1.0);
   const cascadeShelf = add({
     name: 'Cascade Spill Ledge',
     mesh: createSculptedBoulder(0.62, 0.34, 0.42, 6.7),
     position: [0.72, islandHeightAt(0.72, -1.42) + 0.14, -1.42],
-    texture: basaltTex, color: '#687270', roughness: 0.45, metallic: 0.05,
+    texture: rockSet.albedo, normalTexture: rockSet.normal, metallicRoughnessTexture: rockSet.mr,
+    color: '#646e6c', roughness: 0.75, metallic: 0.05,
   });
   attachTerrainShader(cascadeShelf, 0.7);
   const cliffRight = add({
     name: 'Cascade Right Buttress',
     mesh: createSculptedBoulder(0.58, 0.66, 0.52, 3.7),
     position: [1.56, islandHeightAt(1.56, -1.36) - 0.03, -1.36],
-    texture: basaltTex, color: '#767f7c', roughness: 0.78, metallic: 0.04,
+    texture: rockSet.albedo, normalTexture: rockSet.normal, metallicRoughnessTexture: rockSet.mr,
+    color: '#767f7c', roughness: 1.0, metallic: 0.04,
   });
   attachTerrainShader(cliffRight, 1.0);
   const cliffLeft = add({
     name: 'Cascade Left Buttress',
     mesh: createSculptedBoulder(0.54, 0.52, 0.48, 5.1),
     position: [-0.06, islandHeightAt(-0.06, -1.56) - 0.03, -1.56],
-    texture: basaltTex, color: '#6d7774', roughness: 0.62, metallic: 0.04,
+    texture: rockSet.albedo, normalTexture: rockSet.normal, metallicRoughnessTexture: rockSet.mr,
+    color: '#6d7774', roughness: 0.90, metallic: 0.04,
   });
   attachTerrainShader(cliffLeft, 0.95);
   registerPick(cascadeCliff, {
-    id: 'cascade', name: 'Terraced Mossy Basalt Cascade', kind: 'Layered Spring Waterfall',
-    desc: 'Stepped volcanic basalt gorge bathed in slope-driven moss, feeding twin tumbling spring curtains and mist.',
+    id: 'cascade', name: 'Terraced Mossy Basalt Cascade', kind: 'Garden Spring Rockery',
+    desc: 'Stepped basalt gorge with slender refracting spring trickles clinging down glistening mossy rock faces.',
   });
 
   const rimBoulders = [
@@ -314,15 +339,16 @@ export function buildSylvanScene(scene, registerPick) {
       name: `Basin Rim Boulder ${i + 1}`,
       mesh: createSculptedBoulder(rx, ry, rz, seed),
       position: [bx, islandHeightAt(bx, bz) - 0.06, bz],
-      texture: basaltTex, color: '#58605d', roughness: 0.72, metallic: 0.04,
+      texture: rockSet.albedo, normalTexture: rockSet.normal, metallicRoughnessTexture: rockSet.mr,
+      color: '#58605d', roughness: 1.0, metallic: 0.04,
     });
     attachTerrainShader(bNode, 1.0);
   });
 
-  // 3. Translucent Flowing Pond Water + Exposed Curved Waterfall Streams + Mist Particles
+  // 3. Refractive Depth-Absorbing Pond Water + 3 Slender Rock Spring Trickles + Mist Particles
   const pondWater = add({
     name: 'Crystal Pond Water',
-    mesh: createPondWaterDisk(2.08, 28, 64),
+    mesh: createPondWaterDisk(2.08, 32, 64),
     position: [0, 0.0, 0],
     color: [0.06, 0.28, 0.32, 0.54], roughness: 0.03, metallic: 0.02,
     castsShadow: false, receivesShadow: true,
@@ -332,58 +358,75 @@ export function buildSylvanScene(scene, registerPick) {
     uniforms: { time: 0.0, breeze: 0.52, clarity: 0.85, pad: 0.0 },
   });
   registerPick(pondWater, {
-    id: 'pond', name: 'Spring-Fed Sanctuary Basin', kind: 'Translucent Rippling Pond',
-    desc: 'Real-time wave-displaced Fresnel surface revealing river pebbles, lily stems, sunlight caustics, and swimming koi below.',
+    id: 'pond', name: 'Refractive Spring-Fed Basin', kind: 'Optical Depth Pond · SSR',
+    desc: 'Snell-refracting water surface with Beer-Lambert absorption, SSR sky sheen, and clear view of cobbles & koi below.',
   });
 
   const fallMain = add({
-    name: 'Main Cascade Curtain',
+    name: 'Main Cascade Trickle',
     mesh: createCurvedWaterfall([
-      [0.86, 0.96, -1.52],
-      [0.86, 0.78, -1.28],
-      [0.86, 0.52, -1.10],
-      [0.86, 0.24, -1.01],
-      [0.86, -0.05, -0.98],
-    ], 0.14, 0.26, 12),
-    color: [0.80, 0.96, 1.0, 0.88], roughness: 0.14, metallic: 0.02,
+      [0.80, 0.88, -1.48],
+      [0.80, 0.72, -1.28],
+      [0.80, 0.48, -1.11],
+      [0.80, 0.22, -1.03],
+      [0.80, -0.04, -1.00],
+    ], 0.055, 0.095, 10),
+    color: [0.80, 0.96, 1.0, 0.88], roughness: 0.08, metallic: 0.02,
     twoSided: true, castsShadow: false, receivesShadow: true,
   });
   fallMain.setShader({
     module: WATERFALL_SHADER_BK, file: 'fall_main.bk',
-    uniforms: { time: 0.0, flow: 1.0, glow: 1.0, pad: 0.0 },
+    uniforms: { time: 0.0, flow: 1.0, glow: 0.85, pad: 0.0 },
+  });
+
+  const fallMid = add({
+    name: 'Step Cascade Trickle',
+    mesh: createCurvedWaterfall([
+      [0.54, 0.54, -1.25],
+      [0.54, 0.36, -1.14],
+      [0.54, 0.16, -1.07],
+      [0.54, -0.04, -1.04],
+    ], 0.042, 0.072, 8),
+    color: [0.82, 0.97, 1.0, 0.85], roughness: 0.08, metallic: 0.02,
+    twoSided: true, castsShadow: false, receivesShadow: true,
+  });
+  fallMid.setShader({
+    module: WATERFALL_SHADER_BK, file: 'fall_mid.bk',
+    uniforms: { time: 0.0, flow: 0.92, glow: 0.82, pad: 0.0 },
   });
 
   const fallSide = add({
-    name: 'Side Spring Veil',
+    name: 'Side Spring Trickle',
     mesh: createCurvedWaterfall([
-      [0.34, 0.72, -1.42],
-      [0.34, 0.48, -1.20],
-      [0.34, 0.22, -1.08],
-      [0.34, -0.05, -1.04],
-    ], 0.08, 0.14, 10),
-    color: [0.82, 0.97, 1.0, 0.84], roughness: 0.16, metallic: 0.02,
+      [0.26, 0.64, -1.36],
+      [0.26, 0.44, -1.20],
+      [0.26, 0.20, -1.10],
+      [0.26, -0.04, -1.06],
+    ], 0.036, 0.062, 8),
+    color: [0.82, 0.97, 1.0, 0.84], roughness: 0.08, metallic: 0.02,
     twoSided: true, castsShadow: false, receivesShadow: true,
   });
   fallSide.setShader({
     module: WATERFALL_SHADER_BK, file: 'fall_side.bk',
-    uniforms: { time: 0.0, flow: 0.85, glow: 0.95, pad: 0.0 },
+    uniforms: { time: 0.0, flow: 0.84, glow: 0.80, pad: 0.0 },
   });
 
   const mistParticles = scene.createParticles3D({
     name: 'Cascade Plunge Mist',
-    position: [0.76, 0.04, -0.96],
-    maxParticles: 70, rate: 18,
-    lifetime: { min: 1.2, max: 2.2 },
-    size: { start: 0.14, end: 0.38 },
-    color: { start: [0.86, 0.96, 1.0, 0.28], end: [0.86, 0.96, 1.0, 0.0] },
-    velocity: { direction: [0, 1, 0.35], spread: 55, speed: 0.22, speedSpread: 0.10 },
-    gravity: [0, -0.05, 0], drag: 0.55, softness: 0.18,
-    shape: { type: 'sphere', radius: 0.22 },
+    texture: softGlowTex,
+    position: [0.62, 0.03, -1.02],
+    maxParticles: 36, rate: 8,
+    lifetime: { min: 0.8, max: 1.5 },
+    size: { start: 0.045, end: 0.11 },
+    color: { start: [0.88, 0.97, 1.0, 0.10], end: [0.88, 0.97, 1.0, 0.0] },
+    velocity: { direction: [0, 1, 0.25], spread: 50, speed: 0.12, speedSpread: 0.05 },
+    gravity: [0, -0.04, 0], drag: 0.65, softness: 0.14,
+    shape: { type: 'sphere', radius: 0.14 },
   });
 
-  // 4. Connected Space-Colonized Japanese Maple Tree + 5-Lobed Palmate Leaves
-  const mapleOrigin = [-1.72, islandHeightAt(-1.72, -1.16), -1.16];
-  const mapleTree = buildJapaneseMaple(add, barkTex, leafCutoutTex, mapleOrigin, registerPick);
+  // 4. Connected Space-Colonized Layered Japanese Maple Tree + 5-Lobed Palmate Leaves
+  const mapleOrigin = [-1.68, islandHeightAt(-1.68, -1.18), -1.18];
+  const mapleTree = buildJapaneseMaple(add, barkSet, leafSet, mapleOrigin, registerPick);
 
   // 5. Lush Pinnate Ferns + Merged Sedge/Cattail Clumps with Synchronized Rooted Sway
   const frondCard = paintUniformColor(Mesh.leafCard('frond', {
@@ -393,7 +436,7 @@ export function buildSylvanScene(scene, registerPick) {
   const fernSites = [[-2.78, 0.12], [-2.28, 1.92], [1.72, 2.02], [2.72, -0.96]];
   const plantNodes = [];
   fernSites.forEach(([fx, fz], fi) => {
-    plantNodes.push(buildFernRosette(add, frondCard, fernTex, fx, fz, 2.1 + fi * 1.4, fi));
+    plantNodes.push(buildFernRosette(add, frondCard, fernSet, fx, fz, 2.1 + fi * 1.4, fi));
   });
 
   const cattailClumps = [[-2.35, 0.86], [2.46, 1.04], [2.52, -0.18]];
@@ -491,7 +534,8 @@ export function buildSylvanScene(scene, registerPick) {
     name: 'Carved Basalt Lantern',
     mesh: lantern.stone,
     position: [lx, ly, lz],
-    texture: basaltTex, color: '#464d4b', roughness: 0.84, metallic: 0.04,
+    texture: rockSet.albedo, normalTexture: rockSet.normal, metallicRoughnessTexture: rockSet.mr,
+    color: '#464d4b', roughness: 1.0, metallic: 0.04,
   });
   attachTerrainShader(lanternStone, 0.75);
   const lanternEmber = add({
@@ -502,14 +546,14 @@ export function buildSylvanScene(scene, registerPick) {
     castsShadow: false,
   });
 
-  // 8. Five Seamless Underwater Nishikigoi Swimming Inside Translucent Pond
+  // 8. Five Seamless Individualized PBR Nishikigoi Swimming Inside Translucent Pond
   const koiMesh = createAnatomicalKoi();
   const koiSpecs = [
-    { name: 'Kohaku Matriarch', tex: koiTextures.kohaku, rx: 0.30, rz: 0.26, phase: 0.0, dir: 1, y: -0.095, scale: 0.96, bend: 0.046 },
-    { name: 'Yamabuki Ogon', tex: koiTextures.yamabuki, rx: 0.62, rz: 0.52, phase: 2.1, dir: -1, y: -0.115, scale: 0.92, bend: 0.044 },
-    { name: 'Showa Sanshoku', tex: koiTextures.showa, rx: 0.94, rz: 0.78, phase: 4.2, dir: 1, y: -0.090, scale: 0.90, bend: 0.044 },
-    { name: 'Kohaku Prince', tex: koiTextures.kohaku, rx: 1.24, rz: 1.00, phase: 0.9, dir: -1, y: -0.105, scale: 0.88, bend: 0.042 },
-    { name: 'Golden Showa', tex: koiTextures.showa, rx: 1.24, rz: 1.00, phase: 4.04, dir: -1, y: -0.100, scale: 0.86, bend: 0.042 },
+    { name: 'Kohaku Matriarch', pbr: koiSets.kohaku, rx: 0.32, rz: 0.28, phase: 0.0, dir: 1, y: -0.095, scale: 0.98, bend: 0.046 },
+    { name: 'Tancho Sanke', pbr: koiSets.tancho, rx: 0.64, rz: 0.54, phase: 2.1, dir: -1, y: -0.112, scale: 0.92, bend: 0.044 },
+    { name: 'Yamabuki Ogon', pbr: koiSets.yamabuki, rx: 0.94, rz: 0.78, phase: 4.2, dir: 1, y: -0.090, scale: 0.90, bend: 0.044 },
+    { name: 'Showa Sanshoku', pbr: koiSets.showa, rx: 1.24, rz: 1.00, phase: 0.9, dir: -1, y: -0.105, scale: 0.90, bend: 0.042 },
+    { name: 'Asagi Azure', pbr: koiSets.asagi, rx: 1.24, rz: 1.00, phase: 4.04, dir: -1, y: -0.100, scale: 0.86, bend: 0.042 },
   ];
   const koiList = koiSpecs.map((ks) => {
     const node = add({
@@ -517,7 +561,8 @@ export function buildSylvanScene(scene, registerPick) {
       mesh: koiMesh,
       position: [0, ks.y, 0.16],
       scale: [ks.scale, ks.scale, ks.scale],
-      texture: ks.tex, color: '#ffffff', roughness: 0.22, metallic: 0.04,
+      texture: ks.pbr.albedo, normalTexture: ks.pbr.normal, metallicRoughnessTexture: ks.pbr.mr,
+      color: '#ffffff', roughness: 1.0, metallic: 0.02,
     });
     node.setShader({
       module: KOI_SHADER_BK, file: `koi_${ks.name.replace(/\s+/g, '_')}.bk`,
@@ -525,40 +570,43 @@ export function buildSylvanScene(scene, registerPick) {
     });
     registerPick(node, {
       id: `koi_${ks.name}`, name: ks.name, kind: 'Continuous Living Nishikigoi',
-      desc: 'Single-mesh sculpted carp propelling itself underwater via GPU travelling S-waves beneath sunlit caustics.',
+      desc: 'Individualized satin-scaled carp propelling itself underwater via GPU S-waves beneath refractive pond caustics.',
     });
     return { ...ks, node };
   });
 
-  // 9. Palmate Drifting Maple Leaves, Soft Additive Firefly Particles & Translucent Dragonflies
-  const driftLeafCard = paintUniformColor(Mesh.leafCard('lobed', { width: 0.085, length: 0.105, bend: 0.35, cup: 0.28, fullUV: true, shapedSilhouette: true }), 1, 1, 1, 1);
+  // 9. True Twig-to-Pond Floating Palmate Maple Leaves & 4-Winged Perp-Axis Dragonflies
+  const driftLeafCard = paintUniformColor(Mesh.leafCard('lobed', { width: 0.075, length: 0.095, bend: 0.25, cup: 0.20, fullUV: true, shapedSilhouette: true }), 1, 1, 1, 1);
   const driftingLeaves = [];
-  for (let i = 0; i < 10; ++i) {
+  const tips = mapleTree.twigTips;
+  for (let i = 0; i < 14; ++i) {
     const lf = add({
       name: `Drifting Leaf ${i + 1}`,
       mesh: driftLeafCard,
-      texture: leafCutoutTex,
-      color: i % 2 === 0 ? '#dc4520' : '#ea7e26',
-      alphaCutoff: 0.42, twoSided: true, subsurface: 0.55, roughness: 0.60, metallic: 0.0,
+      texture: leafSet.albedo, normalTexture: leafSet.normal, metallicRoughnessTexture: leafSet.mr,
+      color: i % 3 === 0 ? '#a82214' : (i % 3 === 1 ? '#c83a16' : '#8e1810'),
+      alphaCutoff: 0.42, twoSided: true, subsurface: 0.48, roughness: 1.0, metallic: 0.0,
       castsShadow: false,
     });
+    const tip = tips[i % tips.length];
+    // Target landing spot beneath overhanging canopy in calm NW/center pool, then drift SW on pond current
+    const landX = Math.max(-1.35, Math.min(0.65, tip[0] + 0.28 * Math.cos(i * 1.9)));
+    const landZ = Math.max(-0.85, Math.min(0.85, tip[2] + 0.28 * Math.sin(i * 1.9)));
     driftingLeaves.push({
       node: lf,
-      bx: Math.cos(i * 0.628) * 0.72,
-      bz: 0.18 + Math.sin(i * 0.628) * 0.58,
-      phase: i * 0.1,
+      sx: tip[0], sy: tip[1], sz: tip[2],
+      lx: landX, lz: landZ,
+      phase: i / 14,
     });
   }
 
   const dragonflies = [];
-  const dfBodyGeo = createSmoothTube([[0, 0, 0], [-0.04, 0.006, 0], [-0.14, 0.002, 0]], [0.009, 0.007, 0.004], 8);
-  const dfWingL = paintUniformColor(Mesh.leafCard('oval', { width: 0.024, length: 0.125, bend: 0.08, cup: 0.08, shapedSilhouette: true }).rotate(0, 1, 0, Math.PI * 0.5), 1, 1, 1, 1);
-  const dfWingR = paintUniformColor(Mesh.leafCard('oval', { width: 0.024, length: 0.125, bend: 0.08, cup: 0.08, shapedSilhouette: true }).rotate(0, 1, 0, -Math.PI * 0.5), 1, 1, 1, 1);
+  const dfParts = createDragonflyMeshes();
   for (let i = 0; i < 2; ++i) {
     const piv = add({ name: `Dragonfly ${i + 1}`, position: [0.58 - i * 0.25, 0.56 + i * 0.16, 0.55 + i * 0.28] });
-    piv.add(add({ name: `Dragonfly Body ${i + 1}`, mesh: dfBodyGeo, color: '#28cfe2', emissive: 0.25, emissiveColor: [0.15, 0.75, 0.90], roughness: 0.20, metallic: 0.68 }));
-    const wL = add({ name: `Dragonfly Wing L ${i + 1}`, mesh: dfWingL, position: [-0.032, 0.008, 0.005], color: [0.85, 0.96, 1.0, 0.52], twoSided: true, roughness: 0.15, metallic: 0.1, castsShadow: false });
-    const wR = add({ name: `Dragonfly Wing R ${i + 1}`, mesh: dfWingR, position: [-0.032, 0.008, -0.005], color: [0.85, 0.96, 1.0, 0.52], twoSided: true, roughness: 0.15, metallic: 0.1, castsShadow: false });
+    piv.add(add({ name: `Dragonfly Body ${i + 1}`, mesh: dfParts.body, color: '#24c4d8', emissive: 0.18, emissiveColor: [0.12, 0.65, 0.80], roughness: 0.24, metallic: 0.62 }));
+    const wL = add({ name: `Dragonfly Wing L ${i + 1}`, mesh: dfParts.wingL, position: [-0.014, 0.008, 0.005], color: [0.80, 0.95, 1.0, 0.36], twoSided: true, roughness: 0.18, metallic: 0.08, castsShadow: false });
+    const wR = add({ name: `Dragonfly Wing R ${i + 1}`, mesh: dfParts.wingR, position: [-0.014, 0.008, -0.005], color: [0.80, 0.95, 1.0, 0.36], twoSided: true, roughness: 0.18, metallic: 0.08, castsShadow: false });
     piv.add(wL);
     piv.add(wR);
     dragonflies.push({
@@ -570,13 +618,14 @@ export function buildSylvanScene(scene, registerPick) {
 
   const fireflyParticles = scene.createParticles3D({
     name: 'Sanctuary Fireflies',
+    texture: softGlowTex,
     position: [0.0, 0.72, 0.15],
-    maxParticles: 48, rate: 9,
+    maxParticles: 36, rate: 0,
     lifetime: { min: 2.2, max: 3.8 },
-    size: { start: 0.045, end: 0.008 },
-    color: { start: [1.0, 0.88, 0.35, 1.0], end: [1.0, 0.65, 0.15, 0.0] },
+    size: { start: 0.016, end: 0.003 },
+    color: { start: [1.0, 0.88, 0.35, 0.85], end: [1.0, 0.65, 0.15, 0.0] },
     blend: 'additive',
-    velocity: { direction: [0, 1, 0], spread: 180, speed: 0.14, speedSpread: 0.08 },
+    velocity: { direction: [0, 1, 0], spread: 180, speed: 0.12, speedSpread: 0.06 },
     gravity: [0, 0.02, 0], drag: 0.4, softness: 0.12,
     shape: { type: 'sphere', radius: 1.55 },
   });
@@ -589,8 +638,8 @@ export function buildSylvanScene(scene, registerPick) {
   };
 
   return {
-    pondWater, fallMain, fallSide, mistParticles, fireflyParticles,
-    rockNodes, plantNodes, mapleTree, lilyGroups, koiList,
+    pondWater, fallMain, fallMid, fallSide, mistParticles, fireflyParticles,
+    rockNodes, plantNodes, mapleTree, lilyGroups, lilyPads: lilyCoords, koiList,
     dragonflies, driftingLeaves, lanternEmber, lights,
   };
 }

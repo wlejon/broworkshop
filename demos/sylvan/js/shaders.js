@@ -92,19 +92,21 @@ struct Params {
 @binding(4, 0) var params: uniform<Params>;
 
 fn wave_h(p: vec2<f32>, t: f32, br: f32) -> f32 {
-  let d1 = length(p - vec2<f32>(0.86, -0.98));
-  let d2 = length(p - vec2<f32>(0.34, -1.04));
-  let ring1 = sin(d1 * 18.0 - t * 6.5) * exp(-d1 * 1.65) * 0.008;
-  let ring2 = sin(d2 * 22.0 - t * 7.2) * exp(-d2 * 2.15) * 0.005;
-  let wind_w = sin(p.x * 6.2 + p.y * 4.5 + t * 2.3) * 0.0032 * (0.4 + 0.6 * br)
-             + cos(p.x * 9.5 - p.y * 7.8 - t * 2.8) * 0.0022 * (0.4 + 0.6 * br);
-  return ring1 + ring2 + wind_w;
+  let d1 = length(p - vec2<f32>(0.80, -1.00));
+  let d2 = length(p - vec2<f32>(0.54, -1.04));
+  let d3 = length(p - vec2<f32>(0.26, -1.06));
+  let ring1 = sin(d1 * 22.0 - t * 6.8) * exp(-d1 * 2.2) * 0.0055;
+  let ring2 = sin(d2 * 26.0 - t * 7.4) * exp(-d2 * 2.6) * 0.0040;
+  let ring3 = sin(d3 * 28.0 - t * 7.0) * exp(-d3 * 2.8) * 0.0032;
+  let wind_w = sin(p.x * 6.8 + p.y * 4.8 + t * 2.2) * 0.0026 * (0.35 + 0.65 * br)
+             + cos(p.x * 11.0 - p.y * 8.2 - t * 2.7) * 0.0018 * (0.35 + 0.65 * br);
+  return ring1 + ring2 + ring3 + wind_w;
 }
 
 pub fn vertex(v: mesh::Vertex) -> mesh::Vertex {
   var out = v;
   let h = wave_h(v.pos.xz, params.time, params.breeze);
-  let eps = 0.03;
+  let eps = 0.025;
   let hx = wave_h(v.pos.xz + vec2<f32>(eps, 0.0), params.time, params.breeze);
   let hz = wave_h(v.pos.xz + vec2<f32>(0.0, eps), params.time, params.breeze);
   out.pos.y += h;
@@ -119,32 +121,49 @@ pub fn fragment(v: mesh::Vertex, s: mesh::Surface) -> mesh::Surface {
   let r = v.v0.w;
   let t = params.time;
 
-  // Fine capillary ripple normal detail on top of vertex swell
-  let gx = cos(p.x * 16.0 + p.y * 11.0 + t * 3.1) * 0.045 + sin(p.x * 27.0 - p.y * 19.0 - t * 3.8) * 0.028;
-  let gz = sin(p.x * 13.0 - p.y * 17.0 + t * 2.9) * 0.045 + cos(p.x * 23.0 + p.y * 25.0 + t * 3.4) * 0.028;
+  // Dual-scale capillary wind & splash ripple normal perturbation
+  let gx = cos(p.x * 19.0 + p.y * 13.0 + t * 3.0) * 0.036 + sin(p.x * 31.0 - p.y * 23.0 - t * 3.8) * 0.022;
+  let gz = sin(p.x * 15.0 - p.y * 19.0 + t * 2.8) * 0.036 + cos(p.x * 27.0 + p.y * 29.0 + t * 3.3) * 0.022;
   out.normal = normalize(s.normal + vec3<f32>(gx, 0.0, gz));
 
-  // Waterfall plunge aeration foam + radiating concentric froth rings (soft Gaussian, never solid mesh hoops)
-  let d1 = length(p - vec2<f32>(0.86, -0.96));
-  let d2 = length(p - vec2<f32>(0.34, -1.02));
-  let core_foam = exp(-d1 * d1 * 18.0) * 0.72 + exp(-d2 * d2 * 30.0) * 0.56;
-  let ring_wave1 = pow(max(0.0, sin(d1 * 15.0 - t * 4.8)), 3.0) * exp(-d1 * 2.6) * 0.45;
-  let ring_wave2 = pow(max(0.0, sin(d2 * 18.0 - t * 5.2)), 3.0) * exp(-d2 * 3.4) * 0.34;
-  let shore_foam = smoothstep(1.86, 2.02, r) * (0.12 + 0.14 * sin(p.x * 11.0 + p.y * 11.0 + t * 1.4));
-  let foam = clamp(core_foam + ring_wave1 + ring_wave2 + shore_foam, 0.0, 0.92);
+  // Real scene-depth thickness + Snell refraction of submerged koi, stems & river cobbles
+  let uv = scene::screen_uv(v.pixel);
+  let surf_d = max(0.05, -scene::view_pos(v.world_pos).z);
+  let bg_d = scene::linear_depth(scene::sample_scene_depth(uv));
+  let water_depth = max(0.0, bg_d - surf_d);
 
-  // Schlick Fresnel transparency: crystal-clear downward view of koi & pebbles, mirror sheen at grazing angles
+  let refr_off = out.normal.xz * 0.024 * clamp(water_depth * 3.8, 0.0, 1.0);
+  let cand_uv = clamp(uv + refr_off, vec2<f32>(0.002), vec2<f32>(0.998));
+  let test_d = scene::linear_depth(scene::sample_scene_depth(cand_uv));
+  let safe_uv = select(test_d > surf_d, cand_uv, uv);
+  let thickness = max(0.0, select(test_d > surf_d, test_d, bg_d) - surf_d);
+  let refr_col = scene::sample_scene_color(safe_uv);
+
+  // Beer-Lambert optical absorption (red attenuates faster than deep pond jade/blue-teal)
+  let absorb = exp(-thickness * vec3<f32>(2.1, 0.72, 0.56));
+  let transmitted = refr_col * absorb;
+
+  // Delicate small plunge-bubble foam right at the 3 rocky trickle entry points
+  let d1 = length(p - vec2<f32>(0.80, -1.00));
+  let d2 = length(p - vec2<f32>(0.54, -1.04));
+  let d3 = length(p - vec2<f32>(0.26, -1.06));
+  let core_foam = exp(-d1 * d1 * 62.0) * 0.65 + exp(-d2 * d2 * 78.0) * 0.52 + exp(-d3 * d3 * 88.0) * 0.45;
+  let ripple_froth = pow(max(0.0, sin(d1 * 22.0 - t * 5.2)), 5.0) * exp(-d1 * 5.0) * 0.24
+                   + pow(max(0.0, sin(d2 * 24.0 - t * 5.8)), 5.0) * exp(-d2 * 5.6) * 0.18;
+  let meniscus = (1.0 - smoothstep(0.0, 0.032, water_depth)) * smoothstep(0.002, 0.012, water_depth) * 0.18;
+  let foam = clamp(core_foam + ripple_froth + meniscus, 0.0, 0.85);
+
   let view_dir = normalize(-v.world_pos);
   let ndotv = clamp(dot(out.normal, view_dir), 0.0, 1.0);
-  let fresnel = 0.03 + 0.97 * pow(1.0 - ndotv, 4.2);
+  let fresnel = 0.025 + 0.975 * pow(1.0 - ndotv, 4.6);
 
-  let water_col = mix(vec3<f32>(0.05, 0.25, 0.29), vec3<f32>(0.16, 0.44, 0.48), fresnel);
-  out.base_color = mix(water_col, vec3<f32>(0.86, 0.96, 0.99), foam);
-  out.roughness = mix(0.025, 0.52, foam);
+  let foam_col = vec3<f32>(0.88, 0.96, 0.99);
+  out.base_color = mix(vec3<f32>(0.015, 0.055, 0.065), foam_col, foam);
+  out.roughness = mix(0.028, 0.48, foam);
   out.metallic = 0.02;
-  out.emissive = vec3<f32>(0.18, 0.28, 0.30) * foam * 0.35;
-  let clear_base = clamp(0.28 + (1.0 - params.clarity) * 0.22, 0.20, 0.56);
-  out.alpha = clamp(mix(clear_base + fresnel * 0.58, 0.90, foam), 0.24, 0.94);
+  out.emissive = transmitted * (1.0 - fresnel) * (1.0 - foam) * 0.95;
+  // Feather seamlessly along curved shoreline depth -> zero sharp rim seam
+  out.alpha = smoothstep(0.0, 0.024, water_depth) * 0.985;
   return out;
 }
 `;
@@ -152,6 +171,7 @@ pub fn fragment(v: mesh::Vertex, s: mesh::Surface) -> mesh::Surface {
 export const WATERFALL_SHADER_BK = `
 module hook;
 import mesh;
+import scene;
 
 struct Params {
   time: f32,
@@ -163,33 +183,36 @@ struct Params {
 
 pub fn vertex(v: mesh::Vertex) -> mesh::Vertex {
   var out = v;
-  let ripple = sin(v.uv.y * 14.0 - params.time * 7.5 + v.uv.x * 6.0) * 0.012;
+  let ripple = sin(v.uv.y * 18.0 - params.time * 8.2 + v.uv.x * 8.0) * 0.004;
   out.pos += v.normal * ripple;
   return out;
 }
 
 pub fn fragment(v: mesh::Vertex, s: mesh::Surface) -> mesh::Surface {
   var out = s;
-  let t = params.time * (1.35 + 0.4 * params.flow);
+  let t = params.time * (1.55 + 0.4 * params.flow);
   let u = v.uv.x;
   let y = v.uv.y;
 
-  // Multi-scale downward-streaming aerated whitewater threads
-  let s1 = sin(u * 22.0 + sin(y * 7.0 - t * 1.4) * 1.5) * 0.5 + 0.5;
-  let s2 = sin((y * 10.0 - t * 2.8) + sin(u * 34.0) * 0.9) * 0.5 + 0.5;
-  let s3 = cos((y * 20.0 - t * 4.4) - u * 18.0) * 0.5 + 0.5;
-  let threads = pow(s1 * 0.5 + s2 * 0.3 + s3 * 0.2, 1.3);
+  // Fine garden-scale glassy threads clinging to rock with natural refractive bend
+  let s1 = sin(u * 18.0 + sin(y * 11.0 - t * 1.8) * 1.4) * 0.5 + 0.5;
+  let s2 = sin((y * 16.0 - t * 3.6) + sin(u * 28.0) * 0.9) * 0.5 + 0.5;
+  let s3 = cos((y * 28.0 - t * 5.2) - u * 16.0) * 0.5 + 0.5;
+  let threads = pow(s1 * 0.45 + s2 * 0.35 + s3 * 0.20, 1.8);
 
-  // Softly feathered lateral & crest borders (no rigid plank edge)
-  let edge_fade = smoothstep(0.0, 0.22, u) * smoothstep(1.0, 0.78, u);
-  let crest_froth = smoothstep(0.18, 0.0, y) * 0.45;
-  let plunge_froth = smoothstep(0.75, 1.0, y) * 0.65;
-  let foam = clamp(threads * 0.72 + crest_froth + plunge_froth, 0.0, 1.0);
+  let uv = scene::screen_uv(v.pixel);
+  let refr_uv = clamp(uv + vec2<f32>((s1 - 0.5) * 0.010, (s2 - 0.5) * 0.012), vec2<f32>(0.002), vec2<f32>(0.998));
+  let bg = scene::sample_scene_color(refr_uv);
 
-  out.base_color = mix(vec3<f32>(0.36, 0.74, 0.84), vec3<f32>(0.92, 0.98, 1.0), foam);
-  out.roughness = mix(0.08, 0.38, foam);
-  out.emissive = out.base_color * (0.20 + foam * 0.36) * params.glow;
-  out.alpha = clamp(edge_fade * (0.48 + 0.46 * foam), 0.0, 0.95);
+  let edge_fade = smoothstep(0.0, 0.24, u) * smoothstep(1.0, 0.76, u);
+  let crest_froth = smoothstep(0.14, 0.0, y) * 0.34;
+  let plunge_froth = smoothstep(0.80, 1.0, y) * 0.48;
+  let foam = clamp(threads * 0.48 + crest_froth + plunge_froth, 0.0, 0.85);
+
+  out.base_color = mix(vec3<f32>(0.05, 0.14, 0.17), vec3<f32>(0.90, 0.97, 1.0), foam * 0.72);
+  out.roughness = mix(0.03, 0.36, foam);
+  out.emissive = bg * (1.0 - foam * 0.68) * 0.82 + out.base_color * foam * 0.16 * params.glow;
+  out.alpha = clamp(edge_fade * (0.44 + 0.44 * foam), 0.0, 0.92);
   return out;
 }
 `;
@@ -244,9 +267,9 @@ pub fn fragment(v: mesh::Vertex, s: mesh::Surface) -> mesh::Surface {
   let wp = v.world_pos + scene::camera.eye_world.xyz;
   // Subtle shimmering water caustic glints on koi back under clear pond surface
   let c = sin(wp.x * 16.0 + params.time * 2.2) * cos(wp.z * 16.0 - params.time * 1.9);
-  let glint = smoothstep(0.45, 0.98, c) * smoothstep(0.25, 0.85, s.normal.y) * 0.24;
-  out.base_color += vec3<f32>(0.22, 0.34, 0.34) * glint;
-  out.emissive += vec3<f32>(0.08, 0.14, 0.14) * glint;
+  let glint = smoothstep(0.55, 0.98, c) * smoothstep(0.30, 0.85, s.normal.y) * 0.11;
+  out.base_color += vec3<f32>(0.16, 0.24, 0.24) * glint;
+  out.emissive += vec3<f32>(0.04, 0.08, 0.08) * glint;
   return out;
 }
 `;
