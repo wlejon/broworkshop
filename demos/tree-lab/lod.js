@@ -11,8 +11,8 @@ import { leafCard, scene, ground } from "/app/lab.js";
 export const LEVELS = [
     { from: 0, L: 3, sides: 6 },
     { from: 40, L: 6, sides: 5 },
-    { from: 100, L: 12, sides: 4 },
-    { from: 250, L: 24, sides: 3 },
+    { from: 90, L: 12, sides: 4 },
+    { from: 150, L: 24, sides: 3 },
 ];
 // A pixel's angle at 1080 rows and a 50 degree view.
 const PX = 2 * Math.tan(25 * Math.PI / 180) / 1080;

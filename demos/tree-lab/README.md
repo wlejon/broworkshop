@@ -50,8 +50,8 @@ voxels' 0.17 m.
 
 `speciesLevels` and `plantLod` (lod.js) draw the same laid-out forest as
 the grown trees themselves at every distance, each tree a mesh node pair
-(bark, leaves) at a level of detail picked by its distance: from 0, 40, 100
-and 250 m the leaf cards are 3, 6, 12 and 24 times the lab's leaf with
+(bark, leaves) at a level of detail picked by its distance: from 0, 40, 90
+and 150 m the leaf cards are 3, 6, 12 and 24 times the lab's leaf with
 1/L² as many, times the share of the leaf area that leaves the crown
 covering what the L3 level covers (measured per species from three
 directions: a birch keeps 0.43 of it at L24, an oak 0.72), and the branches thinner than
@@ -167,7 +167,13 @@ trees' vegetation pass 1.5 of it, the impostors 0.8, their instance cull
 are slower in every pass (4.25-4.7 on average, 7-9 at the 95th); the
 others are 3.2-3.6. Drawing the impostors nearest first or farthest first
 changes their cost by a tenth, and without MSAA the vegetation pass is
-1.14 ms: neither is where the cost is.
+1.14 ms: neither is where the cost is. Handing the trees to the impostors
+at 150 m instead (the levels then beginning at 0, 40, 90 and 150 m, about
+230 mesh trees within reach) takes the vegetation pass to 0.97 ms and the
+dolly to 3.2 ms; against the truth the rings from 60 to 450 m seen from 12
+and 30 m up are 0.92-1.14 either way, the frame from 150 m up 0.90-1.08
+(0.94-1.07 handing over at 250 m), and from 600 m up the same. At 120 m
+the far rings fall to 0.79.
 
 On the CPU, each species' level is a `scene.createGeometry` made once
 (`speciesLevels`), so a swap makes two nodes and uploads nothing; making
