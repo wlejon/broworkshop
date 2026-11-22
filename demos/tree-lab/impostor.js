@@ -7,14 +7,18 @@
 import { leafCard, scene, ground } from "/app/lab.js";
 import { barkMesh } from "/app/lod.js";
 
-// `L` is the leaf level baked (lod.js's cards L times a leaf): the level the
-// mesh trees show where the impostors take over, so the two cover alike.
+// `L` is the leaf level baked (lod.js's cards L times a leaf), and `cover`
+// the share of the baked coverage drawn: the two that make a forest of
+// impostors hide as much of the ground as the grown trees (all at L3)
+// do, found by sweeping them against that truth (L24 and full coverage
+// left the frame 0.80 as bright from 600 m at noon; L6 at 0.8 is within
+// 0.91-1.06 at noon and golden hour from 150 m and 600 m up).
 // `front`: how far toward the eye (a share of the crown's radius) the quad
 // is drawn and shaded, out of the shadow its own proxy casts at the centre.
-// `gain` scales the baked albedo: what was left between the canopy's mean
-// colour as impostors and as meshes, the same trees, at noon, golden hour
-// and dawn from 150 m and 600 m up (blue 0.82-0.91, the rest within 0.87-1.19).
-export const IMPOSTOR = { res: 128, ss: 4, nAz: 8, nEl: 4, elStep: 25, bend: 0.6, L: 24, gain: [1, 1, 0.87], front: 0.4 };
+// `gain` scales the baked albedo (blue: what was left against the truth).
+// `occluder` is the surface's occluder_sun: the bounce from inside the
+// crown the mesh leaves get (mesh.bk's default).
+export const IMPOSTOR = { res: 128, ss: 4, nAz: 8, nEl: 4, elStep: 25, bend: 0.6, L: 6, gain: [1, 1, 0.95], front: 0.4, cover: 0.8, occluder: 0.5 };
 
 const BAKE_HOOK = `
 module hook;
@@ -60,7 +64,7 @@ import mesh;
 import scene;
 import custom;
 import wind;
-struct Params { box: vec4<f32>, views: vec4<f32>, band: vec4<f32>, gain: vec4<f32> }
+struct Params { box: vec4<f32>, views: vec4<f32>, band: vec4<f32>, gain: vec4<f32>, light: vec4<f32> }
 @binding(4, 0) var params: uniform<Params>;
 @binding(4, 1) var albedo: texture2d_array<vec4<f32>>;
 @binding(4, 2) var normals: texture2d_array<vec4<f32>>;
@@ -137,11 +141,11 @@ pub fn fragment(v: mesh::Vertex, s: mesh::Surface) -> mesh::Surface {
     let tint = mix(vec3<f32>(0.84, 0.97, 1.08), vec3<f32>(1.12, 1.04, 0.76), tone) * (0.9 + 0.2 * fract(tone * 13.7));
     out.base_color = a.xyz * tint * params.gain.xyz;
     out.sky_visibility = nw.w;
-    out.occluder_sun = 0.0;
+    out.occluder_sun = params.light.x;
     // Coverage against a per-pixel dither; nearer than the band's start the
     // impostor gives way to the mesh tree pixel for pixel (band.x .. band.y).
     let dither = scene::band_dither(v.pixel);
-    var keep = a.w > select(params.band.w > 0.0, params.band.w, dither);
+    var keep = a.w * params.light.y > select(params.band.w > 0.0, params.band.w, dither);
     if (params.band.y > 0.0 && length(v.world_pos) < mix(params.band.x, params.band.y, dither)) { keep = false; }
     out.alpha = select(keep, 1.0, 0.0);
     out.normal = normalize(yaw_to_world(nl, v.v0.z, v.v0.w));
@@ -215,6 +219,10 @@ export function bakeImpostor(sp, o = IMPOSTOR) {
         // Captured SS x finer and box-filtered: a texel's alpha is the share
         // of it the tree covers, its albedo and normal the covered samples'
         // mean; empty texels take the view's mean so filtering does not fringe.
+        // A sample's mask is the share of it covered (a leaf's edge, or a leaf
+        // smaller than the sample, blends with the black around it), and its
+        // albedo, normal and occlusion are as much of the leaf's: each is
+        // taken by that share, not only where the mask is whole.
         const shots = {};
         for (const view of ['imp_albedo', 'imp_normal', 'imp_ao', 'imp_mask']) {
             scene.setDebugView(view);
@@ -228,10 +236,11 @@ export function bakeImpostor(sp, o = IMPOSTOR) {
             let cov = 0, ao = 0;
             for (let sy = 0; sy < SS; sy++) for (let sx = 0; sx < SS; sx++) {
                 const p = ((ty * SS + sy) * B + tx * SS + sx) * 4;
-                if (M[p] < 250 || M[p + 1] < 250 || M[p + 2] < 250) continue;
-                cov++;
+                const m = LUT[Math.min(M[p], M[p + 1], M[p + 2])];
+                if (m < 0.02) continue;
+                cov += m;
                 ao += LUT[O[p]];
-                for (let k = 0; k < 3; k++) { a[k] += LUT[A[p + k]]; nn[k] += LUT[N[p + k]] * 2 - 1; }
+                for (let k = 0; k < 3; k++) { a[k] += LUT[A[p + k]]; nn[k] += LUT[N[p + k]] * 2 - m; }
             }
             const t = base + (ty * W + tx) * 4;
             alb[t + 3] = cov / (SS * SS);
@@ -348,7 +357,7 @@ function cullSpheres(sp, trees) {
     return bro.kernel.createBuffer(out);
 }
 
-export function impostorNode(sp, trees, { band = [0, 0], castsShadow = false, gain = IMPOSTOR.gain, front = IMPOSTOR.front } = {}) {
+export function impostorNode(sp, trees, { band = [0, 0], castsShadow = false, gain = IMPOSTOR.gain, front = IMPOSTOR.front, occluder = IMPOSTOR.occluder, cover = IMPOSTOR.cover } = {}) {
     const inst = new Float32Array(trees.length * 16), data = new Float32Array(trees.length * 4);
     trees.forEach((t, i) => {
         inst.set([1, 0, 0, t.x, 0, 1, 0, 0, 0, 0, 1, t.z, 1, 1, 1, 1], i * 16);
@@ -358,7 +367,7 @@ export function impostorNode(sp, trees, { band = [0, 0], castsShadow = false, ga
         alphaCutoff: 0.5, doubleSided: true, castsShadow, receivesShadow: true, vertexColorTint: false });
     const { alb, nrm, box, W, V, o } = sp.imp;
     n.setShader({ module: DRAW_HOOK, file: 'impostor.bk',
-        uniforms: { box, views: [o.nAz, o.nEl, o.elStep * Math.PI / 180, PX], band: [band[0], band[1], W, 0], gain: [...gain, front] } });
+        uniforms: { box, views: [o.nAz, o.nEl, o.elStep * Math.PI / 180, PX], band: [band[0], band[1], W, 0], gain: [...gain, front], light: [occluder, cover, 0, 0] } });
     n.setShaderTexture('albedo', { data: alb, width: W, height: W, layers: V, channels: 4, mipmap: true });
     n.setShaderTexture('normals', { data: nrm, width: W, height: W, layers: V, channels: 4, mipmap: true });
     n.setShaderBuffer('trees', bro.kernel.createBuffer(data));

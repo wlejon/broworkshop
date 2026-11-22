@@ -62,25 +62,32 @@ meshes there, each dithering out over [until, 1.35 until] (`fadeOutDist`).
 
 `bakeImpostor` and `impostorNode` (impostor.js) draw trees past that as
 impostors: each species baked once from 8 x 4 directions by an orthographic
-camera through debug views at the leaf level the meshes hand over at (L24),
+camera through debug views with L6 leaves (finer than the L24 meshes they
+follow: larger cards fill the gaps between a crown's leaves that the
+grown tree leaves open, and a forest of them hides too much of the ground),
 with the terms bro.scene's vegetation shading takes from the crown: albedo
 darkened toward its centre with a lit rim, each leaf's normal turned to the
 eye and leaning to the crown's bulk, and the occlusion of its ambient light;
-coverage from a 4x finer capture. Each tree is one quad facing the eye that
+coverage from a 4x finer capture, each sample counting the share of it a
+leaf covers. Each tree is one quad facing the eye that
 samples the view nearest its direction in its own frame (mipmapped to the
 pixel's footprint), tinted by the tree's own leaf tone, lit as foliage
-(`s.leaf`) through the baked normal, and cut by its coverage against a
-per-pixel dither; nearer than the band it collapses to nothing. The quad
+(`s.leaf`) through the baked normal with the mesh leaves' bounce from
+inside the crown (`occluder_sun` 0.5), and cut by 0.8 of its coverage
+against a per-pixel dither; nearer than the band it collapses to nothing. The quad
 sits 0.4 of the crown's radius toward the eye, where the leaves seen are.
 `shadowProxyNode` casts their shadow: each species' crown as L12 cards at
 half its leaf area and its limbs in one mesh, instanced over the trees as a
 `shadowOnly` mesh (the shadow pass does not run the impostors' cut), each
 shadow page drawing only the trees whose sphere reaches it
 (`setInstanceCullSpheres`; without it every page drew all of them, 17 ms a
-frame of page redraws while the camera moved). Measured on the same trees
-as meshes and as impostors, the canopy's mean colour agrees within
-0.87-1.19 per channel at noon, golden hour and dawn from 150 m and 600 m
-up, after a blue gain of 0.87. With meshes to 250 m and impostors beyond,
+frame of page redraws while the camera moved). Against the truth (the
+same 2282 trees all drawn at L3, casting their own shadow, in wind), the
+impostors with their proxies give the frame's mean linear colour within
+0.91-1.06 per channel at noon and golden hour from 150 m and 600 m up
+(blue gain 0.95; the 0.8 coverage and the L6 bake were swept for it: L24
+and full coverage were 0.80 at 600 m, noon). plantLod's meshes alone are
+0.84-0.98 from 600 m: their L24 cards cover too much as well. With meshes to 250 m and impostors beyond,
 9476 trees on a 3.2 km square cost 1.3 ms from eye height and 30 m, 0.8
 from 150 m, 0.4 from 1 km, the impostors and their shadow 0.16-0.3 of it,
 with the camera still.
@@ -94,15 +101,16 @@ tree's nodes and makes the next level's) redraw nothing. The proxies cast
 everywhere instead, each swap redraws the cached pages it touches the frame
 it happens: a 25 m/s dolly at eye height costs 3 ms a frame on average and
 7 ms at worst, a climb from 30 m to 1 km 1.7 and 4.9. Split, the dolly is
-1.3 ms on average and 1.4 at worst, the climb 0.8 and 1.3, and the ground
+1.3 ms on average and 1.4 at worst, the climb 0.75 and 1.2, and the ground
 under the trees matches the mesh trees' own shadow within 0.97-1.06 from
 eye height, 30 m and 150 m. The impostors do not sway.
 
 On the CPU, each species' level is a `scene.createGeometry` made once
 (`speciesLevels`), so a swap makes two nodes and uploads nothing; making
 each node copy and upload its own mesh cost about 4 ms a swap. The dolly's
-frames take 0.64 ms of CPU on average and 1.05 at worst (0.3 of it
-`plantLod`'s pass over the 9476 trees), the climb's 0.56 and 1.21.
+frames take 0.62 ms of CPU on average and 1.34 at worst (0.3 of it
+`plantLod`'s pass over the 9476 trees; the worst is a run's first frame
+or two), the climb's 0.48 and 1.31.
 
 ## Files
 
