@@ -30,6 +30,42 @@ function leafOpacity(leaves, scale, toUnit, res, voxelSize) {
     return alpha;
 }
 
+// Each bark vertex's opacity: what of its voxel the wood in it covers. A
+// branch of radius r crossing a voxel of side s has surface A = 2 pi r s and
+// covers 2 r / s = A / (pi s^2) of it seen side on, so a twig is a faint
+// voxel and not a 0.17 m beam; a stretch of a trunk's surface (its normals
+// agree: the area-weighted normal's length near A, as a branch's round does
+// not) is opaque, so a trunk has no holes.
+function barkOpacity(bark, scale, toUnit, res, voxelSize) {
+    const P = bark.positions, I = bark.indices;
+    const cell = (u) => Math.min(res - 1, Math.max(0, Math.floor((u + 1) / 2 * res)));
+    const sums = new Map(), triCell = new Int32Array(I.length / 3);
+    for (let t = 0; t < I.length / 3; t++) {
+        const a = I[t * 3] * 3, b = I[t * 3 + 1] * 3, c = I[t * 3 + 2] * 3;
+        const e1 = [0, 1, 2].map((i) => (P[b + i] - P[a + i]) * scale);
+        const e2 = [0, 1, 2].map((i) => (P[c + i] - P[a + i]) * scale);
+        const cx = e1[1] * e2[2] - e1[2] * e2[1], cy = e1[2] * e2[0] - e1[0] * e2[2], cz = e1[0] * e2[1] - e1[1] * e2[0];
+        const u = toUnit(...[0, 1, 2].map((i) => (P[a + i] + P[b + i] + P[c + i]) / 3 * scale));
+        const key = (cell(u[0]) * res + cell(u[1])) * res + cell(u[2]);
+        triCell[t] = key;
+        const s = sums.get(key) ?? [0, 0, 0, 0];
+        s[0] += 0.5 * Math.hypot(cx, cy, cz); s[1] += 0.5 * cx; s[2] += 0.5 * cy; s[3] += 0.5 * cz;
+        sums.set(key, s);
+    }
+    const alpha = new Float32Array(P.length / 3).fill(1);
+    for (let t = 0; t < I.length / 3; t++) {
+        const [A, nx, ny, nz] = sums.get(triCell[t]);
+        const flat = A > 0 ? Math.hypot(nx, ny, nz) / A : 1;
+        const across = Math.min(1, A / (Math.PI * voxelSize * voxelSize));
+        // (Half a branch's round in a voxel agrees 2/pi, a quarter 0.9; a
+        // trunk's surface a voxel wide, 0.99.)
+        const sheet = Math.min(1, Math.max(0, (flat - 0.7) / 0.25));
+        const op = Math.max(across, sheet * sheet * (3 - 2 * sheet));
+        for (let j = 0; j < 3; j++) alpha[I[t * 3 + j]] = Math.max(op, 1 / 255);
+    }
+    return alpha;
+}
+
 let vd = null;
 export function voxelWorld() {
     if (!vd) {
@@ -163,7 +199,8 @@ export function voxelArchetype(world, { scale = 1, leaf = 1, depth = 5 } = {}) {
     const voxelSize = (2 * half) / (4 << depth);
     const alpha = leafOpacity(leaves, scale, toUnit, 4 << depth, voxelSize);
     const sky = skyVisibility(leaves, scale, toUnit, voxelSize, 4 << depth);
-    const mesh = merge([{ mesh: bark, rgb: BARK_RGB, sky }, { mesh: leaves, rgb: LEAF_RGB, jitter: true, alpha, sky }],
+    const barkAlpha = barkOpacity(bark, scale, toUnit, 4 << depth, voxelSize);
+    const mesh = merge([{ mesh: bark, rgb: BARK_RGB, alpha: barkAlpha, sky }, { mesh: leaves, rgb: LEAF_RGB, jitter: true, alpha, sky }],
         scale, toUnit);
     const v = voxelWorld();
     const archetype = v.addArchetypeFromMesh(mesh, depth, { unitBounds: true, roughness: 0.8 });

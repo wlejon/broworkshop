@@ -21,7 +21,10 @@ cube and stands it in a `foliage` region where the mesh tree stands (lit
 two-sided, the sun through the leaves). Each leaf voxel's opacity is what
 its leaves cover: leaf area A in a voxel of side s passes exp(-0.5 A / s^2)
 of the light, so rays see sky through the crown and the region's shadow on
-the ground is dappled as the mesh tree's is. The 22 m oak at depth 6 is
+the ground is dappled as the mesh tree's is. A bark voxel's opacity is what
+its wood covers: a branch of surface A in it covers A / (pi s^2) seen side
+on, so a twig is a faint voxel rather than a beam a voxel thick, while a
+stretch of trunk surface (its normals agreeing) is opaque. The 22 m oak at depth 6 is
 0.17 m voxels, 21k bricks; against the mesh tree (bro.eye compare) it holds
 SSIM 0.91 at 60 m and 0.99 from 150 m, for 0.3-0.7 ms where the mesh tree
 takes 1.5-3.5. The region is given the tree's plant (root, height and trunk
