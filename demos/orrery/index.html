@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Aurelia — Brass Armillary Orrery</title>
+  <link rel="stylesheet" href="/lib/kit/kit.css">
+  <link rel="stylesheet" href="/app/css/app.css">
+</head>
+<body>
+  <canvas id="stage"></canvas>
+
+  <header class="au-brand" id="hud-brand">
+    <div class="au-brand-eyebrow">CELESTIAL MECHANICS · EPOCH J2000</div>
+    <h1>AURELIA</h1>
+    <p class="au-subtitle">Clockwork Brass Armillary &amp; Planetary Orrery</p>
+  </header>
+
+  <nav class="au-top-right" id="hud-views">
+    <div class="au-pill-group" role="group" aria-label="Camera Presets">
+      <button class="au-pill active" data-view="hero" title="Three-quarter gallery view (1)">Hero</button>
+      <button class="au-pill" data-view="ecliptic" title="Low grazing horizon view (2)">Ecliptic</button>
+      <button class="au-pill" data-view="planisphere" title="Top-down orbital planisphere (3)">Planisphere</button>
+      <button class="au-pill" data-view="clockwork" title="Close-up of brass spur gear train (4)">Clockwork</button>
+    </div>
+    <button class="au-pill au-mood-btn" id="moodBtn" title="Cycle studio lighting (M)">Mood: <span id="moodLabel">Midnight</span></button>
+  </nav>
+
+  <aside class="au-placard hidden" id="placard" aria-live="polite">
+    <div class="au-placard-head">
+      <div>
+        <div class="au-placard-kind" id="plKind">Planet</div>
+        <h2 id="plName">Terra</h2>
+      </div>
+      <button class="au-icon-btn" id="plClose" title="Close placard">×</button>
+    </div>
+    <p class="au-placard-desc" id="plDesc"></p>
+    <dl class="au-placard-stats">
+      <div><dt>Mean Distance</dt><dd id="plDist">—</dd></div>
+      <div><dt>Orbital Period</dt><dd id="plPeriod">—</dd></div>
+      <div><dt>Axial Tilt</dt><dd id="plTilt">—</dd></div>
+      <div><dt>Longitude</dt><dd id="plLon">—</dd></div>
+    </dl>
+    <div class="au-placard-actions">
+      <button class="au-pill active" id="plFollow">Follow Body</button>
+      <button class="au-pill" id="plResetCam">Gallery View</button>
+    </div>
+  </aside>
+
+  <footer class="au-transport" id="hud-transport">
+    <button class="au-pill au-play-btn active" id="playBtn" title="Play / Pause (Space)">Pause</button>
+    <button class="au-pill" id="dirBtn" title="Toggle prograde / retrograde (R)">Prograde</button>
+    <div class="au-sep"></div>
+    <div class="au-pill-group" id="speedGroup" aria-label="Simulation Speed">
+      <button class="au-pill" data-speed="0.25">0.25×</button>
+      <button class="au-pill active" data-speed="1">1×</button>
+      <button class="au-pill" data-speed="4">4×</button>
+      <button class="au-pill" data-speed="12">12×</button>
+    </div>
+    <div class="au-sep"></div>
+    <button class="au-pill" id="lawBtn" title="Switch Keplerian vs Harmonic ratio">Keplerian</button>
+    <div class="au-epoch" id="epochReadout">Day 0.0</div>
+    <button class="au-pill au-hud-toggle" id="hideHudBtn" title="Hide / Show UI (H)">Hide UI</button>
+  </footer>
+
+  <button class="au-pill au-restore-hud hidden" id="showHudBtn" title="Show UI (H)">Show UI</button>
+
+  <script type="module" src="/app/js/main.js"></script>
+</body>
+</html>

@@ -1,0 +1,7 @@
+{
+    "app": ".",
+    "title": "Aurelia — Brass Armillary Orrery",
+    "width": 1600,
+    "height": 960,
+    "lib": "../../lib"
+}
