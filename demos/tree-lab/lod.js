@@ -198,26 +198,43 @@ export function plantLod(trees, { levels = LEVELS, castFrom = 0, castUntil = Inf
         for (let l = 1; l < nl; l++) edges[i * (nl + 1) + l] = (levels[l].from + t.r) ** 2;
         edges[i * (nl + 1) + nl] = until > 0 ? (1.35 * until + t.r) ** 2 : Infinity;
     });
-    const update = ([ex, ey, ez]) => {
-        tris = 0;
-        counts.fill(0);
-        const dy2 = (ey - 10) * (ey - 10);
-        for (let i = 0; i < trees.length; i++) {
-            const t = trees[i], e = i * (nl + 1);
-            const d2 = (t.x - ex) * (t.x - ex) + (t.z - ez) * (t.z - ez) + dy2;
-            if (d2 >= edges[e + nl]) {
-                // Past the band: no mesh (what draws it beyond takes over).
-                if (nodes[i]) for (const n of nodes[i]) n.destroy();
-                nodes[i] = null;
-                shown[i] = -2;
-                continue;
-            }
+    // With an end, the trees in grid cells (CELL m) so a pass looks only at
+    // those within reach of it (its cost follows the trees near the eye,
+    // not the forest's), and at those it left a mesh on.
+    const CELL = 64;
+    let rMax = 0;
+    for (const t of trees) rMax = Math.max(rMax, t.r);
+    const reach = until > 0 ? 1.35 * until + rMax : Infinity;
+    const cells = new Map();
+    const key = (cx, cz) => cx * 65536 + cz;
+    trees.forEach((t, i) => {
+        const k = key(Math.floor(t.x / CELL), Math.floor(t.z / CELL));
+        if (!cells.has(k)) cells.set(k, []);
+        cells.get(k).push(i);
+    });
+    const meshed = new Set();
+    const seen = new Uint32Array(trees.length);
+    let pass = 0;
+    const visit = (i, ex, ez, dy2) => {
+        seen[i] = pass;
+        const t = trees[i], e = i * (nl + 1);
+        const d2 = (t.x - ex) * (t.x - ex) + (t.z - ez) * (t.z - ez) + dy2;
+        if (d2 >= edges[e + nl]) {
+            // Past the band: no mesh (what draws it beyond takes over).
+            if (nodes[i]) for (const n of nodes[i]) n.destroy();
+            nodes[i] = null;
+            meshed.delete(i);
+            shown[i] = -2;
+            return;
+        }
+        {
             let li = 0;
             while (li + 1 < nl && d2 >= edges[e + li + 1]) li++;
             counts[li]++;
             tris += t.sp.levels[li].tris;
-            if (shown[i] === li) continue;
+            if (shown[i] === li) return;
             if (nodes[i]) for (const n of nodes[i]) n.destroy();
+            meshed.add(i);
             swaps++;
             const lv = t.sp.levels[li], s = t.sp.k * t.size;
             const cast = li >= castFrom && li < castUntil;
@@ -234,12 +251,32 @@ export function plantLod(trees, { levels = LEVELS, castFrom = 0, castUntil = Inf
             shown[i] = li;
         }
     };
+    const update = ([ex, ey, ez]) => {
+        tris = 0;
+        counts.fill(0);
+        pass = (pass + 1) >>> 0 || 1;
+        const dy2 = (ey - 10) * (ey - 10);
+        if (!Number.isFinite(reach)) {
+            for (let i = 0; i < trees.length; i++) visit(i, ex, ez, dy2);
+        } else if (dy2 < reach * reach) {
+            const span = Math.sqrt(reach * reach - dy2);
+            const x0 = Math.floor((ex - span) / CELL), x1 = Math.floor((ex + span) / CELL);
+            const z0 = Math.floor((ez - span) / CELL), z1 = Math.floor((ez + span) / CELL);
+            for (let cx = x0; cx <= x1; cx++) for (let cz = z0; cz <= z1; cz++) {
+                const list = cells.get(key(cx, cz));
+                if (list) for (const i of list) visit(i, ex, ez, dy2);
+            }
+        }
+        // Those left with a mesh but out of reach now.
+        for (const i of meshed) if (seen[i] !== pass) visit(i, ex, ez, dy2);
+    };
     return {
         update,
         follow(vp) { vp.onView((view) => { if (!cleared) update(view.position); }); },
         clear() {
             cleared = true;
             nodes.forEach((ns, i) => { for (const n of ns ?? []) n.destroy(); nodes[i] = null; shown[i] = -1; });
+            meshed.clear();
         },
         stats: () => ({ tris, counts: counts.slice(), swaps }),
     };
