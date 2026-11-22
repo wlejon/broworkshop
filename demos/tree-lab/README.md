@@ -103,6 +103,13 @@ dawn from 30 m, 150 m and 600 m up, the ground alone 0.96-1.03. By rings of
 ground distance seen from 12 and 30 m up, the rings either side of the
 250 m handoff (230-340 m) are within 0.93-1.06, as near as the meshes'
 own rings inside it (0.93-1.08): the handoff adds no step of its own.
+
+`saveImpostor(imp, dir, name, height)` writes a bake for another app to
+draw: two PNG atlases, the views tiled 8 across and 4 down (`<name>_albedo`:
+the albedo's square root and the coverage; `<name>_normal`: the normal and
+the crown's occlusion), and `<name>.json` with the box, the grown height and
+each view's octagon. The page draws a tree of its own at the origin, so a
+script baking clears it first (`clear()`), or it is baked into every view.
 Against the meshes' own shadow (every level casting, no proxies) the
 proxies' ground is 0.996, 1.025 and 1.045 from 2, 30 and 150 m up. No
 one cover holds from 1.5 km up too: 0.4 there left the golden-hour
@@ -238,8 +245,9 @@ forest.js             growStand, layout, plant: a mixed stand, mesh near,
                       voxels beyond
 lod.js                speciesLevels, plantLod: the grown trees at every
                       distance, reduced per level, all swaying
-impostor.js           bakeImpostor, impostorNode, shadowProxyNode: far
-                      trees as baked view-atlas quads and their shadow
+impostor.js           bakeImpostor, impostorNode, shadowProxyNode,
+                      saveImpostor: far trees as baked view-atlas quads,
+                      their shadow, and the bake as files
 canopy.js             canopyNode, hideBeyond: the forest past the
                       impostors as one textured layer
 sheet.js              runSheet: each species' size, a still from eye height,

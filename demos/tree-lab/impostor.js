@@ -347,6 +347,35 @@ export function bakeImpostor(sp, o = IMPOSTOR) {
     return { alb, nrm, box: [...c, R], W, V, o, shape, area };
 }
 
+/**
+ * Write `imp` (bakeImpostor's) for another app to draw: `<dir>/<name>_albedo.png`
+ * (rgb the albedo's square root, a its coverage) and `<name>_normal.png`
+ * (rgb the normal as 0.5 + 0.5 n, a the crown's occlusion), each the views
+ * tiled nAz across and nEl down (view vi at column vi % nAz, row vi / nAz),
+ * and `<name>.json`: { box (centre and radius, the grown tree's metres),
+ * height (the grown tree's), W, nAz, nEl, elStep (degrees), shape (each
+ * view's octagon, 8 numbers), area, L }.
+ */
+export function saveImpostor(imp, dir, name, height) {
+    const { alb, nrm, W, V, o } = imp;
+    const AW = o.nAz * W, AH = o.nEl * W;
+    const A = new Uint8Array(AW * AH * 4), N = new Uint8Array(AW * AH * 4);
+    const q = (x) => Math.max(0, Math.min(255, Math.round(x * 255)));
+    for (let vi = 0; vi < V; vi++) {
+        const ox = (vi % o.nAz) * W, oy = Math.floor(vi / o.nAz) * W;
+        for (let y = 0; y < W; y++) for (let x = 0; x < W; x++) {
+            const s = (vi * W * W + y * W + x) * 4, d = ((oy + y) * AW + ox + x) * 4;
+            for (let k = 0; k < 3; k++) { A[d + k] = q(Math.sqrt(Math.max(0, alb[s + k]))); N[d + k] = q(nrm[s + k]); }
+            A[d + 3] = q(alb[s + 3]);
+            N[d + 3] = q(nrm[s + 3]);
+        }
+    }
+    bro.image.encodePngFile(`${dir}/${name}_albedo.png`, A, AW, AH, 4);
+    bro.image.encodePngFile(`${dir}/${name}_normal.png`, N, AW, AH, 4);
+    const meta = { box: imp.box, height, W, nAz: o.nAz, nEl: o.nEl, elStep: o.elStep, shape: Array.from(imp.shape), area: imp.area, L: o.L };
+    require('fs').writeFileSync(`${dir}/${name}.json`, JSON.stringify(meta));
+}
+
 // Each card (6 vertices) moved toward the crown's centre so its outer edge
 // sits where its centre was: a big card does not grow the crown.
 function pullCards(m, half, per = 6) {
