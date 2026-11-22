@@ -99,6 +99,7 @@
         { "dir": "demos/steam-lab" },
         { "dir": "demos/stylegan3-lab" },
         { "dir": "demos/supertonic-lab" },
+        { "dir": "demos/sylvan" },
         { "dir": "demos/tactical-flowfield" },
         { "dir": "demos/tensor-lab" },
         { "dir": "demos/terrain" },

@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Sylvan — Mossy Cascade &amp; Living Koi Sanctuary</title>
+  <link rel="stylesheet" href="/lib/kit/kit.css">
+  <link rel="stylesheet" href="/app/css/app.css">
+</head>
+<body>
+  <canvas id="stage"></canvas>
+
+  <header class="sy-brand" id="hud-brand">
+    <div class="sy-eyebrow">LIVING BOTANICAL DIORAMA</div>
+    <h1>SYLVAN</h1>
+    <p class="sy-subtitle">Mossy Cascade, Crimson Maple &amp; Koi Sanctuary</p>
+  </header>
+
+  <nav class="sy-top-right" id="hud-views">
+    <div class="sy-pill-group" role="group" aria-label="Camera Presets">
+      <button class="sy-pill active" data-view="sanctuary" title="Full sanctuary gallery view (1)">Sanctuary</button>
+      <button class="sy-pill" data-view="cascade" title="Waterfall and mossy rock tiers (2)">Cascade</button>
+      <button class="sy-pill" data-view="pond" title="Clear koi pond &amp; water lilies (3)">Koi Pond</button>
+      <button class="sy-pill" data-view="canopy" title="Gnarled Japanese maple canopy &amp; roots (4)">Canopy</button>
+    </div>
+    <button class="sy-pill sy-mood-btn" id="moodBtn" title="Cycle atmosphere lighting (M)">Atmosphere: <span id="moodLabel">Morning Mist</span></button>
+  </nav>
+
+  <aside class="sy-placard hidden" id="placard" aria-live="polite">
+    <div class="sy-placard-head">
+      <div>
+        <div class="sy-placard-kind" id="plKind">Specimen</div>
+        <h2 id="plName">Kohaku Koi</h2>
+      </div>
+      <button class="sy-icon-btn" id="plClose" title="Close placard">×</button>
+    </div>
+    <p class="sy-placard-desc" id="plDesc"></p>
+    <dl class="sy-placard-stats">
+      <div><dt>Zone</dt><dd id="plZone">Basin</dd></div>
+      <div><dt>Activity</dt><dd id="plActivity">Gliding</dd></div>
+      <div><dt>Breeze</dt><dd id="plBreeze">52%</dd></div>
+      <div><dt>Elevation</dt><dd id="plElev">0.24 m</dd></div>
+    </dl>
+    <div class="sy-placard-actions">
+      <button class="sy-pill" id="plResetCam">Sanctuary View</button>
+    </div>
+  </aside>
+
+  <footer class="sy-transport" id="hud-transport">
+    <button class="sy-pill active" id="playBtn" title="Play / Pause (Space)">Pause</button>
+    <div class="sy-sep"></div>
+    <label class="sy-slider-wrap" for="breezeSlider">
+      <span class="sy-slider-lbl">Breeze</span>
+      <input type="range" id="breezeSlider" min="0" max="100" step="1" value="52">
+      <span class="sy-slider-val" id="breezeVal">52%</span>
+    </label>
+    <div class="sy-sep"></div>
+    <div class="sy-readout" id="lifeReadout">5 Koi · 52% Breeze · 22°C Mist</div>
+    <button class="sy-pill sy-hud-toggle" id="hideHudBtn" title="Hide / Show UI (H)">Hide UI</button>
+  </footer>
+
+  <button class="sy-pill sy-restore-hud hidden" id="showHudBtn" title="Show UI (H)">Show UI</button>
+
+  <script type="module" src="/app/js/main.js"></script>
+</body>
+</html>
