@@ -21,7 +21,7 @@ import { barkMesh } from "/app/lod.js";
 // `gain` scales the baked albedo (blue: what was left against the truth).
 // `occluder` is the surface's occluder_sun: the bounce from inside the
 // crown the mesh leaves get (mesh.bk's default).
-export const IMPOSTOR = { res: 128, ss: 4, nAz: 8, nEl: 4, elStep: 25, bend: 0.6, L: 6, gain: [1, 1, 0.95], front: 0.4, cover: 0.8, occluder: 0.5, contrast: [2.5, 0.35] };
+export const IMPOSTOR = { res: 128, ss: 4, nAz: 8, nEl: 4, elStep: 25, bend: 0.6, L: 6, gain: [1, 1, 0.95], front: 0.4, cover: 0.8, occluder: 0.5, contrast: [2.5, 0.35], formats: ['float16', 'unorm8'] };
 
 const BAKE_HOOK = `
 module hook;
@@ -88,27 +88,34 @@ fn view_dir(i: i32) -> vec3<f32> {
 
 pub fn vertex(v: mesh::Vertex) -> mesh::Vertex {
     var o = v;
-    let t = trees[v.instance_index];
+    let id = floor(v.uv.x * 0.5);
+    let t = trees[id as i32];
+    let root = vec3<f32>(t.x, 0.0, t.y);
     let c = cos(t.z);
     let n = sin(t.z);
     let s = t.w;
     let centre = yaw_to_world(params.box.xyz, c, n) * s;
-    let to_eye = scene::camera.eye_world.xyz - (vec3<f32>(t.x, 0.0, t.y) + centre);
+    let to_eye = scene::camera.eye_world.xyz - (root + centre);
     let f = normalize(to_eye);
     var r = cross(vec3<f32>(0.0, 1.0, 0.0), f);
     if (length(r) < 1.0e-4) { r = vec3<f32>(1.0, 0.0, 0.0); }
     r = normalize(r);
     let u = cross(f, r);
-    let q = vec2<f32>(v.uv.x * 2.0 - 1.0, v.uv.y * 2.0 - 1.0);
+    let q = vec2<f32>((v.uv.x - 2.0 * id) * 2.0 - 1.0, v.uv.y * 2.0 - 1.0);
     let R = params.box.w;
     // Moved toward the eye by gain.w (front) of the radius, to the crown's near
     // surface where the leaves seen are (its shadow and depth are theirs),
     // and shrunk to cover what it covered at the centre.
     let dist = length(to_eye);
     let push_d = min(params.gain.w * R * s, 0.5 * dist);
-    o.pos = centre + f * push_d + (r * q.x + u * q.y) * (R * s * (dist - push_d) / dist);
-    // Wholly nearer than the band: no impostor (a collapsed quad, no pixels).
-    if (params.band.x > 0.0 && length(to_eye) + R * s < params.band.x) { o.pos = vec3<f32>(0.0); }
+    // Only as far out as a view's crown reaches (far.y of R), the atlas
+    // mapped as it was baked (the square's half side R).
+    let fit = params.far.y;
+    o.pos = root + centre + f * push_d + (r * q.x + u * q.y) * (fit * R * s * (dist - push_d) / dist);
+    // Wholly nearer than the band, or wholly past the far fade: no impostor
+    // (a collapsed quad, no pixels).
+    if (params.band.x > 0.0 && dist + R * s < params.band.x) { o.pos = root; }
+    if (params.far.x > 0.0 && dist - R * s > 1.35 * params.far.x) { o.pos = root; }
     o.normal = f;
     let d = world_to_yaw(f, c, n);
     var az = atan2(d.x, d.z);
@@ -117,13 +124,13 @@ pub fn vertex(v: mesh::Vertex) -> mesh::Vertex {
     let ai = (floor(az / (6.2831853 / params.views.x) + 0.5) as i32) % (params.views.x as i32);
     let ei = clamp(floor(el / params.views.z + 0.5) as i32, 0, (params.views.y as i32) - 1);
     let vi = ei * (params.views.x as i32) + ai;
-    let pl = world_to_yaw(r * q.x + u * q.y, c, n) * R;
+    let pl = world_to_yaw(r * q.x + u * q.y, c, n) * (fit * R);
     let dv = view_dir(vi);
     let rv = normalize(cross(vec3<f32>(0.0, 1.0, 0.0), dv));
     let uv_ = cross(dv, rv);
     o.v0 = vec4<f32>(0.5 + 0.5 * dot(pl, rv) / R, 0.5 - 0.5 * dot(pl, uv_) / R, c, n);
     o.v1 = vec4<f32>(R * s, 0.0, 0.0, 0.0);
-    o.vi = vec4<i32>(vi, 0, 0, 0);
+    o.vi = vec4<i32>(vi, id as i32, 0, 0);
     return o;
 }
 
@@ -139,7 +146,7 @@ pub fn fragment(v: mesh::Vertex, s: mesh::Surface) -> mesh::Surface {
     // The tree's own leaf tone, as vegetation.bk gives the mesh tree's
     // (hashed from its root's 1/8 m cell), and the baked crown occlusion
     // on its ambient light, as the mesh tree's leaves have.
-    let t = trees[v.instance_index];
+    let t = trees[v.vi.y];
     let tone = wind::wind_hash(vec2<i32>(floor(vec2<f32>(t.x, t.y) * 8.0)) + vec2<i32>(17, 3));
     let tint = mix(vec3<f32>(0.84, 0.97, 1.08), vec3<f32>(1.12, 1.04, 0.76), tone) * (0.9 + 0.2 * fract(tone * 13.7));
     out.base_color = a.xyz * tint * params.gain.xyz;
@@ -284,7 +291,14 @@ export function bakeImpostor(sp, o = IMPOSTOR) {
     scene.setDebugView(null);
     for (const n of nodes) n.destroy();
     ground.visible = groundWas;
-    return { alb, nrm, box: [...c, R], W, V, o };
+    // How far out (a share of R, the square's half side) any view's crown
+    // reaches: the quad is drawn that size, its empty margin not shaded.
+    let fit = 0;
+    for (let vi = 0; vi < V; vi++) for (let y = 0; y < W; y++) for (let x = 0; x < W; x++) {
+        if (alb[(vi * W * W + y * W + x) * 4 + 3] <= 0.01) continue;
+        fit = Math.max(fit, Math.abs((x + 0.5) * 2 / W - 1) + 1 / W, Math.abs((y + 0.5) * 2 / W - 1) + 1 / W);
+    }
+    return { alb, nrm, box: [...c, R], W, V, o, fit: Math.min(1, fit) };
 }
 
 // Each card (6 vertices) moved toward the crown's centre so its outer edge
@@ -348,15 +362,30 @@ function mergeMeshes(a, b) {
     return new Mesh({ positions: pos, normals: nrm, indices: idx });
 }
 
-const QUAD = () => new Mesh({
-    positions: new Float32Array([-30, 0, -30, 30, 0, 30, 30, 60, -30, -30, 60, 30]),
-    normals: new Float32Array([0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1]),
-    uvs: new Float32Array([0, 0, 1, 0, 1, 1, 0, 1]),
-    indices: new Uint32Array([0, 1, 2, 0, 2, 3]),
-});
+// One quad per tree in one mesh, not one instanced quad: the GPU spends about
+// 16 ns on each instance of a draw however small it is (56,000 one-triangle
+// instances 0.92 ms, the same triangles as one mesh 0.026), so a forest of
+// instanced quads costs more than their pixels. A vertex's uv carries its
+// corner and its tree (uv.x = corner + 2 tree); the hook builds the quad from
+// the tree's record. The positions only bound the trees (the node's bounds).
+function quads(sp, trees) {
+    const N = trees.length, R = sp.imp.box[3];
+    const pos = new Float32Array(N * 12), nrm = new Float32Array(N * 12), uv = new Float32Array(N * 8), idx = new Uint32Array(N * 6);
+    const CX = [0, 1, 1, 0], CY = [0, 0, 1, 1];
+    trees.forEach((t, i) => {
+        const r = 2 * R * sp.k * t.size;
+        for (let c = 0; c < 4; c++) {
+            pos.set([t.x + (CX[c] * 2 - 1) * r, CY[c] * r, t.z + (CX[c] * 2 - 1) * r], (i * 4 + c) * 3);
+            nrm[(i * 4 + c) * 3 + 2] = 1;
+            uv.set([CX[c] + 2 * i, CY[c]], (i * 4 + c) * 2);
+        }
+        idx.set([0, 1, 2, 0, 2, 3].map((k) => k + i * 4), i * 6);
+    });
+    return new Mesh({ positions: pos, normals: nrm, uvs: uv, indices: idx });
+}
 
 /**
- * One instanced impostor node for `trees` (all of species `sp`, baked as
+ * One impostor node for `trees` (all of species `sp`, baked as
  * `sp.imp`): { x, z, yaw, size }. `band` [from, to] (m from the eye) dithers
  * the impostors in over it, for a handoff from mesh trees fading out over the
  * same band; `until` (m, 0: none) dithers them out over [until, 1.35 until]
@@ -376,19 +405,15 @@ function cullSpheres(sp, trees) {
 }
 
 export function impostorNode(sp, trees, { band = [0, 0], castsShadow = false, gain = IMPOSTOR.gain, front = IMPOSTOR.front, occluder = IMPOSTOR.occluder, cover = IMPOSTOR.cover, contrast = IMPOSTOR.contrast, until = 0 } = {}) {
-    const inst = new Float32Array(trees.length * 16), data = new Float32Array(trees.length * 4);
-    trees.forEach((t, i) => {
-        inst.set([1, 0, 0, t.x, 0, 1, 0, 0, 0, 0, 1, t.z, 1, 1, 1, 1], i * 16);
-        data.set([t.x, t.z, t.yaw, sp.k * t.size], i * 4);
-    });
-    const n = scene.createInstancedMesh({ mesh: QUAD(), instances: inst, color: [1, 1, 1], metallic: 0, roughness: 0.75,
+    const data = new Float32Array(trees.length * 4);
+    trees.forEach((t, i) => data.set([t.x, t.z, t.yaw, sp.k * t.size], i * 4));
+    const n = scene.createMesh({ data: quads(sp, trees), color: [1, 1, 1], metallic: 0, roughness: 0.75,
         alphaCutoff: 0.5, alphaToCoverage: true, doubleSided: true, castsShadow, receivesShadow: true, vertexColorTint: false });
     const { alb, nrm, box, W, V, o } = sp.imp;
     n.setShader({ module: DRAW_HOOK, file: 'impostor.bk',
-        uniforms: { box, views: [o.nAz, o.nEl, o.elStep * Math.PI / 180, PX], band: [band[0], band[1], W, 0], gain: [...gain, front], light: [occluder, cover, contrast[0], contrast[1]], far: [until, 0, 0, 0] } });
-    n.setShaderTexture('albedo', { data: alb, width: W, height: W, layers: V, channels: 4, mipmap: true });
-    n.setShaderTexture('normals', { data: nrm, width: W, height: W, layers: V, channels: 4, mipmap: true });
+        uniforms: { box, views: [o.nAz, o.nEl, o.elStep * Math.PI / 180, PX], band: [band[0], band[1], W, 0], gain: [...gain, front], light: [occluder, cover, contrast[0], contrast[1]], far: [until, sp.imp.fit ?? 1, 0, 0] } });
+    n.setShaderTexture('albedo', { data: alb, width: W, height: W, layers: V, channels: 4, mipmap: true, format: IMPOSTOR.formats[0] });
+    n.setShaderTexture('normals', { data: nrm, width: W, height: W, layers: V, channels: 4, mipmap: true, format: IMPOSTOR.formats[1] });
     n.setShaderBuffer('trees', bro.kernel.createBuffer(data));
-    n.setInstanceCullSpheres(cullSpheres(sp, trees));
     return n;
 }

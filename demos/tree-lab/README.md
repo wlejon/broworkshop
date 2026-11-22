@@ -71,7 +71,10 @@ with the terms bro.scene's vegetation shading takes from the crown: albedo
 darkened toward its centre with a lit rim, each leaf's normal turned to the
 eye and leaning to the crown's bulk, and the occlusion of its ambient light;
 coverage from a 4x finer capture, each sample counting the share of it a
-leaf covers. Each tree is one quad facing the eye that
+leaf covers. Each tree is one quad facing the eye (all of a species' quads
+in one mesh, each vertex's uv naming its tree, the vertex hook building
+the quad from the tree's record), no larger than the widest view's crown,
+that
 samples the view nearest its direction in its own frame (mipmapped to the
 pixel's footprint), tinted by the tree's own leaf tone, lit as foliage
 (`s.leaf`) through the baked normal with the mesh leaves' bounce from
@@ -83,7 +86,7 @@ Seen from the side the coverage is pulled apart around 0.35 by 2.5 (its
 clumps opaque, its thin parts clear: the grown crowns read as solid shapes
 with ground between them there), and from above (20 to 50 degrees up,
 fading) it is as baked, times 0.8, as the grown crowns are seen through;
-nearer than the band it collapses to nothing. The quad
+nearer than the band, or past its far fade, it collapses to nothing. The quad
 sits 0.4 of the crown's radius toward the eye, where the leaves seen are.
 `shadowProxyNode` casts their shadow: each species' crown as L12 cards at
 0.4 of its leaf area and its limbs in one mesh, instanced over the trees as a
@@ -161,19 +164,37 @@ height through that forest (some 580 mesh trees within reach) is 2.13-2.19
 ms on average, 2.2-2.25 at the 95th percentile and 2.3-3.5 at worst, in
 the page's 1620 x 970 view. With the view at 2560 x 1364 (`--width 2860
 --height 1470`) it is 3.2-3.6 ms on average and 3.3-4.0 at the 95th
-percentile: over a 2.8 ms frame before anything else is drawn (the mesh
-trees' vegetation pass 1.5 of it, the impostors 0.8, their instance cull
-0.45). On either of this machine's two GPUs, some runs of the same dolly
-are slower in every pass (4.25-4.7 on average, 7-9 at the 95th); the
-others are 3.2-3.6. Drawing the impostors nearest first or farthest first
-changes their cost by a tenth, and without MSAA the vegetation pass is
-1.14 ms: neither is where the cost is. Handing the trees to the impostors
-at 150 m instead (the levels then beginning at 0, 40, 90 and 150 m, about
-230 mesh trees within reach) takes the vegetation pass to 0.97 ms and the
-dolly to 3.2 ms; against the truth the rings from 60 to 450 m seen from 12
-and 30 m up are 0.92-1.14 either way, the frame from 150 m up 0.90-1.08
-(0.94-1.07 handing over at 250 m), and from 600 m up the same. At 120 m
-the far rings fall to 0.79.
+percentile when the impostors were instanced quads and the trees handed to
+them at 250 m (the mesh trees' vegetation pass 1.5 ms of it, the impostors
+0.8 and, booked to the instance cull pass, 0.45 more; the shadow proxies
+0.22 there too). On either of this machine's two GPUs, some runs of the
+same dolly are slower in every pass (4.25-4.7 on average, 7-9 at the
+95th).
+
+Four changes brought it to 2.62 ms on average and 2.89 at the 95th
+percentile (2.31 and 2.45 standing still):
+
+- Handing the trees to the impostors at 150 m (the levels beginning at 0,
+  40, 90 and 150 m, about 230 mesh trees within reach): the vegetation
+  pass 1.0 ms. Against the truth the rings from 60 to 450 m seen from 12
+  and 30 m up are 0.89-1.16 either way, the frame from 150 m up 0.94-1.09
+  (0.94-1.07 handing over at 250 m), from 600 m up the same. At 120 m the
+  far rings fall to 0.79.
+- The impostors as one mesh of quads per species rather than an instanced
+  quad: the GPU spends some 16 ns on each instance of a draw however small
+  (56,000 one-triangle instances 0.92 ms, the same triangles as one mesh
+  0.026), which was the 0.45. Their fill is what is left, 0.78 ms: drawn
+  nearest first it is 0.06 less, every fragment discarded it is more (no
+  depth to hide the layers behind), without the normals fetch 0.13 less.
+- Their atlases kept as float16 (albedo) and unorm8 (normals), 0.07 less.
+- The engine no longer culls a shadow-only draw for the camera: the
+  proxies' 56,000 instances were culled for a view that never draws them,
+  0.22 ms a frame. Their own shadow pages cost little while the camera
+  moves (34 pages a frame redrawn in the dolly). Merging them into one
+  draw (`staticBatch`) draws every triangle in every page, 0.57 ms.
+
+Without MSAA the vegetation pass is a quarter cheaper, so most of it is not
+the samples.
 
 On the CPU, each species' level is a `scene.createGeometry` made once
 (`speciesLevels`), so a swap makes two nodes and uploads nothing; making
