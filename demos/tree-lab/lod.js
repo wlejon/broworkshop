@@ -1,10 +1,11 @@
 // A forest of the lab's trees drawn as the grown trees themselves at every
 // distance, each level of detail the same tree reduced for what a pixel
 // holds where the level begins: its leaf cards L times larger and L^2 fewer
-// (the crown's leaf area kept), its branches thinner than half a pixel
+// (times the share of the leaf area that covers as the finest level does:
+// speciesLevels), its branches thinner than half a pixel
 // dropped and the rest fewer sided. Every level carries the tree's vegetation records, so it sways
 // in the wind and shades as foliage (bro.scene vegetation).
-import { leafCard, scene } from "/app/lab.js";
+import { leafCard, scene, ground } from "/app/lab.js";
 
 // Where each level begins (m from the eye to the tree's crown) and what it is.
 export const LEVELS = [
@@ -74,18 +75,100 @@ export function barkMesh(tubes, sides) {
     return m;
 }
 
+// The leaves' coverage, for matching a level's to the finest's: white where
+// a leaf is, in a debug view.
+const COVER_HOOK = `
+module hook;
+import mesh;
+import scene;
+pub fn vertex(v: mesh::Vertex) -> mesh::Vertex { return v; }
+pub fn fragment(v: mesh::Vertex, s: mesh::Surface) -> mesh::Surface {
+    var out = s;
+    if (SCENE_DEBUG(lod_cover)) { out.debug = vec4<f32>(1.0, 1.0, 1.0, 1.0); }
+    return out;
+}`;
+const COVER_DIRS = [[0, 10], [2.1, 40], [4.2, 75]];
+const LIN = new Float32Array(256).map((_, i) => { const c = i / 255; return c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4; });
+
+// The share of the square around the crown its leaves cover, seen from each
+// of COVER_DIRS by an orthographic camera (the ground hidden): each pixel's
+// mask counts the share of it covered. `box` is [cx, cy, cz, R].
+function leafCover(leaves, box, res = 768) {
+    const groundWas = ground.visible;
+    ground.visible = false;
+    const n = scene.createMesh({ data: new Mesh({ positions: leaves.positions, normals: leaves.normals, indices: leaves.indices }),
+        color: [1, 1, 1], doubleSided: true, vertexColorTint: false });
+    n.setShader({ module: COVER_HOOK, file: 'lod_cover.bk' });
+    scene.setDebugView('lod_cover');
+    const [cx, cy, cz, R] = box;
+    const out = COVER_DIRS.map(([az, elDeg]) => {
+        const el = elDeg * Math.PI / 180, d = [Math.sin(az) * Math.cos(el), Math.sin(el), Math.cos(az) * Math.cos(el)];
+        scene.setCamera({ mode: 'orthographic', size: 2 * R, aspect: 1, near: 0.1, far: 8 * R,
+            eye: [cx + 4 * R * d[0], cy + 4 * R * d[1], cz + 4 * R * d[2]], target: [cx, cy, cz], up: [0, 1, 0] });
+        const px = scene.captureFrame(res, res).data;
+        let s = 0;
+        for (let i = 0; i < px.length; i += 4) s += LIN[Math.min(px[i], px[i + 1], px[i + 2])];
+        return s / (px.length / 4);
+    });
+    scene.setDebugView(null);
+    n.destroy();
+    ground.visible = groundWas;
+    return out;
+}
+
+function boundsOf(m) {
+    const P = m.positions, lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity];
+    for (let i = 0; i < P.length; i += 3) for (let a = 0; a < 3; a++) { lo[a] = Math.min(lo[a], P[i + a]); hi[a] = Math.max(hi[a], P[i + a]); }
+    const c = [0, 1, 2].map((a) => (lo[a] + hi[a]) / 2);
+    return [...c, Math.max(...[0, 1, 2].map((a) => (hi[a] - lo[a]) / 2)) * Math.SQRT2];
+}
+
 /**
- * A species' meshes at each level: [{ bark, leaves, tris, barkGeometry,
+ * A species' meshes at each level: [{ bark, leaves, tris, area, barkGeometry,
  * leavesGeometry }], the geometries shared by every tree drawn at that level
  * (scene.createGeometry: made and uploaded once). `sp` is { world, k (draw scale) }.
+ *
+ * A level's cards hold the crown's leaf area times `area`. Left unset, it is
+ * measured: L^2 fewer cards L times larger cover more of the crown than the
+ * small leaves they stand for (a crown's leaves overlap less as cards than
+ * as leaves, and fill the gaps between its clumps), so a coarse level would
+ * hide more of what is behind the tree, and darken a forest seen from
+ * afar. Each level's coverage is matched to the finest level's from three
+ * directions, stepping the area by the overlap of independent cards
+ * (cover = 1 - (1 - c1)^area, c1 its cover at full area) from each
+ * measured cover, up to three times (some 0.8 s a species). How much a
+ * level gives up differs by species: birch keeps 0.80, 0.58 and 0.43 of
+ * its area at L6, L12 and L24, oak 0.97, 0.81 and 0.72. With the same
+ * coverage the coarse levels still darken the picture 0-23% more than the
+ * grown tree does (one tree at 170 m and 400 m, noon; the shadow off
+ * changes none of it), so each covered pixel is darker.
  */
 export function speciesLevels(sp, levels = LEVELS) {
-    return levels.map((lv) => {
+    const emit = (lv, area) => {
         const kk = 1.5 * lv.L / sp.k;
-        const leaves = sp.world.emitFoliageMesh(leafCard(kk, [1, 2]), { seed: 0x1eaf, perArea: 90 / (kk * kk) });
+        return sp.world.emitFoliageMesh(leafCard(kk, [1, 2]), { seed: 0x1eaf, perArea: area * 90 / (kk * kk) });
+    };
+    let ref = null, box = null;
+    return levels.map((lv, i) => {
+        let area = lv.area ?? 1;
+        let leaves = emit(lv, area);
+        if (i === 0) { box = boundsOf(leaves); if (lv.area === undefined && levels.length > 1) ref = leafCover(leaves, box); }
+        else if (ref && lv.area === undefined) {
+            // Fewer cards cover less than in proportion (they thin within
+            // clumps that still overlap), so the overlap model's step is
+            // taken from each measured cover in turn.
+            for (let it = 0; it < 3; it++) {
+                const c = leafCover(leaves, box);
+                const per = ref.map((c0, d) => Math.log(1 - Math.min(c0, 0.98)) / Math.log(1 - Math.min(c[d], 0.98)));
+                const next = Math.min(1, Math.max(0.1, area * per.reduce((a, b) => a + b, 0) / per.length));
+                if (Math.abs(next - area) < 0.02) break;
+                area = next;
+                leaves = emit(lv, area);
+            }
+        }
         // The branches at least half a pixel wide where the level begins.
         const bark = barkMesh(sp.world.emitBranchTubes({ minRadius: 0.25 * lv.from * PX / sp.k }), lv.sides);
-        return { bark, leaves, tris: (bark.indices.length + leaves.indices.length) / 3,
+        return { bark, leaves, area, tris: (bark.indices.length + leaves.indices.length) / 3,
             barkGeometry: scene.createGeometry(bark), leavesGeometry: scene.createGeometry(leaves) };
     });
 }

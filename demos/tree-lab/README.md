@@ -52,7 +52,9 @@ voxels' 0.17 m.
 the grown trees themselves at every distance, each tree a mesh node pair
 (bark, leaves) at a level of detail picked by its distance: from 0, 40, 100
 and 250 m the leaf cards are 3, 6, 12 and 24 times the lab's leaf with
-1/L² as many (the crown's leaf area kept), and the branches thinner than
+1/L² as many, times the share of the leaf area that leaves the crown
+covering what the L3 level covers (measured per species from three
+directions: a birch keeps 0.43 of it at L24, an oak 0.72), and the branches thinner than
 half a pixel where the level begins are dropped, the rest 6 to 3 sided and
 mitred at the joints. Every level carries the tree's vegetation records,
 so every tree at every distance sways and shades as foliage, and every
@@ -84,12 +86,15 @@ shadow page drawing only the trees whose sphere reaches it
 frame of page redraws while the camera moved). Against the truth (the
 same 2282 trees all drawn at L3, casting their own shadow, in wind), the
 mesh trees to 250 m with impostors and proxies beyond give the frame's
-mean linear colour within 0.95-1.08 per channel at noon and golden hour
-from 30 m, 150 m and 600 m up, the ground alone 0.89-1.02. The impostors'
+mean linear colour within 0.95-1.06 per channel at noon and golden hour
+from 30 m, 150 m and 600 m up, the ground alone 0.86-1.02. The impostors'
 0.8 coverage and L6 bake, their blue gain of 0.95 and the proxies' 0.4
 were swept for it: with an L24 bake at full coverage the frame was 0.80
-from 600 m at noon, and plantLod's meshes alone are 0.84-0.98 from there
-(their L24 cards cover too much as well). With meshes to 250 m and impostors beyond,
+from 600 m at noon, and plantLod's meshes at full leaf area alone were
+0.84-0.98 from there. Each mesh level's leaf area is measured against the
+finest level's coverage (`speciesLevels`). Still unlike the truth: past
+some 300 m the impostors read as an even carpet where the grown trees
+stand apart. With meshes to 250 m and impostors beyond,
 9476 trees on a 3.2 km square cost 1.3 ms from eye height and 30 m, 0.8
 from 150 m, 0.4 from 1 km, the impostors and their shadow 0.16-0.3 of it,
 with the camera still.
