@@ -57,7 +57,7 @@ half a pixel where the level begins are dropped, the rest 6 to 3 sided and
 mitred at the joints. Every level carries the tree's vegetation records,
 so every tree at every distance sways and shades as foliage, and every
 level casts. 726 trees on 600 m square: 1.8 ms from eye height, 1.7 from
-30 m, 1.3 from 150 m, 1.1-1.4 from 1 km (GPU frame, 4090).
+30 m, 1.3 from 150 m, 1.1-1.4 from 1 km (GPU frame).
 
 ## Files
 
