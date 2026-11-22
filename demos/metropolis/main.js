@@ -13,47 +13,11 @@ import { createBuildingCollision } from '/app/buildings/building_collision.js';
 import { registerCarBatches } from '/app/traffic/vehicle_meshes.js';
 import { createAmbientTraffic } from '/app/traffic/ambient_traffic.js';
 import { createDriveableCar } from '/app/traffic/driveable_car.js';
+import { createStreetscape } from '/app/world/streetscape.js';
 import { createHud } from '/app/player/hud.js';
 import { createTraversalController } from '/app/player/traversal_modes.js';
 
 const clamp = (x, lo, hi) => (x < lo ? lo : x > hi ? hi : x);
-
-function pushBoxFaces(pos, nrm, uvs, idx, x0, y0, z0, x1, y1, z1, matId, emissiveStrength) {
-    const faces = [
-        { n: [1, 0, 0],  c: [[x1, y0, z1], [x1, y0, z0], [x1, y1, z0], [x1, y1, z1]] },
-        { n: [-1, 0, 0], c: [[x0, y0, z0], [x0, y0, z1], [x0, y1, z1], [x0, y1, z0]] },
-        { n: [0, 1, 0],  c: [[x0, y1, z1], [x1, y1, z1], [x1, y1, z0], [x0, y1, z0]] },
-        { n: [0, -1, 0], c: [[x0, y0, z0], [x1, y0, z0], [x1, y0, z1], [x0, y0, z1]] },
-        { n: [0, 0, 1],  c: [[x0, y0, z1], [x1, y0, z1], [x1, y1, z1], [x0, y1, z1]] },
-        { n: [0, 0, -1], c: [[x1, y0, z0], [x0, y0, z0], [x0, y1, z0], [x1, y1, z0]] },
-    ];
-    for (const f of faces) {
-        const b = pos.length / 3;
-        for (const pt of f.c) {
-            pos.push(pt[0], pt[1], pt[2]);
-            nrm.push(f.n[0], f.n[1], f.n[2]);
-            uvs.push(matId, emissiveStrength);
-        }
-        idx.push(b, b + 1, b + 2, b, b + 2, b + 3);
-    }
-}
-
-function createStreetlightMesh() {
-    const pos = [];
-    const nrm = [];
-    const uvs = [];
-    const idx = [];
-    // Plinth extends -0.20 m below sidewalk base so sidewalk curbs (+0.15 m) remain grounded at street datum
-    pushBoxFaces(pos, nrm, uvs, idx, -0.11, -0.20, -0.11, 0.11, 6.2, 0.11, 1, 0.0);
-    pushBoxFaces(pos, nrm, uvs, idx, -0.14, 6.0, -0.14, 0.90, 6.24, 0.14, 1, 0.0);
-    pushBoxFaces(pos, nrm, uvs, idx, 0.55, 5.86, -0.18, 0.92, 6.0, 0.18, 5, 1.0);
-    return new Mesh({
-        positions: new Float32Array(pos),
-        normals: new Float32Array(nrm),
-        uvs: new Float32Array(uvs),
-        indices: new Uint32Array(idx),
-    });
-}
 
 function rotateLocalNormal(rot, nx, nz) {
     const c = Math.cos(rot), s = Math.sin(rot);
@@ -80,15 +44,7 @@ if (!backendOk) {
     applyScenePerfBudget(scene, 4.0);
 
     const pools = createPoolRegistry(scene);
-    const lightBatch = pools.registerBatch('streetlights', createStreetlightMesh, {
-        capacity: 1024,
-        glowScale: 0.45,
-        castsShadow: true,
-        receivesShadow: true,
-        doubleSided: false,
-        drawOrder: 10,
-        fadeOutDist: 260,
-    });
+    const streetscape = createStreetscape(scene, pools, layout);
     const carBatches = registerCarBatches(pools);
 
     const terrain = createTerrainTiles(scene, layout);
@@ -98,7 +54,7 @@ if (!backendOk) {
     const elevators = createElevators(streamer);
     const collision = createBuildingCollision(streamer, layout, elevators);
     const ambientTraffic = createAmbientTraffic(carBatches);
-    const driveCar = createDriveableCar(carBatches, collision, ambientTraffic);
+    const driveCar = createDriveableCar(carBatches, collision, ambientTraffic, streetscape);
 
     // Pre-warm all instance batches (including traffic & cars) before async wait
     pools.warmAll();
@@ -208,25 +164,7 @@ if (!backendOk) {
             if (elevHint != null) floorHint = elevHint;
         }
         streamer.update(camPos, floorHint, lod, atmoState, elevators, simTime);
-
-        if (altitude <= 260) {
-            const bxCenter = Math.floor(camPos[0] / layout.BLOCK_SIZE);
-            const bzCenter = Math.floor(camPos[2] / layout.BLOCK_SIZE);
-            for (let bz = bzCenter - 1; bz <= bzCenter + 1; bz++) {
-                for (let bx = bxCenter - 1; bx <= bxCenter + 1; bx++) {
-                    const xEdge = bx * layout.BLOCK_SIZE + 11.5;
-                    const zStart = bz * layout.BLOCK_SIZE + 20;
-                    for (let s = 0; s < 3; s++) {
-                        const sz = zStart + s * 44;
-                        const gy = layout.sampleGroundHeight(xEdge, sz);
-                        if (Math.hypot(xEdge - camPos[0], gy - camPos[1], sz - camPos[2]) <= 260) {
-                            lightBatch.pushRel(xEdge, gy, sz, camPos, 0, 0, 0, 1, 1, 1, [1.0, 0.86, 0.62, 1.0]);
-                        }
-                    }
-                }
-            }
-        }
-
+        streetscape.update(camPos, altitude);
         ambientTraffic.pushInstances(camPos, altitude, atmoState);
         driveCar.pushInstances(camPos, altitude);
 
@@ -400,8 +338,7 @@ if (!backendOk) {
 
         for (let ci = 0; ci < searchCenters.length; ci++) {
             const [sx, sz] = searchCenters[ci];
-            const bx0 = Math.floor(sx / layout.BLOCK_SIZE);
-            const bz0 = Math.floor(sz / layout.BLOCK_SIZE);
+            const [bx0, bz0] = layout.worldToBlock(sx, sz);
             for (let rad = 0; rad <= 6 && !bestParcel; rad++) {
                 for (let bz = bz0 - rad; bz <= bz0 + rad; bz++) {
                     for (let bx = bx0 - rad; bx <= bx0 + rad; bx++) {

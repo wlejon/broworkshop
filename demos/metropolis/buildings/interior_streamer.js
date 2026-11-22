@@ -127,8 +127,7 @@ export function createInteriorStreamer(scene, pools, layout, _horizon) {
     };
 
     function getBlueprintAt(pos) {
-        const bx0 = Math.floor(pos[0] / layout.BLOCK_SIZE);
-        const bz0 = Math.floor(pos[2] / layout.BLOCK_SIZE);
+        const [bx0, bz0] = layout.worldToBlock(pos[0], pos[2]);
         for (let bz = bz0 - 1; bz <= bz0 + 1; bz++) {
             for (let bx = bx0 - 1; bx <= bx0 + 1; bx++) {
                 const parcels = layout.getParcelsInBlock(bx, bz);
@@ -388,17 +387,15 @@ export function createInteriorStreamer(scene, pools, layout, _horizon) {
         const allowEnterable = activeInfo?.inside || groundAlt <= 90;
 
         const maxDist = lod.meshFadeEnd + 64;
-        const bxCenter = Math.floor(camPos[0] / layout.BLOCK_SIZE);
-        const bzCenter = Math.floor(camPos[2] / layout.BLOCK_SIZE);
-        const blockRadius = Math.min(6, Math.ceil(maxDist / layout.BLOCK_SIZE));
+        const [bxCenter, bzCenter] = layout.worldToBlock(camPos[0], camPos[2]);
+        const blockRadius = Math.min(6, Math.ceil((maxDist + (layout.MAX_WARP || 42)) / layout.BLOCK_SIZE));
 
         nearbyCandidates.length = 0;
 
         for (let bz = bzCenter - blockRadius; bz <= bzCenter + blockRadius; bz++) {
             for (let bx = bxCenter - blockRadius; bx <= bxCenter + blockRadius; bx++) {
-                const bcx = (bx + 0.5) * layout.BLOCK_SIZE;
-                const bcz = (bz + 0.5) * layout.BLOCK_SIZE;
-                if (Math.hypot(bcx - camPos[0], bcz - camPos[2]) > maxDist + 96) continue;
+                const [bcx, bcz] = layout.gridToWorld((bx + 0.5) * layout.BLOCK_SIZE, (bz + 0.5) * layout.BLOCK_SIZE);
+                if (Math.hypot(bcx - camPos[0], bcz - camPos[2]) > maxDist + 112) continue;
 
                 const parcels = layout.getParcelsInBlock(bx, bz);
                 for (let i = 0; i < parcels.length; i++) {

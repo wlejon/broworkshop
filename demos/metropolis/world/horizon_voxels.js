@@ -338,8 +338,10 @@ export function createHorizonVoxels(scene, layout) {
                                 if ((h & 3) === 0) continue;
                                 const ix = lbx * 4 + 1 + ox;
                                 const iz = lbz * 4 + 1 + oz;
-                                const wx = x0 + (ix + 0.5) * BAND0_CELL;
-                                const wz = z0 + (iz + 0.5) * BAND0_CELL;
+                                const uW = x0 + (ix + 0.5) * BAND0_CELL;
+                                const vW = z0 + (iz + 0.5) * BAND0_CELL;
+                                if (layout.riverCorridorInfo(uW, vW).dist < layout.RIVER_HALF_W + 38.0) continue;
+                                const [wx, wz] = layout.gridToWorld(uW, vW);
                                 const gy = layout.sampleGroundHeight(wx, wz);
                                 const fy = (gy + 32) / BAND0_CELL;
                                 const iy = clamp(Math.floor(fy), 1, 124);
@@ -352,6 +354,7 @@ export function createHorizonVoxels(scene, layout) {
 
                     for (let pi = 0; pi < parcels.length; pi++) {
                         const p = parcels[pi];
+                        if (p.kind === 'park') continue;
                         const ix = clamp(Math.floor((p.cx - x0) / BAND0_CELL), 0, 127);
                         const iz = clamp(Math.floor((p.cz - z0) / BAND0_CELL), 0, 127);
                         const gy = layout.sampleGroundHeight(p.cx, p.cz);
@@ -414,10 +417,12 @@ export function createHorizonVoxels(scene, layout) {
         for (let bx = -48; bx < 48; bx++) {
             const dist = layout.sampleBlockDistrict(bx, bz);
             if (dist.zone === 'park') continue;
-            const ix = bx + 64;
-            const iz = bz + 64;
-            const wx = (bx + 0.5) * BAND1_CELL;
-            const wz = (bz + 0.5) * BAND1_CELL;
+            const bu = (bx + 0.5) * BAND1_CELL;
+            const bv = (bz + 0.5) * BAND1_CELL;
+            if (layout.riverCorridorInfo(bu, bv).dist < layout.RIVER_HALF_W + 24.0) continue;
+            const [wx, wz] = layout.gridToWorld(bu, bv);
+            const ix = clamp(Math.floor(wx / BAND1_CELL) + 64, 0, 127);
+            const iz = clamp(Math.floor(wz / BAND1_CELL) + 64, 0, 127);
             const gy = layout.sampleGroundHeight(wx, wz);
             const fy = (gy + 32) / BAND1_CELL;
             const iy = clamp(Math.floor(fy), 0, 124);

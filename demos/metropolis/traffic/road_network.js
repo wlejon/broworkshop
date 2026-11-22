@@ -1,4 +1,4 @@
-// Deterministic road lane graph, slope probes, and curb-side parked car slots aligned with city_layout.js.
+// Deterministic curved road lane graph, slope probes, and curb-side parked car slots aligned with city_layout.js.
 import * as layout from '/app/world/city_layout.js';
 
 const LANE_SPECS = {
@@ -8,14 +8,15 @@ const LANE_SPECS = {
 };
 
 const CAR_PALETTES = [
-    [0.72, 0.14, 0.16, 1],
-    [0.14, 0.30, 0.56, 1],
-    [0.76, 0.78, 0.80, 1],
-    [0.18, 0.20, 0.23, 1],
-    [0.16, 0.42, 0.28, 1],
-    [0.78, 0.58, 0.16, 1],
-    [0.44, 0.20, 0.38, 1],
-    [0.54, 0.58, 0.62, 1],
+    [0.64, 0.12, 0.14, 1], // Crimson pearl
+    [0.13, 0.28, 0.54, 1], // Deep sapphire
+    [0.82, 0.83, 0.85, 1], // Glacier white
+    [0.16, 0.18, 0.21, 1], // Obsidian metallic
+    [0.14, 0.36, 0.25, 1], // British racing green
+    [0.72, 0.50, 0.16, 1], // Champagne bronze
+    [0.36, 0.42, 0.48, 1], // Slate titanium
+    [0.66, 0.28, 0.14, 1], // Burnt copper
+    [0.18, 0.24, 0.36, 1], // Midnight navy
 ];
 
 const PARKED_CACHE = new Map();
@@ -34,6 +35,17 @@ export function yawForAxisDir(axis, dir) {
     return dir > 0 ? -Math.PI * 0.5 : Math.PI * 0.5;
 }
 
+export function yawForGridAxisDir(u, v, axis, dir) {
+    if (axis === 'z') {
+        const [tx, tz] = layout.gridTangentV(u, v);
+        const yNeg = Math.atan2(tx, tz);
+        return dir < 0 ? yNeg : yNeg + Math.PI;
+    }
+    const [tx, tz] = layout.gridTangentU(u, v);
+    const yPos = Math.atan2(-tx, -tz);
+    return dir > 0 ? yPos : yPos + Math.PI;
+}
+
 export function laneCoord(lineCoord, roadKind, axis, dir, laneIdx = 0) {
     const spec = getLaneSpec(roadKind);
     const off = spec.offsets[Math.min(laneIdx, spec.offsets.length - 1)];
@@ -45,50 +57,56 @@ export function laneCoord(lineCoord, roadKind, axis, dir, laneIdx = 0) {
 
 export function getNearestRoadPoint(x, z, opts = {}) {
     const avoidIntersection = opts.avoidIntersection !== false;
-    const rx = clamp(Math.floor(x / layout.BLOCK_SIZE + 0.5), layout.BLOCK_MIN + 1, layout.BLOCK_MAX);
-    const rz = clamp(Math.floor(z / layout.BLOCK_SIZE + 0.5), layout.BLOCK_MIN + 1, layout.BLOCK_MAX);
+    const [gu, gv] = layout.worldToGrid(x, z);
+    const rx = clamp(Math.floor(gu / layout.BLOCK_SIZE + 0.5), layout.BLOCK_MIN + 1, layout.BLOCK_MAX);
+    const rz = clamp(Math.floor(gv / layout.BLOCK_SIZE + 0.5), layout.BLOCK_MIN + 1, layout.BLOCK_MAX);
 
     const xKind = layout.roadKindForLine(rx, rz);
     const zKind = layout.roadKindForLine(rz, rx);
     const xSpec = getLaneSpec(xKind);
     const zSpec = getLaneSpec(zKind);
 
-    const lineX = rx * layout.BLOCK_SIZE;
-    const lineZ = rz * layout.BLOCK_SIZE;
+    const lineU = rx * layout.BLOCK_SIZE;
+    const lineV = rz * layout.BLOCK_SIZE;
 
-    // Candidate on N-S road (axis = 'z')
-    const dirNS = (x >= lineX) ? -1 : 1;
-    const offIdxNS = xSpec.offsets.length > 1 && Math.abs(x - lineX) > 5.0 ? 1 : 0;
-    const pxNS = laneCoord(lineX, xKind, 'z', dirNS, offIdxNS);
-    let pzNS = clamp(z, layout.WORLD_MIN + 24, layout.WORLD_MAX - 24);
+    // Candidate on N-S road (along grid V, u = rx * 128)
+    const dirNS = (gu >= lineU) ? -1 : 1;
+    const offIdxNS = xSpec.offsets.length > 1 && Math.abs(gu - lineU) > 5.0 ? 1 : 0;
+    const puNS = laneCoord(lineU, xKind, 'z', dirNS, offIdxNS);
+    let pvNS = clamp(gv, layout.WORLD_MIN + 24, layout.WORLD_MAX - 24);
     if (avoidIntersection) {
-        const dzInt = pzNS - lineZ;
+        const dzInt = pvNS - lineV;
         const minClr = zSpec.halfWidth + 5.0;
         if (Math.abs(dzInt) < minClr) {
-            pzNS = lineZ + (dzInt >= 0 ? minClr : -minClr);
+            pvNS = lineV + (dzInt >= 0 ? minClr : -minClr);
         }
     }
-    const dNS = Math.hypot(pxNS - x, pzNS - z);
+    const [wxNS, wzNS] = layout.gridToWorld(puNS, pvNS);
+    const dNS = Math.hypot(wxNS - x, wzNS - z);
 
-    // Candidate on E-W road (axis = 'x')
-    const dirEW = (z >= lineZ) ? 1 : -1;
-    const offIdxEW = zSpec.offsets.length > 1 && Math.abs(z - lineZ) > 5.0 ? 1 : 0;
-    const pzEW = laneCoord(lineZ, zKind, 'x', dirEW, offIdxEW);
-    let pxEW = clamp(x, layout.WORLD_MIN + 24, layout.WORLD_MAX - 24);
+    // Candidate on E-W road (along grid U, v = rz * 128)
+    const dirEW = (gv >= lineV) ? 1 : -1;
+    const offIdxEW = zSpec.offsets.length > 1 && Math.abs(gv - lineV) > 5.0 ? 1 : 0;
+    const pvEW = laneCoord(lineV, zKind, 'x', dirEW, offIdxEW);
+    let puEW = clamp(gu, layout.WORLD_MIN + 24, layout.WORLD_MAX - 24);
     if (avoidIntersection) {
-        const dxInt = pxEW - lineX;
+        const dxInt = puEW - lineU;
         const minClr = xSpec.halfWidth + 5.0;
         if (Math.abs(dxInt) < minClr) {
-            pxEW = lineX + (dxInt >= 0 ? minClr : -minClr);
+            puEW = lineU + (dxInt >= 0 ? minClr : -minClr);
         }
     }
-    const dEW = Math.hypot(pxEW - x, pzEW - z);
+    const [wxEW, wzEW] = layout.gridToWorld(puEW, pvEW);
+    const dEW = Math.hypot(wxEW - x, wzEW - z);
 
-    if (dNS <= dEW) {
-        const py = layout.sampleGroundHeight(pxNS, pzNS);
+    const rcNS = layout.riverCorridorInfo(puNS, pvNS);
+    const useNS = (dNS <= dEW) && rcNS.roadSuppress < 0.35;
+
+    if (useNS) {
+        const py = layout.sampleGroundHeight(wxNS, wzNS);
         return {
-            x: pxNS, y: py, z: pzNS,
-            yaw: yawForAxisDir('z', dirNS),
+            x: wxNS, y: py, z: wzNS,
+            yaw: yawForGridAxisDir(puNS, pvNS, 'z', dirNS),
             roadKind: xKind,
             roadAxis: 'z',
             lineIdx: rx,
@@ -97,10 +115,10 @@ export function getNearestRoadPoint(x, z, opts = {}) {
             dist: dNS,
         };
     }
-    const py = layout.sampleGroundHeight(pxEW, pzEW);
+    const py = layout.sampleGroundHeight(wxEW, wzEW);
     return {
-        x: pxEW, y: py, z: pzEW,
-        yaw: yawForAxisDir('x', dirEW),
+        x: wxEW, y: py, z: wzEW,
+        yaw: yawForGridAxisDir(puEW, pvEW, 'x', dirEW),
         roadKind: zKind,
         roadAxis: 'x',
         lineIdx: rz,
@@ -136,17 +154,20 @@ export function sampleSlopeTransform(x, z, yaw, halfWB = 1.35, halfTrack = 0.80)
 
 export function getSpawnSegmentsNear(camPos, minR = 24, maxR = 250) {
     const segs = [];
-    const bx0 = Math.max(layout.BLOCK_MIN + 1, Math.floor((camPos[0] - maxR) / layout.BLOCK_SIZE));
-    const bx1 = Math.min(layout.BLOCK_MAX, Math.ceil((camPos[0] + maxR) / layout.BLOCK_SIZE));
-    const bz0 = Math.max(layout.BLOCK_MIN + 1, Math.floor((camPos[2] - maxR) / layout.BLOCK_SIZE));
-    const bz1 = Math.min(layout.BLOCK_MAX, Math.ceil((camPos[2] + maxR) / layout.BLOCK_SIZE));
+    const [guCam, gvCam] = layout.worldToGrid(camPos[0], camPos[2]);
+    const bx0 = Math.max(layout.BLOCK_MIN + 1, Math.floor((guCam - maxR) / layout.BLOCK_SIZE));
+    const bx1 = Math.min(layout.BLOCK_MAX, Math.ceil((guCam + maxR) / layout.BLOCK_SIZE));
+    const bz0 = Math.max(layout.BLOCK_MIN + 1, Math.floor((gvCam - maxR) / layout.BLOCK_SIZE));
+    const bz1 = Math.min(layout.BLOCK_MAX, Math.ceil((gvCam + maxR) / layout.BLOCK_SIZE));
 
-    // N-S roads (x = rx * 128)
+    // N-S roads (grid u = rx * 128)
     for (let rx = bx0; rx <= bx1; rx++) {
-        const lineX = rx * layout.BLOCK_SIZE;
+        const lineU = rx * layout.BLOCK_SIZE;
         for (let bz = bz0; bz < bz1; bz++) {
-            const zMid = (bz + 0.5) * layout.BLOCK_SIZE;
-            const d = Math.hypot(lineX - camPos[0], zMid - camPos[2]);
+            const vMid = (bz + 0.5) * layout.BLOCK_SIZE;
+            const rc = layout.riverCorridorInfo(lineU, vMid);
+            if (rc.dist < layout.RIVER_HALF_W + 24.0) continue;
+            const d = Math.hypot(lineU - guCam, vMid - gvCam);
             if (d < minR * 0.5 || d > maxR + 64) continue;
             const kind = layout.roadKindForLine(rx, bz);
             const spec = getLaneSpec(kind);
@@ -154,7 +175,7 @@ export function getSpawnSegmentsNear(camPos, minR = 24, maxR = 250) {
                 axis: 'z',
                 lineIdx: rx,
                 perpIdx: bz,
-                lineCoord: lineX,
+                lineCoord: lineU,
                 startS: bz * layout.BLOCK_SIZE + 16,
                 endS: (bz + 1) * layout.BLOCK_SIZE - 16,
                 roadKind: kind,
@@ -163,12 +184,14 @@ export function getSpawnSegmentsNear(camPos, minR = 24, maxR = 250) {
         }
     }
 
-    // E-W roads (z = rz * 128)
+    // E-W roads (grid v = rz * 128)
     for (let rz = bz0; rz <= bz1; rz++) {
-        const lineZ = rz * layout.BLOCK_SIZE;
+        const lineV = rz * layout.BLOCK_SIZE;
         for (let bx = bx0; bx < bx1; bx++) {
-            const xMid = (bx + 0.5) * layout.BLOCK_SIZE;
-            const d = Math.hypot(xMid - camPos[0], lineZ - camPos[2]);
+            const uMid = (bx + 0.5) * layout.BLOCK_SIZE;
+            const rc = layout.riverCorridorInfo(uMid, lineV);
+            if (rc.roadSuppress > 0.2) continue;
+            const d = Math.hypot(uMid - guCam, lineV - gvCam);
             if (d < minR * 0.5 || d > maxR + 64) continue;
             const kind = layout.roadKindForLine(rz, bx);
             const spec = getLaneSpec(kind);
@@ -176,7 +199,7 @@ export function getSpawnSegmentsNear(camPos, minR = 24, maxR = 250) {
                 axis: 'x',
                 lineIdx: rz,
                 perpIdx: bx,
-                lineCoord: lineZ,
+                lineCoord: lineV,
                 startS: bx * layout.BLOCK_SIZE + 16,
                 endS: (bx + 1) * layout.BLOCK_SIZE - 16,
                 roadKind: kind,
@@ -188,10 +211,6 @@ export function getSpawnSegmentsNear(camPos, minR = 24, maxR = 250) {
 }
 
 function parkedLateralOffset(roadKind, spec) {
-    // Keep parked cars structurally separated from active traffic lanes and clear of curbs:
-    // - avenue: curb shoulder bay on asphalt (|8.95 - 6.2| = 2.75 m from outer lane, wheels <= 9.75 < 9.85)
-    // - street: curb shoulder bay on asphalt (|4.95 - 2.2| = 2.75 m from lane, wheels <= 5.75 < 5.85)
-    // - suburban: off-road driveway apron outside sidewalk (|7.65 - 2.25| = 5.40 m from lane)
     if (roadKind === 'avenue' || roadKind === 'street') return spec.halfWidth - 1.05;
     return spec.halfWidth + 2.0 + 1.15;
 }
@@ -212,37 +231,48 @@ export function getBlockParkedCars(bx, bz) {
         const h2 = layout.hash2f(bx, bz, 503);
         const h3 = layout.hash2f(bx, bz, 601);
 
-        // West edge of block (facing North -Z)
+        // West edge of block (facing North -Z along street)
         if (h0 < 0.78 && bx > layout.BLOCK_MIN) {
             const xKind = layout.roadKindForLine(bx, bz);
             const xSpec = getLaneSpec(xKind);
-            const wx = bx * layout.BLOCK_SIZE + parkedLateralOffset(xKind, xSpec);
-            const wz = bz * layout.BLOCK_SIZE + (0.28 + 0.44 * h1) * layout.BLOCK_SIZE;
-            const slope = sampleSlopeTransform(wx, wz, 0.0);
-            list.push({
-                id: `pk_${bx}_${bz}_0`,
-                wx, wy: slope.y, wz,
-                yaw: 0.0, pitch: slope.pitch, roll: slope.roll,
-                roadKind: xKind,
-                color: CAR_PALETTES[Math.floor(h1 * CAR_PALETTES.length) % CAR_PALETTES.length],
-            });
+            const pu = bx * layout.BLOCK_SIZE + parkedLateralOffset(xKind, xSpec);
+            const pv = bz * layout.BLOCK_SIZE + (0.28 + 0.44 * h1) * layout.BLOCK_SIZE;
+            if (layout.riverCorridorInfo(pu, pv).dist >= layout.RIVER_HALF_W + 22.0) {
+                const [wx, wz] = layout.gridToWorld(pu, pv);
+                const yaw = yawForGridAxisDir(pu, pv, 'z', -1);
+                const slope = sampleSlopeTransform(wx, wz, yaw);
+                const arch = Math.floor(layout.hash2f(bx, bz, 709) * 4) % 4;
+                list.push({
+                    id: `pk_${bx}_${bz}_0`,
+                    wx, wy: slope.y, wz,
+                    yaw, pitch: slope.pitch, roll: slope.roll,
+                    roadKind: xKind,
+                    archetype: arch,
+                    color: CAR_PALETTES[Math.floor(h1 * CAR_PALETTES.length) % CAR_PALETTES.length],
+                });
+            }
         }
 
-        // North edge of block (facing East +X)
+        // North edge of block (facing East +X along street)
         if (h2 < 0.65 && bz > layout.BLOCK_MIN) {
             const zKind = layout.roadKindForLine(bz, bx);
             const zSpec = getLaneSpec(zKind);
-            const wx = bx * layout.BLOCK_SIZE + (0.28 + 0.44 * h3) * layout.BLOCK_SIZE;
-            const wz = bz * layout.BLOCK_SIZE + parkedLateralOffset(zKind, zSpec);
-            const yaw = -Math.PI * 0.5;
-            const slope = sampleSlopeTransform(wx, wz, yaw);
-            list.push({
-                id: `pk_${bx}_${bz}_1`,
-                wx, wy: slope.y, wz,
-                yaw, pitch: slope.pitch, roll: slope.roll,
-                roadKind: zKind,
-                color: CAR_PALETTES[Math.floor(h3 * CAR_PALETTES.length) % CAR_PALETTES.length],
-            });
+            const pu = bx * layout.BLOCK_SIZE + (0.28 + 0.44 * h3) * layout.BLOCK_SIZE;
+            const pv = bz * layout.BLOCK_SIZE + parkedLateralOffset(zKind, zSpec);
+            if (layout.riverCorridorInfo(pu, pv).dist >= layout.RIVER_HALF_W + 22.0) {
+                const [wx, wz] = layout.gridToWorld(pu, pv);
+                const yaw = yawForGridAxisDir(pu, pv, 'x', 1);
+                const slope = sampleSlopeTransform(wx, wz, yaw);
+                const arch = Math.floor(layout.hash2f(bx, bz, 733) * 4) % 4;
+                list.push({
+                    id: `pk_${bx}_${bz}_1`,
+                    wx, wy: slope.y, wz,
+                    yaw, pitch: slope.pitch, roll: slope.roll,
+                    roadKind: zKind,
+                    archetype: arch,
+                    color: CAR_PALETTES[Math.floor(h3 * CAR_PALETTES.length) % CAR_PALETTES.length],
+                });
+            }
         }
     }
 

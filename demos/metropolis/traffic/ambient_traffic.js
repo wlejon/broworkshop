@@ -1,4 +1,4 @@
-// Pre-warmed zero-churn streamed ambient road-following traffic across the 120 km^2 city & suburbs.
+// Pre-warmed zero-churn streamed ambient curved-road traffic across the 120 km^2 city & suburbs.
 import * as layout from '/app/world/city_layout.js';
 import {
     CAR_PALETTES,
@@ -7,7 +7,7 @@ import {
     getSpawnSegmentsNear,
     laneCoord,
     sampleSlopeTransform,
-    yawForAxisDir,
+    yawForGridAxisDir,
 } from '/app/traffic/road_network.js';
 import { pushCarVisual } from '/app/traffic/vehicle_meshes.js';
 
@@ -42,6 +42,7 @@ export function createAmbientTraffic(batches) {
             maxSpeed: 14,
             wheelSpin: 0,
             wheelSteer: 0,
+            archetype: (i * 3) % 4,
             color: CAR_PALETTES[i % CAR_PALETTES.length],
             seed: i * 977 + 13,
         };
@@ -55,19 +56,19 @@ export function createAmbientTraffic(batches) {
     function placeVehicleOnSegment(v, seg, dir, laneIdx, s, skipDistCheckCam) {
         const lineCoord = seg.lineCoord;
         const coordAcross = laneCoord(lineCoord, seg.roadKind, seg.axis, dir, laneIdx);
-        const wx = seg.axis === 'z' ? coordAcross : s;
-        const wz = seg.axis === 'z' ? s : coordAcross;
+        const gu = seg.axis === 'z' ? coordAcross : s;
+        const gv = seg.axis === 'z' ? s : coordAcross;
+        if (layout.riverCorridorInfo(gu, gv).roadSuppress > 0.2) return false;
+        const [wx, wz] = layout.gridToWorld(gu, gv);
         if (skipDistCheckCam && Math.hypot(wx - skipDistCheckCam[0], wz - skipDistCheckCam[2]) < 14.0) {
             return false;
         }
-        // Avoid spawning on top of another active vehicle or parked car
         for (let i = 0; i < MAX_TRAFFIC; i++) {
             const o = vehicles[i];
             if (o === v || !o.active) continue;
             if (Math.hypot(o.wx - wx, o.wz - wz) < 10.5) return false;
         }
-        const pbx0 = Math.floor(wx / layout.BLOCK_SIZE);
-        const pbz0 = Math.floor(wz / layout.BLOCK_SIZE);
+        const [pbx0, pbz0] = layout.worldToBlock(wx, wz);
         for (let bz = pbz0 - 1; bz <= pbz0 + 1; bz++) {
             for (let bx = pbx0 - 1; bx <= pbx0 + 1; bx++) {
                 const parked = getBlockParkedCars(bx, bz);
@@ -77,7 +78,7 @@ export function createAmbientTraffic(batches) {
             }
         }
 
-        const yaw = yawForAxisDir(seg.axis, dir);
+        const yaw = yawForGridAxisDir(gu, gv, seg.axis, dir);
         const slope = sampleSlopeTransform(wx, wz, yaw);
         v.active = true;
         v.axis = seg.axis;
@@ -136,19 +137,27 @@ export function createAmbientTraffic(batches) {
         const crossIdx = v.dir > 0 ? v.perpIdx + 1 : v.perpIdx;
         if (crossIdx <= layout.BLOCK_MIN || crossIdx >= layout.BLOCK_MAX) {
             v.dir = -v.dir;
-            v.yaw = yawForAxisDir(v.axis, v.dir);
             return;
         }
+        // Check if continuing straight enters a river-suppressed minor segment
+        const nextPerp = v.perpIdx + v.dir;
+        const nextMid = (nextPerp + 0.5) * layout.BLOCK_SIZE;
+        const lineCoord = v.lineIdx * layout.BLOCK_SIZE;
+        const nextGu = v.axis === 'z' ? lineCoord : nextMid;
+        const nextGv = v.axis === 'z' ? nextMid : lineCoord;
+        const nextRiver = layout.riverCorridorInfo(nextGu, nextGv);
+        const straightBlocked = v.axis === 'z'
+            ? nextRiver.dist < layout.RIVER_HALF_W + 22.0
+            : nextRiver.roadSuppress > 0.2;
+
         const h = layout.hash2f(v.lineIdx * 13 + v.seed, crossIdx * 17 + v.laneIdx, 701);
-        if (h < 0.72) {
-            // Continue straight into next block
-            v.perpIdx += v.dir;
+        if (!straightBlocked && h < 0.72) {
+            v.perpIdx = nextPerp;
             v.roadKind = layout.roadKindForLine(v.lineIdx, v.perpIdx);
             const spec = getLaneSpec(v.roadKind);
             v.laneIdx = Math.min(v.laneIdx, spec.offsets.length - 1);
             v.maxSpeed = spec.speedLimit * 0.76;
         } else {
-            // Smooth turn onto cross street (update axis & snap to intersection lane exit)
             const turnRight = h < 0.86;
             const oldAxis = v.axis;
             const oldDir = v.dir;
@@ -201,8 +210,7 @@ export function createAmbientTraffic(batches) {
                 if (latDist < 2.4) minAhead = fwdDist;
             }
         }
-        const bx0 = Math.floor(v.wx / layout.BLOCK_SIZE);
-        const bz0 = Math.floor(v.wz / layout.BLOCK_SIZE);
+        const [bx0, bz0] = layout.worldToBlock(v.wx, v.wz);
         for (let bz = bz0 - 1; bz <= bz0 + 1; bz++) {
             for (let bx = bx0 - 1; bx <= bx0 + 1; bx++) {
                 const parked = getBlockParkedCars(bx, bz);
@@ -263,7 +271,6 @@ export function createAmbientTraffic(batches) {
                 if ((v.dir > 0 && v.s >= segMax - 2.0) || (v.dir < 0 && v.s <= segMin + 2.0)) {
                     const prevYaw = v.yaw;
                     advanceIntersection(v);
-                    // Keep yaw smooth via small steering kick (actual yaw snaps only on road change)
                     v.wheelSteer = clamp((v.yaw - prevYaw) * 0.2, -0.35, 0.35);
                 } else {
                     v.wheelSteer *= Math.max(0, 1 - stepDt * 6);
@@ -271,15 +278,15 @@ export function createAmbientTraffic(batches) {
 
                 const targetLineCoord = v.lineIdx * layout.BLOCK_SIZE;
                 const targetAcross = laneCoord(targetLineCoord, v.roadKind, v.axis, v.dir, v.laneIdx);
-                const targetWx = v.axis === 'z' ? targetAcross : v.s;
-                const targetWz = v.axis === 'z' ? v.s : targetAcross;
-                const targetYaw = yawForAxisDir(v.axis, v.dir);
+                const gu = v.axis === 'z' ? targetAcross : v.s;
+                const gv = v.axis === 'z' ? v.s : targetAcross;
+                const [targetWx, targetWz] = layout.gridToWorld(gu, gv);
+                const targetYaw = yawForGridAxisDir(gu, gv, v.axis, v.dir);
 
                 const blend = Math.min(1, stepDt * 8.0);
                 v.wx += (targetWx - v.wx) * blend;
                 v.wz += (targetWz - v.wz) * blend;
 
-                // Shortest-angle yaw lerp
                 let dYaw = targetYaw - v.yaw;
                 while (dYaw > Math.PI) dYaw -= Math.PI * 2;
                 while (dYaw < -Math.PI) dYaw += Math.PI * 2;

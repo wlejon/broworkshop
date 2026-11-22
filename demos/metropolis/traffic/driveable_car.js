@@ -12,7 +12,7 @@ function clamp(x, lo, hi) {
     return x < lo ? lo : x > hi ? hi : x;
 }
 
-export function createDriveableCar(batches, collision, ambientTraffic) {
+export function createDriveableCar(batches, collision, ambientTraffic, streetscape = null) {
     const car = {
         inCar: false,
         claimedParkedId: null,
@@ -57,17 +57,20 @@ export function createDriveableCar(batches, collision, ambientTraffic) {
     }
 
     function resolveStreetlightCollision(x, z) {
+        if (streetscape && streetscape.resolvePoleCollision) {
+            return streetscape.resolvePoleCollision(x, z);
+        }
         let cx = x;
         let cz = z;
         let hit = false;
-        const bx0 = Math.floor(cx / layout.BLOCK_SIZE);
-        const bz0 = Math.floor(cz / layout.BLOCK_SIZE);
+        const [bx0, bz0] = layout.worldToBlock(cx, cz);
         for (let bz = bz0 - 1; bz <= bz0 + 1; bz++) {
             for (let bx = bx0 - 1; bx <= bx0 + 1; bx++) {
-                const xEdge = bx * layout.BLOCK_SIZE + 11.5;
-                const zStart = bz * layout.BLOCK_SIZE + 20;
+                const roadX = layout.roadKindForLine(bx, bz);
+                const lu = bx * layout.BLOCK_SIZE + layout.ROAD_WIDTH[roadX] * 0.5 + 1.0;
+                const zStart = bz * layout.BLOCK_SIZE + 22;
                 for (let s = 0; s < 3; s++) {
-                    const sz = zStart + s * 44;
+                    const [xEdge, sz] = layout.gridToWorld(lu, zStart + s * 42);
                     const dx = cx - xEdge;
                     const dz = cz - sz;
                     const d = Math.hypot(dx, dz);
@@ -91,8 +94,7 @@ export function createDriveableCar(batches, collision, ambientTraffic) {
         let hit = false;
         let pushX = 0;
         let pushZ = 0;
-        const bx0 = Math.floor(cx / layout.BLOCK_SIZE);
-        const bz0 = Math.floor(cz / layout.BLOCK_SIZE);
+        const [bx0, bz0] = layout.worldToBlock(cx, cz);
         const halfW = 0.86;
         const halfL = 2.22;
         const aRx = Math.cos(yaw), aRz = -Math.sin(yaw);
@@ -177,8 +179,7 @@ export function createDriveableCar(batches, collision, ambientTraffic) {
         }
 
         // Check nearby deterministic parked cars
-        const bx0 = Math.floor(px / layout.BLOCK_SIZE);
-        const bz0 = Math.floor(pz / layout.BLOCK_SIZE);
+        const [bx0, bz0] = layout.worldToBlock(px, pz);
         for (let bz = bz0 - 1; bz <= bz0 + 1; bz++) {
             for (let bx = bx0 - 1; bx <= bx0 + 1; bx++) {
                 const parked = getBlockParkedCars(bx, bz);
@@ -428,8 +429,7 @@ export function createDriveableCar(batches, collision, ambientTraffic) {
             }
         }
 
-        const bx0 = Math.floor(camPos[0] / layout.BLOCK_SIZE);
-        const bz0 = Math.floor(camPos[2] / layout.BLOCK_SIZE);
+        const [bx0, bz0] = layout.worldToBlock(camPos[0], camPos[2]);
         for (let bz = bz0 - 1; bz <= bz0 + 1; bz++) {
             for (let bx = bx0 - 1; bx <= bx0 + 1; bx++) {
                 const parked = getBlockParkedCars(bx, bz);

@@ -190,10 +190,12 @@ export function createBuildingCollision(streamer, layout, elevators) {
 
     function gatherNearby(wx, wz, radius = 48) {
         nearbyBuildings.length = 0;
-        const bx0 = Math.floor((wx - radius) / layout.BLOCK_SIZE);
-        const bx1 = Math.floor((wx + radius) / layout.BLOCK_SIZE);
-        const bz0 = Math.floor((wz - radius) / layout.BLOCK_SIZE);
-        const bz1 = Math.floor((wz + radius) / layout.BLOCK_SIZE);
+        const pad = radius + (layout.MAX_WARP || 42);
+        const [gu, gv] = layout.worldToGrid(wx, wz);
+        const bx0 = Math.floor((gu - pad) / layout.BLOCK_SIZE);
+        const bx1 = Math.floor((gu + pad) / layout.BLOCK_SIZE);
+        const bz0 = Math.floor((gv - pad) / layout.BLOCK_SIZE);
+        const bz1 = Math.floor((gv + pad) / layout.BLOCK_SIZE);
         for (let bz = bz0; bz <= bz1; bz++) {
             for (let bx = bx0; bx <= bx1; bx++) {
                 const parcels = layout.getParcelsInBlock(bx, bz);

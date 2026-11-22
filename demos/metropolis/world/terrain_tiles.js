@@ -86,6 +86,8 @@ export function createTerrainTiles(scene, layout) {
     const parcelFloatsScratch = new Float32Array(MAX_PARCELS_PER_BATCH * 8);
     let ringIdx = 0;
 
+    const warpPad = layout.MAX_WARP || 42.0;
+
     const cache = bro.tiles.createCache({
         domain: { type: 'plane', origin: [-6144, -6144], size: 4096, roots: [3, 3] },
         tileSize: TILE,
@@ -111,15 +113,15 @@ export function createTerrainTiles(scene, layout) {
                 const start = totalParcels;
                 let count = 0;
                 if (tile.level >= 3) {
-                    const pad = BORDER * (tile.extent / TILE) + 4.0;
+                    const pad = BORDER * (tile.extent / TILE) + 6.0;
                     const minX = tile.origin[0] - pad;
                     const maxX = tile.origin[0] + tile.extent + pad;
                     const minZ = tile.origin[2] - pad;
                     const maxZ = tile.origin[2] + tile.extent + pad;
-                    const bx0 = Math.floor(minX / BLOCK_SIZE);
-                    const bx1 = Math.floor(maxX / BLOCK_SIZE);
-                    const bz0 = Math.floor(minZ / BLOCK_SIZE);
-                    const bz1 = Math.floor(maxZ / BLOCK_SIZE);
+                    const bx0 = Math.floor((minX - warpPad) / BLOCK_SIZE);
+                    const bx1 = Math.floor((maxX + warpPad) / BLOCK_SIZE);
+                    const bz0 = Math.floor((minZ - warpPad) / BLOCK_SIZE);
+                    const bz1 = Math.floor((maxZ + warpPad) / BLOCK_SIZE);
 
                     for (let bz = bz0; bz <= bz1 && totalParcels < MAX_PARCELS_PER_BATCH; bz++) {
                         for (let bx = bx0; bx <= bx1 && totalParcels < MAX_PARCELS_PER_BATCH; bx++) {
@@ -127,10 +129,9 @@ export function createTerrainTiles(scene, layout) {
                             for (let pi = 0; pi < parcels.length && totalParcels < MAX_PARCELS_PER_BATCH; pi++) {
                                 const p = parcels[pi];
                                 if (p.padSkirt <= 0) continue;
-                                const reachX = p.padHalfW + p.padSkirt;
-                                const reachZ = p.padHalfD + p.padSkirt;
-                                if (p.cx + reachX < minX || p.cx - reachX > maxX) continue;
-                                if (p.cz + reachZ < minZ || p.cz - reachZ > maxZ) continue;
+                                const reach = Math.hypot(p.padHalfW, p.padHalfD) + p.padSkirt;
+                                if (p.cx + reach < minX || p.cx - reach > maxX) continue;
+                                if (p.cz + reach < minZ || p.cz - reach > maxZ) continue;
                                 const off = totalParcels * 8;
                                 parcelFloatsScratch[off + 0] = p.cx;
                                 parcelFloatsScratch[off + 1] = p.cz;
@@ -138,8 +139,9 @@ export function createTerrainTiles(scene, layout) {
                                 parcelFloatsScratch[off + 3] = p.padHalfD;
                                 parcelFloatsScratch[off + 4] = p.padY;
                                 parcelFloatsScratch[off + 5] = p.padSkirt;
-                                parcelFloatsScratch[off + 6] = 0;
-                                parcelFloatsScratch[off + 7] = 0;
+                                const pr = p.padRot || 0;
+                                parcelFloatsScratch[off + 6] = Math.cos(pr);
+                                parcelFloatsScratch[off + 7] = Math.sin(pr);
                                 totalParcels++;
                                 count++;
                             }
