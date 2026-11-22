@@ -62,15 +62,21 @@ meshes there, each dithering out over [until, 1.35 until] (`fadeOutDist`).
 
 `bakeImpostor` and `impostorNode` (impostor.js) draw trees past that as
 impostors: each species baked once from 8 x 4 directions by an orthographic
-camera through debug views (albedo darkened toward the crown's centre,
+camera through debug views at the leaf level the meshes hand over at (L24;
+albedo darkened toward the crown's centre,
 normals leaning out from it as the vegetation shading's do, coverage from a
 4x finer capture), each tree one quad facing the eye that samples the view
 nearest its direction in its own frame, lit through the baked normal and cut
 by its coverage against a per-pixel dither; nearer than the band it collapses
-to nothing. With meshes to 250 m and impostors beyond, 9476 trees on a 3.2 km
-square cost 1.3 ms from eye height and 30 m, 0.8 from 150 m, 0.6 from 1 km,
-the impostors 0.17-0.29 of it. The impostors cast no shadow and do not sway,
-and read darker than the vegetation-shaded meshes at the handoff.
+to nothing. The baked albedo is scaled by a gain `bro.eye.fit` found against
+the mesh forest at noon from 150 m (the bake's plain material lacks the
+vegetation shading the meshes have; it is matched for that light only).
+`shadowProxyNodes` casts their shadow: each species' crown as L48 cards
+pulled into it and its limbs, instanced over the trees as `shadowOnly`
+meshes (the shadow pass does not run the impostors' cut). With meshes to
+250 m and impostors beyond, 9476 trees on a 3.2 km square cost 1.3 ms from
+eye height and 30 m, 0.85 from 150 m, 0.5 from 1 km, the impostors and
+their shadow 0.2-0.3 of it. The impostors do not sway.
 
 ## Files
 
@@ -83,8 +89,8 @@ forest.js             growStand, layout, plant: a mixed stand, mesh near,
                       voxels beyond
 lod.js                speciesLevels, plantLod: the grown trees at every
                       distance, reduced per level, all swaying
-impostor.js           bakeImpostor, impostorNode: far trees as baked
-                      view-atlas quads
+impostor.js           bakeImpostor, impostorNode, shadowProxyNodes: far
+                      trees as baked view-atlas quads and their shadow
 sheet.js              runSheet: each species' size, a still from eye height,
                       and its GPU ms over the bare frame at given distances
 ```

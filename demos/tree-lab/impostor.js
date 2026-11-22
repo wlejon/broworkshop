@@ -5,8 +5,15 @@
 // nearest its direction in the tree's own frame, lit by the engine through
 // the baked normal and cut by its coverage against a per-pixel dither.
 import { leafCard, scene, ground } from "/app/lab.js";
+import { barkMesh } from "/app/lod.js";
 
-export const IMPOSTOR = { res: 128, ss: 4, nAz: 8, nEl: 4, elStep: 25, bend: 0.6, L: 6 };
+// `gain` scales the baked albedo, matching the impostors to the
+// vegetation-shaded mesh trees they take over from.
+// `L` is the leaf level baked (lod.js's cards L times a leaf): the level the
+// mesh trees show where the impostors take over, so the two cover alike.
+// `gain` was fitted by bro.eye.fit to the mesh forest seen from 150 m at
+// noon (the vegetation shading the bake's plain material does not have).
+export const IMPOSTOR = { res: 128, ss: 4, nAz: 8, nEl: 4, elStep: 25, bend: 0.6, L: 24, gain: [2.175, 2.383, 0.878] };
 
 const BAKE_HOOK = `
 module hook;
@@ -32,7 +39,7 @@ module hook;
 import mesh;
 import scene;
 import custom;
-struct Params { box: vec4<f32>, views: vec4<f32>, band: vec4<f32> }
+struct Params { box: vec4<f32>, views: vec4<f32>, band: vec4<f32>, gain: vec4<f32> }
 @binding(4, 0) var params: uniform<Params>;
 @binding(4, 1) var albedo: texture2d_array<vec4<f32>>;
 @binding(4, 2) var normals: texture2d_array<vec4<f32>>;
@@ -91,7 +98,7 @@ pub fn fragment(v: mesh::Vertex, s: mesh::Surface) -> mesh::Surface {
     let uvw = vec3<f32>(v.v0.x, v.v0.y, v.vi.x as f32);
     let a = albedo.sample_lod(custom::linear, uvw, 0.0);
     let nl = normals.sample_lod(custom::linear, uvw, 0.0).xyz * 2.0 - 1.0;
-    out.base_color = a.xyz;
+    out.base_color = a.xyz * params.gain.xyz;
     // Coverage against a per-pixel dither; nearer than the band's start the
     // impostor gives way to the mesh tree pixel for pixel (band.x .. band.y).
     let dither = scene::band_dither(v.pixel);
@@ -195,6 +202,44 @@ export function bakeImpostor(sp, o = IMPOSTOR) {
     return { alb, nrm, box: [...c, R], W, V, o };
 }
 
+// Each card (6 vertices) moved toward the crown's centre so its outer edge
+// sits where its centre was: a big card does not grow the crown.
+function pullCards(m, half, per = 6) {
+    const P = m.positions;
+    const lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity];
+    for (let i = 0; i < P.length; i += 3) for (let a = 0; a < 3; a++) { lo[a] = Math.min(lo[a], P[i + a]); hi[a] = Math.max(hi[a], P[i + a]); }
+    const c = [0, 1, 2].map((a) => (lo[a] + hi[a]) / 2);
+    const out = new Float32Array(P);
+    for (let v = 0; v < P.length / 3; v += per) {
+        const q = [0, 0, 0];
+        for (let j = 0; j < per; j++) for (let a = 0; a < 3; a++) q[a] += P[(v + j) * 3 + a] / per;
+        const d = [q[0] - c[0], q[1] - c[1], q[2] - c[2]], dl = Math.hypot(...d);
+        const move = dl > 1e-6 ? Math.min(half, dl) / dl : 0;
+        for (let j = 0; j < per; j++) for (let a = 0; a < 3; a++) out[(v + j) * 3 + a] -= d[a] * move;
+    }
+    return new Mesh({ positions: out, normals: m.normals, indices: m.indices });
+}
+
+/**
+ * The trees' shadow, for impostors (whose cut the shadow pass does not run):
+ * species `sp`'s crown as L-times leaf cards pulled into it and its limbs
+ * (branches past `minRadius` m), instanced over `trees`, shadowOnly. Returns
+ * the nodes.
+ */
+export function shadowProxyNodes(sp, trees, { L = 48, minRadius = 0.15 } = {}) {
+    const kk = 1.5 * L / sp.k;
+    const leaves = pullCards(sp.world.emitFoliageMesh(leafCard(kk, [1, 2]), { seed: 0x1eaf, perArea: 90 / (kk * kk) }), 0.06 * kk);
+    const bark = barkMesh(sp.world.emitBranchTubes({ minRadius: minRadius / sp.k }), 3);
+    const inst = new Float32Array(trees.length * 16);
+    trees.forEach((t, i) => {
+        const s = sp.k * t.size, c = Math.cos(t.yaw) * s, n = Math.sin(t.yaw) * s;
+        inst.set([c, 0, n, t.x, 0, s, 0, 0, -n, 0, c, t.z, 1, 1, 1, 1], i * 16);
+    });
+    return [leaves, new Mesh({ positions: bark.positions, normals: bark.normals, indices: bark.indices })].map((mesh) =>
+        scene.createInstancedMesh({ mesh, instances: inst, color: [0.1, 0.1, 0.1], doubleSided: true,
+            castsShadow: true, shadowOnly: true, receivesShadow: false, vertexColorTint: false }));
+}
+
 const QUAD = () => new Mesh({
     positions: new Float32Array([-30, 0, -30, 30, 0, 30, 30, 60, -30, -30, 60, 30]),
     normals: new Float32Array([0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1]),
@@ -208,7 +253,7 @@ const QUAD = () => new Mesh({
  * the impostors in over it, for a handoff from mesh trees fading out over the
  * same band. Returns the node (destroy() to drop it).
  */
-export function impostorNode(sp, trees, { band = [0, 0], castsShadow = false } = {}) {
+export function impostorNode(sp, trees, { band = [0, 0], castsShadow = false, gain = IMPOSTOR.gain } = {}) {
     const inst = new Float32Array(trees.length * 16), data = new Float32Array(trees.length * 4);
     trees.forEach((t, i) => {
         inst.set([1, 0, 0, t.x, 0, 1, 0, 0, 0, 0, 1, t.z, 1, 1, 1, 1], i * 16);
@@ -218,7 +263,7 @@ export function impostorNode(sp, trees, { band = [0, 0], castsShadow = false } =
         alphaCutoff: 0.5, doubleSided: true, castsShadow, receivesShadow: true, vertexColorTint: false });
     const { alb, nrm, box, W, V, o } = sp.imp;
     n.setShader({ module: DRAW_HOOK, file: 'impostor.bk',
-        uniforms: { box, views: [o.nAz, o.nEl, o.elStep * Math.PI / 180, 0], band: [band[0], band[1], 0, 0] } });
+        uniforms: { box, views: [o.nAz, o.nEl, o.elStep * Math.PI / 180, 0], band: [band[0], band[1], 0, 0], gain: [...gain, 0] } });
     n.setShaderTexture('albedo', { data: alb, width: W, height: W, layers: V, channels: 4 });
     n.setShaderTexture('normals', { data: nrm, width: W, height: W, layers: V, channels: 4 });
     n.setShaderBuffer('trees', bro.kernel.createBuffer(data));

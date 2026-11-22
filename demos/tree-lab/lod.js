@@ -24,7 +24,7 @@ const LEAF = { color: [0.07, 0.13, 0.04], metallic: 0, roughness: 0.7, doubleSid
 // tip, -(1 + weightTo); base, weightFrom; 0, twig, limb, trunk), so it
 // bends along the segment as the tubes do. (GPU-built tubes cost several
 // times as much for the same wood.)
-function barkMesh(tubes, sides) {
+export function barkMesh(tubes, sides) {
     const S = tubes.segments, V = tubes.vegetation, T = tubes.tangents, n = tubes.segCount;
     const nv = n * sides * 2;
     const pos = new Float32Array(nv * 3), nrm = new Float32Array(nv * 3), veg = new Float32Array(nv * 16);
@@ -95,7 +95,7 @@ export function speciesLevels(sp, levels = LEVELS) {
  */
 export function plantLod(trees, { levels = LEVELS, castFrom = 0, until = 0 } = {}) {
     const shown = new Array(trees.length).fill(-1), nodes = new Array(trees.length).fill(null);
-    let tris = 0;
+    let tris = 0, cleared = false;
     const counts = levels.map(() => 0);
     const update = ([ex, ey, ez]) => {
         tris = 0;
@@ -132,7 +132,11 @@ export function plantLod(trees, { levels = LEVELS, castFrom = 0, until = 0 } = {
     };
     return {
         update,
-        follow(vp) { vp.onView((view) => update(view.position)); },
+        follow(vp) { vp.onView((view) => { if (!cleared) update(view.position); }); },
+        clear() {
+            cleared = true;
+            nodes.forEach((ns, i) => { for (const n of ns ?? []) n.destroy(); nodes[i] = null; shown[i] = -1; });
+        },
         stats: () => ({ tris, counts: counts.slice() }),
     };
 }
