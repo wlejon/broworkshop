@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Vulcan No. 4 — Precision Mechanical Mill Engine</title>
+  <link rel="stylesheet" href="/lib/kit/kit.css">
+  <link rel="stylesheet" href="/app/css/app.css">
+</head>
+<body>
+  <canvas id="stage"></canvas>
+
+  <header class="vn-brand" id="hud-brand">
+    <div class="vn-eyebrow">MANCHESTER WORKS · SER. NO. 1889-IV</div>
+    <h1>VULCAN NO. 4</h1>
+    <p class="vn-subtitle">Exposed Twin-Cylinder Corliss Mill Engine &amp; Watt Governor</p>
+  </header>
+
+  <nav class="vn-top-right" id="hud-views">
+    <div class="vn-pill-group" role="group" aria-label="Camera Presets">
+      <button class="vn-pill active" data-view="gallery" title="Three-quarter gallery view (1)">Gallery</button>
+      <button class="vn-pill" data-view="crank" title="Close-up of crankpin, connecting rods &amp; crossheads (2)">Crank &amp; Rods</button>
+      <button class="vn-pill" data-view="gears" title="Close-up of 5-gear spur train &amp; cam springs (3)">Gear Train</button>
+      <button class="vn-pill" data-view="governor" title="Close-up of bevel drive &amp; Watt flyball governor (4)">Governor</button>
+    </div>
+    <button class="vn-pill vn-mood-btn" id="moodBtn" title="Cycle studio lighting (M)">Mood: <span id="moodLabel">Atelier</span></button>
+  </nav>
+
+  <aside class="vn-placard hidden" id="placard" aria-live="polite">
+    <div class="vn-placard-head">
+      <div>
+        <div class="vn-placard-kind" id="plKind">Assembly</div>
+        <h2 id="plName">Flywheel</h2>
+      </div>
+      <button class="vn-icon-btn" id="plClose" title="Close inspection placard">×</button>
+    </div>
+    <p class="vn-placard-desc" id="plDesc"></p>
+    <dl class="vn-placard-stats">
+      <div><dt>Crank Angle</dt><dd id="plAngle">0.0°</dd></div>
+      <div><dt>Speed</dt><dd id="plRpm">0.0 RPM</dd></div>
+      <div><dt>Piston Stroke</dt><dd id="plStroke">—</dd></div>
+      <div><dt>Governor Lift</dt><dd id="plGov">—</dd></div>
+    </dl>
+    <div class="vn-placard-actions">
+      <button class="vn-pill" id="plResetCam">Gallery View</button>
+    </div>
+  </aside>
+
+  <footer class="vn-transport" id="hud-transport">
+    <button class="vn-pill active" id="playBtn" title="Play / Pause (Space)">Pause</button>
+    <button class="vn-pill" id="dirBtn" title="Toggle Forward / Reverse (R)">Forward</button>
+    <div class="vn-sep"></div>
+    <label class="vn-throttle-wrap" for="throttleSlider">
+      <span class="vn-throttle-lbl">Throttle</span>
+      <input type="range" id="throttleSlider" min="0" max="100" step="1" value="68">
+      <span class="vn-throttle-val" id="throttleVal">68%</span>
+    </label>
+    <div class="vn-sep"></div>
+    <button class="vn-pill active" id="cutawayBtn" title="Toggle Cylinder Cutaway Windows (C)">Cutaway</button>
+    <div class="vn-readout" id="rpmReadout">81.6 RPM · 6.8 BAR</div>
+    <button class="vn-pill vn-hud-toggle" id="hideHudBtn" title="Hide / Show UI (H)">Hide UI</button>
+  </footer>
+
+  <button class="vn-pill vn-restore-hud hidden" id="showHudBtn" title="Show UI (H)">Show UI</button>
+
+  <script type="module" src="/app/js/main.js"></script>
+</body>
+</html>

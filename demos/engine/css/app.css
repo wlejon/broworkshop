@@ -1,0 +1,241 @@
+/* Vulcan No. 4 — Industrial Atelier HUD */
+
+html, body {
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  overflow: hidden;
+  background: #0a0c10;
+  color: #eef0f4;
+  font-family: 'Inter', 'IBM Plex Sans', system-ui, sans-serif;
+}
+
+#stage {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+.hidden {
+  display: none !important;
+}
+
+.vn-brand,
+.vn-top-right,
+.vn-placard,
+.vn-transport,
+.vn-restore-hud {
+  position: fixed;
+  z-index: 12;
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  background: rgba(14, 17, 24, 0.72);
+  border: 1px solid rgba(218, 176, 108, 0.24);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
+}
+
+.vn-brand {
+  top: 20px;
+  left: 22px;
+  padding: 12px 16px;
+  border-radius: 14px;
+}
+
+.vn-eyebrow {
+  font-size: 10px;
+  letter-spacing: 0.16em;
+  color: #d6aa63;
+  font-weight: 600;
+}
+
+.vn-brand h1 {
+  margin: 3px 0 2px;
+  font-size: 20px;
+  letter-spacing: 0.10em;
+  font-weight: 700;
+  color: #f6efe2;
+}
+
+.vn-subtitle {
+  margin: 0;
+  font-size: 12px;
+  color: rgba(232, 236, 244, 0.72);
+}
+
+.vn-top-right {
+  top: 20px;
+  right: 22px;
+  padding: 7px 9px;
+  border-radius: 999px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.vn-pill-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.vn-pill {
+  appearance: none;
+  border: 1px solid rgba(218, 176, 108, 0.16);
+  background: rgba(255, 255, 255, 0.04);
+  color: #dfe4ec;
+  padding: 6px 12px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 140ms ease, border-color 140ms ease, color 140ms ease;
+}
+
+.vn-pill:hover {
+  background: rgba(218, 176, 108, 0.16);
+  border-color: rgba(218, 176, 108, 0.45);
+}
+
+.vn-pill.active {
+  background: linear-gradient(180deg, rgba(224, 174, 92, 0.34), rgba(176, 122, 48, 0.24));
+  border-color: #e4b66c;
+  color: #fff5e2;
+}
+
+.vn-mood-btn {
+  border-color: rgba(140, 180, 220, 0.28);
+}
+
+.vn-placard {
+  top: 84px;
+  right: 22px;
+  width: 280px;
+  padding: 15px 16px;
+  border-radius: 16px;
+}
+
+.vn-placard-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.vn-placard-kind {
+  font-size: 10px;
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+  color: #d6aa63;
+  font-weight: 600;
+}
+
+.vn-placard h2 {
+  margin: 3px 0 8px;
+  font-size: 17px;
+  color: #f7f1e6;
+}
+
+.vn-icon-btn {
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  background: rgba(255, 255, 255, 0.06);
+  color: #e6eaf0;
+  font-size: 15px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.vn-placard-desc {
+  margin: 0 0 12px;
+  font-size: 12px;
+  line-height: 1.48;
+  color: rgba(232, 236, 244, 0.80);
+}
+
+.vn-placard-stats {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px 12px;
+  margin: 0 0 12px;
+  padding: 9px 10px;
+  background: rgba(8, 10, 15, 0.55);
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.vn-placard-stats dt {
+  font-size: 10px;
+  color: rgba(214, 170, 99, 0.85);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.vn-placard-stats dd {
+  margin: 2px 0 0;
+  font-size: 13px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.vn-placard-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.vn-transport {
+  bottom: 20px;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 7px 10px;
+  border-radius: 999px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.vn-sep {
+  width: 1px;
+  height: 20px;
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.vn-throttle-wrap {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 6px;
+}
+
+.vn-throttle-lbl {
+  font-size: 12px;
+  color: rgba(235, 238, 245, 0.78);
+}
+
+#throttleSlider {
+  width: 112px;
+  height: 26px;
+  accent-color: #d9a75a;
+  cursor: pointer;
+}
+
+.vn-throttle-val,
+.vn-readout {
+  font-size: 12px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: #f0cf92;
+  white-space: nowrap;
+}
+
+.vn-readout {
+  padding: 0 6px;
+}
+
+.vn-restore-hud {
+  bottom: 20px;
+  right: 22px;
+}
