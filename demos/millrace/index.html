@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Millrace — Alpine Stone Watermill &amp; Timber Aqueduct</title>
+  <link rel="stylesheet" href="/lib/kit/kit.css" />
+  <link rel="stylesheet" href="css/app.css" />
+</head>
+<body>
+  <canvas id="stage"></canvas>
+
+  <div id="hud-brand" class="hud-card">
+    <div class="eyebrow">LIVING ALPINE MECHANISM</div>
+    <h1>MILLRACE</h1>
+    <div class="sub">Stone Watermill, Timber Aqueduct &amp; Gearworks</div>
+  </div>
+
+  <div id="hud-views" class="hud-card">
+    <button class="pill active" data-view="valley">Valley</button>
+    <button class="pill" data-view="wheel">Waterwheel</button>
+    <button class="pill" data-view="gears">Gearworks</button>
+    <button class="pill" data-view="pond">Millpond</button>
+    <button class="pill" data-view="bridge">Footbridge</button>
+    <button id="moodBtn" class="pill mood-btn">Atmosphere: <span id="moodLabel">Alpine Morning</span></button>
+  </div>
+
+  <div id="placard" class="hud-card hidden">
+    <div class="placard-head">
+      <div>
+        <div id="plKind" class="eyebrow">MECHANISM</div>
+        <h2 id="plName">Component</h2>
+      </div>
+      <button id="plClose" class="icon-btn" title="Close (Esc)">&times;</button>
+    </div>
+    <p id="plDesc"></p>
+    <div class="pl-grid">
+      <div><span class="k">Zone</span><span id="plZone" class="v">Wheelpit</span></div>
+      <div><span class="k">Motion</span><span id="plActivity" class="v">Turning</span></div>
+      <div><span class="k">Ratio</span><span id="plRatio" class="v">20 : 12</span></div>
+      <div><span class="k">RPM</span><span id="plRpm" class="v">9.0 rpm</span></div>
+    </div>
+    <div class="pl-foot">
+      <button id="plResetCam" class="pill subtle">Overview Camera</button>
+    </div>
+  </div>
+
+  <div id="hud-transport" class="hud-card">
+    <button id="playBtn" class="pill active">Pause</button>
+    <label class="slider-wrap">
+      <span>Sluice</span>
+      <input id="flowSlider" type="range" min="0" max="100" value="76" />
+      <span id="flowVal" class="mono">76%</span>
+    </label>
+    <label class="slider-wrap">
+      <span>Breeze</span>
+      <input id="breezeSlider" type="range" min="0" max="100" value="48" />
+      <span id="breezeVal" class="mono">48%</span>
+    </label>
+    <span id="lifeReadout" class="mono dim">9.0 RPM · 76% Sluice · Morning</span>
+    <button id="hideHudBtn" class="pill subtle">Hide UI</button>
+  </div>
+
+  <button id="showHudBtn" class="hud-card pill hidden">Show UI (H)</button>
+
+  <script type="module" src="js/main.js"></script>
+</body>
+</html>

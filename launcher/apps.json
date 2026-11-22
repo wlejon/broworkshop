@@ -72,6 +72,7 @@
         { "dir": "demos/lm-playground" },
         { "dir": "demos/mechanical-sandbox" },
         { "dir": "demos/mic-chunks" },
+        { "dir": "demos/millrace" },
         { "dir": "demos/nav-carving" },
         { "dir": "demos/nav-lab" },
         { "dir": "demos/netsync" },
