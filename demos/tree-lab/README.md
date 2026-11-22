@@ -93,7 +93,7 @@ shadow page drawing only the trees whose sphere reaches it
 frame of page redraws while the camera moved). Against the truth (the
 same 2282 trees all drawn at L3, casting their own shadow, in wind), the
 mesh trees to 250 m with impostors and proxies beyond give the frame's
-mean linear colour within 0.94-1.07 per channel at noon and golden hour
+mean linear colour within 0.94-1.08 per channel at noon and golden hour
 from 30 m, 150 m and 600 m up, the ground alone 0.96-1.03. The impostors'
 0.8 coverage and L6 bake, their blue gain of 0.95 and the proxies' 0.4
 were swept for it: with an L24 bake at full coverage the frame was 0.80
@@ -103,7 +103,10 @@ finest level's coverage (`speciesLevels`). Cut against a per-pixel dither
 instead of covering samples, the impostors matched the frame's mean as
 well but read as an even speckled carpet past 300 m where the grown trees
 stand apart; the side contrast was found looking at 1:1 crops of that
-field. With meshes to 250 m and impostors beyond,
+field. The side contrast holds only while the mip sampled still resolves
+the crown's clumps (fading out between mips 1.5 and 3): coarser, a texel's
+alpha is the crown's mean, which pulled apart made the forest fade out
+from 2 km up. With meshes to 250 m and impostors beyond,
 9476 trees on a 3.2 km square cost 1.3 ms from eye height and 30 m, 0.8
 from 150 m, 0.4 from 1 km, the impostors and their shadow 0.16-0.3 of it,
 with the camera still.
@@ -119,6 +122,26 @@ it happens: a 25 m/s dolly at eye height costs 3 ms a frame on average and
 7 ms at worst, a climb from 30 m to 1 km 1.7 and 4.9. Split, the dolly is
 1.34 ms on average and 1.43 at worst, the climb 0.86 and 1.32, with the
 ground's agreement above. The impostors do not sway.
+
+`canopyNode` (canopy.js) draws the forest past the impostors (their
+`until`, dithering out over [until, 1.35 until] as it dithers in): one
+quad over the forest's ground at its crowns' mean height, textured with 4 m
+cells of what the trees cover seen from above (each tree's coverage by
+radius from its bake's top views, a cell's coverage 1 - prod(1 - a) of the
+trees over it, times 0.9) and the colour covering it, mipmapped, lit as
+foliage facing up. Seen at a slant the crowns' sides hide the gaps between
+them, so its coverage is that of a layer 1 / sin(elevation) as deep. Past a
+few kilometres a crown is a few pixels and the impostors spend their quads
+on sub-pixel triangles that hit the pixels' samples less and less: from 8
+km up the impostor forest had faded into the ground, from 20 km it was
+gone. Against the impostors at 3 km the layer's frame is within 1% per
+channel (its colour gain 1.06, 0.96, 0.95 found for it). `hideBeyond` hides
+the impostor nodes while the eye is farther than their band from the whole
+forest, so they cull nothing up there. A climb from 2 m to 40 km in 15 s
+over 55754 trees on a 6 km square (meshes to 250 m, impostors to 3 km, the
+layer beyond): 2.0 ms mean below 30 m (2.6 worst), 1.0 to 300 m, 1.35 to 3
+km (2.7 worst, the proxies' shadow pages redrawing), 0.6 to 10 km, 0.33
+above. Its texture takes 2 s to make for that square.
 
 On the CPU, each species' level is a `scene.createGeometry` made once
 (`speciesLevels`), so a swap makes two nodes and uploads nothing; making
@@ -140,6 +163,8 @@ lod.js                speciesLevels, plantLod: the grown trees at every
                       distance, reduced per level, all swaying
 impostor.js           bakeImpostor, impostorNode, shadowProxyNode: far
                       trees as baked view-atlas quads and their shadow
+canopy.js             canopyNode, hideBeyond: the forest past the
+                      impostors as one textured layer
 sheet.js              runSheet: each species' size, a still from eye height,
                       and its GPU ms over the bare frame at given distances
 ```

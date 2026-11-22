@@ -67,7 +67,7 @@ import mesh;
 import scene;
 import custom;
 import wind;
-struct Params { box: vec4<f32>, views: vec4<f32>, band: vec4<f32>, gain: vec4<f32>, light: vec4<f32> }
+struct Params { box: vec4<f32>, views: vec4<f32>, band: vec4<f32>, gain: vec4<f32>, light: vec4<f32>, far: vec4<f32> }
 @binding(4, 0) var params: uniform<Params>;
 @binding(4, 1) var albedo: texture2d_array<vec4<f32>>;
 @binding(4, 2) var normals: texture2d_array<vec4<f32>>;
@@ -153,10 +153,15 @@ pub fn fragment(v: mesh::Vertex, s: mesh::Surface) -> mesh::Surface {
     // and as baked seen from above (20 to 50 degrees up), where it does not.
     let up = normalize(-v.world_pos).y;
     let top = smoothstep(0.34, 0.77, up);
-    let k = mix(params.light.z, 1.0, top);
+    // Only while the mip still holds the crown's clumps (a texel 1/32 of the
+    // crown or finer): coarser, its alpha is the crown's mean coverage,
+    // which pulled apart would vanish.
+    let k = mix(mix(params.light.z, 1.0, top), 1.0, smoothstep(1.5, 3.0, lod));
     var alpha = clamp((a.w - params.light.w) * k + params.light.w, 0.0, 1.0) * mix(1.0, params.light.y, top);
     if (params.band.w > 0.0) { alpha = select(a.w > params.band.w, 1.0, 0.0); }
     if (params.band.y > 0.0 && length(v.world_pos) < mix(params.band.x, params.band.y, dither)) { alpha = 0.0; }
+    // Past the far band the canopy layer (canopy.js) has the pixel.
+    if (params.far.x > 0.0 && length(v.world_pos) >= mix(params.far.x, 1.35 * params.far.x, dither)) { alpha = 0.0; }
     out.alpha = alpha;
     out.normal = normalize(yaw_to_world(nl, v.v0.z, v.v0.w));
     out.roughness = 0.75;
@@ -354,7 +359,8 @@ const QUAD = () => new Mesh({
  * One instanced impostor node for `trees` (all of species `sp`, baked as
  * `sp.imp`): { x, z, yaw, size }. `band` [from, to] (m from the eye) dithers
  * the impostors in over it, for a handoff from mesh trees fading out over the
- * same band. Returns the node (destroy() to drop it).
+ * same band; `until` (m, 0: none) dithers them out over [until, 1.35 until]
+ * for the canopy layer to dither in. Returns the node (destroy() to drop it).
  */
 // Each tree's bounding sphere (its baked box's centre and radius, a little
 // over for the quad drawn toward the eye), for setInstanceCullSpheres: the
@@ -369,7 +375,7 @@ function cullSpheres(sp, trees) {
     return bro.kernel.createBuffer(out);
 }
 
-export function impostorNode(sp, trees, { band = [0, 0], castsShadow = false, gain = IMPOSTOR.gain, front = IMPOSTOR.front, occluder = IMPOSTOR.occluder, cover = IMPOSTOR.cover, contrast = IMPOSTOR.contrast } = {}) {
+export function impostorNode(sp, trees, { band = [0, 0], castsShadow = false, gain = IMPOSTOR.gain, front = IMPOSTOR.front, occluder = IMPOSTOR.occluder, cover = IMPOSTOR.cover, contrast = IMPOSTOR.contrast, until = 0 } = {}) {
     const inst = new Float32Array(trees.length * 16), data = new Float32Array(trees.length * 4);
     trees.forEach((t, i) => {
         inst.set([1, 0, 0, t.x, 0, 1, 0, 0, 0, 0, 1, t.z, 1, 1, 1, 1], i * 16);
@@ -379,7 +385,7 @@ export function impostorNode(sp, trees, { band = [0, 0], castsShadow = false, ga
         alphaCutoff: 0.5, alphaToCoverage: true, doubleSided: true, castsShadow, receivesShadow: true, vertexColorTint: false });
     const { alb, nrm, box, W, V, o } = sp.imp;
     n.setShader({ module: DRAW_HOOK, file: 'impostor.bk',
-        uniforms: { box, views: [o.nAz, o.nEl, o.elStep * Math.PI / 180, PX], band: [band[0], band[1], W, 0], gain: [...gain, front], light: [occluder, cover, contrast[0], contrast[1]] } });
+        uniforms: { box, views: [o.nAz, o.nEl, o.elStep * Math.PI / 180, PX], band: [band[0], band[1], W, 0], gain: [...gain, front], light: [occluder, cover, contrast[0], contrast[1]], far: [until, 0, 0, 0] } });
     n.setShaderTexture('albedo', { data: alb, width: W, height: W, layers: V, channels: 4, mipmap: true });
     n.setShaderTexture('normals', { data: nrm, width: W, height: W, layers: V, channels: 4, mipmap: true });
     n.setShaderBuffer('trees', bro.kernel.createBuffer(data));
