@@ -37,8 +37,10 @@ each frame): a tree coming within reach of the band [handoff, 1.35 handoff]
 (30 m) takes a mesh, which dithers out over the band (`fadeOutDist`) as its
 voxels dither in (`minDist`), pixel for pixel, and casts the tree's shadow
 while it holds it (the region's `castShadow` off). A tree gives its mesh back
-only once wholly past the band, so no swap is seen. The meshes draw a 1 x 2
-segment leaf card, five times cheaper than the lab's 3 x 5.
+only once wholly past the band, so no swap is seen; with every slot held, a
+tree coming nearer stays voxels. The meshes draw a 1 x 2 segment leaf card,
+five times cheaper than the lab's 3 x 5 and as light (bro.eye, calm). `maxDist`
+ends the voxel trees that far off (0: never).
 
 ## Files
 

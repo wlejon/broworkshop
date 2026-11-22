@@ -81,9 +81,9 @@ export function layout(species, { half = 300, seed = 7, crowding = 0.42, tries =
  */
 // (A forest's mesh trees draw a 1 x 2 segment leaf card, five times cheaper
 // than the lab's 3 x 5, its leaves and their shadows, and seen as alike.)
-export function plant(trees, { handoff = 30, slots = 8, card = [1, 2] } = {}) {
+export function plant(trees, { handoff = 30, slots = 8, card = [1, 2], maxDist = 0 } = {}) {
     const v = voxelWorld();
-    const regions = trees.map((t) => standVoxelTree(t.sp.arch, { x: t.x, z: t.z, yaw: t.yaw, size: t.size }));
+    const regions = trees.map((t) => standVoxelTree(t.sp.arch, { x: t.x, z: t.z, yaw: t.yaw, size: t.size, maxDist }));
     const free = new Map(), held = new Map();   // species -> idle meshes; tree index -> mesh
     // (Up to `slots` meshes of each species, made as first wanted; at most
     // `slots` of them shown.)
@@ -116,8 +116,11 @@ export function plant(trees, { handoff = 30, slots = 8, card = [1, 2] } = {}) {
             const d = Math.hypot(dh, dv);
             if (d < (held.has(i) ? leave : enter)) near.push([d, i]);
         });
+        // A held tree keeps its mesh until it is past `leave` (a mesh given
+        // back nearer would be seen to go); free slots go to the nearest.
         near.sort((a, b) => a[0] - b[0]);
-        const want = new Set(near.slice(0, slots).map(([, i]) => i));
+        const want = new Set(near.filter(([, i]) => held.has(i)).map(([, i]) => i));
+        for (const [, i] of near) if (want.size < slots) want.add(i);
         short = Math.max(0, near.length - slots);
         for (const [i, m] of held) {
             if (want.has(i)) continue;
