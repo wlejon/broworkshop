@@ -7,13 +7,14 @@
 import { leafCard, scene, ground } from "/app/lab.js";
 import { barkMesh } from "/app/lod.js";
 
-// `gain` scales the baked albedo, matching the impostors to the
-// vegetation-shaded mesh trees they take over from.
 // `L` is the leaf level baked (lod.js's cards L times a leaf): the level the
 // mesh trees show where the impostors take over, so the two cover alike.
-// `gain` was fitted by bro.eye.fit to the mesh forest seen from 150 m at
-// noon (the vegetation shading the bake's plain material does not have).
-export const IMPOSTOR = { res: 128, ss: 4, nAz: 8, nEl: 4, elStep: 25, bend: 0.6, L: 24, gain: [2.175, 2.383, 0.878] };
+// `front`: how far toward the eye (a share of the crown's radius) the quad
+// is drawn and shaded, out of the shadow its own proxy casts at the centre.
+// `gain` scales the baked albedo: what was left between the canopy's mean
+// colour as impostors and as meshes, the same trees, at noon, golden hour
+// and dawn from 150 m and 600 m up (blue 0.82-0.91, the rest within 0.87-1.19).
+export const IMPOSTOR = { res: 128, ss: 4, nAz: 8, nEl: 4, elStep: 25, bend: 0.6, L: 24, gain: [1, 1, 0.87], front: 0.4 };
 
 const BAKE_HOOK = `
 module hook;
@@ -21,15 +22,34 @@ import mesh;
 import scene;
 struct Params { crown: vec4<f32>, bend: vec4<f32> }
 @binding(4, 0) var params: uniform<Params>;
+pub fn vertex(v: mesh::Vertex) -> mesh::Vertex {
+    var o = v;
+    o.v0 = vec4<f32>(v.pos, 1.0);
+    return o;
+}
 pub fn fragment(v: mesh::Vertex, s: mesh::Surface) -> mesh::Surface {
     var out = s;
-    let p = v.world_pos + scene::camera.eye_world.xyz;
-    let depth = length(p - params.crown.xyz) / max(params.crown.w, 0.01);
-    let shade = mix(0.45, 1.0, smoothstep(0.2, 1.0, depth));
-    let outward = normalize(p - params.crown.xyz);
-    let nb = normalize(mix(normalize(s.normal), outward, params.bend.x));
-    if (SCENE_DEBUG(imp_albedo)) { out.debug = vec4<f32>(s.base_color * shade, 1.0); }
+    // The leaf terms bro.scene's vegetation shading derives from the crown
+    // (vegetation.bk tint and crown_shade): albedo darkened toward the
+    // crown's centre with a lit rim, the normal leaning to the crown's bulk,
+    // and an occlusion of its ambient light (baked to the normal atlas's w).
+    // (Model space, which is the world here: the bake's nodes sit at the origin.)
+    let p = v.v0.xyz;
+    let rc = (p - params.crown.xyz) / max(params.crown.w, 0.5);
+    let depth = length(rc);
+    var tone = mix(vec3<f32>(0.5, 0.62, 0.68), vec3<f32>(1.0), smoothstep(0.25, 1.0, depth));
+    tone *= 1.0 + 0.15 * smoothstep(0.85, 1.15, depth);
+    let bulk = normalize(rc + vec3<f32>(0.0, 0.25, 0.0));
+    // A leaf's normal faces the eye, as the vegetation shading turns it (by
+    // the side it is seen from, not by its triangle's winding).
+    var nf = normalize(s.normal);
+    if (dot(nf, params.bend.yzw) < 0.0) { nf = -nf; }
+    let nb = normalize(nf * (1.0 - params.bend.x) + bulk * params.bend.x);
+    let dc = clamp(depth, 0.0, 1.2);
+    let ao = clamp(0.25 + 0.85 * dc * dc, 0.25, 1.0) * mix(0.75, 1.0, clamp(rc.y * 0.5 + 0.6, 0.0, 1.0));
+    if (SCENE_DEBUG(imp_albedo)) { out.debug = vec4<f32>(s.base_color * tone, 1.0); }
     if (SCENE_DEBUG(imp_normal)) { out.debug = vec4<f32>(nb * 0.5 + 0.5, 1.0); }
+    if (SCENE_DEBUG(imp_ao)) { out.debug = vec4<f32>(vec3<f32>(ao), 1.0); }
     if (SCENE_DEBUG(imp_mask)) { out.debug = vec4<f32>(1.0, 1.0, 1.0, 1.0); }
     return out;
 }`;
@@ -39,6 +59,7 @@ module hook;
 import mesh;
 import scene;
 import custom;
+import wind;
 struct Params { box: vec4<f32>, views: vec4<f32>, band: vec4<f32>, gain: vec4<f32> }
 @binding(4, 0) var params: uniform<Params>;
 @binding(4, 1) var albedo: texture2d_array<vec4<f32>>;
@@ -73,7 +94,12 @@ pub fn vertex(v: mesh::Vertex) -> mesh::Vertex {
     let u = cross(f, r);
     let q = vec2<f32>(v.uv.x * 2.0 - 1.0, v.uv.y * 2.0 - 1.0);
     let R = params.box.w;
-    o.pos = centre + (r * q.x + u * q.y) * (R * s);
+    // Moved toward the eye by gain.w (front) of the radius, to the crown's near
+    // surface where the leaves seen are (its shadow and depth are theirs),
+    // and shrunk to cover what it covered at the centre.
+    let dist = length(to_eye);
+    let push_d = min(params.gain.w * R * s, 0.5 * dist);
+    o.pos = centre + f * push_d + (r * q.x + u * q.y) * (R * s * (dist - push_d) / dist);
     // Wholly nearer than the band: no impostor (a collapsed quad, no pixels).
     if (params.band.x > 0.0 && length(to_eye) + R * s < params.band.x) { o.pos = vec3<f32>(0.0); }
     o.normal = f;
@@ -89,6 +115,7 @@ pub fn vertex(v: mesh::Vertex) -> mesh::Vertex {
     let rv = normalize(cross(vec3<f32>(0.0, 1.0, 0.0), dv));
     let uv_ = cross(dv, rv);
     o.v0 = vec4<f32>(0.5 + 0.5 * dot(pl, rv) / R, 0.5 - 0.5 * dot(pl, uv_) / R, c, n);
+    o.v1 = vec4<f32>(R * s, 0.0, 0.0, 0.0);
     o.vi = vec4<i32>(vi, 0, 0, 0);
     return o;
 }
@@ -96,21 +123,36 @@ pub fn vertex(v: mesh::Vertex) -> mesh::Vertex {
 pub fn fragment(v: mesh::Vertex, s: mesh::Surface) -> mesh::Surface {
     var out = s;
     let uvw = vec3<f32>(v.v0.x, v.v0.y, v.vi.x as f32);
-    let a = albedo.sample_lod(custom::linear, uvw, 0.0);
-    let nl = normals.sample_lod(custom::linear, uvw, 0.0).xyz * 2.0 - 1.0;
-    out.base_color = a.xyz * params.gain.xyz;
+    // The mip whose texel is the pixel's footprint (views.w: a pixel's
+    // angle; the atlas spans 2 R s over res texels).
+    let lod = max(0.0, log2(v.cam_dist * params.views.w * params.band.z / (2.0 * v.v1.x)));
+    let a = albedo.sample_lod(custom::linear, uvw, lod);
+    let nw = normals.sample_lod(custom::linear, uvw, lod);
+    let nl = nw.xyz * 2.0 - 1.0;
+    // The tree's own leaf tone, as vegetation.bk gives the mesh tree's
+    // (hashed from its root's 1/8 m cell), and the baked crown occlusion
+    // on its ambient light, as the mesh tree's leaves have.
+    let t = trees[v.instance_index];
+    let tone = wind::wind_hash(vec2<i32>(floor(vec2<f32>(t.x, t.y) * 8.0)) + vec2<i32>(17, 3));
+    let tint = mix(vec3<f32>(0.84, 0.97, 1.08), vec3<f32>(1.12, 1.04, 0.76), tone) * (0.9 + 0.2 * fract(tone * 13.7));
+    out.base_color = a.xyz * tint * params.gain.xyz;
+    out.sky_visibility = nw.w;
+    out.occluder_sun = 0.0;
     // Coverage against a per-pixel dither; nearer than the band's start the
     // impostor gives way to the mesh tree pixel for pixel (band.x .. band.y).
     let dither = scene::band_dither(v.pixel);
-    var keep = a.w > dither;
+    var keep = a.w > select(params.band.w > 0.0, params.band.w, dither);
     if (params.band.y > 0.0 && length(v.world_pos) < mix(params.band.x, params.band.y, dither)) { keep = false; }
     out.alpha = select(keep, 1.0, 0.0);
     out.normal = normalize(yaw_to_world(nl, v.v0.z, v.v0.w));
     out.roughness = 0.75;
+    out.leaf = 1.0;
     out.metallic = 0.0;
     return out;
 }`;
 
+// A pixel's angle at 1080 rows and a 50 degree view (as lod.js).
+const PX = 2 * Math.tan(25 * Math.PI / 180) / 1080;
 const srgb = (b) => { const x = b / 255; return x <= 0.04045 ? x / 12.92 : Math.pow((x + 0.055) / 1.055, 2.4); };
 const LUT = new Float32Array(256).map((_, i) => srgb(i));
 const BARK = { color: [0.2, 0.17, 0.14], metallic: 0, roughness: 0.9, vertexColorTint: false };
@@ -120,7 +162,8 @@ const plain = (m) => new Mesh({ positions: m.positions, normals: m.normals, indi
 /** Bake species `sp` ({ world, k }): { alb, nrm, box: [cx, cy, cz, R], W, V }. Hides the ground while it runs. */
 export function bakeImpostor(sp, o = IMPOSTOR) {
     const kk = 1.5 * o.L / sp.k;
-    const leaves = plain(sp.world.emitFoliageMesh(leafCard(kk, [1, 2]), { seed: 0x1eaf, perArea: 90 / (kk * kk) }));
+    const foliage = sp.world.emitFoliageMesh(leafCard(kk, [1, 2]), { seed: 0x1eaf, perArea: 90 / (kk * kk) });
+    const leaves = plain(foliage);
     const bark = plain(sp.world.emitMesh(5));
     const lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity];
     const llo = [Infinity, Infinity, Infinity], lhi = [-Infinity, -Infinity, -Infinity];
@@ -137,8 +180,21 @@ export function bakeImpostor(sp, o = IMPOSTOR) {
         const P = m.positions;
         for (let i = 0; i < P.length; i += 3) R = Math.max(R, Math.hypot(P[i] - c[0], P[i + 1] - c[1], P[i + 2] - c[2]));
     }
-    const crownC = [0, 1, 2].map((a) => (llo[a] + lhi[a]) / 2);
-    const crownR = Math.max(...[0, 1, 2].map((a) => (lhi[a] - llo[a]) / 2));
+    // The crown the vegetation shading uses (each leaf's record: v1 = its
+    // crown's centre and radius), else the leaves' box.
+    let crownC = [0, 1, 2].map((a) => (llo[a] + lhi[a]) / 2);
+    let crownR = Math.max(...[0, 1, 2].map((a) => (lhi[a] - llo[a]) / 2));
+    const VR = foliage.vegetation;
+    if (VR && VR.length >= 16) {
+        const sum = [0, 0, 0, 0];
+        let n = 0;
+        for (let r = 0; r < VR.length; r += 16) {
+            if (!(VR[r + 7] > 0)) continue;
+            for (let k = 0; k < 4; k++) sum[k] += VR[r + 4 + k];
+            n++;
+        }
+        if (n) { crownC = sum.slice(0, 3).map((v) => v / n); crownR = sum[3] / n; }
+    }
     const groundWas = ground.visible;
     ground.visible = false;
     const nodes = [[bark, BARK], [leaves, LEAF]].map(([m, mat]) => {
@@ -155,24 +211,26 @@ export function bakeImpostor(sp, o = IMPOSTOR) {
         const D = 4 * R;
         scene.setCamera({ mode: 'orthographic', size: 2 * R, aspect: 1, near: 0.1, far: 8 * R,
             eye: [c[0] + d[0] * D, c[1] + d[1] * D, c[2] + d[2] * D], target: c, up: [0, 1, 0] });
+        for (const n of nodes) n.setShaderUniform('bend', [o.bend, ...d]);
         // Captured SS x finer and box-filtered: a texel's alpha is the share
         // of it the tree covers, its albedo and normal the covered samples'
         // mean; empty texels take the view's mean so filtering does not fringe.
         const shots = {};
-        for (const view of ['imp_albedo', 'imp_normal', 'imp_mask']) {
+        for (const view of ['imp_albedo', 'imp_normal', 'imp_ao', 'imp_mask']) {
             scene.setDebugView(view);
             shots[view] = scene.captureFrame(B, B).data;
         }
-        const A = shots.imp_albedo, N = shots.imp_normal, M = shots.imp_mask, base = vi * W * W * 4;
+        const A = shots.imp_albedo, N = shots.imp_normal, O = shots.imp_ao, M = shots.imp_mask, base = vi * W * W * 4;
         const meanA = [0, 0, 0], meanN = [0, 0, 0];
-        let meanCount = 0;
+        let meanCount = 0, meanO = 0;
         for (let ty = 0; ty < W; ty++) for (let tx = 0; tx < W; tx++) {
             const a = [0, 0, 0], nn = [0, 0, 0];
-            let cov = 0;
+            let cov = 0, ao = 0;
             for (let sy = 0; sy < SS; sy++) for (let sx = 0; sx < SS; sx++) {
                 const p = ((ty * SS + sy) * B + tx * SS + sx) * 4;
                 if (M[p] < 250 || M[p + 1] < 250 || M[p + 2] < 250) continue;
                 cov++;
+                ao += LUT[O[p]];
                 for (let k = 0; k < 3; k++) { a[k] += LUT[A[p + k]]; nn[k] += LUT[N[p + k]] * 2 - 1; }
             }
             const t = base + (ty * W + tx) * 4;
@@ -184,6 +242,8 @@ export function bakeImpostor(sp, o = IMPOSTOR) {
                 nrm[t + k] = (nn[k] / nl) * 0.5 + 0.5;
                 meanA[k] += a[k]; meanN[k] += nn[k];
             }
+            nrm[t + 3] = ao / cov;
+            meanO += ao;
             meanCount += cov;
         }
         const mnl = Math.hypot(...meanN) || 1;
@@ -194,6 +254,7 @@ export function bakeImpostor(sp, o = IMPOSTOR) {
                 alb[t + k] = meanCount ? meanA[k] / meanCount : 0;
                 nrm[t + k] = (meanN[k] / mnl) * 0.5 + 0.5;
             }
+            nrm[t + 3] = meanCount ? meanO / meanCount : 1;
         }
     }
     scene.setDebugView(null);
@@ -253,7 +314,7 @@ const QUAD = () => new Mesh({
  * the impostors in over it, for a handoff from mesh trees fading out over the
  * same band. Returns the node (destroy() to drop it).
  */
-export function impostorNode(sp, trees, { band = [0, 0], castsShadow = false, gain = IMPOSTOR.gain } = {}) {
+export function impostorNode(sp, trees, { band = [0, 0], castsShadow = false, gain = IMPOSTOR.gain, front = IMPOSTOR.front } = {}) {
     const inst = new Float32Array(trees.length * 16), data = new Float32Array(trees.length * 4);
     trees.forEach((t, i) => {
         inst.set([1, 0, 0, t.x, 0, 1, 0, 0, 0, 0, 1, t.z, 1, 1, 1, 1], i * 16);
@@ -263,9 +324,9 @@ export function impostorNode(sp, trees, { band = [0, 0], castsShadow = false, ga
         alphaCutoff: 0.5, doubleSided: true, castsShadow, receivesShadow: true, vertexColorTint: false });
     const { alb, nrm, box, W, V, o } = sp.imp;
     n.setShader({ module: DRAW_HOOK, file: 'impostor.bk',
-        uniforms: { box, views: [o.nAz, o.nEl, o.elStep * Math.PI / 180, 0], band: [band[0], band[1], 0, 0], gain: [...gain, 0] } });
-    n.setShaderTexture('albedo', { data: alb, width: W, height: W, layers: V, channels: 4 });
-    n.setShaderTexture('normals', { data: nrm, width: W, height: W, layers: V, channels: 4 });
+        uniforms: { box, views: [o.nAz, o.nEl, o.elStep * Math.PI / 180, PX], band: [band[0], band[1], W, 0], gain: [...gain, front] } });
+    n.setShaderTexture('albedo', { data: alb, width: W, height: W, layers: V, channels: 4, mipmap: true });
+    n.setShaderTexture('normals', { data: nrm, width: W, height: W, layers: V, channels: 4, mipmap: true });
     n.setShaderBuffer('trees', bro.kernel.createBuffer(data));
     return n;
 }

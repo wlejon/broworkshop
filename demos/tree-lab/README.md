@@ -62,21 +62,25 @@ meshes there, each dithering out over [until, 1.35 until] (`fadeOutDist`).
 
 `bakeImpostor` and `impostorNode` (impostor.js) draw trees past that as
 impostors: each species baked once from 8 x 4 directions by an orthographic
-camera through debug views at the leaf level the meshes hand over at (L24;
-albedo darkened toward the crown's centre,
-normals leaning out from it as the vegetation shading's do, coverage from a
-4x finer capture), each tree one quad facing the eye that samples the view
-nearest its direction in its own frame, lit through the baked normal and cut
-by its coverage against a per-pixel dither; nearer than the band it collapses
-to nothing. The baked albedo is scaled by a gain `bro.eye.fit` found against
-the mesh forest at noon from 150 m (the bake's plain material lacks the
-vegetation shading the meshes have; it is matched for that light only).
+camera through debug views at the leaf level the meshes hand over at (L24),
+with the terms bro.scene's vegetation shading takes from the crown: albedo
+darkened toward its centre with a lit rim, each leaf's normal turned to the
+eye and leaning to the crown's bulk, and the occlusion of its ambient light;
+coverage from a 4x finer capture. Each tree is one quad facing the eye that
+samples the view nearest its direction in its own frame (mipmapped to the
+pixel's footprint), tinted by the tree's own leaf tone, lit as foliage
+(`s.leaf`) through the baked normal, and cut by its coverage against a
+per-pixel dither; nearer than the band it collapses to nothing. The quad
+sits 0.4 of the crown's radius toward the eye, where the leaves seen are.
 `shadowProxyNodes` casts their shadow: each species' crown as L48 cards
 pulled into it and its limbs, instanced over the trees as `shadowOnly`
-meshes (the shadow pass does not run the impostors' cut). With meshes to
-250 m and impostors beyond, 9476 trees on a 3.2 km square cost 1.3 ms from
-eye height and 30 m, 0.85 from 150 m, 0.5 from 1 km, the impostors and
-their shadow 0.2-0.3 of it. The impostors do not sway.
+meshes (the shadow pass does not run the impostors' cut). Measured on the
+same trees as meshes and as impostors, the canopy's mean colour agrees
+within 0.87-1.19 per channel at noon, golden hour and dawn from 150 m and
+600 m up, after a blue gain of 0.87. With meshes to 250 m and impostors
+beyond, 9476 trees on a 3.2 km square cost 1.3 ms from eye height and 30 m,
+0.8 from 150 m, 0.4 from 1 km, the impostors and their shadow 0.16-0.3 of
+it, with the camera still. The impostors do not sway.
 
 ## Files
 
