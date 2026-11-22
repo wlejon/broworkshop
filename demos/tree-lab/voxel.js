@@ -126,11 +126,14 @@ export function standVoxelTree(t, { x = 0, z = 0, yaw = 0, size = 1, minDist = 0
     const cs = Math.cos(yaw), sn = Math.sin(yaw);
     const right = [cs, 0, -sn], fwd = [sn, 0, cs];
     const [cx, cy, cz] = t.centre;
+    const at = ([px, py, pz]) => [x + size * (px * right[0] + pz * fwd[0]), size * py, z + size * (px * right[2] + pz * fwd[2])];
     const v = voxelWorld();
+    const p = t.plant;
     const region = v.addRegion({
-        center: [x + size * (cx * right[0] + cz * fwd[0]), size * cy, z + size * (cx * right[2] + cz * fwd[2])],
+        center: at([cx, cy, cz]),
         right, up: [0, 1, 0], forward: fwd,
         voxelSize: t.voxelSize * size, maxDepth: t.depth, minDist, maxDist, castShadow, foliage: true,
+        plant: { root: at(p.root), height: p.height * size, trunk: p.trunk, scale: p.scale * size },
     });
     v.place(region, 0, 0, 0, t.archetype, 0);
     return region;
@@ -160,5 +163,10 @@ export function voxelArchetype(world, { scale = 1, leaf = 1, depth = 5 } = {}) {
         scale, toUnit);
     const v = voxelWorld();
     const archetype = v.addArchetypeFromMesh(mesh, depth, { unitBounds: true, roughness: 0.8 });
-    return { archetype, centre: c, voxelSize, depth, ms: Date.now() - t0, tris: mesh.indices.length / 3 };
+    // The plant its vegetation records describe (any branch's record holds
+    // the plant's root, height and trunk word), so the voxel tree sways as
+    // the mesh tree does.
+    const rec = world.emitBranchTubes().vegetation;
+    const plant = { root: [rec[0] * scale, rec[1] * scale, rec[2] * scale], height: rec[3] * scale, trunk: rec[15], scale };
+    return { archetype, centre: c, voxelSize, depth, plant, ms: Date.now() - t0, tris: mesh.indices.length / 3 };
 }
