@@ -1,4 +1,4 @@
-// js/organic_geometry.js — Outward-wound procedural natural & botanical mesh generators for Sylvan.
+// js/organic_geometry.js — Continuous watertight natural meshes & icosphere rock geometry for Sylvan.
 
 function cross(ax, ay, az, bx, by, bz) {
   return [ay * bz - az * by, az * bx - ax * bz, ax * by - ay * bx];
@@ -35,264 +35,453 @@ function smoothNoise3(x, y, z) {
   return lerp(lerp(c00, c10, v), lerp(c01, c11, v), w);
 }
 
-/**
- * Watertight sculpted boulder with flat grounded bottom (`y >= 0`) and terraced basalt facets.
- * Verified outward CCW normals.
- */
-export function createOrganicBoulder(rx = 0.8, ry = 0.55, rz = 0.7, seed = 1.0, latSegs = 14, lonSegs = 22) {
-  const rawPos = [];
-  const rawUv = [];
-  for (let i = 0; i <= latSegs; ++i) {
-    const phi = (i / latSegs) * Math.PI; // 0 = top (+Y), pi = bottom (-Y)
-    const sp = Math.sin(phi), cp = Math.cos(phi);
-    for (let j = 0; j <= lonSegs; ++j) {
-      const th = (j / lonSegs) * Math.PI * 2;
-      const nx = sp * Math.cos(th), ny = cp, nz = sp * Math.sin(th);
-      const n1 = smoothNoise3(nx * 1.9 + seed, ny * 2.1 + seed, nz * 1.9 + seed);
-      const n2 = smoothNoise3(nx * 4.3 + seed * 2, ny * 4.0, nz * 4.3) * 0.35;
-      const disp = 0.78 + 0.42 * (n1 + n2 * 0.4);
-      const flatBot = ny < -0.22 ? Math.max(-0.22, ny * 0.45) : ny;
-      const x = nx * rx * disp;
-      const y = Math.max(0, (flatBot + 0.22) * ry * (ny > 0 ? disp : 1.0));
-      const z = nz * rz * disp;
-      rawPos.push([x, y, z]);
-      rawUv.push([j / lonSegs, i / latSegs]);
+function pushSmoothTris(verts, uvs, tris) {
+  const vertNrm = verts.map(() => [0, 0, 0]);
+  for (const [i0, i1, i2] of tris) {
+    const p0 = verts[i0], p1 = verts[i1], p2 = verts[i2];
+    const fn = cross(p1[0] - p0[0], p1[1] - p0[1], p1[2] - p0[2], p2[0] - p0[0], p2[1] - p0[1], p2[2] - p0[2]);
+    for (const k of [i0, i1, i2]) {
+      vertNrm[k][0] += fn[0]; vertNrm[k][1] += fn[1]; vertNrm[k][2] += fn[2];
     }
   }
   const pos = [], norm = [], uv = [], idx = [];
-  const vertNormals = rawPos.map(() => [0, 0, 0]);
-  const tris = [];
-  const stride = lonSegs + 1;
-  for (let i = 0; i < latSegs; ++i) {
-    for (let j = 0; j < lonSegs; ++j) {
-      const a = i * stride + j, b = a + stride, c = a + 1, d = b + 1;
-      // theta increases CW in XZ (+X -> +Z around +Y from above? (cos, sin): th=0:+X, th=pi/2:+Z -> CW viewed from +Y!)
-      // Check quad at equator (phi=pi/2, th=0): a->b is downward (-Y), a->c is +Z: (b-a) x (c-a) = (-Y) x (+Z) = (-X) INWARD!
-      // So (a, c, d) and (a, d, b) give (+Z) x (-Y) = (+X) OUTWARD!
-      if (i > 0) tris.push([a, c, d]);
-      if (i < latSegs - 1) tris.push([a, d, b]);
-    }
-  }
-  for (const [i0, i1, i2] of tris) {
-    const p0 = rawPos[i0], p1 = rawPos[i1], p2 = rawPos[i2];
-    const fn = cross(p1[0] - p0[0], p1[1] - p0[1], p1[2] - p0[2], p2[0] - p0[0], p2[1] - p0[1], p2[2] - p0[2]);
-    for (const k of [i0, i1, i2]) {
-      vertNormals[k][0] += fn[0]; vertNormals[k][1] += fn[1]; vertNormals[k][2] += fn[2];
-    }
-  }
-  for (let i = 0; i < rawPos.length; ++i) {
-    const n = normalize3(...vertNormals[i]);
-    pos.push(...rawPos[i]);
-    norm.push(...n);
-    uv.push(...rawUv[i]);
+  for (let i = 0; i < verts.length; ++i) {
+    pos.push(...verts[i]);
+    norm.push(...normalize3(...vertNrm[i]));
+    uv.push(...uvs[i]);
   }
   for (const t of tris) idx.push(...t);
   return buildMesh(pos, norm, uv, idx);
 }
 
-/**
- * Watertight swept tapered organic branch/root/koi spine tube along `pts`.
- * Uses verified outward winding `(a, c, d, a, d, b)` + outward end caps.
- */
-export function createOrganicBranch(pts, rFnOrVal, segs = 12, closedCaps = true) {
-  const pos = [], norm = [], uv = [], idx = [];
-  const rFn = typeof rFnOrVal === 'function' ? rFnOrVal : () => rFnOrVal;
-  const nPts = pts.length;
-  let prevB = null;
-  for (let i = 0; i < nPts; ++i) {
-    const p = pts[i];
-    const p0 = pts[Math.max(0, i - 1)], p1 = pts[Math.min(nPts - 1, i + 1)];
-    const t = normalize3(p1[0] - p0[0], p1[1] - p0[1], p1[2] - p0[2]);
-    const up = Math.abs(t[1]) < 0.9 ? [0, 1, 0] : [1, 0, 0];
-    let n = prevB ? cross(prevB[0], prevB[1], prevB[2], t[0], t[1], t[2]) : cross(up[0], up[1], up[2], t[0], t[1], t[2]);
-    n = normalize3(n[0], n[1], n[2]);
-    const b = normalize3(...cross(t[0], t[1], t[2], n[0], n[1], n[2]));
-    prevB = b;
-    const rad = Math.max(0.004, rFn(i / Math.max(1, nPts - 1)));
-    for (let j = 0; j <= segs; ++j) {
-      const a = (j / segs) * Math.PI * 2;
-      const ca = Math.cos(a), sa = Math.sin(a);
-      const nx = n[0] * ca + b[0] * sa;
-      const ny = n[1] * ca + b[1] * sa;
-      const nz = n[2] * ca + b[2] * sa;
-      pos.push(p[0] + nx * rad, p[1] + ny * rad, p[2] + nz * rad);
-      norm.push(nx, ny, nz);
-      uv.push(j / segs, (i / Math.max(1, nPts - 1)) * 2.5);
-    }
+/** Exact analytical elevation of Sylvan's island terrain & sunken pebble pond bed. */
+export function islandHeightAt(x, z) {
+  const r = Math.hypot(x, z);
+  const ang = Math.atan2(z, x);
+  const shoreR = 1.92 + 0.10 * Math.sin(ang * 3.0 + 0.4) + 0.06 * Math.cos(ang * 5.0);
+  if (r < shoreR) {
+    const t = r / shoreR;
+    const ripple = (smoothNoise3(x * 1.4, 0, z * 1.4) - 0.5) * 0.04;
+    return -0.34 + 0.34 * Math.pow(t, 1.85) + ripple * (1.0 - t * t);
   }
-  const stride = segs + 1;
-  for (let i = 0; i < nPts - 1; ++i) {
+  const outer = Math.min(1.0, (r - shoreR) / 1.95);
+  let h = 0.16 * Math.sin(outer * Math.PI * 0.85);
+  h += (smoothNoise3(x * 0.85 + 2.1, 0, z * 0.85 + 1.3) - 0.5) * 0.09 * Math.min(1, (r - shoreR) * 1.2);
+  // Natural knoll under Maple corner (-1.75, -1.15) & gentle terrace under Cascade cove (+0.85, -1.38)
+  const dm = (x + 1.75) * (x + 1.75) + (z + 1.15) * (z + 1.15);
+  h += 0.24 * Math.exp(-dm / 1.15);
+  const dc = (x - 0.85) * (x - 0.85) + (z + 1.48) * (z + 1.48);
+  h += 0.16 * Math.exp(-dc / 1.10);
+  return h;
+}
+
+/** Watertight sculpted botanical diorama island with sunken pond bowl & chamfered basalt skirt. */
+export function createSculptedIslandTerrain(segs = 72) {
+  const rings = [];
+  const rads = [
+    0.0, 0.28, 0.56, 0.85, 1.14, 1.42, 1.68, 1.92,
+    2.18, 2.50, 2.86, 3.24, 3.60, 3.92, 4.10, 4.18, 3.85,
+  ];
+  const verts = [], uvs = [], tris = [];
+  const cTop = 0;
+  verts.push([0, islandHeightAt(0, 0), 0]);
+  uvs.push([0.5, 0.5]);
+
+  for (let ri = 1; ri < rads.length; ++ri) {
+    const rBase = rads[ri];
+    const startIdx = verts.length;
     for (let j = 0; j < segs; ++j) {
-      const a = i * stride + j, b = a + stride, c = a + 1, d = b + 1;
-      idx.push(a, c, d, a, d, b);
-    }
-  }
-  if (closedCaps && nPts >= 2) {
-    for (const [endIdx, flip] of [[0, true], [nPts - 1, false]]) {
-      const pc = pts[endIdx];
-      const p0 = pts[Math.max(0, endIdx - 1)], p1 = pts[Math.min(nPts - 1, endIdx + 1)];
-      const tang = normalize3(p1[0] - p0[0], p1[1] - p0[1], p1[2] - p0[2]);
-      const nCap = flip ? [-tang[0], -tang[1], -tang[2]] : tang;
-      const cVert = pos.length / 3;
-      pos.push(pc[0], pc[1], pc[2]);
-      norm.push(...nCap);
-      uv.push(0.5, 0.5);
-      const ringBase = endIdx * stride;
-      for (let j = 0; j < segs; ++j) {
-        const a = pos.length / 3;
-        pos.push(pos[(ringBase + j) * 3], pos[(ringBase + j) * 3 + 1], pos[(ringBase + j) * 3 + 2]);
-        norm.push(...nCap); uv.push(0, 0);
-        const b = pos.length / 3;
-        pos.push(pos[(ringBase + j + 1) * 3], pos[(ringBase + j + 1) * 3 + 1], pos[(ringBase + j + 1) * 3 + 2]);
-        norm.push(...nCap); uv.push(1, 0);
-        // Ring sweeps CW around +T so +T cap uses (cVert, a, b) and -T cap uses (cVert, b, a)
-        if (flip) idx.push(cVert, b, a);
-        else idx.push(cVert, a, b);
-      }
-    }
-  }
-  return buildMesh(pos, norm, uv, idx);
-}
-
-/** Layered organic leaf-cloud cushion for crimson Japanese maple crowns. */
-export function createFoliageCluster(radius = 0.65, squashY = 0.54, seed = 2.0) {
-  return createOrganicBoulder(radius, radius * squashY, radius * 0.92, seed, 12, 20);
-}
-
-/** Closed 3D wedge/ribbon feather frond (watertight solid blades with outward CCW normals). */
-export function createFernFrond(length = 0.92, archH = 0.24, leaflets = 8) {
-  const pts = [];
-  for (let i = 0; i <= 14; ++i) {
-    const t = i / 14;
-    pts.push([t * length, Math.sin(t * Math.PI * 0.85) * archH - t * t * 0.12, 0]);
-  }
-  // Build solid tapered rachis + solid leaflet diamonds attached to rachis
-  const pos = [], norm = [], uv = [], idx = [];
-  const addQuad = (a, b, c, d) => {
-    const n = normalize3(...cross(b[0] - a[0], b[1] - a[1], b[2] - a[2], c[0] - a[0], c[1] - a[1], c[2] - a[2]));
-    const base = pos.length / 3;
-    pos.push(...a, ...b, ...c, ...d);
-    norm.push(...n, ...n, ...n, ...n);
-    uv.push(0, 0, 1, 0, 1, 1, 0, 1);
-    idx.push(base, base + 1, base + 2, base, base + 2, base + 3);
-  };
-  const addTri = (a, b, c) => {
-    const n = normalize3(...cross(b[0] - a[0], b[1] - a[1], b[2] - a[2], c[0] - a[0], c[1] - a[1], c[2] - a[2]));
-    const base = pos.length / 3;
-    pos.push(...a, ...b, ...c);
-    norm.push(...n, ...n, ...n);
-    uv.push(0, 0, 1, 0, 0.5, 1);
-    idx.push(base, base + 1, base + 2);
-  };
-
-  // Solid square-section rachis stem along pts
-  const rBase = 0.016;
-  for (let i = 0; i < pts.length - 1; ++i) {
-    const t0 = i / (pts.length - 1), t1 = (i + 1) / (pts.length - 1);
-    const w0 = rBase * (1 - t0 * 0.72), w1 = rBase * (1 - t1 * 0.72);
-    const p0 = pts[i], p1 = pts[i + 1];
-    addQuad([p0[0], p0[1] + w0, w0], [p1[0], p1[1] + w1, w1], [p1[0], p1[1] + w1, -w1], [p0[0], p0[1] + w0, -w0]);
-    addQuad([p0[0], p0[1] - w0, -w0], [p1[0], p1[1] - w1, -w1], [p1[0], p1[1] - w1, w1], [p0[0], p0[1] - w0, w0]);
-    addQuad([p0[0], p0[1] - w0, w0], [p1[0], p1[1] - w1, w1], [p1[0], p1[1] + w1, w1], [p0[0], p0[1] + w0, w0]);
-    addQuad([p0[0], p0[1] + w0, -w0], [p1[0], p1[1] + w1, -w1], [p1[0], p1[1] - w1, -w1], [p0[0], p0[1] - w0, -w0]);
-  }
-
-  // Paired closed 3D diamond leaflets fanning along both sides of the arching rachis
-  for (let k = 1; k <= leaflets; ++k) {
-    const t = 0.14 + (k / (leaflets + 0.4)) * 0.80;
-    const x = t * length;
-    const y = Math.sin(t * Math.PI * 0.85) * archH - t * t * 0.12;
-    const span = 0.24 * Math.sin(t * Math.PI) + 0.04;
-    const hw = 0.036;
-    const th = 0.008;
-    for (const sgn of [1, -1]) {
-      const rootA = [x - hw * 0.4, y, sgn * 0.006];
-      const rootB = [x + hw * 0.4, y, sgn * 0.006];
-      const midT = [x + 0.05, y + 0.025 + th, sgn * span * 0.55];
-      const midB = [x + 0.05, y + 0.025 - th, sgn * span * 0.55];
-      const tip = [x + 0.12, y - 0.015, sgn * span];
-      if (sgn > 0) {
-        addTri(rootA, tip, midT); addTri(midT, tip, rootB); addTri(rootA, midT, rootB);
-        addTri(rootA, midB, tip); addTri(midB, rootB, tip); addTri(rootA, rootB, midB);
-      } else {
-        addTri(rootA, midT, tip); addTri(midT, rootB, tip); addTri(rootA, rootB, midT);
-        addTri(rootA, tip, midB); addTri(midB, tip, rootB); addTri(rootA, midB, rootB);
-      }
-    }
-  }
-  return buildMesh(pos, norm, uv, idx);
-}
-
-/** Watertight V-notched thick water-lily pad (`y = -thick/2 .. +thick/2`) with integral underwater root stem option. */
-export function createLilyPad(radius = 0.32, thick = 0.018, segs = 28) {
-  const pos = [], norm = [], uv = [], idx = [];
-  const startA = 0.28, arc = Math.PI * 2 - 0.56;
-  const hy = thick * 0.5;
-  const pushQuad = (a, b, c, d) => {
-    const n = normalize3(...cross(b[0] - a[0], b[1] - a[1], b[2] - a[2], c[0] - a[0], c[1] - a[1], c[2] - a[2]));
-    const base = pos.length / 3;
-    pos.push(...a, ...b, ...c, ...d);
-    norm.push(...n, ...n, ...n, ...n);
-    uv.push(0, 0, 1, 0, 1, 1, 0, 1);
-    idx.push(base, base + 1, base + 2, base, base + 2, base + 3);
-  };
-  const pushTri = (a, b, c) => {
-    const n = normalize3(...cross(b[0] - a[0], b[1] - a[1], b[2] - a[2], c[0] - a[0], c[1] - a[1], c[2] - a[2]));
-    const base = pos.length / 3;
-    pos.push(...a, ...b, ...c);
-    norm.push(...n, ...n, ...n);
-    uv.push(0.5, 0.5, 1, 0, 1, 1);
-    idx.push(base, base + 1, base + 2);
-  };
-
-  for (let i = 0; i < segs; ++i) {
-    const a0 = startA + (i / segs) * arc;
-    const a1 = startA + ((i + 1) / segs) * arc;
-    // CCW when viewed from +Y: (r cos a, 0, -r sin a)
-    const x0 = Math.cos(a0) * radius, z0 = -Math.sin(a0) * radius;
-    const x1 = Math.cos(a1) * radius, z1 = -Math.sin(a1) * radius;
-    pushTri([0, hy, 0], [x0, hy, z0], [x1, hy, z1]);
-    pushTri([0, -hy, 0], [x1, -hy, z1], [x0, -hy, z0]);
-    pushQuad([x0, -hy, z0], [x1, -hy, z1], [x1, hy, z1], [x0, hy, z0]);
-  }
-  const sX = Math.cos(startA) * radius, sZ = -Math.sin(startA) * radius;
-  const eX = Math.cos(startA + arc) * radius, eZ = -Math.sin(startA + arc) * radius;
-  pushQuad([0, -hy, 0], [sX, -hy, sZ], [sX, hy, sZ], [0, hy, 0]);
-  pushQuad([eX, -hy, eZ], [0, -hy, 0], [0, hy, 0], [eX, hy, eZ]);
-  return buildMesh(pos, norm, uv, idx);
-}
-
-/** Solid two-tier blooming lotus blossom (`y = 0..height`) with watertight solid petals. */
-export function createLotusBloom(radius = 0.14) {
-  const pos = [], norm = [], uv = [], idx = [];
-  const pushTri = (a, b, c) => {
-    const n = normalize3(...cross(b[0] - a[0], b[1] - a[1], b[2] - a[2], c[0] - a[0], c[1] - a[1], c[2] - a[2]));
-    const base = pos.length / 3;
-    pos.push(...a, ...b, ...c);
-    norm.push(...n, ...n, ...n);
-    uv.push(0.5, 0, 1, 0.5, 0, 1);
-    idx.push(base, base + 1, base + 2);
-  };
-  for (const [count, ringR, tilt, h] of [[8, radius, 0.42, 0.085], [6, radius * 0.65, 0.85, 0.105]]) {
-    for (let i = 0; i < count; ++i) {
-      const a = (i / count) * Math.PI * 2 + ringR;
+      const a = (j / segs) * Math.PI * 2;
+      // CCW viewed from +Y: (cos a, 0, -sin a)
       const ca = Math.cos(a), sa = Math.sin(a);
-      const nx = -sa, nz = ca;
-      const bL = [ca * 0.02 + nx * 0.022, 0, -sa * 0.02 - nz * 0.022];
-      const bR = [ca * 0.02 - nx * 0.022, 0, -sa * 0.02 + nz * 0.022];
-      const tip = [ca * ringR, h * tilt, -sa * ringR];
-      const midIn = [ca * ringR * 0.55, h * tilt * 0.45 + 0.028, -sa * ringR * 0.55];
-      // Solid tetrahedron-like cupped petal (always closed + outward CCW!)
-      pushTri(bL, bR, tip);
-      pushTri(bL, tip, midIn);
-      pushTri(midIn, tip, bR);
-      pushTri(bL, midIn, bR);
+      const wobble = ri >= 12 ? 1.0 + 0.03 * Math.sin(a * 5.0 + 0.7) + 0.02 * Math.cos(a * 8.0) : 1.0;
+      const rr = rBase * wobble;
+      const x = ca * rr, z = -sa * rr;
+      let y = islandHeightAt(x, z);
+      if (ri === 14) y = -0.02;
+      else if (ri === 15) y = -0.22;
+      else if (ri === 16) y = -0.26;
+      verts.push([x, y, z]);
+      uvs.push([0.5 + x * 0.11, 0.5 + z * 0.11]);
+    }
+    rings.push(startIdx);
+  }
+  const cBot = verts.length;
+  verts.push([0, -0.26, 0]);
+  uvs.push([0.5, 0.5]);
+
+  // First fan: outward +Y
+  for (let j = 0; j < segs; ++j) {
+    const j1 = (j + 1) % segs;
+    tris.push([cTop, rings[0] + j, rings[0] + j1]);
+  }
+  // Ring strips down to outer bottom rim
+  for (let ri = 0; ri < rings.length - 1; ++ri) {
+    const r0 = rings[ri], r1 = rings[ri + 1];
+    for (let j = 0; j < segs; ++j) {
+      const j1 = (j + 1) % segs;
+      const a = r0 + j, b = r0 + j1, c = r1 + j, d = r1 + j1;
+      tris.push([a, c, d], [a, d, b]);
     }
   }
-  return buildMesh(pos, norm, uv, idx);
+  // Bottom cap fan: outward -Y
+  const lastRing = rings[rings.length - 1];
+  for (let j = 0; j < segs; ++j) {
+    const j1 = (j + 1) % segs;
+    tris.push([cBot, lastRing + j1, lastRing + j]);
+  }
+  return pushSmoothTris(verts, uvs, tris);
 }
 
-/** Articulated smooth swimming koi segment (tapered fish body cylinder or forked caudal fin). */
-export function createKoiSegment(len = 0.22, rFront = 0.06, rBack = 0.04, heightRatio = 1.15) {
-  return createOrganicBranch([[0, 0, 0], [-len * 0.5, 0, 0], [-len, 0, 0]], (t) => (rFront * (1 - t) + rBack * t) * (1 + 0.12 * heightRatio * Math.sin(t * Math.PI)), 14, true);
+/** Finely tessellated circular pond water surface (`y = 0`) for smooth vertex waves. */
+export function createPondWaterDisk(radius = 2.08, ringCount = 26, segs = 64) {
+  const verts = [[0, 0, 0]];
+  const uvs = [[0.5, 0.5]];
+  const tris = [];
+  for (let r = 1; r <= ringCount; ++r) {
+    const rr = (r / ringCount) * radius;
+    const base = verts.length;
+    for (let j = 0; j < segs; ++j) {
+      const a = (j / segs) * Math.PI * 2;
+      const x = Math.cos(a) * rr, z = -Math.sin(a) * rr;
+      verts.push([x, 0, z]);
+      uvs.push([0.5 + (x / (radius * 2)), 0.5 + (z / (radius * 2))]);
+    }
+    if (r === 1) {
+      for (let j = 0; j < segs; ++j) tris.push([0, base + j, base + ((j + 1) % segs)]);
+    } else {
+      const prev = base - segs;
+      for (let j = 0; j < segs; ++j) {
+        const j1 = (j + 1) % segs;
+        tris.push([prev + j, base + j, base + j1], [prev + j, base + j1, prev + j1]);
+      }
+    }
+  }
+  return pushSmoothTris(verts, uvs, tris);
+}
+
+/** Subdivided icosphere basalt boulder — zero UV/normal pinch cross artifacts, grounded flat base. */
+export function createSculptedBoulder(rx = 0.6, ry = 0.4, rz = 0.5, seed = 1.0) {
+  const t = (1 + Math.sqrt(5)) / 2;
+  let icoV = [
+    [-1, t, 0], [1, t, 0], [-1, -t, 0], [1, -t, 0],
+    [0, -1, t], [0, 1, t], [0, -1, -t], [0, 1, -t],
+    [t, 0, -1], [t, 0, 1], [-t, 0, -1], [-t, 0, 1],
+  ].map((p) => normalize3(...p));
+  let icoF = [
+    [0, 11, 5], [0, 5, 1], [0, 1, 7], [0, 7, 10], [0, 10, 11],
+    [1, 5, 9], [5, 11, 4], [11, 10, 2], [10, 7, 6], [7, 1, 8],
+    [3, 9, 4], [3, 4, 2], [3, 2, 6], [3, 6, 8], [3, 8, 9],
+    [4, 9, 5], [2, 4, 11], [6, 2, 10], [8, 6, 7], [9, 8, 1],
+  ];
+  for (let sub = 0; sub < 2; ++sub) {
+    const cache = new Map();
+    const mid = (a, b) => {
+      const key = a < b ? `${a}_${b}` : `${b}_${a}`;
+      if (cache.has(key)) return cache.get(key);
+      const va = icoV[a], vb = icoV[b];
+      const idx = icoV.length;
+      icoV.push(normalize3(va[0] + vb[0], va[1] + vb[1], va[2] + vb[2]));
+      cache.set(key, idx);
+      return idx;
+    };
+    const nextF = [];
+    for (const [a, b, c] of icoF) {
+      const ab = mid(a, b), bc = mid(b, c), ca = mid(c, a);
+      nextF.push([a, ab, ca], [b, bc, ab], [c, ca, bc], [ab, bc, ca]);
+    }
+    icoF = nextF;
+  }
+
+  const verts = [];
+  const uvs = [];
+  for (const [nx, ny, nz] of icoV) {
+    const n1 = smoothNoise3(nx * 2.1 + seed, ny * 2.3 + seed, nz * 2.1 + seed);
+    const n2 = smoothNoise3(nx * 4.8 + seed * 1.7, ny * 4.5, nz * 4.8) * 0.32;
+    const strata = Math.sin(ny * 13.0 + n1 * 4.2) * 0.055;
+    const ridge = 1.0 - Math.abs(n2 * 2.0 - 0.32) * 0.35;
+    const disp = (0.78 + 0.38 * (n1 + n2 * 0.45) + strata) * ridge;
+    const flatY = ny < -0.18 ? -0.18 + (ny + 0.18) * 0.16 : ny;
+    verts.push([nx * rx * disp, (flatY + 0.18) * ry * (ny > 0 ? disp : 1.0) - 0.12, nz * rz * disp]);
+    uvs.push([0.5 + nx * 0.45, 0.5 - ny * 0.45]);
+  }
+  return pushSmoothTris(verts, uvs, icoF);
+}
+
+/** Smooth curved open waterfall sheet hugging cliff contour down into the pond. */
+export function createCurvedWaterfall(pts, wTop = 0.18, wBot = 0.34, segsW = 10) {
+  const verts = [], uvs = [], tris = [];
+  const stride = segsW + 1;
+  for (let i = 0; i < pts.length; ++i) {
+    const v = i / (pts.length - 1);
+    const [cx, cy, cz] = pts[i];
+    const hw = wTop + (wBot - wTop) * v;
+    for (let j = 0; j <= segsW; ++j) {
+      const u = j / segsW;
+      const s = u * 2.0 - 1.0;
+      // Gently convex parabolic bow along front stream
+      const bowZ = (1.0 - s * s) * 0.035;
+      verts.push([cx + s * hw, cy, cz + bowZ]);
+      uvs.push([u, v]);
+    }
+  }
+  for (let i = 0; i < pts.length - 1; ++i) {
+    for (let j = 0; j < segsW; ++j) {
+      const a = i * stride + j, b = a + stride, c = a + 1, d = b + 1;
+      // Top->bottom (y drops as i increases), left->right (+X as j increases): (d-a)x(c-a) -> +Z front outward
+      tris.push([a, b, d], [a, d, c]);
+    }
+  }
+  return pushSmoothTris(verts, uvs, tris);
+}
+
+/**
+ * Single watertight sculpted Nishikigoi mesh (`x = 0` rounded nose -> `x = -0.40` forked caudal tail)
+ * with dorsal ridge, integrated dorsal fin, swept pectoral fins, pelvic fins, and deeply forked tail fin.
+ */
+export function createAnatomicalKoi() {
+  const len = 0.40;
+  const xSegs = 44;
+  const rSegs = 20;
+  const verts = [], uvs = [], tris = [];
+
+  const profile = (t) => {
+    let w = 0, hTop = 0, hBot = 0;
+    if (t < 0.74) {
+      const u = t / 0.74;
+      const body = Math.sin(Math.pow(u, 0.56) * Math.PI * 0.91);
+      // Graceful narrow caudal peduncle before tail flare
+      const pinch = t > 0.64 ? 1.0 - 0.35 * Math.sin(((t - 0.64) / 0.10) * Math.PI * 0.5) : 1.0;
+      w = (0.044 * body + 0.007 * (1 - u)) * pinch;
+      hTop = (0.048 * Math.pow(body, 0.85) + 0.007 * (1 - u)) * (0.85 + 0.15 * pinch);
+      hBot = (0.032 * body + 0.005 * (1 - u)) * (0.85 + 0.15 * pinch);
+      if (t < 0.05) {
+        const s = Math.sin((t / 0.05) * Math.PI * 0.5);
+        w *= s; hTop *= s; hBot *= s;
+      }
+    } else {
+      // Veil caudal tail fan with soft trailing lobe taper
+      const u = (t - 0.74) / 0.26;
+      const arch = Math.sin(Math.min(1.0, u * 0.82) * Math.PI * 0.78);
+      w = 0.006 * (1.0 - 0.75 * u) + 0.0018;
+      hTop = 0.010 + 0.046 * arch * (1.0 - 0.25 * Math.pow(u, 3.0));
+      hBot = 0.008 + 0.040 * arch * (1.0 - 0.25 * Math.pow(u, 3.0));
+    }
+    return { w, hTop, hBot };
+  };
+
+  // Nose pole
+  verts.push([0.004, 0.0, 0.0]);
+  uvs.push([0.0, 0.5]);
+
+  for (let i = 1; i < xSegs; ++i) {
+    const t = i / xSegs;
+    const xBase = -t * len;
+    const { w, hTop, hBot } = profile(t);
+    for (let j = 0; j <= rSegs; ++j) {
+      const a = (j / rSegs) * Math.PI * 2;
+      const ca = Math.cos(a), sa = Math.sin(a); // sa=+1 top (+Y), sa=-1 bot (-Y), ca=+1 (+Z)
+      const h = sa >= 0 ? hTop : hBot;
+      // Smooth central caudal V-fork notch at trailing edge
+      const forkPull = (t > 0.85 && Math.abs(sa) < 0.75) ? (1.0 - Math.abs(sa) / 0.75) * 0.055 * ((t - 0.85) / 0.15) : 0.0;
+      const eyeBump = (t > 0.07 && t < 0.14 && sa > 0.15 && Math.abs(ca) > 0.75) ? 0.004 : 0.0;
+      verts.push([xBase + forkPull, sa * h, ca * (w + eyeBump)]);
+      uvs.push([t, 0.5 - sa * 0.45]);
+    }
+  }
+  const tailPoleIdx = verts.length;
+  verts.push([-len + 0.042, 0.0, 0.0]);
+  uvs.push([1.0, 0.5]);
+
+  const stride = rSegs + 1;
+  // Nose fan: outward +X
+  for (let j = 0; j < rSegs; ++j) {
+    tris.push([0, 1 + j + 1, 1 + j]);
+  }
+  // Body & tail rings
+  for (let i = 0; i < xSegs - 2; ++i) {
+    const r0 = 1 + i * stride, r1 = r0 + stride;
+    for (let j = 0; j < rSegs; ++j) {
+      const a = r0 + j, b = a + 1, c = r1 + j, d = c + 1;
+      tris.push([a, b, d], [a, d, c]);
+    }
+  }
+  // Tail pole fan: outward -X
+  const lastBodyRing = 1 + (xSegs - 2) * stride;
+  for (let j = 0; j < rSegs; ++j) {
+    tris.push([tailPoleIdx, lastBodyRing + j, lastBodyRing + j + 1]);
+  }
+
+  // Seamlessly attached curved fan fins fused INTO the body hull (n-gon convex outline, zero sharp boxes)
+  const addCurvedFin = (pts, thick = 0.003) => {
+    const n = pts.length;
+    const f0 = verts.length;
+    for (const p of pts) {
+      verts.push([p[0], p[1] + thick, p[2]]); uvs.push([Math.max(0.05, Math.min(0.95, -p[0] / len)), 0.88]);
+    }
+    const b0 = verts.length;
+    for (const p of pts) {
+      verts.push([p[0], p[1] - thick, p[2]]); uvs.push([Math.max(0.05, Math.min(0.95, -p[0] / len)), 0.88]);
+    }
+    for (let k = 1; k < n - 1; ++k) {
+      tris.push([f0, f0 + k, f0 + k + 1]);
+      tris.push([b0, b0 + k + 1, b0 + k]);
+    }
+    for (let k = 0; k < n; ++k) {
+      const k1 = (k + 1) % n;
+      tris.push([f0 + k, b0 + k, b0 + k1], [f0 + k, b0 + k1, f0 + k1]);
+    }
+  };
+  // Left (+Z) & Right (-Z) rounded swept pectoral fans rooted inside hull
+  addCurvedFin([
+    [-0.085, -0.012, 0.020], [-0.105, -0.016, 0.068], [-0.128, -0.018, 0.086],
+    [-0.156, -0.017, 0.080], [-0.165, -0.014, 0.052], [-0.135, -0.010, 0.020],
+  ], 0.0022);
+  addCurvedFin([
+    [-0.135, -0.010, -0.020], [-0.165, -0.014, -0.052], [-0.156, -0.017, -0.080],
+    [-0.128, -0.018, -0.086], [-0.105, -0.016, -0.068], [-0.085, -0.012, -0.020],
+  ], 0.0022);
+  // Swept pelvic fins
+  addCurvedFin([
+    [-0.175, -0.018, 0.014], [-0.192, -0.022, 0.042], [-0.215, -0.023, 0.048],
+    [-0.228, -0.020, 0.034], [-0.210, -0.016, 0.014],
+  ], 0.0018);
+  addCurvedFin([
+    [-0.210, -0.016, -0.014], [-0.228, -0.020, -0.034], [-0.215, -0.023, -0.048],
+    [-0.192, -0.022, -0.042], [-0.175, -0.018, -0.014],
+  ], 0.0018);
+  // Flowing curved dorsal crest along back spine
+  const addVerticalFin = (pts, halfZ = 0.0022) => {
+    const n = pts.length;
+    const l0 = verts.length;
+    for (const p of pts) { verts.push([p[0], p[1], p[2] + halfZ]); uvs.push([-p[0] / len, 0.45]); }
+    const r0 = verts.length;
+    for (const p of pts) { verts.push([p[0], p[1], p[2] - halfZ]); uvs.push([-p[0] / len, 0.55]); }
+    for (let k = 1; k < n - 1; ++k) {
+      tris.push([l0, l0 + k, l0 + k + 1]);
+      tris.push([r0, r0 + k + 1, r0 + k]);
+    }
+    for (let k = 0; k < n; ++k) {
+      const k1 = (k + 1) % n;
+      tris.push([l0 + k, r0 + k, r0 + k1], [l0 + k, r0 + k1, l0 + k1]);
+    }
+  };
+  addVerticalFin([
+    [-0.125, 0.032, 0], [-0.148, 0.072, 0], [-0.182, 0.082, 0],
+    [-0.224, 0.074, 0], [-0.252, 0.056, 0], [-0.225, 0.020, 0],
+  ], 0.0020);
+
+  return pushSmoothTris(verts, uvs, tris);
+}
+
+/** Organic V-notched water-lily pad with subtle upturned botanical rim (flush at water surface y = 0). */
+export function createCurledLilyPad(radius = 0.25, segs = 28) {
+  const verts = [[0, 0.004, 0], [0, 0.000, 0]];
+  const uvs = [[0.5, 0.5], [0.5, 0.5]];
+  const tris = [];
+  const startA = 0.24, arc = Math.PI * 2 - 0.48;
+  const topRing = [], botRing = [];
+  for (let i = 0; i <= segs; ++i) {
+    const t = i / segs;
+    const a = startA + t * arc;
+    const ca = Math.cos(a), sa = Math.sin(a);
+    const wave = 0.006 + 0.004 * Math.sin(a * 5.0);
+    const x = ca * radius, z = -sa * radius;
+    topRing.push(verts.length);
+    verts.push([x, 0.006 + wave, z]); uvs.push([0.5 + ca * 0.48, 0.5 - sa * 0.48]);
+    botRing.push(verts.length);
+    verts.push([x, 0.000, z]); uvs.push([0.5 + ca * 0.48, 0.5 - sa * 0.48]);
+  }
+  for (let i = 0; i < segs; ++i) {
+    tris.push([0, topRing[i], topRing[i + 1]]);
+    tris.push([1, botRing[i + 1], botRing[i]]);
+    tris.push([botRing[i], botRing[i + 1], topRing[i + 1]], [botRing[i], topRing[i + 1], topRing[i]]);
+  }
+  tris.push([1, botRing[0], topRing[0]], [1, topRing[0], 0]);
+  tris.push([0, topRing[segs], botRing[segs]], [0, botRing[segs], 1]);
+  const mesh = pushSmoothTris(verts, uvs, tris);
+  const cols = new Float32Array(verts.length * 4);
+  for (let i = 0; i < verts.length; ++i) {
+    const rNorm = Math.min(1.0, Math.hypot(verts[i][0], verts[i][2]) / Math.max(1e-4, radius));
+    const a = Math.atan2(verts[i][2], verts[i][0]);
+    const vein = Math.pow(0.5 + 0.5 * Math.cos(a * 11.0), 3.0) * 0.06;
+    const cen = 1.0 - rNorm * 0.42;
+    cols[i * 4 + 0] = 0.14 + 0.16 * rNorm + vein * 0.5;
+    cols[i * 4 + 1] = 0.34 + 0.24 * rNorm + 0.06 * (1 - cen) + vein;
+    cols[i * 4 + 2] = 0.12 + 0.12 * rNorm;
+    cols[i * 4 + 3] = 1.0;
+  }
+  mesh.colors = cols;
+  return mesh;
+}
+
+/** Smooth continuous vertical/arched cattail & underwater stem tube using Mesh.tube. */
+export function createSmoothTube(pts, rVals, sides = 10) {
+  return Mesh.tube(pts, rVals, sides, { capStart: true, capEnd: true, miterJoints: true });
+}
+
+/** Graceful arching tufted bank clump of cattail stalks + sedge grass blades rooted together at y = -0.04. */
+export function createSedgeClumpGeo(bladeCount = 14, seed = 1.0) {
+  const meshes = [];
+  for (let i = 0; i < bladeCount; ++i) {
+    const a = (i / bladeCount) * Math.PI * 2 + seed * 0.7;
+    const ox = Math.cos(a) * (0.02 + (i % 3) * 0.025);
+    const oz = Math.sin(a) * (0.02 + (i % 3) * 0.025);
+    const len = 0.46 + (i % 4) * 0.12;
+    const path = Mesh.bladePath({
+      base: [ox, -0.03, oz],
+      tipDir: [Math.cos(a) * 0.48, 0.88, Math.sin(a) * 0.48],
+      length: len,
+      bend: 0.14 + (i % 3) * 0.06,
+      lift: 0.12,
+      segments: 7,
+    });
+    meshes.push(Mesh.bladeStrip(path, {
+      width: 0.018,
+      thickness: 0.002,
+      profileScale: [1.0, 0.95, 0.88, 0.75, 0.56, 0.34, 0.14, 0.02],
+      capStart: true,
+      capEnd: true,
+    }));
+  }
+  return Mesh.merge(meshes);
+}
+
+/** Traditional hexagonal Japanese carved stone Tōrō lantern meshes ({ stone, ember }). */
+export function createCarvedLanternMeshes() {
+  const hexSlab = (rBot, rTop, yBot, yTop) => {
+    const segs = 6;
+    const verts = [[0, yTop, 0], [0, yBot, 0]];
+    const uvs = [[0.5, 0.5], [0.5, 0.5]];
+    const tris = [], tr = [], br = [];
+    for (let i = 0; i < segs; ++i) {
+      const a = (i / segs) * Math.PI * 2;
+      const ca = Math.cos(a), sa = Math.sin(a);
+      tr.push(verts.length); verts.push([ca * rTop, yTop, -sa * rTop]); uvs.push([0.5 + ca * 0.4, 0.5 - sa * 0.4]);
+      br.push(verts.length); verts.push([ca * rBot, yBot, -sa * rBot]); uvs.push([0.5 + ca * 0.4, 0.5 - sa * 0.4]);
+    }
+    for (let i = 0; i < segs; ++i) {
+      const j = (i + 1) % segs;
+      tris.push([0, tr[i], tr[j]], [1, br[j], br[i]], [br[i], br[j], tr[j]], [br[i], tr[j], tr[i]]);
+    }
+    return pushSmoothTris(verts, uvs, tris);
+  };
+
+  const parts = [
+    hexSlab(0.28, 0.24, -0.14, 0.10),
+    Mesh.tube([[0, 0.06, 0], [0, 0.28, 0], [0, 0.44, 0], [0, 0.52, 0]], [0.11, 0.085, 0.095, 0.16], 10),
+    hexSlab(0.18, 0.18, 0.51, 0.55),
+    hexSlab(0.26, 0.12, 0.72, 0.82),
+    hexSlab(0.26, 0.26, 0.70, 0.72),
+    Mesh.sphere(0.065, 10, 8).scale(0.85, 1.35, 0.85).translate(0, 0.87, 0),
+  ];
+  for (let i = 0; i < 4; ++i) {
+    const a = (i / 4) * Math.PI * 2 + Math.PI * 0.25;
+    const px = Math.cos(a) * 0.11, pz = Math.sin(a) * 0.11;
+    parts.push(Mesh.tube([[px, 0.54, pz], [px, 0.71, pz]], 0.018, 6));
+  }
+  return {
+    stone: Mesh.merge(parts),
+    ember: Mesh.sphere(0.060, 12, 10).translate(0, 0.60, 0),
+  };
 }

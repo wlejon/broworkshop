@@ -1,4 +1,4 @@
-// js/textures.js — Procedural natural textures: wet volcanic slate, furrowed bark, autumn maple foliage, pebbles, waterfall & koi scales.
+// js/textures.js — High-detail botanical alpha cutouts, bark, basalt, and vivid carp scale maps.
 
 function hash2(x, y) {
   const n = Math.sin(x * 127.1 + y * 311.7) * 43758.5453123;
@@ -24,27 +24,18 @@ function clampByte(v) {
   return Math.max(0, Math.min(255, v | 0));
 }
 
-/** Dark fractured basalt stone with patchy velvet emerald moss restricted to upper pockets. */
+/** Crisp fractured volcanic basalt grain (moss masking is computed seamlessly in world-space shader). */
 export function makeMossyBasalt(w = 192, h = 192) {
   const data = new Uint8Array(w * h * 4);
   for (let y = 0; y < h; ++y) {
-    const topBias = Math.max(0, 1.0 - (y / h) * 1.95);
     for (let x = 0; x < w; ++x) {
-      const rock = fbm(x * 0.09, y * 0.09);
-      const crack = Math.abs(fbm(x * 0.22 + 3, y * 0.22 + 5) - 0.5) * 2.0;
-      const grain = fbm(x * 0.34 + 13, y * 0.34 + 7);
-      const mossMask = Math.max(0, Math.min(1, (topBias * 1.05 + grain * 0.42 - 0.68) * 3.4));
-      const shade = 0.72 + rock * 0.46 - (1.0 - crack) * 0.16;
-      const baseR = 56 * shade;
-      const baseG = 61 * shade;
-      const baseB = 65 * shade;
-      const mossR = 46 + grain * 34;
-      const mossG = 94 + grain * 48;
-      const mossB = 36 + grain * 22;
+      const rock = fbm(x * 0.10, y * 0.10);
+      const grain = fbm(x * 0.36 + 7, y * 0.36 + 13);
+      const v = 132 + rock * 56 + grain * 28;
       const o = (y * w + x) * 4;
-      data[o + 0] = clampByte(baseR * (1 - mossMask) + mossR * mossMask);
-      data[o + 1] = clampByte(baseG * (1 - mossMask) + mossG * mossMask);
-      data[o + 2] = clampByte(baseB * (1 - mossMask) + mossB * mossMask);
+      data[o + 0] = clampByte(v * 0.94);
+      data[o + 1] = clampByte(v * 0.98);
+      data[o + 2] = clampByte(v * 1.02);
       data[o + 3] = 255;
     }
   }
@@ -56,106 +47,154 @@ export function makeMapleBark(w = 192, h = 192) {
   const data = new Uint8Array(w * h * 4);
   for (let y = 0; y < h; ++y) {
     for (let x = 0; x < w; ++x) {
-      const furrow = 0.5 + 0.5 * Math.sin(x * 0.38 + fbm(x * 0.09, y * 0.06) * 4.8);
-      const fin = fbm(x * 0.24, y * 0.14);
-      const lichen = Math.max(0, fin - 0.68) * 2.8;
+      const furrow = 0.5 + 0.5 * Math.sin(x * 0.42 + fbm(x * 0.09, y * 0.05) * 5.2);
+      const fin = fbm(x * 0.25, y * 0.14);
+      const lichen = Math.max(0, fin - 0.69) * 2.5;
       const o = (y * w + x) * 4;
-      data[o + 0] = clampByte(50 + furrow * 42 + lichen * 48);
-      data[o + 1] = clampByte(38 + furrow * 34 + lichen * 72);
-      data[o + 2] = clampByte(32 + furrow * 26 + lichen * 40);
+      data[o + 0] = clampByte(56 + furrow * 42 + lichen * 48);
+      data[o + 1] = clampByte(44 + furrow * 34 + lichen * 68);
+      data[o + 2] = clampByte(37 + furrow * 26 + lichen * 36);
       data[o + 3] = 255;
     }
   }
   return { width: w, height: h, data };
 }
 
-/** Variegated autumn Japanese maple leaf-canopy texture (deep crimson, scarlet & warm gold leaf clusters). */
-export function makeMapleFoliage(w = 192, h = 192) {
+/** Crisp lush multi-leaf Japanese maple spray RGBA cutout with 5-lobed serrated leaves & fine veins. */
+export function makePalmateMapleLeaf(w = 128, h = 128) {
+  const data = new Uint8Array(w * h * 4);
+  const drawLobeLeaf = (u, v, cx, cy, scale, rot) => {
+    const cu = Math.cos(rot), su = Math.sin(rot);
+    const rx = (u - cx) * cu - (v - cy) * su;
+    const ry = (u - cx) * su + (v - cy) * cu;
+    const dx = rx / scale, dy = (ry - 0.16 * scale) / scale;
+    const r = Math.hypot(dx, dy);
+    const ang = Math.atan2(dx, Math.max(1e-4, dy));
+    const lobeCos = Math.cos(ang * 2.55);
+    const serrate = 0.045 * Math.sin(r * 46.0);
+    const maxR = (0.38 + 0.40 * Math.max(0, lobeCos) + serrate) * smoothMask(dy, -0.06, 0.12);
+    const petiole = ry >= 0 && ry < 0.18 * scale && Math.abs(rx) < 0.032 * scale;
+    const inside = petiole || (dy > -0.06 && r < maxR && ry < 0.92 * scale);
+    const vein = Math.exp(-Math.abs(Math.sin(ang * 2.55)) * 10.0) * Math.max(0, 1.0 - r);
+    return { inside, r, vein };
+  };
+
+  for (let y = 0; y < h; ++y) {
+    const v = 1.0 - y / (h - 1);
+    for (let x = 0; x < w; ++x) {
+      const u = (x / (w - 1)) * 2.0 - 1.0;
+      const a = drawLobeLeaf(u, v, 0.0, 0.12, 0.88, 0.0);
+      const b = drawLobeLeaf(u, v, -0.28, 0.04, 0.62, 0.58);
+      const c = drawLobeLeaf(u, v, 0.28, 0.04, 0.62, -0.58);
+      const stem = v < 0.18 && Math.abs(u) < 0.032;
+      const inside = stem || a.inside || b.inside || c.inside;
+
+      const grain = fbm(x * 0.16, y * 0.16);
+      const vein = Math.max(a.vein, b.vein, c.vein);
+      const tipWarm = Math.max(0, Math.min(1, Math.min(a.r, Math.min(b.r, c.r)) * 1.1 + grain * 0.25));
+      const o = (y * w + x) * 4;
+      data[o + 0] = clampByte(215 + tipWarm * 30 + vein * 14);
+      data[o + 1] = clampByte(168 + tipWarm * 42 + vein * 18);
+      data[o + 2] = clampByte(126 + tipWarm * 24 + vein * 12);
+      data[o + 3] = inside ? 255 : 0;
+    }
+  }
+  return { width: w, height: h, data };
+}
+
+function smoothMask(v, e0, e1) {
+  const t = Math.max(0, Math.min(1, (v - e0) / (e1 - e0)));
+  return t * t * (3 - 2 * t);
+}
+
+/** Pinnate forest fern frond RGBA alpha-cutout with opposite tapered leaflets and central rachis. */
+export function makeFernFrondTex(w = 128, h = 256) {
   const data = new Uint8Array(w * h * 4);
   for (let y = 0; y < h; ++y) {
+    const v = 1.0 - y / (h - 1);
     for (let x = 0; x < w; ++x) {
-      const patch = fbm(x * 0.10, y * 0.10);
-      const leaf = fbm(x * 0.44 + 5, y * 0.44 + 11);
-      const darkPocket = Math.max(0, 1.0 - leaf * 1.45) * 0.35;
-      const warm = Math.max(0, Math.min(1, patch * 1.4 - 0.18));
+      const u = (x / (w - 1)) * 2.0 - 1.0;
+      const absU = Math.abs(u);
+      const rachis = absU < 0.042 * (1.0 - v * 0.72);
+      const pairs = 15.0;
+      const pinnaIdx = Math.floor(v * pairs);
+      const localY = (v * pairs) - pinnaIdx;
+      const envW = Math.sin(Math.pow(v, 0.72) * Math.PI) * 0.88 + 0.08;
+      // Slight upward sweep of each pinna + tapered blade
+      const sweepY = localY - absU * 0.28;
+      const pinnaThick = Math.max(0, 0.34 * (1.0 - absU / Math.max(0.05, envW)));
+      const inPinna = v > 0.06 && v < 0.98 && absU < envW && Math.abs(sweepY - 0.48) < pinnaThick;
+      const inside = rachis || inPinna;
+
+      const shade = 0.82 + 0.22 * fbm(x * 0.14, y * 0.10);
       const o = (y * w + x) * 4;
-      data[o + 0] = clampByte((146 + warm * 88 + leaf * 24) * (1 - darkPocket));
-      data[o + 1] = clampByte((30 + warm * 78 + leaf * 20) * (1 - darkPocket));
-      data[o + 2] = clampByte((20 + warm * 16) * (1 - darkPocket));
-      data[o + 3] = 255;
+      data[o + 0] = clampByte((rachis ? 115 : 88) * shade);
+      data[o + 1] = clampByte((rachis ? 156 : 162 + v * 32) * shade);
+      data[o + 2] = clampByte((rachis ? 70 : 62) * shade);
+      data[o + 3] = inside ? 255 : 0;
     }
   }
   return { width: w, height: h, data };
 }
 
-/** Textured river-stone basin floor & dappled woodland moss/soil plinth margin. */
+/** Variegated autumn leaf albedo modulation map (legacy compatibility if referenced). */
+export function makeMapleFoliage(w = 192, h = 192) {
+  return makePalmateMapleLeaf(w, h);
+}
+
+/** Detailed multi-pebble submerged riverbed & dark soil island substrate texture. */
 export function makePondBedTexture(w = 256, h = 256) {
   const data = new Uint8Array(w * h * 4);
-  const cx = w * 0.5, cy = h * 0.5;
   for (let y = 0; y < h; ++y) {
     for (let x = 0; x < w; ++x) {
-      const r = Math.hypot(x - cx, y - cy) / (w * 0.5);
-      const peb = fbm(x * 0.14, y * 0.14);
-      const fine = fbm(x * 0.45 + 4, y * 0.45 + 9);
-      const loam = fbm(x * 0.08 + 19, y * 0.08 + 23);
-      const mix = r < 0.54 ? 0.0 : Math.min(1, (r - 0.54) * 5.0);
-      const bedR = 40 + peb * 34 + fine * 16;
-      const bedG = 52 + peb * 38 + fine * 14;
-      const bedB = 50 + peb * 32 + fine * 14;
-      // Mottled forest earth & mossy turf on outer bank
-      const mossPatch = Math.max(0, Math.min(1, (loam - 0.36) * 2.4));
-      const dither = (hash2(x, y) - 0.5) * 6.0;
-      const rimR = 46 * (1 - mossPatch) + (38 + peb * 28) * mossPatch + fine * 10 + dither;
-      const rimG = 42 * (1 - mossPatch) + (74 + peb * 42) * mossPatch + fine * 12 + dither;
-      const rimB = 34 * (1 - mossPatch) + (34 + peb * 20) * mossPatch + fine * 8 + dither;
+      const peb = fbm(x * 0.18, y * 0.18);
+      const sand = fbm(x * 0.45 + 11, y * 0.45 + 3);
+      const stone = Math.pow(peb, 1.15);
       const o = (y * w + x) * 4;
-      data[o + 0] = clampByte(bedR * (1 - mix) + rimR * mix);
-      data[o + 1] = clampByte(bedG * (1 - mix) + rimG * mix);
-      data[o + 2] = clampByte(bedB * (1 - mix) + rimB * mix);
+      data[o + 0] = clampByte(72 + stone * 58 + sand * 20);
+      data[o + 1] = clampByte(74 + stone * 54 + sand * 18);
+      data[o + 2] = clampByte(66 + stone * 46 + sand * 16);
       data[o + 3] = 255;
     }
   }
   return { width: w, height: h, data };
 }
 
-/** Flowing striated white-turquoise cascade foam curtain texture (tiled). */
-export function makeWaterfallTexture(w = 128, h = 192) {
-  const data = new Uint8Array(w * h * 4);
-  for (let y = 0; y < h; ++y) {
-    for (let x = 0; x < w; ++x) {
-      const streak = fbm(x * 0.30, y * 0.05);
-      const foam = Math.max(0, Math.min(1, (streak - 0.30) * 2.3));
-      const o = (y * w + x) * 4;
-      data[o + 0] = clampByte(150 + foam * 104);
-      data[o + 1] = clampByte(218 + foam * 36);
-      data[o + 2] = clampByte(234 + foam * 20);
-      data[o + 3] = 255;
-    }
-  }
-  return { width: w, height: h, data };
-}
-
-/** Authentic Kohaku / Yamabuki / Showa ornamental koi pattern. */
-export function makeKoiTexture(variant = 'kohaku', w = 128, h = 64) {
+/** Rich Nishikigoi diamond-scale Kohaku / Yamabuki / Showa pattern texture. */
+export function makeKoiTexture(variant = 'kohaku', w = 256, h = 128) {
   const data = new Uint8Array(w * h * 4);
   const seed = variant === 'yamabuki' ? 2.1 : (variant === 'showa' ? 5.7 : 0.9);
   for (let y = 0; y < h; ++y) {
     for (let x = 0; x < w; ++x) {
-      const u = x / w, v = Math.abs(y / h - 0.5) * 2.0;
-      const pat = fbm(u * 4.2 + seed, v * 3.2 + seed);
-      let r = 248, g = 244, b = 236;
+      const u = x / w; // 0 = nose, 1 = caudal tail
+      const v = Math.abs(y / h - 0.5) * 2.0; // 0 = dorsal ridge, 1 = belly
+      const pat = fbm(u * 4.5 + seed, v * 3.0 + seed);
+      const scale = 0.93 + 0.07 * Math.sin(u * 82.0) * Math.sin((y / h) * 42.0);
+      // Warm pearlescent belly + white/pearl base
+      let r = 248, g = 242, b = 232;
       if (variant === 'yamabuki') {
-        r = 248; g = 192 + pat * 34; b = 50;
+        r = 250; g = 190 + pat * 36; b = 44;
       } else if (variant === 'kohaku') {
-        if (pat > 0.50 && v < 0.78) { r = 232; g = 62; b = 30; }
+        if (pat > 0.48 && v < 0.72) { r = 232; g = 52; b = 22; }
       } else {
-        if (pat > 0.56) { r = 232; g = 58; b = 28; }
-        else if (pat < 0.37) { r = 28; g = 30; b = 36; }
+        if (pat > 0.54 && v < 0.78) { r = 228; g = 48; b = 22; }
+        else if (pat < 0.36 && v < 0.82) { r = 24; g = 26; b = 32; }
+      }
+      // Glossy dark eyes with subtle golden iris ring near head snout
+      const eyeD = Math.hypot((u - 0.088) * 1.8, (v - 0.42));
+      if (eyeD < 0.042) {
+        if (eyeD < 0.024) { r = 16; g = 18; b = 22; }
+        else { r = 216; g = 182; b = 96; }
+      } else if (u > 0.80) {
+        const ft = (u - 0.80) / 0.20;
+        r = r * (1 - ft * 0.35) + 252 * ft * 0.35;
+        g = g * (1 - ft * 0.35) + 244 * ft * 0.35;
+        b = b * (1 - ft * 0.35) + 228 * ft * 0.35;
       }
       const o = (y * w + x) * 4;
-      data[o + 0] = clampByte(r);
-      data[o + 1] = clampByte(g);
-      data[o + 2] = clampByte(b);
+      data[o + 0] = clampByte(r * scale);
+      data[o + 1] = clampByte(g * scale);
+      data[o + 2] = clampByte(b * scale);
       data[o + 3] = 255;
     }
   }

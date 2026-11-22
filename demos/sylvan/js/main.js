@@ -105,7 +105,7 @@ function updateTelemetryDom() {
     $('#plZone').textContent = isMaple ? 'West Bank' : (isCascade ? 'North Falls' : 'Clear Pool');
     $('#plActivity').textContent = !ctrl.playing ? 'Paused' : (isKoi ? 'Gliding' : (isMaple ? 'Swaying' : 'Flowing'));
     $('#plBreeze').textContent = `${pct}%`;
-    $('#plElev').textContent = isMaple ? '1.85 m' : (isCascade ? '1.30 m' : '0.08 m');
+    $('#plElev').textContent = isMaple ? '1.85 m' : (isCascade ? '1.10 m' : '-0.08 m');
   }
 }
 

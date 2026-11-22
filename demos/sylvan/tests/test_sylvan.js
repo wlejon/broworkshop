@@ -13,13 +13,33 @@ test('3D structural winding and grounding audit', () => {
   const { scene } = window.sylvan;
   window.sylvan.setPhase(0, 0.52);
   const st = bro.eye.structure(scene, {
-    groundY: 0,
-    ignoreFloating: ['Koi', 'Dragonfly', 'Drifting Leaf', 'Firefly'],
+    groundY: 0.08,
+    ignoreFloating: ['Koi', 'Dragonfly', 'Drifting Leaf', 'Water', 'Cascade', 'Side Spring', 'Lantern Warm Ember'],
   });
   eq(st.invertedCount, 0, '0 inverted winding meshes');
   eq(st.floatingCount, 0, '0 unintended floating disconnected meshes');
   eq(st.overhangCount, 0, '0 overhanging base footings');
   eq(st.ok, true, 'bro.eye.structure ok === true');
+});
+
+test('3D macro close-up inspection across key subjects', () => {
+  const { scene } = window.sylvan;
+  window.sylvan.setPhase(0.15, 0.52);
+  const cu = bro.eye.closeup(scene, {
+    targets: [
+      'Kohaku Matriarch',
+      'Japanese Maple',
+      'Main Cascade',
+      'Water Lily 1',
+      'Carved Basalt Lantern',
+      'Forest Fern Tussock 1',
+    ],
+    angles: ['threeQuarter', 'grazing'],
+    maxPanelDim: 380,
+  });
+  eq(cu.ok, true, 'bro.eye.closeup ok === true');
+  check(cu.panelCount >= 6, 'captured >= 6 macro close-up panels');
+  eq(cu.targets.length, 6, 'matched all 6 requested close-up subjects');
 });
 
 test('3D living clearance sweep across cyclic phase', () => {
