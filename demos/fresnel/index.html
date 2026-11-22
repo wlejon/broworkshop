@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Fresnel — First-Order Rotating Lighthouse Lantern Room</title>
+  <link rel="stylesheet" href="/lib/kit/kit.css">
+  <link rel="stylesheet" href="css/app.css">
+</head>
+<body>
+  <canvas id="stage"></canvas>
+
+  <header id="hud-title" class="panel-glass">
+    <div class="eyebrow">First-Order Catadioptric Optics</div>
+    <h1>FRESNEL</h1>
+    <div class="subtitle">Mercury-Bath Chariot · Helical Lantern &amp; Watchroom</div>
+  </header>
+
+  <nav id="hud-views" class="panel-glass" aria-label="Camera Presets and Atmosphere">
+    <button class="btn-chip active" data-view="overview">Tower</button>
+    <button class="btn-chip" data-view="lens">Optics</button>
+    <button class="btn-chip" data-view="pedestal">Mercury Bath</button>
+    <button class="btn-chip" data-view="watchroom">Watchroom</button>
+    <button class="btn-chip" data-view="cupola">Cupola</button>
+    <button id="moodBtn" class="btn-chip accent-mood">Sky: Dawn Foghorn</button>
+    <button id="shutterBtn" class="btn-chip accent-beam active">Beams: Active</button>
+  </nav>
+
+  <aside id="placard" class="panel-glass hidden" aria-live="polite">
+    <div class="placard-top">
+      <div>
+        <div id="pl-cat" class="eyebrow">Specimen</div>
+        <h2 id="pl-name">—</h2>
+      </div>
+      <button id="pl-close" class="close-x" title="Dismiss placard">&times;</button>
+    </div>
+    <p id="pl-desc"></p>
+    <dl class="specs">
+      <div><dt>Rotation</dt><dd id="pl-rpm">—</dd></div>
+      <div><dt>Flash Period</dt><dd id="pl-flash">—</dd></div>
+      <div><dt>Wind Speed</dt><dd id="pl-wind">—</dd></div>
+      <div><dt>Lamp</dt><dd id="pl-lamp">—</dd></div>
+    </dl>
+    <div class="placard-actions">
+      <button id="pl-reset" class="btn-chip subtle">Reset View</button>
+    </div>
+  </aside>
+
+  <footer id="hud-controls" class="panel-glass">
+    <button id="playBtn" class="btn-chip active">Pause</button>
+    <label class="ctrl-slider">
+      <span>Clockwork</span>
+      <input id="speedSlider" type="range" min="0" max="100" value="72" aria-label="Clockwork speed">
+      <span id="speedVal" class="mono">72%</span>
+    </label>
+    <label class="ctrl-slider">
+      <span>Gale</span>
+      <input id="windSlider" type="range" min="0" max="100" value="55" aria-label="Gale wind intensity">
+      <span id="windVal" class="mono">55%</span>
+    </label>
+    <span id="telemetryText" class="mono muted">3.6 RPM · Dawn Foghorn</span>
+    <button id="hideHudBtn" class="btn-chip subtle">Hide HUD</button>
+  </footer>
+
+  <button id="showHudBtn" class="panel-glass btn-chip hidden">Show HUD</button>
+
+  <script type="module" src="js/main.js"></script>
+</body>
+</html>

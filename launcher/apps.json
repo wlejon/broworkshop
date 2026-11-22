@@ -60,6 +60,7 @@
         { "dir": "demos/dom-lab" },
         { "dir": "demos/engine" },
         { "dir": "demos/flora-lab" },
+        { "dir": "demos/fresnel" },
         { "dir": "demos/image-kernels" },
         { "dir": "demos/input-lab" },
         { "dir": "demos/instanced-crowd" },
