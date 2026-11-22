@@ -28,14 +28,15 @@ export function createDriveableCar(batches, collision, ambientTraffic, streetsca
         speed: 0,
         steerAngle: 0,
         wheelSpin: 0,
-        color: [0.74, 0.16, 0.18, 1],
+        archetype: 0,
+        color: [0.64, 0.12, 0.14, 1],
     };
 
     function resetChaseBoom() {
         const fx = -Math.sin(car.yaw);
         const fz = -Math.cos(car.yaw);
-        car.chaseX = car.wx - fx * 3.4;
-        car.chaseZ = car.wz - fz * 3.4;
+        car.chaseX = car.wx - fx * 5.2;
+        car.chaseZ = car.wz - fz * 5.2;
     }
 
     const input = {
@@ -174,7 +175,7 @@ export function createDriveableCar(batches, collision, ambientTraffic, streetsca
             const d = Math.hypot(car.wx - px, car.wz - pz);
             if (d <= 24.0) {
                 bestDist = d;
-                bestCar = { wx: car.wx, wz: car.wz, yaw: car.yaw, color: car.color, parkedId: car.claimedParkedId };
+                bestCar = { wx: car.wx, wz: car.wz, yaw: car.yaw, archetype: car.archetype, color: car.color, parkedId: car.claimedParkedId };
             }
         }
 
@@ -188,7 +189,7 @@ export function createDriveableCar(batches, collision, ambientTraffic, streetsca
                     const d = Math.hypot(pk.wx - px, pk.wz - pz);
                     if (d <= 24.0 && d < bestDist) {
                         bestDist = d;
-                        bestCar = { wx: pk.wx, wz: pk.wz, yaw: pk.yaw, color: pk.color, parkedId: pk.id };
+                        bestCar = { wx: pk.wx, wz: pk.wz, yaw: pk.yaw, archetype: pk.archetype || 0, color: pk.color, parkedId: pk.id };
                     }
                 }
             }
@@ -198,7 +199,7 @@ export function createDriveableCar(batches, collision, ambientTraffic, streetsca
         if (!bestCar) {
             const rp = getNearestRoadPoint(px, pz, { avoidIntersection: true });
             if (!rp || rp.dist > 56.0) return false;
-            bestCar = { wx: rp.x, wz: rp.z, yaw: rp.yaw, color: [0.74, 0.16, 0.18, 1], parkedId: null };
+            bestCar = { wx: rp.x, wz: rp.z, yaw: rp.yaw, archetype: 0, color: [0.64, 0.12, 0.14, 1], parkedId: null };
         }
 
         // Ensure spawn spot sits cleanly outside building footprints
@@ -220,6 +221,7 @@ export function createDriveableCar(batches, collision, ambientTraffic, streetsca
         car.roll = slope.roll;
         car.speed = 0;
         car.steerAngle = 0;
+        car.archetype = bestCar.archetype || 0;
         car.color = bestCar.color;
         clearInput();
 
@@ -371,8 +373,8 @@ export function createDriveableCar(batches, collision, ambientTraffic, streetsca
                 ux /= ul;
                 uz /= ul;
             }
-            car.chaseX = car.wx - ux * 3.4;
-            car.chaseZ = car.wz - uz * 3.4;
+            car.chaseX = car.wx - ux * 5.2;
+            car.chaseZ = car.wz - uz * 5.2;
         } else {
             resetChaseBoom();
         }
@@ -389,7 +391,7 @@ export function createDriveableCar(batches, collision, ambientTraffic, streetsca
         let cx = clamp(car.chaseX, layout.WORLD_MIN + 2, layout.WORLD_MAX - 2);
         let cz = clamp(car.chaseZ, layout.WORLD_MIN + 2, layout.WORLD_MAX - 2);
         const gy = layout.sampleGroundHeight(cx, cz);
-        let cy = Math.max(car.wy + 1.72, gy + 0.65);
+        let cy = Math.max(car.wy + 2.15, gy + 0.75);
 
         const cRes = collision.resolveBox2D(cx, cz, cy, 0.45, 0.45, 0.55);
         if (cRes.collided) {
@@ -397,9 +399,9 @@ export function createDriveableCar(batches, collision, ambientTraffic, streetsca
             cz = cRes.z;
         }
 
-        const tx = car.wx + tfx * 3.0;
-        const ty = car.wy + 1.12;
-        const tz = car.wz + tfz * 3.0;
+        const tx = car.wx + tfx * 4.5;
+        const ty = car.wy + 1.15;
+        const tz = car.wz + tfz * 4.5;
         const dx = tx - cx;
         const dy = ty - cy;
         const dz = tz - cz;
@@ -424,6 +426,7 @@ export function createDriveableCar(batches, collision, ambientTraffic, streetsca
                     wx: car.wx, wy: car.wy, wz: car.wz,
                     yaw: car.yaw, pitch: car.pitch, roll: car.roll,
                     wheelSpin: car.wheelSpin, wheelSteer: car.steerAngle,
+                    archetype: car.archetype,
                     color: car.color,
                 }, headTint, tailTint);
             }

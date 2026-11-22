@@ -100,22 +100,24 @@ pub fn fragment(v: mesh::Vertex, s: mesh::Surface) -> mesh::Surface {
         out.metallic = 0.16;
         out.normal = n;
     } else if (mat == 4) {
-        // Polished chrome trim
-        out.roughness = 0.14;
-        out.metallic = 0.92;
-        out.normal = n;
+        // Polished chrome trim & alloy wheel rims
+        out.base_color = vec3<f32>(0.78, 0.80, 0.84) * clamp(1.0 + 0.08 * grain, 0.90, 1.10);
+        out.roughness = 0.18;
+        out.metallic = 0.90;
+        out.normal = normalize(n + t0 * (gx * 0.04) + b0 * (gy * 0.04));
     } else if (mat == 5) {
         // Emissive (streetlamps, interior ceiling lights, vehicle headlights/taillights)
         let night_atten = mix(0.85, 0.42, smoothstep(0.15, 0.85, params.night_factor));
         out.base_color = s.base_color;
-        out.roughness = 0.30;
+        out.roughness = 0.25;
         out.metallic = 0.0;
         out.emissive = min(vec3<f32>(1.4), s.base_color * max(0.0, param * params.glow_scale * night_atten));
     } else if (mat == 6) {
-        // Smooth clearcoat automotive paint
-        out.base_color = s.base_color;
-        out.roughness = 0.20;
-        out.metallic = 0.55;
+        // Mirror-smooth clearcoat metallic automotive paint (zero macro bump distortion)
+        let flake = (vnoise3(v.v0.xyz * 36.0) - 0.5) * detail_fine;
+        out.base_color = s.base_color * clamp(1.0 + 0.04 * flake, 0.95, 1.05);
+        out.roughness = 0.16;
+        out.metallic = 0.52;
         out.normal = n;
     } else if (mat == 7) {
         // Rooftops & cornices
@@ -135,6 +137,18 @@ pub fn fragment(v: mesh::Vertex, s: mesh::Surface) -> mesh::Surface {
         out.roughness = 0.90;
         out.metallic = 0.0;
         out.normal = normalize(n + t0 * (gx * 0.22) + b0 * (gy * 0.22));
+    } else if (mat == 12) {
+        // Dark satin automotive tire rubber
+        out.base_color = vec3<f32>(0.09, 0.095, 0.105) * clamp(1.0 + 0.14 * grain, 0.82, 1.18);
+        out.roughness = 0.82;
+        out.metallic = 0.02;
+        out.normal = normalize(n + t0 * (gx * 0.12) + b0 * (gy * 0.12));
+    } else if (mat == 13) {
+        // Dark matte automotive grille, bumper fascia & clean interior backing
+        out.base_color = vec3<f32>(0.08, 0.085, 0.095);
+        out.roughness = 0.62;
+        out.metallic = 0.10;
+        out.normal = n;
     }
 
     if (SCENE_DEBUG(mat_id)) {
