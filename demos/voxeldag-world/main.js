@@ -77,7 +77,6 @@ if (!available) {
     params('#quality', settings, {
         lodScale:    { min: 0.4, max: 3.0, step: 0.05, label: 'LOD scale', fmt: (v) => v.toFixed(2) },
         maxRaySteps: { min: 32, max: 256, step: 8, label: 'ray steps' },
-        shadowSteps: { min: 0, max: 48, step: 2, label: 'shadow steps' },
         animFps:     { min: 1, max: 24, step: 1, label: 'anim FPS' },
     }, { onChange: () => applySettings() });
 

@@ -74,7 +74,6 @@ export const settings = {
     autoAnimate: true,
     lodScale: 1.0,
     maxRaySteps: 128,
-    shadowSteps: 18,
     animFps: 8,
     timeOfDay: 'afternoon',
 };
@@ -98,7 +97,6 @@ function buildWorld(sceneGraph) {
     const voxelWorld = bro.voxeldag.createWorld(sceneGraph);
     voxelWorld.setLodScale(settings.lodScale);
     voxelWorld.setMaxRaySteps(settings.maxRaySteps);
-    voxelWorld.setShadowSteps(settings.shadowSteps);
     voxelWorld.setAnimFps(settings.animFps);
     voxelWorld.setAutoAnimate(settings.autoAnimate);
 
@@ -383,7 +381,6 @@ export function applySettings() {
     terrainNode.visible = !!settings.showTerrain;
     vd.setLodScale(settings.lodScale);
     vd.setMaxRaySteps(settings.maxRaySteps);
-    vd.setShadowSteps(settings.shadowSteps);
     vd.setAnimFps(settings.animFps);
     vd.setAutoAnimate(!!settings.autoAnimate);
     built.syncCarveBuffers();

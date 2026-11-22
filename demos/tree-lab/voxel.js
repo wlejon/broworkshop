@@ -54,13 +54,56 @@ function merge(parts, scale, toUnit) {
             pos.set(u, (v + k) * 3);
             if (N) nrm.set([N[k * 3], N[k * 3 + 1], N[k * 3 + 2]], (v + k) * 3);
             // A leaf's own shade, as the scatter tints them.
-            const t = p.jitter ? 0.8 + 0.4 * ((Math.sin(k * 12.9898) * 43758.5453) % 1 + 1) % 1 : 1;
+            let t = p.jitter ? 0.8 + 0.4 * ((Math.sin(k * 12.9898) * 43758.5453) % 1 + 1) % 1 : 1;
+            // Shaded by the sky it sees (the voxels' ambient has no
+            // occlusion of its own).
+            if (p.sky) t *= 0.3 + 0.7 * p.sky(u[0], u[1], u[2]);
             col.set([p.rgb[0] * t, p.rgb[1] * t, p.rgb[2] * t, p.alpha ? p.alpha[k] : 1], (v + k) * 4);
         }
         for (let k = 0; k < I.length; k++) idx[i + k] = I[k] + v;
         v += n; i += I.length;
     }
     return { positions: pos, normals: nrm, colors: col, indices: idx };
+}
+
+// The sky each part of the crown sees: leaf area binned into a coarse grid
+// (`n`^3 cells over the archetype's cube), then the light that comes down
+// through the leaves above a cell and in from the four sides, each
+// exp(-0.5 A / s^2) of what the cells between it and the edge hold. Returns
+// (u, v, w) in [-1, 1]^3 -> the share of sky it sees, 0..1.
+function skyVisibility(leaves, scale, toUnit, voxelSize, res, n = 48) {
+    const P = leaves.positions, I = leaves.indices;
+    const area = new Float32Array(n * n * n);
+    const cell = (u) => Math.min(n - 1, Math.max(0, Math.floor((u + 1) / 2 * n)));
+    for (let t = 0; t < I.length / 3; t++) {
+        const a = I[t * 3] * 3, b = I[t * 3 + 1] * 3, c = I[t * 3 + 2] * 3;
+        const e1x = (P[b] - P[a]) * scale, e1y = (P[b + 1] - P[a + 1]) * scale, e1z = (P[b + 2] - P[a + 2]) * scale;
+        const e2x = (P[c] - P[a]) * scale, e2y = (P[c + 1] - P[a + 1]) * scale, e2z = (P[c + 2] - P[a + 2]) * scale;
+        const cx = e1y * e2z - e1z * e2y, cy = e1z * e2x - e1x * e2z, cz = e1x * e2y - e1y * e2x;
+        const u = toUnit((P[a] + P[b] + P[c]) / 3 * scale, (P[a + 1] + P[b + 1] + P[c + 1]) / 3 * scale,
+            (P[a + 2] + P[b + 2] + P[c + 2]) / 3 * scale);
+        area[(cell(u[0]) * n + cell(u[1])) * n + cell(u[2])] += 0.5 * Math.sqrt(cx * cx + cy * cy + cz * cz);
+    }
+    // A cell's optical depth: its leaves over the cell's face (s = the cell's side).
+    const side = voxelSize * res / n;
+    const k = 0.5 / (side * side);
+    const vis = new Float32Array(n * n * n);
+    const at = (x, y, z) => (x * n + y) * n + z;
+    for (let x = 0; x < n; x++) for (let z = 0; z < n; z++) {
+        let up = 0;
+        for (let y = n - 1; y >= 0; y--) { vis[at(x, y, z)] += Math.exp(-k * up) * 2; up += area[at(x, y, z)]; }
+    }
+    const sweep = (outer, inner, idx) => {
+        for (let o1 = 0; o1 < n; o1++) for (let o2 = 0; o2 < n; o2++) {
+            let f = 0, b = 0;
+            for (let i = 0; i < n; i++) { const j = idx(o1, o2, i); vis[j] += Math.exp(-k * f); f += area[j]; }
+            for (let i = n - 1; i >= 0; i--) { const j = idx(o1, o2, i); vis[j] += Math.exp(-k * b); b += area[j]; }
+        }
+    };
+    sweep(0, 0, (y, z, x) => at(x, y, z));
+    sweep(0, 0, (x, y, z) => at(x, y, z));
+    for (let i = 0; i < vis.length; i++) vis[i] /= 6;   // up counts twice: the sky is mostly above
+    return (u, v, w) => vis[at(cell(u), cell(v), cell(w))];
 }
 
 /**
@@ -112,7 +155,9 @@ export function voxelArchetype(world, { scale = 1, leaf = 1, depth = 5 } = {}) {
     const toUnit = (px, py, pz) => [(px - c[0]) / half, (py - c[1]) / half, (pz - c[2]) / half];
     const voxelSize = (2 * half) / (4 << depth);
     const alpha = leafOpacity(leaves, scale, toUnit, 4 << depth, voxelSize);
-    const mesh = merge([{ mesh: bark, rgb: BARK_RGB }, { mesh: leaves, rgb: LEAF_RGB, jitter: true, alpha }], scale, toUnit);
+    const sky = skyVisibility(leaves, scale, toUnit, voxelSize, 4 << depth);
+    const mesh = merge([{ mesh: bark, rgb: BARK_RGB, sky }, { mesh: leaves, rgb: LEAF_RGB, jitter: true, alpha, sky }],
+        scale, toUnit);
     const v = voxelWorld();
     const archetype = v.addArchetypeFromMesh(mesh, depth, { unitBounds: true, roughness: 0.8 });
     return { archetype, centre: c, voxelSize, depth, ms: Date.now() - t0, tris: mesh.indices.length / 3 };

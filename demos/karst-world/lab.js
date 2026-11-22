@@ -98,7 +98,6 @@ function buildScene(sceneGraph) {
     const voxelWorld = bro.voxeldag.createWorld(sceneGraph);
     voxelWorld.setLodScale(1.1);
     voxelWorld.setMaxRaySteps(128);
-    voxelWorld.setShadowSteps(0);
     voxelWorld.setAutoAnimate(false);
     // Keep the voxel raymarcher off by default: bro.voxeldag serves as 3D terrain storage.
     voxelWorld.node.visible = false;
