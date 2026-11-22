@@ -88,9 +88,12 @@ export function speciesLevels(sp, levels = LEVELS) {
 /**
  * Stand `trees` ({ sp (with .levels from speciesLevels), x, z, yaw, size, r })
  * as grown trees with distance LOD. Call `update(eye)` as the camera moves
- * (`follow(vp)` does it each frame). Returns { update, follow, stats }.
+ * (`follow(vp)` does it each frame). `until` (m, 0: none) ends the meshes:
+ * each dithers out over [until, 1.35 until] from the eye (fadeOutDist), for
+ * what draws the trees beyond to dither in over the same band.
+ * Returns { update, follow, stats }.
  */
-export function plantLod(trees, { levels = LEVELS, castFrom = 0 } = {}) {
+export function plantLod(trees, { levels = LEVELS, castFrom = 0, until = 0 } = {}) {
     const shown = new Array(trees.length).fill(-1), nodes = new Array(trees.length).fill(null);
     let tris = 0;
     const counts = levels.map(() => 0);
@@ -99,6 +102,13 @@ export function plantLod(trees, { levels = LEVELS, castFrom = 0 } = {}) {
         counts.fill(0);
         trees.forEach((t, i) => {
             const d = Math.max(0, Math.hypot(t.x - ex, t.z - ez, ey - 10) - t.r);
+            if (until > 0 && d >= 1.35 * until) {
+                // Past the band: no mesh (what draws it beyond takes over).
+                for (const n of nodes[i] ?? []) n.destroy();
+                nodes[i] = null;
+                shown[i] = -2;
+                return;
+            }
             let li = 0;
             while (li + 1 < levels.length && d >= levels[li + 1].from) li++;
             counts[li]++;
@@ -114,6 +124,7 @@ export function plantLod(trees, { levels = LEVELS, castFrom = 0 } = {}) {
                 n.position = [t.x, 0, t.z];
                 n.scale = [s, s, s];
                 n.rotation = [0, t.yaw, 0];
+                if (until > 0) n.fadeOutDist = until;
                 return n;
             });
             shown[i] = li;
