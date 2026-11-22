@@ -75,8 +75,15 @@ leaf covers. Each tree is one quad facing the eye that
 samples the view nearest its direction in its own frame (mipmapped to the
 pixel's footprint), tinted by the tree's own leaf tone, lit as foliage
 (`s.leaf`) through the baked normal with the mesh leaves' bounce from
-inside the crown (`occluder_sun` 0.5), and cut by 0.8 of its coverage
-against a per-pixel dither; nearer than the band it collapses to nothing. The quad
+inside the crown (`occluder_sun` 0.5), and drawn with its coverage as the
+share of each pixel's samples it covers (bro.scene's `alphaToCoverage`,
+under the lab's 4x MSAA), so a thin crown resolves as the grown tree's
+sub-pixel leaves do, a blend with what is behind it, not a speckle.
+Seen from the side the coverage is pulled apart around 0.35 by 2.5 (its
+clumps opaque, its thin parts clear: the grown crowns read as solid shapes
+with ground between them there), and from above (20 to 50 degrees up,
+fading) it is as baked, times 0.8, as the grown crowns are seen through;
+nearer than the band it collapses to nothing. The quad
 sits 0.4 of the crown's radius toward the eye, where the leaves seen are.
 `shadowProxyNode` casts their shadow: each species' crown as L12 cards at
 0.4 of its leaf area and its limbs in one mesh, instanced over the trees as a
@@ -86,15 +93,17 @@ shadow page drawing only the trees whose sphere reaches it
 frame of page redraws while the camera moved). Against the truth (the
 same 2282 trees all drawn at L3, casting their own shadow, in wind), the
 mesh trees to 250 m with impostors and proxies beyond give the frame's
-mean linear colour within 0.95-1.06 per channel at noon and golden hour
-from 30 m, 150 m and 600 m up, the ground alone 0.86-1.02. The impostors'
+mean linear colour within 0.94-1.07 per channel at noon and golden hour
+from 30 m, 150 m and 600 m up, the ground alone 0.96-1.03. The impostors'
 0.8 coverage and L6 bake, their blue gain of 0.95 and the proxies' 0.4
 were swept for it: with an L24 bake at full coverage the frame was 0.80
 from 600 m at noon, and plantLod's meshes at full leaf area alone were
 0.84-0.98 from there. Each mesh level's leaf area is measured against the
-finest level's coverage (`speciesLevels`). Still unlike the truth: past
-some 300 m the impostors read as an even carpet where the grown trees
-stand apart. With meshes to 250 m and impostors beyond,
+finest level's coverage (`speciesLevels`). Cut against a per-pixel dither
+instead of covering samples, the impostors matched the frame's mean as
+well but read as an even speckled carpet past 300 m where the grown trees
+stand apart; the side contrast was found looking at 1:1 crops of that
+field. With meshes to 250 m and impostors beyond,
 9476 trees on a 3.2 km square cost 1.3 ms from eye height and 30 m, 0.8
 from 150 m, 0.4 from 1 km, the impostors and their shadow 0.16-0.3 of it,
 with the camera still.
@@ -108,14 +117,15 @@ tree's nodes and makes the next level's) redraw nothing. The proxies cast
 everywhere instead, each swap redraws the cached pages it touches the frame
 it happens: a 25 m/s dolly at eye height costs 3 ms a frame on average and
 7 ms at worst, a climb from 30 m to 1 km 1.7 and 4.9. Split, the dolly is
-1.26 ms on average and 1.37 at worst, the climb 0.71 and 1.16, with the
+1.34 ms on average and 1.43 at worst, the climb 0.86 and 1.32, with the
 ground's agreement above. The impostors do not sway.
 
 On the CPU, each species' level is a `scene.createGeometry` made once
 (`speciesLevels`), so a swap makes two nodes and uploads nothing; making
 each node copy and upload its own mesh cost about 4 ms a swap. The dolly's
-frames take 0.55 ms of CPU on average and 0.87 at worst (0.3 of it
-`plantLod`'s pass over the 9476 trees), the climb's 0.48 and 0.94.
+frames take 0.55-0.64 ms of CPU on average and 0.87-1.02 at worst
+(0.3-0.5 of it `plantLod`'s pass over the 9476 trees, varying run to run),
+the climb's 0.48-0.61 and 0.94-1.14.
 
 ## Files
 
