@@ -297,12 +297,14 @@ function pullCards(m, half, per = 6) {
  * limbs (branches past `minRadius` m) in one mesh, instanced over `trees`,
  * shadowOnly, casting `range` of the sun's shadow (shadowRange), each page
  * view drawing only the trees whose sphere reaches it
- * (setInstanceCullSpheres). The defaults match the mesh trees' own shadow
- * on the ground within 0.97-1.06 from eye height, 30 m and 150 m in wind,
- * soft-edged as theirs (half the cards: a swaying crown's flutter lets more
- * light through than a still card does). Returns the node.
+ * (setInstanceCullSpheres). `cover` 0.4 was swept against the grown
+ * forest (every tree at L3, its own shadow, in wind) under the mesh trees
+ * and impostors: the frame within 0.95-1.08 at noon and golden hour from
+ * 30 m, 150 m and 600 m up (0.5 left golden hour from 600 m at 0.90, the
+ * ground too dark: a swaying crown of fine leaves lets more light through
+ * than still cards do). Returns the node.
  */
-export function shadowProxyNode(sp, trees, { L = 12, minRadius = 0.15, range = 'all', pull = 0, cover = 0.5 } = {}) {
+export function shadowProxyNode(sp, trees, { L = 12, minRadius = 0.15, range = 'all', pull = 0, cover = 0.4 } = {}) {
     const kk = 1.5 * L / sp.k;
     const leaves = pullCards(sp.world.emitFoliageMesh(leafCard(kk, [1, 2]), { seed: 0x1eaf, perArea: cover * 90 / (kk * kk) }), pull * kk);
     const bark = barkMesh(sp.world.emitBranchTubes({ minRadius: minRadius / sp.k }), 3);

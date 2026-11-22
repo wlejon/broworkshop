@@ -77,17 +77,19 @@ inside the crown (`occluder_sun` 0.5), and cut by 0.8 of its coverage
 against a per-pixel dither; nearer than the band it collapses to nothing. The quad
 sits 0.4 of the crown's radius toward the eye, where the leaves seen are.
 `shadowProxyNode` casts their shadow: each species' crown as L12 cards at
-half its leaf area and its limbs in one mesh, instanced over the trees as a
+0.4 of its leaf area and its limbs in one mesh, instanced over the trees as a
 `shadowOnly` mesh (the shadow pass does not run the impostors' cut), each
 shadow page drawing only the trees whose sphere reaches it
 (`setInstanceCullSpheres`; without it every page drew all of them, 17 ms a
 frame of page redraws while the camera moved). Against the truth (the
 same 2282 trees all drawn at L3, casting their own shadow, in wind), the
-impostors with their proxies give the frame's mean linear colour within
-0.91-1.06 per channel at noon and golden hour from 150 m and 600 m up
-(blue gain 0.95; the 0.8 coverage and the L6 bake were swept for it: L24
-and full coverage were 0.80 at 600 m, noon). plantLod's meshes alone are
-0.84-0.98 from 600 m: their L24 cards cover too much as well. With meshes to 250 m and impostors beyond,
+mesh trees to 250 m with impostors and proxies beyond give the frame's
+mean linear colour within 0.95-1.08 per channel at noon and golden hour
+from 30 m, 150 m and 600 m up, the ground alone 0.89-1.02. The impostors'
+0.8 coverage and L6 bake, their blue gain of 0.95 and the proxies' 0.4
+were swept for it: with an L24 bake at full coverage the frame was 0.80
+from 600 m at noon, and plantLod's meshes alone are 0.84-0.98 from there
+(their L24 cards cover too much as well). With meshes to 250 m and impostors beyond,
 9476 trees on a 3.2 km square cost 1.3 ms from eye height and 30 m, 0.8
 from 150 m, 0.4 from 1 km, the impostors and their shadow 0.16-0.3 of it,
 with the camera still.
@@ -101,9 +103,8 @@ tree's nodes and makes the next level's) redraw nothing. The proxies cast
 everywhere instead, each swap redraws the cached pages it touches the frame
 it happens: a 25 m/s dolly at eye height costs 3 ms a frame on average and
 7 ms at worst, a climb from 30 m to 1 km 1.7 and 4.9. Split, the dolly is
-1.3 ms on average and 1.4 at worst, the climb 0.75 and 1.2, and the ground
-under the trees matches the mesh trees' own shadow within 0.97-1.06 from
-eye height, 30 m and 150 m. The impostors do not sway.
+1.3 ms on average and 1.4 at worst, the climb 0.75 and 1.2, with the
+ground's agreement above. The impostors do not sway.
 
 On the CPU, each species' level is a `scene.createGeometry` made once
 (`speciesLevels`), so a swap makes two nodes and uploads nothing; making
