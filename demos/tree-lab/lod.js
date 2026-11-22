@@ -74,14 +74,19 @@ export function barkMesh(tubes, sides) {
     return m;
 }
 
-/** A species' meshes at each level: [{ bark, leaves, tris }]. `sp` is { world, k (draw scale) }. */
+/**
+ * A species' meshes at each level: [{ bark, leaves, tris, barkGeometry,
+ * leavesGeometry }], the geometries shared by every tree drawn at that level
+ * (scene.createGeometry: made and uploaded once). `sp` is { world, k (draw scale) }.
+ */
 export function speciesLevels(sp, levels = LEVELS) {
     return levels.map((lv) => {
         const kk = 1.5 * lv.L / sp.k;
         const leaves = sp.world.emitFoliageMesh(leafCard(kk, [1, 2]), { seed: 0x1eaf, perArea: 90 / (kk * kk) });
         // The branches at least half a pixel wide where the level begins.
         const bark = barkMesh(sp.world.emitBranchTubes({ minRadius: 0.25 * lv.from * PX / sp.k }), lv.sides);
-        return { bark, leaves, tris: (bark.indices.length + leaves.indices.length) / 3 };
+        return { bark, leaves, tris: (bark.indices.length + leaves.indices.length) / 3,
+            barkGeometry: scene.createGeometry(bark), leavesGeometry: scene.createGeometry(leaves) };
     });
 }
 
@@ -94,35 +99,48 @@ export function speciesLevels(sp, levels = LEVELS) {
  * from `castFrom` up to (not including) `castUntil` cast shadows, the part
  * `castRange` names (bro.scene shadowRange: 'near' with a stand-in casting
  * 'far', so a level's swap redraws no cached shadow page).
- * Returns { update, follow, clear, stats }.
+ * Returns { update, follow, clear, stats } (stats: the triangles drawn, the
+ * trees at each level, and the level swaps made so far).
  */
 export function plantLod(trees, { levels = LEVELS, castFrom = 0, castUntil = Infinity, castRange = 'all', until = 0 } = {}) {
     const shown = new Array(trees.length).fill(-1), nodes = new Array(trees.length).fill(null);
-    let tris = 0, cleared = false;
+    let tris = 0, cleared = false, swaps = 0;
     const counts = levels.map(() => 0);
+    // Per tree, the squared distances from the eye (to its crown's centre
+    // line, 10 m up) at which each level begins and the meshes end: a level
+    // begins `from` m from the crown's edge.
+    const nl = levels.length;
+    const edges = new Float64Array(trees.length * (nl + 1));
+    trees.forEach((t, i) => {
+        for (let l = 1; l < nl; l++) edges[i * (nl + 1) + l] = (levels[l].from + t.r) ** 2;
+        edges[i * (nl + 1) + nl] = until > 0 ? (1.35 * until + t.r) ** 2 : Infinity;
+    });
     const update = ([ex, ey, ez]) => {
         tris = 0;
         counts.fill(0);
-        trees.forEach((t, i) => {
-            const d = Math.max(0, Math.hypot(t.x - ex, t.z - ez, ey - 10) - t.r);
-            if (until > 0 && d >= 1.35 * until) {
+        const dy2 = (ey - 10) * (ey - 10);
+        for (let i = 0; i < trees.length; i++) {
+            const t = trees[i], e = i * (nl + 1);
+            const d2 = (t.x - ex) * (t.x - ex) + (t.z - ez) * (t.z - ez) + dy2;
+            if (d2 >= edges[e + nl]) {
                 // Past the band: no mesh (what draws it beyond takes over).
-                for (const n of nodes[i] ?? []) n.destroy();
+                if (nodes[i]) for (const n of nodes[i]) n.destroy();
                 nodes[i] = null;
                 shown[i] = -2;
-                return;
+                continue;
             }
             let li = 0;
-            while (li + 1 < levels.length && d >= levels[li + 1].from) li++;
+            while (li + 1 < nl && d2 >= edges[e + li + 1]) li++;
             counts[li]++;
             tris += t.sp.levels[li].tris;
-            if (shown[i] === li) return;
-            for (const n of nodes[i] ?? []) n.destroy();
+            if (shown[i] === li) continue;
+            if (nodes[i]) for (const n of nodes[i]) n.destroy();
+            swaps++;
             const lv = t.sp.levels[li], s = t.sp.k * t.size;
             const cast = li >= castFrom && li < castUntil;
             nodes[i] = [
-                scene.createMesh(Object.assign({ data: lv.bark, castsShadow: cast, shadowRange: castRange, receivesShadow: true }, BARK)),
-                scene.createMesh(Object.assign({ data: lv.leaves, castsShadow: cast, shadowRange: castRange, receivesShadow: true }, LEAF)),
+                scene.createMesh(Object.assign({ geometry: lv.barkGeometry, castsShadow: cast, shadowRange: castRange, receivesShadow: true }, BARK)),
+                scene.createMesh(Object.assign({ geometry: lv.leavesGeometry, castsShadow: cast, shadowRange: castRange, receivesShadow: true }, LEAF)),
             ].map((n) => {
                 n.position = [t.x, 0, t.z];
                 n.scale = [s, s, s];
@@ -131,7 +149,7 @@ export function plantLod(trees, { levels = LEVELS, castFrom = 0, castUntil = Inf
                 return n;
             });
             shown[i] = li;
-        });
+        }
     };
     return {
         update,
@@ -140,6 +158,6 @@ export function plantLod(trees, { levels = LEVELS, castFrom = 0, castUntil = Inf
             cleared = true;
             nodes.forEach((ns, i) => { for (const n of ns ?? []) n.destroy(); nodes[i] = null; shown[i] = -1; });
         },
-        stats: () => ({ tris, counts: counts.slice() }),
+        stats: () => ({ tris, counts: counts.slice(), swaps }),
     };
 }

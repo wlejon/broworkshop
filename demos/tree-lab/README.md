@@ -94,9 +94,15 @@ tree's nodes and makes the next level's) redraw nothing. The proxies cast
 everywhere instead, each swap redraws the cached pages it touches the frame
 it happens: a 25 m/s dolly at eye height costs 3 ms a frame on average and
 7 ms at worst, a climb from 30 m to 1 km 1.7 and 4.9. Split, the dolly is
-1.4 ms on average and 1.5 at worst, the climb 0.9 and 1.5, and the ground
+1.3 ms on average and 1.4 at worst, the climb 0.8 and 1.3, and the ground
 under the trees matches the mesh trees' own shadow within 0.97-1.06 from
 eye height, 30 m and 150 m. The impostors do not sway.
+
+On the CPU, each species' level is a `scene.createGeometry` made once
+(`speciesLevels`), so a swap makes two nodes and uploads nothing; making
+each node copy and upload its own mesh cost about 4 ms a swap. The dolly's
+frames take 0.64 ms of CPU on average and 1.05 at worst (0.3 of it
+`plantLod`'s pass over the 9476 trees), the climb's 0.56 and 1.21.
 
 ## Files
 
