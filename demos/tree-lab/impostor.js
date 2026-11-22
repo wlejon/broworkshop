@@ -377,20 +377,38 @@ function pullCards(m, half, per = 6) {
  * and impostors: the frame within 0.95-1.08 at noon and golden hour from
  * 30 m, 150 m and 600 m up (0.5 left golden hour from 600 m at 0.90, the
  * ground too dark: a swaying crown of fine leaves lets more light through
- * than still cards do). Returns the node.
+ * than still cards do).
+ *
+ * `thin` [from, to, cover]: the cards thin with the tree's distance from the
+ * eye when a page is drawn, to `cover` at `to`. Cached pages are not redrawn
+ * as the eye moves, but the sun's clipmap levels are centred on it, so a
+ * page drawn far from the eye is a coarse level's, where the grown crowns'
+ * fine leaves let more light through than the cards do (from 1.5 km up at
+ * golden hour 0.4 everywhere left the ground at 0.76-0.87 of the truth's).
+ * It is two nodes: `cover` of the cards and the limbs on every tree, the
+ * rest dropping out tree by tree between `from` and `to`
+ * (setInstanceCullSpheres's maxDistance and fade, in the cull pass: as a
+ * vertex hook dropping cards the page draws cost five times as much).
+ * Returns { nodes, destroy() }.
  */
-export function shadowProxyNode(sp, trees, { L = 12, minRadius = 0.15, range = 'all', pull = 0, cover = 0.4 } = {}) {
+export function shadowProxyNode(sp, trees, { L = 12, minRadius = 0.15, range = 'all', pull = 0, cover = 0.4, thin = [700, 1600, 0.08] } = {}) {
     const kk = 1.5 * L / sp.k;
-    const leaves = pullCards(sp.world.emitFoliageMesh(leafCard(kk, [1, 2]), { seed: 0x1eaf, perArea: cover * 90 / (kk * kk) }), pull * kk);
+    const cards = (c, seed) => pullCards(sp.world.emitFoliageMesh(leafCard(kk, [1, 2]), { seed, perArea: c * 90 / (kk * kk) }), pull * kk);
     const bark = barkMesh(sp.world.emitBranchTubes({ minRadius: minRadius / sp.k }), 3);
     const inst = new Float32Array(trees.length * 16);
     trees.forEach((t, i) => {
         const s = sp.k * t.size, c = Math.cos(t.yaw) * s, n = Math.sin(t.yaw) * s;
         inst.set([c, 0, n, t.x, 0, s, 0, 0, -n, 0, c, t.z, 1, 1, 1, 1], i * 16);
     });
-    return scene.createInstancedMesh({ mesh: mergeMeshes(leaves, bark), instances: inst, color: [0.1, 0.1, 0.1],
-        doubleSided: true, castsShadow: true, shadowOnly: true, shadowRange: range, receivesShadow: false, vertexColorTint: false })
-        .setInstanceCullSpheres(cullSpheres(sp, trees));
+    const spheres = cullSpheres(sp, trees);
+    const make = (mesh) => scene.createInstancedMesh({ mesh, instances: inst, color: [0.1, 0.1, 0.1],
+        doubleSided: true, castsShadow: true, shadowOnly: true, shadowRange: range, receivesShadow: false, vertexColorTint: false });
+    const far = thin ? Math.min(thin[2], cover) : cover;
+    const nodes = [make(mergeMeshes(cards(far, 0x1eaf), bark)).setInstanceCullSpheres(spheres)];
+    if (cover > far) {
+        nodes.push(make(cards(cover - far, 0x2eaf)).setInstanceCullSpheres(spheres, { maxDistance: thin[1], fade: 1 - thin[0] / thin[1] }));
+    }
+    return { nodes, destroy() { for (const n of nodes) n.destroy(); } };
 }
 
 // Two meshes' positions, normals and triangles as one.

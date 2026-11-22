@@ -104,11 +104,19 @@ ground distance seen from 12 and 30 m up, the rings either side of the
 250 m handoff (230-340 m) are within 0.93-1.06, as near as the meshes'
 own rings inside it (0.93-1.08): the handoff adds no step of its own.
 Against the meshes' own shadow (every level casting, no proxies) the
-proxies' ground is 0.996, 1.025 and 1.045 from 2, 30 and 150 m up. From
-1.5 km at golden hour and dawn the proxies darken the ground to 0.81-0.84
-of the truth's (0.25 would give 0.91-0.93 there, too light nearer); a
-cached page is not redrawn as the eye moves, so its shadow cannot thin
-with distance. The impostors'
+proxies' ground is 0.996, 1.025 and 1.045 from 2, 30 and 150 m up. No
+one cover holds from 1.5 km up too: 0.4 there left the golden-hour
+ground at 0.76-0.87 of the truth's, 0.25 put it right but lifted golden
+hour from 600 m to 1.17. So the proxies thin with distance: 0.08 of the
+cards and the limbs on every tree, the rest dropping out tree by tree
+from 700 to 1600 m from the eye (`setInstanceCullSpheres`'s maxDistance
+and fade). A cached page keeps the trees it was drawn with, and the sun's
+clipmap levels are centred on the eye, so the coarse levels, drawn far
+from it, take the thinner shadow. With the 150 m handoff the frame is
+then 0.92-1.10 of the truth from 30 m, 150 m, 600 m and 1.5 km up at
+noon, golden hour and dawn. Thinning the cards in a vertex hook instead
+did as well but made the page draws five times dearer (a 7 ms frame when
+the dolly began). The impostors'
 0.8 coverage and L6 bake, their blue gain of 0.95 and the proxies' 0.4
 were swept for it: with an L24 bake at full coverage the frame was 0.80
 from 600 m at noon, and plantLod's meshes at full leaf area alone were
@@ -183,8 +191,9 @@ them at 250 m (the mesh trees' vegetation pass 1.5 ms of it, the impostors
 same dolly are slower in every pass (4.25-4.7 on average, 7-9 at the
 95th).
 
-Five changes brought it to 2.38 ms on average and 2.69 at the 95th
-percentile (2.06 and 2.28 standing still):
+Five changes brought it to 2.38-2.40 ms on average and 2.69-2.76 at the
+95th percentile, 3.24 at worst (2.06 standing still), the proxies thinned
+by distance included:
 
 - Handing the trees to the impostors at 150 m (the levels beginning at 0,
   40, 90 and 150 m, about 230 mesh trees within reach): the vegetation
