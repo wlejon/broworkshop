@@ -279,8 +279,8 @@ export function buildMillMechanics(add, mats, registerPick) {
   add({
     name: 'Gear Porch Pillow Bearings & Mill Frame',
     mesh: Mesh.merge([
-      // East main-axle pillow-block cradle (clearance > 0.080 axle radius)
-      boxAt(0.20, 0.21, 0.32, 1.0).translate(0.42, 0.40 + 0.105, wz),
+      // East main-axle pillow-block cradle seated into sloping terrace bank (y=0.31..0.61, clearance > 0.080 axle radius)
+      boxAt(0.20, 0.30, 0.32, 1.0).translate(0.42, 0.31 + 0.15, wz),
       boxAt(0.18, 0.16, 0.07, 1.0).translate(0.42, wy - 0.03, wz - 0.13),
       boxAt(0.18, 0.16, 0.07, 1.0).translate(0.42, wy - 0.03, wz + 0.13),
       // Pinion countershaft cradle stand seated onto terrace (y=0.40) at x=0.76

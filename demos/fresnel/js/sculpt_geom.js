@@ -178,8 +178,8 @@ export function buildCorbelBracket(rWall = 2.48, rOut = 2.98, y0 = 1.96, y1 = 2.
     }
     for (let j = 0; j < n; ++j) {
       const j1 = (j + 1) % n;
-      if (s > 0) tris.push([base, base + 1 + j, base + 1 + j1]);
-      else tris.push([base, base + 1 + j1, base + 1 + j]);
+      if (s > 0) tris.push([base, base + 1 + j1, base + 1 + j]);
+      else tris.push([base, base + 1 + j, base + 1 + j1]);
     }
   }
   // Perimeter quads
@@ -200,7 +200,15 @@ export function buildCorbelBracket(rWall = 2.48, rOut = 2.98, y0 = 1.96, y1 = 2.
 export function buildSpiralStaircase(steps = 16, rIn = 1.46, rOut = 2.08, aStart = 0.48 * Math.PI, aEnd = 1.18 * Math.PI) {
   const treadMeshes = [], railMeshes = [];
   const yTop = 2.56;
+  const rInStr = rIn + 0.05;
+  const rOutStr = rOut - 0.05;
+  const inStrPts = [];
+  const outStrPts = [];
   const railPts = [];
+
+  const aFloor = aStart - (aEnd - aStart) * (0.25 / steps);
+  inStrPts.push([rInStr * Math.sin(aFloor), 0.0, rInStr * Math.cos(aFloor)]);
+  outStrPts.push([rOutStr * Math.sin(aFloor), 0.0, rOutStr * Math.cos(aFloor)]);
 
   for (let i = 0; i < steps; ++i) {
     const frac = (i + 0.5) / steps;
@@ -212,21 +220,25 @@ export function buildSpiralStaircase(steps = 16, rIn = 1.46, rOut = 2.08, aStart
       .translate(midR * Math.sin(th), y, midR * Math.cos(th));
     treadMeshes.push(tread);
 
-    // Inner & outer wrought-iron risers/balusters anchored on tread up to helical handrail
-    const bx = rIn * Math.sin(th), bz = rIn * Math.cos(th);
-    const ox = (rOut - 0.04) * Math.sin(th), oz = (rOut - 0.04) * Math.cos(th);
-    if (i > 0) {
-      treadMeshes.push(cylFull(0.020, (yTop / steps) + 0.02, 8).translate(bx, y - (yTop / steps) * 0.5, bz));
-      treadMeshes.push(cylFull(0.020, (yTop / steps) + 0.02, 8).translate(ox, y - (yTop / steps) * 0.5, oz));
-    } else {
-      treadMeshes.push(cylFull(0.024, y, 8).translate(bx, y * 0.5, bz));
-      treadMeshes.push(cylFull(0.024, y, 8).translate(ox, y * 0.5, oz));
+    // Continuous carriage stringer waypoints directly underneath every tread + grounded starter posts at step 0
+    inStrPts.push([rInStr * Math.sin(th), y - 0.032, rInStr * Math.cos(th)]);
+    outStrPts.push([rOutStr * Math.sin(th), y - 0.032, rOutStr * Math.cos(th)]);
+    if (i === 0) {
+      treadMeshes.push(cylFull(0.024, y, 8).translate(rInStr * Math.sin(th), y * 0.5, rInStr * Math.cos(th)));
+      treadMeshes.push(cylFull(0.024, y, 8).translate(rOutStr * Math.sin(th), y * 0.5, rOutStr * Math.cos(th)));
     }
 
+    const bx = rIn * Math.sin(th), bz = rIn * Math.cos(th);
     const railH = y + 0.84;
     railMeshes.push(cylFull(0.014, 0.84, 8).translate(bx, y + 0.42, bz));
     railPts.push([bx, railH, bz]);
   }
+  const aDeck = aEnd + 0.04;
+  inStrPts.push([rInStr * Math.sin(aDeck), yTop - 0.04, rInStr * Math.cos(aDeck)]);
+  outStrPts.push([rOutStr * Math.sin(aDeck), yTop - 0.04, rOutStr * Math.cos(aDeck)]);
+  treadMeshes.push(Mesh.tube(inStrPts, 0.032, 10, { capStart: true, capEnd: true }));
+  treadMeshes.push(Mesh.tube(outStrPts, 0.032, 10, { capStart: true, capEnd: true }));
+
   const handrail = Mesh.tube(railPts, 0.024, 10, { capStart: true, capEnd: true });
   railMeshes.push(handrail);
 

@@ -56,6 +56,7 @@ export function buildTowerArchitecture(scene, add, mats, registerPick) {
       uvs[i * 2] = 0.5 + pos[i * 3] / 4.52;
       uvs[i * 2 + 1] = 0.5 + pos[i * 3 + 2] / 4.52;
     }
+    floorDisc.uvs = uvs;
   }
   add({
     name: 'Compass Rose Watchroom Floor',

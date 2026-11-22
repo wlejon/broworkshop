@@ -73,7 +73,7 @@ export function buildMillhouseArchitecture(scene, add, mats, registerPick) {
   const postX = mx - stoneW * 0.5 - porchW + 0.10;
   const postZs = [mz - 1.05, mz + 1.05];
   for (const pz of postZs) {
-    stoneParts.push(uvBox(0.24, 0.26, 0.24, 0.7).translate(postX, my + 0.04, pz));
+    stoneParts.push(uvBox(0.24, 0.44, 0.24, 0.7).translate(postX, my - 0.05, pz));
   }
   const millStoneNode = add({
     name: 'Millhouse Fieldstone Masonry',
@@ -222,8 +222,10 @@ export function buildMillhouseArchitecture(scene, add, mats, registerPick) {
   // 6. Hanging Cast-Iron Porch Lantern (suspended below tip of oak wall bracket, clear of post!)
   const lanPivot = add({ name: 'Porch Lantern Pivot', position: [postX - 0.23, upperY - 0.058, mz + 1.05] });
   const lanIron = Mesh.merge([
-    Mesh.tube([[0, 0, 0], [0, -0.13, 0]], 0.011, 6, { capStart: false, capEnd: false }),
+    Mesh.tube([[0, 0, 0], [0, -0.14, 0]], 0.011, 6, { capStart: false, capEnd: false }),
     Mesh.cone(0.095, 0.08, 6).translate(0, -0.13, 0),
+    Mesh.cylinder(0.005, 0.20, 6).translate(0.064, -0.22, 0),
+    Mesh.cylinder(0.005, 0.20, 6).translate(-0.064, -0.22, 0),
     Mesh.cylinder(0.075, 0.012, 6).translate(0, -0.31, 0),
   ]);
   lanPivot.add(add({

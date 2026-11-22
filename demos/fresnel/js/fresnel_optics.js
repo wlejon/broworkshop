@@ -41,7 +41,7 @@ function buildFresnelOpticPanelMesh(rMid = 0.88, aSpan = Math.PI / 3.4, yCenter 
 }
 
 /** Tapered horizontal volumetric beacon cone along +Z from bullseye out into coastal night air. */
-function buildBeamCone(rStart = 0.22, rEnd = 1.45, len = 6.2, segs = 20) {
+function buildBeamCone(rStart = 0.22, rEnd = 1.45, len = 6.2, segs = 48) {
   const verts = [], uvs = [], tris = [];
   for (let i = 0; i <= 10; ++i) {
     const v = i / 10;
@@ -135,9 +135,9 @@ export function buildFresnelOptics(scene, add, mats, registerPick) {
       [0.095, 4.86],
       [0.085, 4.86],
       [0.085, 4.38],
-    ], 24, 0, Math.PI * 2, false, 1.0),
+    ], 48, 0, Math.PI * 2, false, 1.0),
     color: [0.90, 0.96, 1.0, 0.34], roughness: 0.14, metallic: 0.02,
-    twoSided: true, castsShadow: false, receivesShadow: true,
+    twoSided: false, castsShadow: false, receivesShadow: true,
   });
 
   // 2. Rotating First-Order Catadioptric Optical Assembly (pivot Y = 3.32)
@@ -186,7 +186,7 @@ export function buildFresnelOptics(scene, add, mats, registerPick) {
   lensPivot.add(glassNode);
 
   // 6 Rotating Volumetric Beacon Cones pointing outward from bullseye center (local y = 1.16 -> world Y = 4.48)
-  const beamProto = buildBeamCone(0.18, 1.18, 6.2, 20);
+  const beamProto = buildBeamCone(0.18, 1.18, 6.2, 48);
   const beamParts = [];
   for (let i = 0; i < 6; ++i) {
     const a = (i + 0.5) * (Math.PI / 3);
@@ -196,7 +196,7 @@ export function buildFresnelOptics(scene, add, mats, registerPick) {
     name: 'Fresnel Beacon Beams',
     mesh: Mesh.merge(beamParts),
     color: [1.0, 0.88, 0.58, 0.25], roughness: 0.9, metallic: 0.0,
-    twoSided: true, castsShadow: false, receivesShadow: false,
+    twoSided: false, castsShadow: false, receivesShadow: false,
   });
   beamsNode.setShader({ module: BEACON_BEAM_BK, file: 'beacon_beams.bk', uniforms: { beamGain: 0.85, time: 0, pad0: 0, pad1: 0 } });
   lensPivot.add(beamsNode);

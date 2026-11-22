@@ -121,9 +121,11 @@ export function buildWatchroomInterior(add, mats, registerPick) {
   gimbalPivot.add(add({
     name: 'Gimballed Brass Lamp Body',
     mesh: Mesh.merge([
-      cylFull(0.010, 0.14, 6).translate(0, -0.07, 0),
-      Mesh.cone(0.11, 0.07, 12).translate(0, -0.18, 0),
-      cylFull(0.068, 0.05, 12).translate(0, -0.29, 0),
+      cylFull(0.010, 0.16, 8).translate(0, -0.08, 0),
+      Mesh.cone(0.11, 0.07, 16).translate(0, -0.18, 0),
+      cylFull(0.006, 0.13, 8).translate(0.052, -0.24, 0),
+      cylFull(0.006, 0.13, 8).translate(-0.052, -0.24, 0),
+      cylFull(0.068, 0.05, 16).translate(0, -0.29, 0),
     ]),
     texture: mats.brass.albedo, normalTexture: mats.brass.normal, metallicRoughnessTexture: mats.brass.mr,
     color: '#ffffff', roughness: 1.0, metallic: 0.86,

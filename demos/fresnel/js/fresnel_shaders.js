@@ -68,6 +68,7 @@ pub fn fragment(v: mesh::Vertex, s: mesh::Surface) -> mesh::Surface {
 export const BEACON_BEAM_BK = `
 module hook;
 import mesh;
+import scene;
 
 struct Params {
   beamGain: f32,
@@ -80,14 +81,15 @@ struct Params {
 pub fn fragment(v: mesh::Vertex, s: mesh::Surface) -> mesh::Surface {
   var out = s;
   let axial = smoothstep(0.0, 0.12, v.uv.y) * pow(max(0.0, 1.0 - v.uv.y), 1.65);
-  let ndotv = clamp(abs(dot(normalize(out.normal), normalize(-v.world_pos))), 0.0, 1.0);
-  let soft_cone = pow(ndotv, 1.75);
+  let view_dir = normalize(-scene::view_ray(v.pixel));
+  let ndotv = clamp(dot(normalize(out.normal), view_dir), 0.0, 1.0);
+  let soft_cone = pow(ndotv, 2.1);
   let strength = axial * soft_cone * params.beamGain;
   out.base_color = vec3<f32>(0.02, 0.02, 0.02);
   out.roughness = 0.90;
   out.metallic = 0.0;
-  out.emissive = vec3<f32>(1.0, 0.85, 0.52) * strength * 0.42;
-  out.alpha = clamp(strength * 0.34, 0.0, 0.42);
+  out.emissive = vec3<f32>(1.0, 0.85, 0.52) * strength * 0.56;
+  out.alpha = clamp(strength * 0.42, 0.0, 0.48);
   return out;
 }
 `;
