@@ -237,8 +237,8 @@ pub fn fragment(v: mesh::Vertex, s_in: mesh::Surface) -> mesh::Surface {
     let block_cov = clamp(1.0 - road_cov - sw_cov, 0.0, 1.0);
 
     // Band-limited multi-scale natural fBm: crisp close-up aggregate (5.2/m) fading smoothly into 1.1/m mid relief
-    let dist_damp_fine = 1.0 - smoothstep(0.06, 0.28, fw_max);
-    let dist_damp_mid = 1.0 - smoothstep(0.30, 1.35, fw_max);
+    let dist_damp_fine = 1.0 - smoothstep(0.08, 0.42, fw_max);
+    let dist_damp_mid = 1.0 - smoothstep(0.40, 2.10, fw_max);
     let n_macro = fbm2(world_xz * 0.024);
     let n_mid = mix(0.5, fbm2(world_xz * 0.55 + vec2<f32>(3.1, 7.4)), dist_damp_mid);
     let n_fine = mix(0.5, fbm2(world_xz * 4.8 + vec2<f32>(11.2, 4.9)), dist_damp_fine);
@@ -252,7 +252,7 @@ pub fn fragment(v: mesh::Vertex, s_in: mesh::Surface) -> mesh::Surface {
     let pad_mask = surf_val.z;
     let zone_code = surf_val.w;
 
-    let n_amp = mix(0.14, 0.11, max(road_cov, sw_cov));
+    let n_amp = mix(0.24, 0.22, max(road_cov, sw_cov));
     s.normal = normalize(s.normal + vec3<f32>(n_grad_x * n_amp, 0.0, n_grad_z * n_amp));
 
     var col = vec3<f32>(0.0);
@@ -260,8 +260,8 @@ pub fn fragment(v: mesh::Vertex, s_in: mesh::Surface) -> mesh::Surface {
 
     if (road_cov > 0.001) {
         let grit = (vnoise2(world_xz * 10.5) - 0.5) * dist_damp_fine;
-        let lane_wear = 0.94 + 0.09 * (n_macro - 0.5) + 0.10 * (n_mid - 0.5) + 0.14 * (n_fine - 0.5) + 0.14 * grit;
-        var road_col = vec3<f32>(0.095, 0.100, 0.108) * lane_wear;
+        let lane_wear = clamp(0.92 + 0.14 * (n_macro - 0.5) + 0.16 * (n_mid - 0.5) + 0.20 * (n_fine - 0.5) + 0.18 * grit, 0.65, 1.35);
+        var road_col = vec3<f32>(0.105, 0.110, 0.118) * lane_wear;
         var road_rough = clamp(0.78 + 0.10 * n_fine + 0.08 * grit, 0.65, 0.92);
 
         let aa_mark = 1.0 - smoothstep(0.04, 0.11, fw_max);

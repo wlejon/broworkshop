@@ -1,5 +1,5 @@
-// Vertex & PBR/emissive fragment hook for GPU-instanced city & interior meshes.
-// Clean 3D object-space fBm material grain without diagonal static or bumpy distortions.
+// Vertex & multi-material PBR/emissive fragment hook for GPU-instanced city & interior meshes.
+// Includes architectural siding/brick, interior plaster+baseboards, oak planks, marble tile, textile, shingles.
 module hook;
 import mesh;
 import scene;
@@ -57,86 +57,152 @@ pub fn fragment(v: mesh::Vertex, s: mesh::Surface) -> mesh::Surface {
     let t0 = normalize(cross(up_ref, n));
     let b0 = cross(n, t0);
 
-    // Multi-scale object-space fBm micro + mid relief (uniform control flow, zero diagonal stripes)
     let m_fw = length(dpdx(v.world_pos)) + length(dpdy(v.world_pos));
     let detail_fine = 1.0 - smoothstep(0.06, 0.42, m_fw);
     let detail_mid = 1.0 - smoothstep(0.35, 2.20, m_fw);
 
-    let freq = (mat == 2 || mat == 0 || mat == 9 || mat == 7) ? 5.2 : 6.5;
-    let op = v.v0.xyz * freq + vec3<f32>(v.v1.w * 0.137, v.v1.w * 0.071, v.v1.w * 0.193);
-    let speck = (vnoise3(op * 3.2) - 0.5) * detail_fine;
+    let inst_seed = vec3<f32>(v.v1.w * 0.137, v.v1.w * 0.071, v.v1.w * 0.193);
+    let op = v.v0.xyz * 28.0 + inst_seed;
+    let op_fine = v.v0.xyz * 54.0 + inst_seed;
+    let op_micro = v.v0.xyz * 210.0 + inst_seed;
+    let speck = (vnoise3(op * 2.2) - 0.5) * detail_fine;
+    let m_speck = (vnoise3(op_micro) - 0.5) * detail_fine;
     let grain_f = (fbm3(op) - 0.5) * detail_fine;
-    let grain_m = (vnoise3(op * 0.28) - 0.5) * detail_mid;
-    let grain = grain_f + grain_m * 0.70 + speck * 0.55;
-    let g_fx = (vnoise3(op * 2.4 + t0 * 0.11) - vnoise3(op * 2.4 - t0 * 0.11)) * detail_fine;
-    let g_fy = (vnoise3(op * 2.4 + b0 * 0.11) - vnoise3(op * 2.4 - b0 * 0.11)) * detail_fine;
-    let g_mx = (vnoise3(op * 0.55 + t0 * 0.25) - vnoise3(op * 0.55 - t0 * 0.25)) * detail_mid;
-    let g_my = (vnoise3(op * 0.55 + b0 * 0.25) - vnoise3(op * 0.55 - b0 * 0.25)) * detail_mid;
-    let gx = (g_fx + g_mx * 0.85) * 9.0;
-    let gy = (g_fy + g_my * 0.85) * 9.0;
+    let grain_m = (vnoise3(op * 0.35) - 0.5) * detail_mid;
+    let grain = grain_f + grain_m * 0.55 + speck * 0.55;
+    let g_fx = (vnoise3(op_fine + t0 * 0.14) - vnoise3(op_fine - t0 * 0.14)) * detail_fine;
+    let g_fy = (vnoise3(op_fine + b0 * 0.14) - vnoise3(op_fine - b0 * 0.14)) * detail_fine;
+    let mg_x = (vnoise3(op_micro + t0 * 0.22) - vnoise3(op_micro - t0 * 0.22)) * detail_fine;
+    let mg_y = (vnoise3(op_micro + b0 * 0.22) - vnoise3(op_micro - b0 * 0.22)) * detail_fine;
+    let g_mx = (vnoise3(op * 0.65 + t0 * 0.25) - vnoise3(op * 0.65 - t0 * 0.25)) * detail_mid;
+    let g_my = (vnoise3(op * 0.65 + b0 * 0.25) - vnoise3(op * 0.65 - b0 * 0.25)) * detail_mid;
+    let gx = (g_fx + g_mx * 0.65) * 9.0;
+    let gy = (g_fy + g_my * 0.65) * 9.0;
 
     if (mat == 0) {
-        // Exterior & interior plaster, brick, drywall
-        out.base_color = s.base_color * clamp(1.0 + 0.24 * grain, 0.78, 1.22);
-        out.roughness = clamp(0.82 + 0.08 * grain, 0.68, 0.94);
-        out.metallic = 0.02;
-        out.normal = normalize(n + t0 * (gx * 0.18) + b0 * (gy * 0.18));
+        if (param > 0.5) {
+            // Crisp interior drywall plaster + clean painted wood baseboard along bottom margin
+            let is_base = v.v0.y < 0.045;
+            let base_line = smoothstep(0.006, 0.0, abs(v.v0.y - 0.045)) * detail_fine;
+            let wall_tex = s.base_color * clamp(1.0 + 0.075 * m_speck + 0.025 * speck, 0.90, 1.10);
+            out.base_color = (is_base ? vec3<f32>(0.89, 0.87, 0.83) : wall_tex) * (1.0 - 0.18 * base_line);
+            out.roughness = is_base ? 0.44 : clamp(0.84 + 0.04 * m_speck, 0.74, 0.92);
+            out.metallic = 0.02;
+            out.normal = normalize(n + t0 * (mg_x * 1.45) + b0 * (mg_y * 1.45));
+        } else {
+            // Exterior architectural siding/masonry horizontal courses + fine masonry micro-grain
+            let course = sin(v.v0.y * 42.0) * detail_fine;
+            let course_mul = 0.96 + 0.04 * course;
+            out.base_color = s.base_color * clamp(1.0 + 0.08 * m_speck + 0.05 * speck + 0.04 * grain_f, 0.88, 1.12) * course_mul;
+            out.roughness = clamp(0.80 + 0.06 * m_speck, 0.68, 0.92);
+            out.metallic = 0.02;
+            out.normal = normalize(n + t0 * (mg_x * 1.45 + gx * 0.08) + b0 * (mg_y * 1.45 + gy * 0.08 + course * 0.05));
+        }
     } else if (mat == 1) {
         // Brushed steel mullions, frames, streetlight poles, elevator cab metal
-        out.base_color = s.base_color * clamp(1.0 + 0.12 * grain, 0.88, 1.12);
-        out.roughness = clamp(0.36 + 0.08 * grain, 0.22, 0.55);
+        out.base_color = s.base_color * clamp(1.0 + 0.10 * m_speck + 0.06 * grain_f, 0.88, 1.12);
+        out.roughness = clamp(0.36 + 0.06 * m_speck, 0.24, 0.52);
         out.metallic = 0.72;
-        out.normal = normalize(n + t0 * (gx * 0.08) + b0 * (gy * 0.08));
+        out.normal = normalize(n + t0 * (mg_x * 1.25) + b0 * (mg_y * 1.25));
     } else if (mat == 2) {
-        // Slabs, concrete floors, stone, wood furniture, stair treads
-        let is_slab = param > 0.5;
-        out.base_color = s.base_color * clamp(1.0 + (is_slab ? 0.22 : 0.24) * grain, 0.76, 1.24);
-        out.roughness = is_slab ? 0.84 : 0.76;
-        out.metallic = 0.02;
-        out.normal = normalize(n + t0 * (gx * 0.18) + b0 * (gy * 0.18));
+        if (param > 1.5) {
+            // Polished veined lobby marble floor / stone countertop
+            let tile_x = abs(fract(v.world_pos.x * 0.8) - 0.5);
+            let tile_z = abs(fract(v.world_pos.z * 0.8) - 0.5);
+            let grout = smoothstep(0.47, 0.495, max(tile_x, tile_z)) * detail_fine;
+            let vein = sin(v.world_pos.x * 1.9 + vnoise3(v.world_pos * 1.2) * 5.0) * 0.5 + 0.5;
+            let col_m = mix(vec3<f32>(0.82, 0.80, 0.77), vec3<f32>(0.62, 0.60, 0.57), vein * 0.52);
+            let stone_f = (vnoise3(v.world_pos * 24.0) - 0.5) * detail_fine;
+            let sx_g = (vnoise3(v.world_pos * 24.0 + t0 * 0.22) - vnoise3(v.world_pos * 24.0 - t0 * 0.22)) * detail_fine;
+            let sy_g = (vnoise3(v.world_pos * 24.0 + b0 * 0.22) - vnoise3(v.world_pos * 24.0 - b0 * 0.22)) * detail_fine;
+            out.base_color = col_m * (1.0 - 0.28 * grout) * clamp(1.0 + 0.14 * stone_f + 0.09 * m_speck, 0.82, 1.18);
+            out.roughness = mix(0.28, 0.76, grout);
+            out.metallic = 0.04;
+            out.normal = normalize(n + t0 * (sx_g * 1.55 + mg_x * 0.95) + b0 * (sy_g * 1.55 + mg_y * 0.95));
+        } else if (param > 0.5) {
+            // Hardwood oak plank flooring for homes & offices (crisp high-entropy fiber & plank bevels)
+            let plank_z = fract(v.world_pos.z * 4.5);
+            let seam_z = smoothstep(0.44, 0.49, abs(plank_z - 0.5)) * detail_fine;
+            let plank_id = floor(v.world_pos.z * 4.5);
+            let end_x = smoothstep(0.46, 0.495, abs(fract(v.world_pos.x * 0.65 + plank_id * 0.37) - 0.5)) * detail_fine;
+            let plank_tint = 0.84 + 0.28 * hash3(vec3<f32>(plank_id, 1.0, 2.0));
+            let fiber_coord = vec3<f32>(v.world_pos.x * 3.5, 0.0, v.world_pos.z * 26.0);
+            let wood_grain = 0.90 + 0.20 * (vnoise3(fiber_coord) - 0.5);
+            let fg_x = (vnoise3(fiber_coord + t0 * 0.16) - vnoise3(fiber_coord - t0 * 0.16)) * detail_fine;
+            let fg_y = (vnoise3(fiber_coord + b0 * 0.16) - vnoise3(fiber_coord - b0 * 0.16)) * detail_fine;
+            let wood_col = vec3<f32>(0.54, 0.38, 0.24) * plank_tint * wood_grain * (1.0 - 0.34 * max(seam_z, end_x));
+            out.base_color = wood_col;
+            out.roughness = mix(0.42, 0.76, max(seam_z, end_x));
+            out.metallic = 0.02;
+            out.normal = normalize(n + t0 * (fg_x * 1.45 + g_fx * 0.35) + b0 * (fg_y * 1.45 + g_fy * 0.35));
+        } else {
+            // Sculpted furniture hardwood grain (crisp fine normal & tonal relief)
+            let wood_g = (vnoise3(vec3<f32>(v.v0.x * 22.0, v.v0.y * 8.0, v.v0.z * 8.0)) - 0.5) * detail_fine;
+            out.base_color = s.base_color * clamp(1.0 + 0.24 * wood_g + 0.12 * m_speck, 0.78, 1.22);
+            out.roughness = 0.54;
+            out.metallic = 0.02;
+            out.normal = normalize(n + t0 * (mg_x * 1.45 + g_fx * 0.45) + b0 * (mg_y * 1.45 + g_fy * 0.45));
+        }
     } else if (mat == 3) {
-        // Architectural glass
+        // Architectural & vehicle glass
         out.roughness = 0.06;
         out.metallic = 0.16;
         out.normal = n;
     } else if (mat == 4) {
-        // Polished chrome trim & alloy wheel rims
+        // Polished chrome & alloy rims
         out.base_color = vec3<f32>(0.78, 0.80, 0.84) * clamp(1.0 + 0.08 * grain, 0.90, 1.10);
         out.roughness = 0.18;
         out.metallic = 0.90;
         out.normal = normalize(n + t0 * (gx * 0.04) + b0 * (gy * 0.04));
     } else if (mat == 5) {
-        // Emissive (streetlamps, interior ceiling lights, vehicle headlights/taillights)
+        // Emissive lamps, ceiling lights, vehicle headlights/taillights, monitors
         let night_atten = mix(0.85, 0.42, smoothstep(0.15, 0.85, params.night_factor));
         out.base_color = s.base_color;
         out.roughness = 0.25;
         out.metallic = 0.0;
-        out.emissive = min(vec3<f32>(1.4), s.base_color * max(0.0, param * params.glow_scale * night_atten));
+        out.emissive = min(vec3<f32>(0.88), s.base_color * max(0.0, param * params.glow_scale * night_atten));
     } else if (mat == 6) {
-        // Mirror-smooth clearcoat metallic automotive paint (zero macro bump distortion)
+        // Satin-gloss clearcoat automotive paint (controlled roughness avoids grazing dusk HDR clipping)
         let flake = (vnoise3(v.v0.xyz * 36.0) - 0.5) * detail_fine;
-        out.base_color = s.base_color * clamp(1.0 + 0.04 * flake, 0.95, 1.05);
-        out.roughness = 0.16;
-        out.metallic = 0.52;
+        out.base_color = min(vec3<f32>(0.54), s.base_color * clamp(1.0 + 0.04 * flake, 0.95, 1.05));
+        out.roughness = 0.30;
+        out.metallic = 0.28;
         out.normal = n;
     } else if (mat == 7) {
-        // Rooftops & cornices
-        out.base_color = s.base_color * clamp(1.0 + 0.26 * grain, 0.76, 1.24);
-        out.roughness = 0.86;
+        // Commercial/skyscraper slate rooftops, spire crowns & parapets (crisp fine architectural finish)
+        out.base_color = s.base_color * clamp(1.0 + 0.075 * m_speck + 0.03 * speck, 0.88, 1.12);
+        out.roughness = 0.82;
         out.metallic = 0.04;
-        out.normal = normalize(n + t0 * (gx * 0.20) + b0 * (gy * 0.20));
+        out.normal = normalize(n + t0 * (mg_x * 1.45) + b0 * (mg_y * 1.45));
+    } else if (mat == 8) {
+        // Woven textile upholstery, rugs, canvas art, commercial awnings
+        let weave = (sin(v.v0.x * 90.0) * sin(v.v0.z * 90.0)) * detail_fine;
+        out.base_color = s.base_color * clamp(1.0 + 0.12 * weave + 0.12 * m_speck, 0.82, 1.18);
+        out.roughness = 0.88;
+        out.metallic = 0.0;
+        out.normal = normalize(n + t0 * (mg_x * 1.45) + b0 * (mg_y * 1.45));
     } else if (mat == 9) {
-        // Foliage crown tinted by per-instance color
+        // Botanical foliage
         out.base_color = s.base_color * clamp(1.0 + 0.28 * grain, 0.72, 1.28);
-        out.roughness = 0.84;
+        out.roughness = 0.82;
         out.metallic = 0.0;
         out.normal = normalize(n + t0 * (gx * 0.18) + b0 * (gy * 0.18));
     } else if (mat == 10) {
-        // Organic tree bark brown (overrides green foliage tint)
+        // Tree bark brown
         out.base_color = vec3<f32>(0.29, 0.21, 0.14) * clamp(1.0 + 0.25 * grain, 0.74, 1.25);
         out.roughness = 0.90;
         out.metallic = 0.0;
         out.normal = normalize(n + t0 * (gx * 0.22) + b0 * (gy * 0.22));
+    } else if (mat == 11) {
+        // Pitched roof slate/asphalt shingles
+        let row = floor(v.v0.y * 7.5);
+        let row_seam = smoothstep(0.43, 0.49, abs(fract(v.v0.y * 7.5) - 0.5)) * detail_fine;
+        let tab_seam = smoothstep(0.46, 0.495, abs(fract(v.v0.x * 2.2 + row * 0.5) - 0.5)) * detail_fine;
+        let grit = (vnoise3(v.v0.xyz * 22.0) - 0.5) * detail_fine;
+        out.base_color = s.base_color * clamp(1.0 + 0.10 * grit + 0.08 * m_speck, 0.84, 1.16) * (1.0 - 0.24 * max(row_seam, tab_seam));
+        out.roughness = 0.84;
+        out.metallic = 0.04;
+        out.normal = normalize(n + t0 * (mg_x * 1.45 + gx * 0.10) + b0 * (mg_y * 1.45 + gy * 0.10));
     } else if (mat == 12) {
         // Dark satin automotive tire rubber
         out.base_color = vec3<f32>(0.09, 0.095, 0.105) * clamp(1.0 + 0.14 * grain, 0.82, 1.18);
@@ -152,7 +218,7 @@ pub fn fragment(v: mesh::Vertex, s: mesh::Surface) -> mesh::Surface {
     }
 
     if (SCENE_DEBUG(mat_id)) {
-        let m = clamp((mat as f32) / 7.0, 0.0, 1.0);
+        let m = clamp((mat as f32) / 13.0, 0.0, 1.0);
         out = mesh::debug(out, vec3<f32>(m, clamp(param, 0.0, 1.0), 1.0 - m));
     }
     return out;

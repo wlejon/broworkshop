@@ -163,7 +163,12 @@ if (!backendOk) {
             const elevHint = elevators.getActiveFloorHint(bp, ctrl.walkFeet);
             if (elevHint != null) floorHint = elevHint;
         }
-        streamer.update(camPos, floorHint, lod, atmoState, elevators, simTime);
+        const act = streamer.update(camPos, floorHint, lod, atmoState, elevators, simTime);
+        if (act && act.inside && act.activeRoomCenter) {
+            atmo.setInteriorLight(true, act.activeRoomCenter[0] - camPos[0], act.activeRoomCenter[1] - camPos[1], act.activeRoomCenter[2] - camPos[2]);
+        } else {
+            atmo.setInteriorLight(false);
+        }
         streetscape.update(camPos, altitude);
         ambientTraffic.pushInstances(camPos, altitude, atmoState);
         driveCar.pushInstances(camPos, altitude);

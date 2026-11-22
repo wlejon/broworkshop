@@ -132,9 +132,9 @@ function voxelizeSlotted(vd, solidMesh, glowMesh, depth, slotCount) {
 
 function buildSkyscraperBaseSlots(vd, depth, slotCount) {
     const slots = new Array(slotCount);
-    const stone = [0.42, 0.44, 0.48];
+    const stone = [0.46, 0.48, 0.52];
     const glass = [0.22, 0.30, 0.38];
-    const winCol = [1.0, 0.86, 0.60];
+    const winCol = [0.78, 0.72, 0.56];
     for (let s = 0; s < slotCount; s++) {
         const yDatum = -1.0 + ((s + 0.5) / slotCount) * 2.0;
         const yBot = Math.max(-1.0, yDatum - 0.25);
@@ -145,11 +145,11 @@ function buildSkyscraperBaseSlots(vd, depth, slotCount) {
         sb.addBox(0, yMid + hy * 0.15, 0, 0.68, hy * 0.75, 0.68, glass);
         const gb = new MeshBuilder();
         for (let wy = yBot + 0.28; wy < 0.92; wy += 0.30) {
-            gb.addBox(0, wy, 0, 0.75, 0.06, 0.64, winCol);
-            gb.addBox(0, wy, 0, 0.64, 0.06, 0.75, winCol);
+            gb.addBox(0, wy, 0, 0.75, 0.05, 0.62, winCol);
+            gb.addBox(0, wy, 0, 0.62, 0.05, 0.75, winCol);
         }
         const sm = voxMeshFixed(vd, sb.toMesh(), depth, { roughness: 0.55 });
-        const gm = gb.pos.length > 0 ? voxMeshFixed(vd, gb.toMesh(), depth, { roughness: 0.22, emissive: 0.36 }) : null;
+        const gm = gb.pos.length > 0 ? voxMeshFixed(vd, gb.toMesh(), depth, { roughness: 0.22, emissive: 0.20 }) : null;
         const belowMb = new MeshBuilder();
         belowMb.addBox(0, 0.72, 0, 0.74, 0.28, 0.74, stone);
         const below = s <= 1 ? voxMeshFixed(vd, belowMb.toMesh(), depth, { roughness: 0.80 }) : null;
@@ -165,25 +165,27 @@ function buildSkyscraperBaseSlots(vd, depth, slotCount) {
 function buildSkyscraperTier(vd, variant) {
     const sb = new MeshBuilder();
     const gb = new MeshBuilder();
-    const frame = variant === 'A' ? [0.46, 0.49, 0.54] : [0.36, 0.40, 0.46];
-    const winCol = variant === 'A' ? [1.0, 0.88, 0.62] : [0.82, 0.92, 1.0];
+    const frame = variant === 'A' ? [0.42, 0.46, 0.52] : [0.34, 0.39, 0.45];
+    const glass = variant === 'A' ? [0.22, 0.30, 0.38] : [0.18, 0.26, 0.34];
+    const winCol = variant === 'A' ? [0.80, 0.72, 0.56] : [0.68, 0.78, 0.88];
     if (variant === 'crown') {
-        sb.addBox(0, -0.52, 0, 0.60, 0.48, 0.60, frame);
-        sb.addBox(0, 0.10, 0, 0.44, 0.28, 0.44, frame);
-        sb.addPyramid(0, 0.36, 0, 0.32, 0.56, 0.32, frame, [0.70, 0.72, 0.76]);
-        gb.addBox(0, -0.50, 0, 0.62, 0.16, 0.52, winCol);
-        gb.addBox(0, -0.50, 0, 0.52, 0.16, 0.62, winCol);
-        gb.addBox(0, 0.88, 0, 0.06, 0.10, 0.06, [1.0, 0.24, 0.18]);
+        sb.addBox(0, -0.50, 0, 0.62, 0.50, 0.62, frame);
+        sb.addBox(0, 0.18, 0, 0.44, 0.26, 0.44, glass);
+        sb.addBox(0, 0.56, 0, 0.26, 0.18, 0.26, [0.58, 0.60, 0.64]);
+        sb.addBox(0, 0.82, 0, 0.05, 0.16, 0.05, [0.68, 0.70, 0.74]);
+        gb.addBox(0, -0.50, 0, 0.63, 0.12, 0.50, winCol);
+        gb.addBox(0, -0.50, 0, 0.50, 0.12, 0.63, winCol);
     } else {
         const hx = variant === 'A' ? 0.68 : 0.62;
         sb.addBox(0, 0.0, 0, hx, 1.0, hx, frame);
+        sb.addBox(0, 0.0, 0, hx * 0.96, 0.96, hx * 0.96, glass);
         for (let wy = -0.78; wy <= 0.82; wy += 0.32) {
-            gb.addBox(0, wy, 0, hx + 0.02, 0.07, hx * 0.84, winCol);
-            gb.addBox(0, wy, 0, hx * 0.84, 0.07, hx + 0.02, winCol);
+            gb.addBox(0, wy, 0, hx + 0.015, 0.05, hx * 0.82, winCol);
+            gb.addBox(0, wy, 0, hx * 0.82, 0.05, hx + 0.015, winCol);
         }
     }
     const sm = voxMeshFixed(vd, sb.toMesh(), 3, { roughness: 0.48 });
-    const gm = voxMeshFixed(vd, gb.toMesh(), 3, { roughness: 0.22, emissive: 0.38 });
+    const gm = voxMeshFixed(vd, gb.toMesh(), 3, { roughness: 0.22, emissive: 0.20 });
     return sm && gm ? vd.mergeArchetypes(sm, gm) : sm;
 }
 

@@ -1,4 +1,19 @@
-// Procedural closed single-island outward-CCW meshes for buildings, stairs, elevators, and furniture.
+// Procedural closed single-island outward-CCW meshes for buildings, stairs, elevators,
+// pitched roofs, porches, awnings, and skyscraper crowns. Furniture re-exported from furniture_meshes.js.
+export {
+    createTableMesh,
+    createChairMesh,
+    createDeskMesh,
+    createSofaMesh,
+    createBedMesh,
+    createCounterMesh,
+    createShelfMesh,
+    createLampMesh,
+    createPlantMesh,
+    createRugMesh,
+    createCeilingLightMesh,
+    createWallArtMesh,
+} from '/app/buildings/furniture_meshes.js';
 
 const FACES = [
     { n: [1, 0, 0],  t: [0, 0, -1, 1], c: (x0, y0, z0, x1, y1, z1) => [[x1, y0, z1], [x1, y0, z0], [x1, y1, z0], [x1, y1, z1]] },
@@ -18,6 +33,52 @@ class MeshAcc {
         this.idx = [];
     }
 
+    addTriOut(p0, p1, p2, ref, matId, param = 0.0) {
+        const ux = p1[0] - p0[0], uy = p1[1] - p0[1], uz = p1[2] - p0[2];
+        const vx = p2[0] - p0[0], vy = p2[1] - p0[1], vz = p2[2] - p0[2];
+        let nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx;
+        const len = Math.hypot(nx, ny, nz) || 1;
+        nx /= len; ny /= len; nz /= len;
+        const mx = (p0[0] + p1[0] + p2[0]) / 3 - ref[0];
+        const my = (p0[1] + p1[1] + p2[1]) / 3 - ref[1];
+        const mz = (p0[2] + p1[2] + p2[2]) / 3 - ref[2];
+        const flip = (nx * mx + ny * my + nz * mz) < 0;
+        if (flip) { nx = -nx; ny = -ny; nz = -nz; }
+        const pts = flip ? [p0, p2, p1] : [p0, p1, p2];
+        const tx = Math.abs(ny) > 0.9 ? [1, 0, 0, 1] : [nz, 0, -nx, 1];
+        const b = this.pos.length / 3;
+        for (let i = 0; i < 3; i++) {
+            this.pos.push(pts[i][0], pts[i][1], pts[i][2]);
+            this.nrm.push(nx, ny, nz);
+            this.tan.push(tx[0], tx[1], tx[2], tx[3]);
+            this.uvs.push(matId, param);
+        }
+        this.idx.push(b, b + 1, b + 2);
+    }
+
+    addQuadOut(p0, p1, p2, p3, ref, matId, param = 0.0) {
+        const ux = p1[0] - p0[0], uy = p1[1] - p0[1], uz = p1[2] - p0[2];
+        const vx = p2[0] - p0[0], vy = p2[1] - p0[1], vz = p2[2] - p0[2];
+        let nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx;
+        const len = Math.hypot(nx, ny, nz) || 1;
+        nx /= len; ny /= len; nz /= len;
+        const mx = 0.25 * (p0[0] + p1[0] + p2[0] + p3[0]) - ref[0];
+        const my = 0.25 * (p0[1] + p1[1] + p2[1] + p3[1]) - ref[1];
+        const mz = 0.25 * (p0[2] + p1[2] + p2[2] + p3[2]) - ref[2];
+        const flip = (nx * mx + ny * my + nz * mz) < 0;
+        if (flip) { nx = -nx; ny = -ny; nz = -nz; }
+        const pts = flip ? [p0, p3, p2, p1] : [p0, p1, p2, p3];
+        const tx = Math.abs(ny) > 0.9 ? [1, 0, 0, 1] : [nz, 0, -nx, 1];
+        const b = this.pos.length / 3;
+        for (let i = 0; i < 4; i++) {
+            this.pos.push(pts[i][0], pts[i][1], pts[i][2]);
+            this.nrm.push(nx, ny, nz);
+            this.tan.push(tx[0], tx[1], tx[2], tx[3]);
+            this.uvs.push(matId, param);
+        }
+        this.idx.push(b, b + 1, b + 2, b, b + 2, b + 3);
+    }
+
     addBox(x0, y0, z0, x1, y1, z1, matId = 0, param = 0.0) {
         for (let fi = 0; fi < FACES.length; fi++) {
             const f = FACES[fi];
@@ -31,6 +92,23 @@ class MeshAcc {
                 this.uvs.push(matId, param);
             }
             this.idx.push(b, b + 1, b + 2, b, b + 2, b + 3);
+        }
+    }
+
+    addPrismRoof(hx, hz, y0, yPeak, ridgeHalfX, matRoof, matGable, zc = 0.0) {
+        // Closed hip/gable prism from base [-hx..hx] x [zc-hz..zc+hz] at y0 to ridge at yPeak
+        const bFL = [-hx, y0, zc + hz], bFR = [hx, y0, zc + hz], bRR = [hx, y0, zc - hz], bRL = [-hx, y0, zc - hz];
+        const tL = [-ridgeHalfX, yPeak, zc], tR = [ridgeHalfX, yPeak, zc];
+        const ref = [0, y0 + (yPeak - y0) * 0.35, zc];
+        this.addQuadOut(bRL, bRR, bFR, bFL, ref, matGable, 0.0); // bottom soffit
+        this.addQuadOut(bFL, bFR, tR, tL, ref, matRoof, 0.0);    // front roof slope
+        this.addQuadOut(bRR, bRL, tL, tR, ref, matRoof, 0.0);    // back roof slope
+        if (ridgeHalfX < hx - 0.02) {
+            this.addTriOut(bFR, bRR, tR, ref, matRoof, 0.0);     // right hip slope
+            this.addTriOut(bRL, bFL, tL, ref, matRoof, 0.0);     // left hip slope
+        } else {
+            this.addTriOut(bFR, bRR, tR, ref, matGable, 0.0);    // right gable triangle
+            this.addTriOut(bRL, bFL, tL, ref, matGable, 0.0);    // left gable triangle
         }
     }
 
@@ -57,35 +135,29 @@ export function createSolidBoxMesh(matId = 0, param = 0.0) {
     return m.build();
 }
 
-export function createWallDoorMesh() {
+export function createWallDoorMesh(matId = 0, param = 0.0) {
     const m = new MeshAcc();
-    // Door aperture: x in [-0.36, 0.36], y in [0, 0.78]
-    m.addBox(-0.5, 0.0, -0.5, -0.36, 1.0, 0.5, 0, 0.0);
-    m.addBox(0.36, 0.0, -0.5, 0.5, 1.0, 0.5, 0, 0.0);
-    m.addBox(-0.38, 0.78, -0.5, 0.38, 1.0, 0.5, 0, 0.0);
-    // Overlapping jamb & header trim (single connected island)
-    m.addBox(-0.38, 0.0, -0.52, -0.34, 0.80, 0.52, 1, 0.0);
-    m.addBox(0.34, 0.0, -0.52, 0.38, 0.80, 0.52, 1, 0.0);
-    m.addBox(-0.38, 0.76, -0.52, 0.38, 0.81, 0.52, 1, 0.0);
+    m.addBox(-0.5, 0.0, -0.5, -0.36, 1.0, 0.5, matId, param);
+    m.addBox(0.36, 0.0, -0.5, 0.5, 1.0, 0.5, matId, param);
+    m.addBox(-0.38, 0.78, -0.5, 0.38, 1.0, 0.5, matId, param);
+    m.addBox(-0.38, 0.0, -0.52, -0.34, 0.80, 0.52, 2, 0.0);
+    m.addBox(0.34, 0.0, -0.52, 0.38, 0.80, 0.52, 2, 0.0);
+    m.addBox(-0.38, 0.76, -0.52, 0.38, 0.81, 0.52, 2, 0.0);
     return m.build();
 }
 
-export function createWallWindowMesh() {
+export function createWallWindowMesh(matId = 0, param = 0.0) {
     const m = new MeshAcc();
-    // Window aperture: x in [-0.24, 0.24], y in [0.28, 0.80]
-    m.addBox(-0.5, 0.0, -0.5, 0.5, 0.28, 0.5, 0, 0.0);
-    m.addBox(-0.5, 0.80, -0.5, 0.5, 1.0, 0.5, 0, 0.0);
-    m.addBox(-0.5, 0.26, -0.5, -0.24, 0.82, 0.5, 0, 0.0);
-    m.addBox(0.24, 0.26, -0.5, 0.5, 0.82, 0.5, 0, 0.0);
-    // Central vertical mullion overlapping sill & lintel
+    m.addBox(-0.5, 0.0, -0.5, 0.5, 0.28, 0.5, matId, param);
+    m.addBox(-0.5, 0.80, -0.5, 0.5, 1.0, 0.5, matId, param);
+    m.addBox(-0.5, 0.26, -0.5, -0.24, 0.82, 0.5, matId, param);
+    m.addBox(0.24, 0.26, -0.5, 0.5, 0.82, 0.5, matId, param);
     m.addBox(-0.02, 0.26, -0.22, 0.02, 0.82, 0.22, 1, 0.0);
     return m.build();
 }
 
 export function createWindowGlassMesh() {
     const m = new MeshAcc();
-    // Planar closed outward-CCW glass panes inside left/right window sub-apertures (curvedEdges = 0).
-    // Slight 2 mm overlap into sill/lintel/jamb ensures contact graph connectivity without Z-fighting.
     m.addBox(-0.242, 0.278, -0.07, -0.021, 0.802, 0.07, 3, 0.0);
     m.addBox(0.021, 0.278, -0.07, 0.242, 0.802, 0.07, 3, 0.0);
     return m.build();
@@ -93,8 +165,6 @@ export function createWindowGlassMesh() {
 
 export function createStairFlightMesh(steps = 18) {
     const m = new MeshAcc();
-    // Sloped-carriage stepped flight from (y=0, z=0) ascending to (y=1, z=1), single closed island.
-    // Sloped underside preserves >= 0.88 * floorHeight headroom for stacked multi-story stairs.
     for (let i = 0; i < steps; i++) {
         const z0 = i / steps;
         const z1 = Math.min(1.0, (i + 1) / steps + 0.01);
@@ -102,20 +172,29 @@ export function createStairFlightMesh(steps = 18) {
         const yTop = (i + 1) / steps;
         m.addBox(-0.5, yBot, z0, 0.5, yTop, z1, 2, 0.0);
     }
+    // Handrail posts & sloped top brass/oak banister on left side
+    for (let i = 0; i <= 4; i++) {
+        const t = i / 4;
+        const z = t * 0.94 + 0.03;
+        m.addBox(-0.48, t * 0.92, z - 0.018, -0.42, t + 0.26, z + 0.018, 1, 0.0);
+    }
+    for (let i = 0; i < 4; i++) {
+        const t0 = i / 4, t1 = (i + 1) / 4;
+        m.addBox(-0.49, Math.min(t0, t1) + 0.23, t0 * 0.94 + 0.02, -0.41, Math.max(t0, t1) + 0.28, t1 * 0.94 + 0.04, 2, 0.0);
+    }
     return m.build();
 }
 
 export function createElevatorCabMesh() {
     const m = new MeshAcc();
-    // Normalized [-0.5..0.5] x [0..1] x [-0.5..0.5], open at +Z
-    m.addBox(-0.50, 0.00, -0.50, 0.50, 0.05, 0.50, 2, 0.0);   // Floor
-    m.addBox(-0.36, 0.00, 0.46, 0.36, 0.05, 0.540, 2, 0.0);   // Front doorway threshold sill
-    m.addBox(-0.50, 0.03, -0.50, -0.44, 1.00, 0.50, 1, 0.0); // Left wall
-    m.addBox(0.44, 0.03, -0.50, 0.50, 1.00, 0.50, 1, 0.0);   // Right wall
-    m.addBox(-0.46, 0.03, -0.50, 0.46, 1.00, -0.44, 1, 0.0); // Back wall
-    m.addBox(-0.46, 0.94, -0.46, 0.46, 1.00, 0.50, 0, 0.0);  // Ceiling
-    m.addBox(-0.24, 0.91, -0.24, 0.24, 0.96, 0.24, 5, 0.55); // Ceiling light panel
-    // Side guide shoes engaging shaft guide channels (contacts shaft walls at all heights)
+    m.addBox(-0.50, 0.00, -0.50, 0.50, 0.05, 0.50, 2, 2.0);   // Marble cab floor
+    m.addBox(-0.36, 0.00, 0.46, 0.36, 0.05, 0.540, 1, 0.0);   // Brass threshold sill
+    m.addBox(-0.50, 0.03, -0.50, -0.44, 1.00, 0.50, 2, 0.0);  // Wood-paneled left wall
+    m.addBox(0.44, 0.03, -0.50, 0.50, 1.00, 0.50, 2, 0.0);    // Wood-paneled right wall
+    m.addBox(-0.46, 0.03, -0.50, 0.46, 1.00, -0.44, 1, 0.0);  // Brushed steel back wall
+    m.addBox(-0.46, 0.94, -0.46, 0.46, 1.00, 0.50, 0, 0.55);  // Ceiling
+    m.addBox(-0.24, 0.91, -0.24, 0.24, 0.96, 0.24, 5, 0.55);  // Ceiling light panel
+    // Guide shoes
     m.addBox(-0.540, 0.00, -0.14, -0.46, 0.08, 0.14, 1, 0.0);
     m.addBox(0.46, 0.00, -0.14, 0.540, 0.08, 0.14, 1, 0.0);
     m.addBox(-0.540, 0.92, -0.14, -0.46, 1.00, 0.14, 1, 0.0);
@@ -123,132 +202,75 @@ export function createElevatorCabMesh() {
     return m.build();
 }
 
-// Furniture meshes: 1 unit = 1 meter, base at y = 0.0 exact, minXZ < 2.5 m, single connected island.
+// Exterior Architectural Silhouettes (closed single outward-CCW islands, base seated flush at y=0)
 
-export function createTableMesh() {
+export function createGableRoofMesh() {
     const m = new MeshAcc();
-    // Octagonal chamfered dining / conference table: 1.40 x 0.76 x 0.90 m (diagonal corner bevels avoid axis_grid)
-    const cx = 0.70, cz = 0.45, bev = 0.22;
-    const pts = [
-        [cx - bev, -cz], [cx, -cz + bev],
-        [cx, cz - bev],  [cx - bev, cz],
-        [-cx + bev, cz], [-cx, cz - bev],
-        [-cx, -cz + bev], [-cx + bev, -cz],
-    ];
-    const y0 = 0.70, y1 = 0.76;
-    const bt = m.pos.length / 3;
-    for (const [px, pz] of pts) {
-        m.pos.push(px, y1, pz); m.nrm.push(0, 1, 0); m.tan.push(1, 0, 0, 1); m.uvs.push(2, 0);
-    }
-    for (let i = 1; i + 1 < pts.length; i++) m.idx.push(bt, bt + i + 1, bt + i);
-    const bb = m.pos.length / 3;
-    for (const [px, pz] of pts) {
-        m.pos.push(px, y0, pz); m.nrm.push(0, -1, 0); m.tan.push(1, 0, 0, 1); m.uvs.push(2, 0);
-    }
-    for (let i = 1; i + 1 < pts.length; i++) m.idx.push(bb, bb + i, bb + i + 1);
-    for (let i = 0; i < pts.length; i++) {
-        const a = pts[i], c = pts[(i + 1) % pts.length];
-        const nx = c[1] - a[1], nz = -(c[0] - a[0]);
-        const l = Math.hypot(nx, nz) || 1;
-        const nrm = [nx / l, 0, nz / l];
-        const sb = m.pos.length / 3;
-        m.pos.push(c[0], y0, c[1], a[0], y0, a[1], a[0], y1, a[1], c[0], y1, c[1]);
-        for (let k = 0; k < 4; k++) { m.nrm.push(...nrm); m.tan.push(1, 0, 0, 1); m.uvs.push(2, 0); }
-        m.idx.push(sb, sb + 1, sb + 2, sb, sb + 2, sb + 3);
-    }
-    const lx = 0.44, lz = 0.24;
-    m.addBox(-lx - 0.035, 0.0, -lz - 0.035, -lx + 0.035, 0.72, -lz + 0.035, 2, 0.0);
-    m.addBox(lx - 0.035, 0.0, -lz - 0.035, lx + 0.035, 0.72, -lz + 0.035, 2, 0.0);
-    m.addBox(-lx - 0.035, 0.0, lz - 0.035, -lx + 0.035, 0.72, lz + 0.035, 2, 0.0);
-    m.addBox(lx - 0.035, 0.0, lz - 0.035, lx + 0.035, 0.72, lz + 0.035, 2, 0.0);
+    m.addBox(-0.51, 0.00, -0.51, 0.51, 0.06, 0.51, 0, 0.0); // fascia eaves collar seated flush at y=0
+    m.addPrismRoof(0.55, 0.55, 0.02, 1.00, 0.55, 11, 0);    // pitched gable shingle roof
+    m.addBox(0.24, 0.15, -0.28, 0.36, 1.08, -0.14, 0, 0.0); // brick chimney overlapping slope
     return m.build();
 }
 
-export function createChairMesh() {
+export function createHipRoofMesh() {
     const m = new MeshAcc();
-    // Chair: 0.50 x 0.92 x 0.50 m
-    m.addBox(-0.24, 0.43, -0.24, 0.24, 0.48, 0.24, 2, 0.0);   // Seat
-    m.addBox(-0.24, 0.46, -0.24, 0.24, 0.92, -0.17, 2, 0.0);  // Backrest
-    const lx = 0.19, lz = 0.19;
-    m.addBox(-lx - 0.025, 0.0, -lz - 0.025, -lx + 0.025, 0.45, -lz + 0.025, 1, 0.0);
-    m.addBox(lx - 0.025, 0.0, -lz - 0.025, lx + 0.025, 0.45, -lz + 0.025, 1, 0.0);
-    m.addBox(-lx - 0.025, 0.0, lz - 0.025, -lx + 0.025, 0.45, lz + 0.025, 1, 0.0);
-    m.addBox(lx - 0.025, 0.0, lz - 0.025, lx + 0.025, 0.45, lz + 0.025, 1, 0.0);
+    m.addBox(-0.51, 0.00, -0.51, 0.51, 0.06, 0.51, 0, 0.0); // fascia eaves collar seated flush at y=0
+    m.addPrismRoof(0.55, 0.55, 0.02, 1.00, 0.18, 11, 0);    // 4-slope hip shingle roof
+    m.addBox(-0.34, 0.15, -0.28, -0.22, 1.06, -0.14, 0, 0.0);
     return m.build();
 }
 
-export function createDeskMesh() {
+export function createPorchCanopyMesh() {
     const m = new MeshAcc();
-    // Office desk: 1.50 x 0.76 x 0.75 m + monitor stand
-    m.addBox(-0.75, 0.70, -0.37, 0.75, 0.76, 0.37, 2, 0.0);
-    m.addBox(-0.73, 0.0, -0.35, -0.45, 0.72, 0.35, 0, 0.0); // Left drawer pedestal
-    m.addBox(0.45, 0.0, -0.35, 0.73, 0.72, 0.35, 0, 0.0);   // Right drawer pedestal
-    m.addBox(-0.70, 0.32, -0.35, 0.70, 0.71, -0.29, 0, 0.0); // Modesty panel
-    m.addBox(-0.08, 0.74, -0.22, 0.08, 0.88, -0.14, 1, 0.0); // Monitor neck
-    m.addBox(-0.32, 0.86, -0.20, 0.32, 1.18, -0.14, 1, 0.0); // Monitor screen frame
+    // Covered suburban front entry canopy (posts sit flush on porch slab, ledger seated on front wall)
+    m.addBox(-1.35, -0.03, 0.92, -1.19, 2.75, 1.08, 0, 0.0);
+    m.addBox( 1.19, -0.03, 0.92,  1.35, 2.75, 1.08, 0, 0.0);
+    m.addBox(-1.44, 2.70, -0.02, 1.44, 2.86, 1.16, 0, 0.0);
+    m.addPrismRoof(1.48, 0.62, 2.84, 3.48, 0.15, 11, 0, 0.55);
     return m.build();
 }
 
-export function createSofaMesh() {
+export function createStorefrontAwningMesh() {
     const m = new MeshAcc();
-    // Sofa: 1.90 x 0.86 x 0.86 m
-    m.addBox(-0.95, 0.0, -0.43, 0.95, 0.42, 0.43, 2, 0.0);  // Base + cushion
-    m.addBox(-0.95, 0.40, -0.43, 0.95, 0.86, -0.22, 2, 0.0); // Back
-    m.addBox(-0.95, 0.40, -0.43, -0.76, 0.64, 0.43, 2, 0.0); // Left arm
-    m.addBox(0.76, 0.40, -0.43, 0.95, 0.64, 0.43, 2, 0.0);  // Right arm
+    // Unit commercial storefront awning (width=1 along X, mounting rail spans wall faces 0.00..+0.09)
+    const ref = [0, 0.35, 0.45];
+    const bL = [-0.50, 0.0, -0.02], bR = [0.50, 0.0, -0.02];
+    const fL = [-0.50, 0.0, 1.00],  fR = [0.50, 0.0, 1.00];
+    const tL = [-0.50, 0.68, -0.02], tR = [0.50, 0.68, -0.02];
+    const mL = [-0.50, 0.14, 1.00],  mR = [0.50, 0.14, 1.00];
+    m.addBox(-0.50, 0.0, -0.02, 0.50, 0.68, 0.09, 1, 0.0); // wall-flush mounting ledger
+    m.addQuadOut(bL, bR, fR, fL, ref, 8, 0.0);
+    m.addQuadOut(tL, tR, mR, mL, ref, 8, 0.0);
+    m.addQuadOut(fL, fR, mR, mL, ref, 8, 0.0);
+    m.addQuadOut(bR, bL, tL, tR, ref, 8, 0.0);
+    m.addQuadOut(bL, fL, mL, tL, ref, 8, 0.0);
+    m.addQuadOut(fR, bR, tR, mR, ref, 8, 0.0);
     return m.build();
 }
 
-export function createBedMesh() {
+export function createSkyCrownSteppedMesh() {
     const m = new MeshAcc();
-    // Bed: 1.50 x 0.95 x 2.05 m (minXZ = 1.50 < 2.5 m)
-    m.addBox(-0.75, 0.0, -1.02, 0.75, 0.36, 1.02, 2, 0.0);   // Frame
-    m.addBox(-0.71, 0.34, -0.98, 0.71, 0.56, 0.98, 0, 0.0);  // Mattress
-    m.addBox(-0.75, 0.34, -1.02, 0.75, 0.95, -0.90, 2, 0.0); // Headboard
-    m.addBox(-0.60, 0.54, -0.88, -0.06, 0.65, -0.58, 0, 0.0); // Left pillow
-    m.addBox(0.06, 0.54, -0.88, 0.60, 0.65, -0.58, 0, 0.0);   // Right pillow
+    // Tiered Art-Deco skyscraper crown seated flush at y=0
+    m.addBox(-0.48, 0.00, -0.48, 0.48, 0.34, 0.48, 0, 0.0);
+    m.addBox(-0.34, 0.30, -0.34, 0.34, 0.64, 0.34, 0, 0.0);
+    m.addBox(-0.20, 0.60, -0.20, 0.20, 0.88, 0.20, 1, 0.0);
+    m.addBox(-0.04, 0.84, -0.04, 0.04, 1.05, 0.04, 4, 0.0);
     return m.build();
 }
 
-export function createCounterMesh() {
+export function createSkyCrownSpireMesh() {
     const m = new MeshAcc();
-    // Reception / kitchen counter: 1.80 x 0.96 x 0.68 m
-    m.addBox(-0.88, 0.0, -0.31, 0.88, 0.90, 0.31, 0, 0.0);
-    m.addBox(-0.92, 0.88, -0.35, 0.92, 0.96, 0.35, 2, 0.0);
+    // Modern tapered zinc/slate skyscraper crown + architectural spire seated flush at y=0
+    m.addBox(-0.46, 0.00, -0.46, 0.46, 0.22, 0.46, 7, 0.0);
+    m.addPrismRoof(0.42, 0.42, 0.18, 0.72, 0.04, 7, 7);
+    m.addBox(-0.03, 0.55, -0.03, 0.03, 1.15, 0.03, 4, 0.0);
     return m.build();
 }
 
-export function createShelfMesh() {
+export function createRoofHvacMesh() {
     const m = new MeshAcc();
-    // Bookshelf / storage rack: 1.20 x 1.90 x 0.40 m
-    m.addBox(-0.60, 0.0, -0.20, -0.54, 1.90, 0.20, 2, 0.0); // Left upright
-    m.addBox(0.54, 0.0, -0.20, 0.60, 1.90, 0.20, 2, 0.0);   // Right upright
-    m.addBox(-0.56, 0.0, -0.20, 0.56, 1.90, -0.15, 2, 0.0); // Back panel
-    const ys = [0.02, 0.48, 0.96, 1.44, 1.86];
-    for (let i = 0; i < ys.length; i++) {
-        m.addBox(-0.56, ys[i] - 0.02, -0.18, 0.56, ys[i] + 0.02, 0.20, 2, 0.0);
-    }
-    return m.build();
-}
-
-export function createLampMesh() {
-    const m = new MeshAcc();
-    // Floor lamp: 0.44 x 1.65 x 0.44 m
-    m.addBox(-0.18, 0.0, -0.18, 0.18, 0.04, 0.18, 1, 0.0);   // Base
-    m.addBox(-0.03, 0.02, -0.03, 0.03, 1.38, 0.03, 1, 0.0);  // Stem
-    m.addBox(-0.22, 1.30, -0.22, 0.22, 1.64, 0.22, 5, 0.65); // Emissive shade
-    return m.build();
-}
-
-export function createPlantMesh() {
-    const m = new MeshAcc();
-    // Potted indoor plant with stepped diagonal canopy (avoids axis_grid on boxy foliage)
-    m.addBox(-0.18, 0.0, -0.18, 0.18, 0.34, 0.18, 0, 0.0);   // Pot
-    m.addBox(-0.04, 0.30, -0.04, 0.04, 0.72, 0.04, 2, 0.0);  // Trunk
-    // Diamond/cross-layered foliage fronds
-    m.addBox(-0.24, 0.52, -0.12, 0.24, 0.74, 0.12, 2, 0.0);
-    m.addBox(-0.12, 0.56, -0.24, 0.12, 0.80, 0.24, 2, 0.0);
-    m.addBox(-0.18, 0.70, -0.18, 0.18, 0.92, 0.18, 2, 0.0);
-    m.addBox(-0.10, 0.88, -0.10, 0.10, 1.05, 0.10, 2, 0.0);
+    // Rooftop mechanical penthouse & twin chiller units seated flush at y=0
+    m.addBox(-0.46, 0.00, -0.46, 0.10, 0.90, 0.32, 1, 0.0);
+    m.addBox( 0.06, 0.00, -0.26, 0.46, 0.55, 0.34, 1, 0.0);
     return m.build();
 }

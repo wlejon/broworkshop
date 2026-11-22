@@ -63,17 +63,32 @@ export function createAtmosphereCycle(scene) {
         intensity: 0,
         castsShadow: false,
     });
+    // Single pre-warmed warm ceiling fill point light used strictly when player is indoors (zero node churn)
+    const interiorLight = scene.createLight({
+        type: 'point',
+        position: [0, 0, 0],
+        color: [1.0, 0.89, 0.72],
+        intensity: 0,
+        radius: 18.0,
+        castsShadow: false,
+    });
 
     let mode = 'day';
     let timeHours = PRESETS.day.timeHours;
     let turbidity = PRESETS.day.turbidity;
     let appliedTurbidity = -1;
     let nightFactor = 0;
+    let interiorLightActive = false;
     let emissiveScale = 0.45;
     let sunDir = [0.35, 0.85, 0.39];
     let autoCycle = false;
     let cycleRate = 0.25;
     let exposureSnapTimer = 0;
+
+    function updateInteriorLightIntensity() {
+        const dayWeight = Math.pow(Math.max(0.0, 1.0 - nightFactor), 2.2);
+        interiorLight.intensity = interiorLightActive ? (8.0 + 3400.0 * dayWeight) : 0.0;
+    }
 
     function triggerExposureSnap() {
         exposureSnapTimer = 0.15;
@@ -99,6 +114,7 @@ export function createAtmosphereCycle(scene) {
         sun.castsShadow = sun.intensity > 0 && sunElev > 0.002;
 
         nightFactor = clamp((0.12 - sunElev) / 0.24, 0, 1);
+        updateInteriorLightIntensity();
         const duskFactor = clamp(1.0 - Math.abs(sunElev - 0.03) / 0.20, 0, 1);
         emissiveScale = clamp(0.45 + 1.55 * duskFactor + 2.75 * nightFactor, 0.45, 3.2);
 
@@ -185,10 +201,19 @@ export function createAtmosphereCycle(scene) {
         };
     }
 
+    function setInteriorLight(active, relX = 0, relY = 0, relZ = 0) {
+        interiorLightActive = !!active;
+        if (interiorLightActive) {
+            interiorLight.position = [relX, relY, relZ];
+        }
+        updateInteriorLightIntensity();
+    }
+
     function dispose() {
         try { scene.destroyNode(sun); } catch (_) {}
         try { scene.destroyNode(moonLight); } catch (_) {}
         try { scene.destroyNode(nightFill); } catch (_) {}
+        try { scene.destroyNode(interiorLight); } catch (_) {}
     }
 
     setPreset('day');
@@ -197,6 +222,7 @@ export function createAtmosphereCycle(scene) {
         setPreset,
         setTimeOfDay,
         setAutoCycle,
+        setInteriorLight,
         update,
         getState,
         dispose,

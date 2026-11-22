@@ -592,6 +592,52 @@ export function assertStructureClean(scene, label, opts = {}) {
     }
     const resolvedGroundY = opts.groundY != null ? opts.groundY : defaultGroundY;
     const autoRadius = Math.max(120, Math.abs(resolvedGroundY) + 150, curAlt + 150);
+    let resolvedGroundGrid = opts.groundGrid;
+    if (!resolvedGroundGrid && !opts.floors && api && typeof api.getState === "function") {
+        const cur = api.getState();
+        const layout = api._subsystems && api._subsystems.layout;
+        if (cur && Array.isArray(cur.pos) && layout && typeof layout.sampleGroundHeight === "function") {
+            const gridR = Math.min(autoRadius + 12, 420);
+            const step = gridR > 220 ? 5.0 : 2.0;
+            const cols = Math.ceil((2 * gridR) / step) + 1;
+            const rows = cols;
+            const originX = -gridR;
+            const originZ = -gridR;
+            const camX = cur.pos[0];
+            const camY = cur.pos[1];
+            const camZ = cur.pos[2];
+            const qx = Math.round(camX / 4);
+            const qz = Math.round(camZ / 4);
+            const cacheKey = `${qx}_${qz}_${gridR}_${step}`;
+            if (!assertStructureClean._gridCache) assertStructureClean._gridCache = new Map();
+            let worldH = assertStructureClean._gridCache.get(cacheKey);
+            if (!worldH) {
+                worldH = new Float32Array(cols * rows);
+                const snapX = qx * 4;
+                const snapZ = qz * 4;
+                for (let r = 0; r < rows; r++) {
+                    const wz = snapZ + originZ + r * step;
+                    for (let c = 0; c < cols; c++) {
+                        const wx = snapX + originX + c * step;
+                        worldH[r * cols + c] = layout.sampleGroundHeight(wx, wz);
+                    }
+                }
+                if (assertStructureClean._gridCache.size >= 16) {
+                    assertStructureClean._gridCache.delete(assertStructureClean._gridCache.keys().next().value);
+                }
+                assertStructureClean._gridCache.set(cacheKey, worldH);
+            }
+            const heights = assertStructureClean._scratchH && assertStructureClean._scratchH.length === cols * rows
+                ? assertStructureClean._scratchH
+                : (assertStructureClean._scratchH = new Float32Array(cols * rows));
+            for (let i = 0; i < heights.length; i++) heights[i] = worldH[i] - camY;
+            resolvedGroundGrid = {
+                originX: (qx * 4 - camX) + originX,
+                originZ: (qz * 4 - camZ) + originZ,
+                step, cols, rows, heights,
+            };
+        }
+    }
     const ignoreFloating = Array.from(new Set(["metropolis_ground", ...(opts.ignoreFloating || [])]));
     const interiorWalk = opts.interiorWalk && typeof opts.interiorWalk === "object"
         ? {
@@ -601,10 +647,11 @@ export function assertStructureClean(scene, label, opts = {}) {
         : opts.interiorWalk;
     const sOpts = {
         groundY: resolvedGroundY,
+        ...(resolvedGroundGrid ? { groundGrid: resolvedGroundGrid } : {}),
         contactTol: opts.contactTol != null ? opts.contactTol : 0.05,
         overhangTol: opts.overhangTol != null ? opts.overhangTol : 0.35,
         checkIslands: opts.checkIslands !== undefined ? opts.checkIslands : true,
-        autoDetectFloors: opts.autoDetectFloors !== undefined ? opts.autoDetectFloors : true,
+        autoDetectFloors: opts.autoDetectFloors !== undefined ? opts.autoDetectFloors : Boolean(opts.floors || opts.interiorWalk),
         ...(opts.near !== undefined
             ? (opts.near ? { near: opts.near } : {})
             : (!opts.bounds ? { near: { center: [0, 0, 0], radius: opts.nearRadius != null ? opts.nearRadius : autoRadius } } : {})),
@@ -615,7 +662,8 @@ export function assertStructureClean(scene, label, opts = {}) {
         ...(interiorWalk !== undefined ? { interiorWalk } : {}),
     };
     const st = bro.eye.structure(scene, sOpts);
-    eq(st.ok, true, `${label}: bro.eye.structure ok === true`);
+    const errMsgs = (st.issues || []).filter((i) => i.severity === "error").map((i) => i.message).slice(0, 6);
+    eq(st.ok, true, `${label}: bro.eye.structure ok === true (${JSON.stringify(errMsgs)})`);
     eq(st.invertedCount, 0, `${label}: invertedCount === 0`);
     eq(st.floatingCount, 0, `${label}: floatingCount === 0`);
     eq(st.overhangCount, 0, `${label}: overhangCount === 0`);

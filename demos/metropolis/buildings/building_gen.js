@@ -1,5 +1,6 @@
 // Deterministic parcel-seeded building blueprints with LRU cache, BSP rooms,
-// spanning-tree doorways, stairwell/elevator slab cutouts, and cleared furniture.
+// spanning-tree doorways, stairwell/elevator slab cutouts, and cleared sculpted furniture.
+import { populateRoomFurniture } from '/app/buildings/furniture_layout.js';
 
 const MAX_CACHE = 512;
 const bpCache = new Map();
@@ -9,18 +10,6 @@ const WALL_THICK = 0.24;
 const SLAB_THICK = 0.20;
 const PLINTH_DEPTH = 0.27; // padY - 0.15 .. padY + 0.12
 const STAIR_STEPS = 18;
-
-const FURN_DIMS = {
-    table:   { hx: 0.72, hz: 0.47, h: 0.76 },
-    chair:   { hx: 0.26, hz: 0.26, h: 0.92 },
-    desk:    { hx: 0.77, hz: 0.39, h: 1.18 },
-    sofa:    { hx: 0.97, hz: 0.45, h: 0.86 },
-    bed:     { hx: 0.77, hz: 1.04, h: 0.95 },
-    counter: { hx: 0.94, hz: 0.37, h: 0.96 },
-    shelf:   { hx: 0.62, hz: 0.22, h: 1.90 },
-    lamp:    { hx: 0.24, hz: 0.24, h: 1.64 },
-    plant:   { hx: 0.26, hz: 0.26, h: 1.05 },
-};
 
 function clamp(x, lo, hi) { return x < lo ? lo : x > hi ? hi : x; }
 
@@ -146,109 +135,6 @@ function assignRoomRole(kind, floorIdx, roomIdx, isEntry, isStairExit, rng) {
     if (floorIdx === 0) return roomIdx % 2 === 0 ? 'lounge' : 'retail';
     const roles = ['office', 'conference', 'exec_suite', 'lounge'];
     return roles[(roomIdx + floorIdx) % roles.length];
-}
-
-function populateRoomFurniture(room, role, cellSize, halfW, halfD, clearPts, rng) {
-    const x0 = -halfW + room.c0 * cellSize;
-    const x1 = -halfW + (room.c1 + 1) * cellSize;
-    const z0 = -halfD + room.r0 * cellSize;
-    const z1 = -halfD + (room.r1 + 1) * cellSize;
-    const rw = x1 - x0;
-    const rd = z1 - z0;
-    const cx = 0.5 * (x0 + x1);
-    const cz = 0.5 * (z0 + z1);
-    const items = [];
-    const margin = WALL_THICK * 0.5 + 0.18;
-
-    const tryPlace = (type, lx, lz, ry, tint) => {
-        const d = FURN_DIMS[type];
-        const rot90 = Math.abs(Math.sin(ry)) > 0.7;
-        const hx = rot90 ? d.hz : d.hx;
-        const hz = rot90 ? d.hx : d.hz;
-        if (lx - hx < x0 + margin || lx + hx > x1 - margin) return false;
-        if (lz - hz < z0 + margin || lz + hz > z1 - margin) return false;
-        const minGap = (role === 'foyer' || role === 'lobby') ? 1.45 : 1.05;
-        for (let i = 0; i < clearPts.length; i++) {
-            const cp = clearPts[i];
-            const dx = Math.max(0, Math.abs(lx - cp.x) - hx);
-            const dz = Math.max(0, Math.abs(lz - cp.z) - hz);
-            if (Math.hypot(dx, dz) < minGap) return false;
-        }
-        for (let i = 0; i < items.length; i++) {
-            const it = items[i];
-            if (Math.abs(lx - it.x) < hx + it.hx + 0.35 && Math.abs(lz - it.z) < hz + it.hz + 0.35) {
-                return false;
-            }
-        }
-        items.push({ type, x: lx, z: lz, ry, hx, hz, h: d.h, tint });
-        return true;
-    };
-
-    const tryCorners = (type, corners, ry, tint) => {
-        for (let i = 0; i < corners.length; i++) {
-            if (tryPlace(type, corners[i][0], corners[i][1], ry, tint)) return true;
-        }
-        return false;
-    };
-
-    const wood = [0.46, 0.32, 0.20, 1];
-    const oak = [0.62, 0.46, 0.30, 1];
-    const fabric = [0.34, 0.40, 0.48, 1];
-    const cream = [0.84, 0.80, 0.72, 1];
-    const foliage = [0.22, 0.46, 0.22, 1];
-    const dark = [0.24, 0.26, 0.30, 1];
-
-    if (role === 'foyer' || role === 'lobby') {
-        tryPlace('counter', cx, cz - rd * 0.15, 0, oak);
-        tryPlace('sofa', x0 + 0.85, cz, Math.PI * 0.5, fabric);
-        tryCorners('plant', [[x1 - 0.62, z0 + 0.62], [x0 + 0.62, z0 + 0.62], [x1 - 0.62, z1 - 0.62], [x0 + 0.62, z1 - 0.62]], 0, foliage);
-        tryCorners('lamp', [[x0 + 0.58, z0 + 0.58], [x1 - 0.58, z0 + 0.58], [x0 + 0.58, z1 - 0.58]], 0, cream);
-    } else if (role === 'living' || role === 'lounge') {
-        tryPlace('sofa', cx, z0 + 0.85, 0, fabric);
-        tryPlace('table', cx, cz + 0.45, 0, wood);
-        tryCorners('lamp', [[x1 - 0.58, z0 + 0.58], [x0 + 0.58, z0 + 0.58], [x1 - 0.58, z1 - 0.58]], 0, cream);
-        tryCorners('plant', [[x0 + 0.62, z1 - 0.62], [x1 - 0.62, z1 - 0.62], [x0 + 0.62, z0 + 0.62], [x1 - 0.62, z0 + 0.62]], 0, foliage);
-    } else if (role === 'bedroom') {
-        const bedCands = [
-            [cx, z0 + 1.36, 0],
-            [cx, z1 - 1.36, Math.PI],
-            [x1 - 1.36, cz, Math.PI * 0.5],
-            [x0 + 1.36, cz, -Math.PI * 0.5],
-        ];
-        for (let i = 0; i < bedCands.length; i++) {
-            if (tryPlace('bed', bedCands[i][0], bedCands[i][1], bedCands[i][2], cream)) break;
-        }
-        tryCorners('shelf', [[x0 + 0.58, cz], [x1 - 0.58, cz]], Math.PI * 0.5, wood);
-        tryCorners('lamp', [[x1 - 0.58, z0 + 0.58], [x0 + 0.58, z0 + 0.58], [x1 - 0.58, z1 - 0.58], [x0 + 0.58, z1 - 0.58]], 0, cream);
-        tryCorners('plant', [[x0 + 0.62, z1 - 0.62], [x1 - 0.62, z1 - 0.62], [x0 + 0.62, z0 + 0.62]], 0, foliage);
-    } else if (role === 'kitchen' || role === 'retail') {
-        tryPlace('counter', cx, z0 + 0.68, 0, cream);
-        tryPlace('table', cx, cz + 0.5, 0, oak);
-        tryPlace('chair', cx, cz + 1.15, Math.PI, dark);
-        tryPlace('shelf', x1 - 0.58, cz, -Math.PI * 0.5, wood);
-    } else if (role === 'dining' || role === 'conference') {
-        tryPlace('table', cx, cz, 0, wood);
-        tryPlace('chair', cx, cz - 0.85, 0, dark);
-        tryPlace('chair', cx, cz + 0.85, Math.PI, dark);
-        tryCorners('plant', [[x0 + 0.62, z0 + 0.62], [x1 - 0.62, z0 + 0.62], [x0 + 0.62, z1 - 0.62], [x1 - 0.62, z1 - 0.62]], 0, foliage);
-    } else if (role === 'office' || role === 'exec_suite' || role === 'study') {
-        tryPlace('desk', cx, cz - 0.25, 0, oak);
-        tryPlace('chair', cx, cz + 0.55, Math.PI, dark);
-        tryCorners('shelf', [[x0 + 0.58, cz], [x1 - 0.58, cz]], Math.PI * 0.5, wood);
-        tryCorners('plant', [[x1 - 0.62, z0 + 0.62], [x0 + 0.62, z0 + 0.62], [x1 - 0.62, z1 - 0.62], [x0 + 0.62, z1 - 0.62]], 0, foliage);
-        if (role === 'exec_suite' || rng() < 0.4) {
-            tryPlace('sofa', cx, z1 - 0.78, Math.PI, fabric);
-        }
-    } else if (role === 'storage') {
-        tryPlace('shelf', x0 + 0.58, cz - 0.4, Math.PI * 0.5, dark);
-        tryPlace('shelf', x1 - 0.58, cz + 0.4, -Math.PI * 0.5, dark);
-        tryPlace('table', cx, cz, 0, wood);
-    } else {
-        tryCorners('plant', [[x0 + 0.62, z0 + 0.62], [x1 - 0.62, z0 + 0.62], [x0 + 0.62, z1 - 0.62], [x1 - 0.62, z1 - 0.62]], 0, foliage);
-        tryCorners('lamp', [[x1 - 0.58, z0 + 0.58], [x0 + 0.58, z0 + 0.58], [x1 - 0.58, z1 - 0.58]], 0, cream);
-    }
-
-    return items;
 }
 
 function buildFloorTemplate({
@@ -653,6 +539,36 @@ function buildFloorTemplate({
         }
     }
 
+    // Populate ceiling lights (1 per walkable room) + framed wall art on interior solid walls
+    const ceilingLights = [];
+    for (let i = 0; i < rooms.length; i++) {
+        const rm = rooms[i];
+        ceilingLights.push({
+            x: 0.5 * (rm.x0 + rm.x1),
+            z: 0.5 * (rm.z0 + rm.z1),
+            roomId: rm.id,
+        });
+    }
+    const wallArt = [];
+    for (let i = 0; i < wallSegs.length && wallArt.length < 4; i++) {
+        const w = wallSegs[i];
+        // Only place wall art on interior walls that render solid (not intWinBatch partition glass walls)
+        if (w.isExt || w.type !== 'solid') continue;
+        if (kind !== 'home' && w.roomA >= 0 && w.roomB >= 0) continue;
+        const targetRoom = w.roomA >= 0 ? w.roomA : w.roomB;
+        if (targetRoom < 0 || !rooms[targetRoom]) continue;
+        const rm = rooms[targetRoom];
+        const rcx = 0.5 * (rm.x0 + rm.x1);
+        const rcz = 0.5 * (rm.z0 + rm.z1);
+        const alongZ = Math.abs(Math.sin(w.ry)) > 0.7;
+        const dirX = alongZ ? (rcx >= w.x ? 1 : -1) : 0;
+        const dirZ = alongZ ? 0 : (rcz >= w.z ? 1 : -1);
+        const ax = w.x + dirX * (WALL_THICK * 0.5);
+        const az = w.z + dirZ * (WALL_THICK * 0.5);
+        const ary = Math.atan2(dirX, dirZ);
+        wallArt.push({ x: ax, z: az, ry: ary, roomId: targetRoom });
+    }
+
     return {
         rooms,
         cellRoom,
@@ -663,6 +579,8 @@ function buildFloorTemplate({
         slabTiles,
         wallSegs,
         furniture,
+        ceilingLights,
+        wallArt,
         minC, maxC, minR, maxR,
         footW: (maxC - minC + 1) * cellSize,
         footD: (maxR - minR + 1) * cellSize,
@@ -701,10 +619,13 @@ export function getBuildingMass(parcel) {
     const floorHeight = parcel.floorHeight || (kind === 'home' ? 3.2 : (kind === 'business' ? 3.6 : 3.8));
     const palette = getPalette(kind, rng);
     const setbackStart = totalFloors >= 20 && cols >= 5 && rows >= 5 ? Math.floor(totalFloors * 0.68) : totalFloors;
+    const archStyle = (parcel.seed >>> 2) & 3;
+    const roofVariant = (parcel.seed >>> 5) & 1;
     const m = {
         id: parcel.id, kind, originX: parcel.cx, originZ: parcel.cz, rot,
         width, depth, halfW: width * 0.5, halfD: depth * 0.5,
         seedMod: (parcel.seed & 1023) * 0.13,
+        archStyle, roofVariant,
         cellSize, cols, rows, baseY, totalFloors, floorHeight, palette,
         setbackStart,
         sbWidth: (cols - 2) * cellSize,
@@ -778,6 +699,8 @@ export function getBuildingBlueprint(parcel) {
     let setbackTpl = null;
     let setbackTopTpl = null;
     const setbackStart = totalFloors >= 20 && cols >= 5 && rows >= 5 ? Math.floor(totalFloors * 0.68) : totalFloors;
+    const archStyle = (parcel.seed >>> 2) & 3;
+    const roofVariant = (parcel.seed >>> 5) & 1;
     if (setbackStart < totalFloors) {
         setbackTpl = buildFloorTemplate({ ...common, floorIdx: setbackStart, minC: 1, maxC: cols - 2, minR: 1, maxR: rows - 2 });
         setbackTopTpl = buildFloorTemplate({ ...common, floorIdx: totalFloors - 1, minC: 1, maxC: cols - 2, minR: 1, maxR: rows - 2 });
@@ -854,6 +777,8 @@ export function getBuildingBlueprint(parcel) {
         floorHeight,
         totalFloors,
         setbackStart,
+        archStyle,
+        roofVariant,
         palette,
         floors,
         elevatorShaft,

@@ -207,6 +207,9 @@ export function createDriveableCar(batches, collision, ambientTraffic, streetsca
         const bRes = collision.resolveBox2D(bestCar.wx, bestCar.wz, slope0.y + 0.75, 1.05, 2.25, 0.72);
         const fx = bRes.x;
         const fz = bRes.z;
+        if (ambientTraffic && typeof ambientTraffic.clearOverlap === 'function') {
+            ambientTraffic.clearOverlap(fx, fz, 5.5);
+        }
         const slope = sampleSlopeTransform(fx, fz, bestCar.yaw);
 
         car.inCar = true;
@@ -345,11 +348,11 @@ export function createDriveableCar(batches, collision, ambientTraffic, streetsca
         }
 
         if (ambientTraffic) {
-            const trRes = ambientTraffic.resolveCollision(nx, nz, 1.0, 2.2);
+            const trRes = ambientTraffic.resolveCollision(nx, nz, 0.95, 2.2, car.yaw);
             if (trRes.hit) {
                 nx = trRes.x;
                 nz = trRes.z;
-                car.speed *= 0.55;
+                car.speed *= 0.75;
             }
         }
 

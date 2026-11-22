@@ -317,36 +317,76 @@ export function createAmbientTraffic(batches) {
         }
     }
 
-    function resolveCollision(wx, wz, _halfW = 0.95, _halfL = 2.2) {
+    function resolveCollision(wx, wz, halfW = 0.95, halfL = 2.2, yaw = 0) {
         let cx = wx;
         let cz = wz;
         let hit = false;
-        const minSep = 3.5;
+        const aRx = Math.cos(yaw), aRz = -Math.sin(yaw);
+        const aFx = -Math.sin(yaw), aFz = -Math.cos(yaw);
+        const bHW = 0.96, bHL = 2.24;
         for (let i = 0; i < MAX_TRAFFIC; i++) {
             const v = vehicles[i];
             if (!v.active) continue;
             const dx = cx - v.wx;
             const dz = cz - v.wz;
-            const d = Math.hypot(dx, dz);
-            if (d < minSep) {
+            if (dx * dx + dz * dz > 26.0) continue;
+
+            const bRx = Math.cos(v.yaw), bRz = -Math.sin(v.yaw);
+            const bFx = -Math.sin(v.yaw), bFz = -Math.cos(v.yaw);
+            let minOverlap = Infinity;
+            let minNx = 0, minNz = 0;
+            let separated = false;
+            for (let ai = 0; ai < 4; ai++) {
+                const ux = ai === 0 ? aRx : ai === 1 ? aFx : ai === 2 ? bRx : bFx;
+                const uz = ai === 0 ? aRz : ai === 1 ? aFz : ai === 2 ? bRz : bFz;
+                const dist = Math.abs(dx * ux + dz * uz);
+                const projA = halfW * Math.abs(aRx * ux + aRz * uz) + halfL * Math.abs(aFx * ux + aFz * uz);
+                const projB = bHW * Math.abs(bRx * ux + bRz * uz) + bHL * Math.abs(bFx * ux + bFz * uz);
+                const overlap = (projA + projB) - dist;
+                if (overlap <= 0) {
+                    separated = true;
+                    break;
+                }
+                if (overlap < minOverlap) {
+                    minOverlap = overlap;
+                    minNx = ux;
+                    minNz = uz;
+                }
+            }
+            if (!separated && minOverlap > 0) {
                 hit = true;
-                const nx = d > 1e-4 ? dx / d : 1;
-                const nz = d > 1e-4 ? dz / d : 0;
-                const pen = minSep - d;
-                cx += nx * pen * 0.7;
-                cz += nz * pen * 0.7;
-                v.wx -= nx * pen * 0.3;
-                v.wz -= nz * pen * 0.3;
+                if (dx * minNx + dz * minNz < 0) {
+                    minNx = -minNx;
+                    minNz = -minNz;
+                }
+                cx += minNx * minOverlap * 0.7;
+                cz += minNz * minOverlap * 0.7;
+                v.wx -= minNx * minOverlap * 0.3;
+                v.wz -= minNz * minOverlap * 0.3;
                 v.speed = Math.min(v.speed, 2.0);
             }
         }
         return { x: cx, z: cz, hit };
     }
 
+    function clearOverlap(wx, wz, minRadius = 5.5) {
+        const r2 = minRadius * minRadius;
+        for (let i = 0; i < MAX_TRAFFIC; i++) {
+            const v = vehicles[i];
+            if (!v.active) continue;
+            const dx = v.wx - wx;
+            const dz = v.wz - wz;
+            if (dx * dx + dz * dz < r2) {
+                v.active = false;
+            }
+        }
+    }
+
     return {
         update,
         pushInstances,
         resolveCollision,
+        clearOverlap,
         getCount: () => activeCount,
         getVehicles: () => vehicles,
     };

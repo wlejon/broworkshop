@@ -1,5 +1,5 @@
 // Opaque mid-tier interior-parallax facade & roof shader for metropolis buildings.
-// Clean architectural masonry/curtain-wall/siding PBR + crisp sky-reflective glass + warm night rooms.
+// Rich architectural styles: glass curtain walls, Art-Deco limestone, brick storefronts, clapboard homes.
 module hook;
 import mesh;
 import scene;
@@ -50,7 +50,8 @@ pub fn fragment(v: mesh::Vertex, s: mesh::Surface) -> mesh::Surface {
     out.alpha = 1.0;
 
     let seed = v.v1.x;
-    let kind = floor(v.v1.y + 0.5) as i32; // 0=home, 1=business, 2=skyscraper
+    let kind = floor(v.v1.y + 0.5) as i32;  // 0=home, 1=business, 2=skyscraper
+    let style = floor(v.v1.w + 0.5) as i32; // 0..3 architectural facade variant
     let floor_h = max(2.6, v.v0.w);
     let ln = v.v2.xyz;
 
@@ -59,19 +60,18 @@ pub fn fragment(v: mesh::Vertex, s: mesh::Surface) -> mesh::Surface {
     let wy = max(0.0, v.v0.y);
     let wall_p = vec2<f32>(wx, wy);
 
-    // Distance fade so sub-pixel wall grain smoothly vanishes without moire
     let dp_wall = max(length(dpdx(wall_p)), length(dpdy(wall_p)));
     let dp_roof = max(length(dpdx(roof_p)), length(dpdy(roof_p)));
-    let detail_wall = 1.0 - smoothstep(0.08, 0.35, dp_wall);
-    let detail_roof = 1.0 - smoothstep(0.10, 0.42, dp_roof);
+    let detail_wall = 1.0 - smoothstep(0.08, 0.38, dp_wall);
+    let detail_roof = 1.0 - smoothstep(0.10, 0.45, dp_roof);
 
-    let g_wall = fbm2(wall_p * 1.6, seed) - 0.5;
-    let gx_w = (vnoise2(wall_p * 3.4 + vec2<f32>(0.08, 0.0), seed) - vnoise2(wall_p * 3.4 - vec2<f32>(0.08, 0.0), seed)) * detail_wall;
-    let gy_w = (vnoise2(wall_p * 3.4 + vec2<f32>(0.0, 0.08), seed) - vnoise2(wall_p * 3.4 - vec2<f32>(0.0, 0.08), seed)) * detail_wall;
+    let g_wall = fbm2(wall_p * 1.8, seed) - 0.5;
+    let gx_w = (vnoise2(wall_p * 3.4 + vec2<f32>(0.08, 0.0), seed) - vnoise2(wall_p * 3.4 - vec2<f32>(0.08, 0.0), seed)) * detail_wall * 3.2;
+    let gy_w = (vnoise2(wall_p * 3.4 + vec2<f32>(0.0, 0.08), seed) - vnoise2(wall_p * 3.4 - vec2<f32>(0.0, 0.08), seed)) * detail_wall * 3.2;
 
-    let g_roof = fbm2(roof_p * 0.45, seed) - 0.5;
-    let gx_r = (vnoise2(roof_p * 2.2 + vec2<f32>(0.1, 0.0), seed) - vnoise2(roof_p * 2.2 - vec2<f32>(0.1, 0.0), seed)) * detail_roof;
-    let gy_r = (vnoise2(roof_p * 2.2 + vec2<f32>(0.0, 0.1), seed) - vnoise2(roof_p * 2.2 - vec2<f32>(0.0, 0.1), seed)) * detail_roof;
+    let g_roof = fbm2(roof_p * 0.5, seed) - 0.5;
+    let gx_r = (vnoise2(roof_p * 2.2 + vec2<f32>(0.1, 0.0), seed) - vnoise2(roof_p * 2.2 - vec2<f32>(0.1, 0.0), seed)) * detail_roof * 3.2;
+    let gy_r = (vnoise2(roof_p * 2.2 + vec2<f32>(0.0, 0.1), seed) - vnoise2(roof_p * 2.2 - vec2<f32>(0.0, 0.1), seed)) * detail_roof * 3.2;
 
     let n = normalize(v.normal);
     let t = normalize(v.tangent.xyz);
@@ -79,37 +79,48 @@ pub fn fragment(v: mesh::Vertex, s: mesh::Surface) -> mesh::Surface {
     var debug_col = vec3<f32>(0.25, 0.35, 0.45);
 
     if (abs(ln.y) > 0.6) {
-        // Architectural roof deck + subtle gravel membrane
         let rx_e = fract(abs(v.v0.x) * 0.12);
         let rz_e = fract(abs(v.v0.z) * 0.12);
         let parapet_seam = 1.0 - 0.08 * smoothstep(0.46, 0.495, max(abs(rx_e - 0.5), abs(rz_e - 0.5))) * detail_roof;
-        let roof_base = kind == 0 ? vec3<f32>(0.26, 0.23, 0.22) : vec3<f32>(0.34, 0.35, 0.37);
-        out.base_color = roof_base * clamp(1.0 + 0.12 * g_roof, 0.82, 1.15) * parapet_seam;
+        let roof_base = kind == 0 ? vec3<f32>(0.24, 0.22, 0.21) : vec3<f32>(0.34, 0.35, 0.37);
+        out.base_color = roof_base * clamp(1.0 + 0.14 * g_roof, 0.82, 1.16) * parapet_seam;
         out.roughness = 0.86;
         out.metallic = 0.04;
         out.normal = normalize(n + t * (gx_r * 0.08) + b * (gy_r * 0.08));
         debug_col = vec3<f32>(0.35, 0.35, 0.38);
     } else {
-        let bay_w = kind == 2 ? 3.2 : (kind == 1 ? 3.2 : 2.7);
+        let is_curtain = (kind == 2 && (style == 0 || style == 3));
+        let bay_w = kind == 2 ? (is_curtain ? 2.4 : 3.2) : (kind == 1 ? 3.2 : 2.6);
         let bay_i = floor(wx / bay_w);
         let floor_j = floor(wy / floor_h);
         let bu = fract(wx / bay_w);
         let bv = fract(wy / floor_h);
 
         let is_storefront = (kind == 1 && floor_j < 0.5);
-        let margin_x = kind == 2 ? 0.10 : (is_storefront ? 0.08 : 0.22);
-        let sill_y = kind == 2 ? 0.18 : (is_storefront ? 0.06 : 0.28);
-        let lintel_y = kind == 2 ? 0.91 : (is_storefront ? 0.88 : 0.82);
+        let margin_x = kind == 2 ? (is_curtain ? 0.05 : 0.18) : (is_storefront ? 0.07 : 0.24);
+        let sill_y = kind == 2 ? (is_curtain ? 0.12 : 0.20) : (is_storefront ? 0.06 : 0.30);
+        let lintel_y = kind == 2 ? (is_curtain ? 0.94 : 0.88) : (is_storefront ? 0.88 : 0.82);
         let in_win = bu > margin_x && bu < (1.0 - margin_x) && bv > sill_y && bv < lintel_y;
 
         if (!in_win) {
             let is_spandrel = bv <= sill_y || bv >= lintel_y;
-            let course_band = kind == 0 ? (0.94 + 0.06 * sin(wy * 24.0) * detail_wall) : (is_spandrel ? 0.86 : 1.02);
-            let wall_mod = clamp(1.0 + 0.10 * g_wall * detail_wall, 0.86, 1.14) * course_band;
-            out.base_color = s.base_color * wall_mod;
-            out.roughness = kind == 2 ? 0.42 : 0.80;
-            out.metallic = kind == 2 ? 0.36 : 0.03;
-            out.normal = normalize(n + t * (gx_w * 0.07) + b * (gy_w * 0.07));
+            let masonry_brick = (kind == 1 || (kind == 0 && style == 1));
+            var wall_tint = s.base_color;
+            if (kind == 2 && style == 1) { wall_tint = vec3<f32>(0.68, 0.64, 0.56); }
+            else if (kind == 2 && style == 2) { wall_tint = vec3<f32>(0.24, 0.27, 0.32); }
+            else if (kind == 1 && style == 0) { wall_tint = vec3<f32>(0.54, 0.31, 0.24); }
+            else if (kind == 0 && style == 1) { wall_tint = vec3<f32>(0.58, 0.35, 0.27); }
+
+            let clapboard = (kind == 0 && style != 1) ? (0.91 + 0.07 * sin(wy * 28.0) * detail_wall) : 1.0;
+            let brick_row = masonry_brick ? (0.92 + 0.06 * smoothstep(0.82, 0.96, fract(wy * 7.5)) * detail_wall) : 1.0;
+            let cornice = is_spandrel ? (kind == 2 && is_curtain ? 0.72 : 0.86) : 0.96;
+            let frame_shut = (kind == 0 && bv > sill_y && bv < lintel_y && (abs(bu - margin_x) < 0.055 || abs(bu - (1.0 - margin_x)) < 0.055));
+
+            let fac_albedo = wall_tint * clamp(1.0 + 0.16 * g_wall * detail_wall, 0.82, 1.12) * clapboard * brick_row * cornice;
+            out.base_color = frame_shut ? vec3<f32>(0.22, 0.26, 0.30) : min(vec3<f32>(0.50), fac_albedo);
+            out.roughness = is_curtain ? 0.34 : 0.80;
+            out.metallic = is_curtain ? 0.55 : 0.03;
+            out.normal = normalize(n + t * (gx_w * 0.14) + b * (gy_w * 0.14));
             debug_col = vec3<f32>(0.45, 0.45, 0.48);
         } else {
             let wu = (bu - margin_x) / (1.0 - 2.0 * margin_x);
@@ -119,19 +130,18 @@ pub fn fragment(v: mesh::Vertex, s: mesh::Surface) -> mesh::Surface {
             let h_room = hash21(vec2<f32>(bay_i + face_id * 31.0, floor_j), seed);
             let h_warm = hash21(vec2<f32>(bay_i * 3.0 + 7.0, floor_j * 5.0 + face_id), seed);
 
-            let mull_off = 0.44 + 0.12 * h_warm;
-            let is_mullion = (kind == 2 && (abs(wu - 0.5) < 0.025 || abs(wv - 0.5) < 0.022))
-                          || (kind != 2 && h_room > 0.35 && abs(wu - mull_off) < 0.032)
-                          || (kind == 0 && abs(wv - 0.50) < 0.030);
+            let mull_off = 0.46 + 0.08 * h_warm;
+            let is_mullion = (kind == 2 && (abs(wu - 0.5) < 0.024 || abs(wv - 0.5) < 0.020))
+                          || (kind != 2 && h_room > 0.32 && abs(wu - mull_off) < 0.032)
+                          || (kind == 0 && (abs(wv - 0.50) < 0.030 || wu < 0.04 || wu > 0.96 || wv < 0.04 || wv > 0.96));
             if (is_mullion) {
-                let trim_col = kind == 0 ? vec3<f32>(0.82, 0.81, 0.78) : vec3<f32>(0.22, 0.24, 0.27);
+                let trim_col = kind == 0 ? vec3<f32>(0.50, 0.49, 0.46) : (style == 1 ? vec3<f32>(0.34, 0.31, 0.26) : vec3<f32>(0.22, 0.25, 0.29));
                 out.base_color = trim_col;
-                out.roughness = kind == 0 ? 0.55 : 0.36;
-                out.metallic = kind == 0 ? 0.05 : 0.65;
+                out.roughness = kind == 0 ? 0.52 : 0.34;
+                out.metallic = kind == 0 ? 0.04 : 0.68;
                 out.normal = n;
                 debug_col = vec3<f32>(0.20, 0.22, 0.26);
             } else {
-                // Ray-box interior parallax room behind crisp reflective glass
                 let I = normalize(v.world_pos);
                 let rx_ray = dot(I, t);
                 let ry_ray = dot(I, b);
@@ -153,34 +163,33 @@ pub fn fragment(v: mesh::Vertex, s: mesh::Surface) -> mesh::Surface {
                 let curtain_edge = 0.32 + 0.36 * h_warm + 0.16 * sin(mid_p.y * 2.8 + h_room * 6.28);
                 let mid_card = (mid_p.x > curtain_edge || (abs(mid_p.x) < 0.72 && mid_p.y < -0.22 + 0.15 * mid_p.x && mid_p.y > -0.98));
 
-                let lit_prob = is_storefront ? 0.85 : mix(0.24, 0.68, smoothstep(0.10, 0.75, params.night_factor));
+                let lit_prob = is_storefront ? 0.88 : mix(0.26, 0.70, smoothstep(0.10, 0.75, params.night_factor));
                 let is_lit = h_room < lit_prob;
 
-                var wall_col = vec3<f32>(0.22, 0.24, 0.28);
-                if (hit.y > 0.92) {
-                    wall_col = vec3<f32>(0.82, 0.80, 0.76);
-                } else if (hit.y < -0.92) {
-                    wall_col = vec3<f32>(0.36, 0.32, 0.28);
-                } else if (t_hit < tz - 0.01) {
-                    wall_col = vec3<f32>(0.50, 0.47, 0.43);
-                } else {
-                    wall_col = vec3<f32>(0.60, 0.56, 0.51);
-                }
-                if (mid_card) { wall_col *= 0.52; }
+                var wall_col = vec3<f32>(0.24, 0.26, 0.30);
+                if (hit.y > 0.92) { wall_col = vec3<f32>(0.85, 0.83, 0.78); }
+                else if (hit.y < -0.92) { wall_col = vec3<f32>(0.40, 0.35, 0.29); }
+                else if (t_hit < tz - 0.01) { wall_col = vec3<f32>(0.54, 0.50, 0.45); }
+                else { wall_col = vec3<f32>(0.64, 0.59, 0.53); }
+                if (mid_card) { wall_col *= 0.55; }
 
-                let warm_tint = mix(vec3<f32>(1.0, 0.86, 0.64), vec3<f32>(0.82, 0.92, 1.0), step(0.68, h_warm));
-                let room_shade = is_lit ? warm_tint * wall_col * (0.85 + 0.35 * h_warm) : wall_col * 0.30;
+                let warm_tint = mix(vec3<f32>(1.0, 0.87, 0.66), vec3<f32>(0.84, 0.93, 1.0), step(0.66, h_warm));
+                let room_shade = is_lit ? warm_tint * wall_col * (0.88 + 0.35 * h_warm) : wall_col * 0.30;
 
-                let glass_tint = kind == 2 ? vec3<f32>(0.14, 0.21, 0.28) : vec3<f32>(0.10, 0.14, 0.18);
-                out.base_color = mix(room_shade, glass_tint, is_lit ? 0.32 : 0.68);
-                out.roughness = 0.08;
-                out.metallic = kind == 2 ? 0.22 : 0.08;
+                var glass_tint = vec3<f32>(0.10, 0.15, 0.20);
+                if (kind == 2 && style == 0) { glass_tint = vec3<f32>(0.15, 0.27, 0.36); }
+                else if (kind == 2 && style == 3) { glass_tint = vec3<f32>(0.26, 0.24, 0.21); }
+                else if (kind == 2 && style == 1) { glass_tint = vec3<f32>(0.18, 0.16, 0.14); }
+
+                out.base_color = min(vec3<f32>(0.38), mix(room_shade, glass_tint, is_lit ? 0.30 : 0.66));
+                out.roughness = kind == 2 ? 0.20 : 0.34;
+                out.metallic = kind == 2 ? 0.20 : 0.06;
                 out.normal = n;
 
                 if (is_lit) {
-                    let glow = mix(0.06, 0.48, smoothstep(0.05, 0.65, params.night_factor));
-                    let ceiling_boost = hit.y > 0.90 ? 1.15 : 0.85;
-                    out.emissive = min(vec3<f32>(0.82), warm_tint * wall_col * ceiling_boost * glow);
+                    let glow = mix(0.02, 0.30, smoothstep(0.55, 0.95, params.night_factor));
+                    let ceiling_boost = hit.y > 0.90 ? 1.10 : 0.85;
+                    out.emissive = min(vec3<f32>(0.28), warm_tint * wall_col * ceiling_boost * glow);
                 }
                 debug_col = is_lit ? vec3<f32>(1.0, 0.75, 0.2) : vec3<f32>(0.15, 0.35, 0.6);
             }

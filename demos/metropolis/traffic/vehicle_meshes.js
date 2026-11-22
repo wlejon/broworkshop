@@ -199,7 +199,7 @@ const ARCHETYPE_SPECS = [
         cabin: { zFBot: -1.00, zFTop: -0.44, zRTop: 0.62, zRBot: 1.22, wBot: 0.68, wTop: 0.62, yBot: 0.86, yTop: 1.44 },
         glass: { zFBot: -1.04, zFTop: -0.46, zRTop: 0.60, zRBot: 1.24, wBot: 0.79, wTop: 0.67, yBot: 0.68, yTop: 1.40 },
         mirrors: [-0.95, 0.95, 0.92, -0.78],
-        lights: { yH: 0.66, zH: -2.14, yT: 0.76, zT: 2.15 },
+        lights: { yH: 0.66, zH: -2.19, yT: 0.76, zT: 2.18 },
     },
     {
         // 1: Modern SUV
@@ -235,15 +235,16 @@ const ARCHETYPE_SPECS = [
         stations: [
             { z: -2.30, xBot: 0.82, xMid: 0.96, xBelt: 0.92, xCrown: 0.72, yBot: 0.22, ySill: 0.50, yBelt: 0.78, yCrown: 0.84, lowMat: 13, topMat: 13, sideMat: 13 },
             { z: -2.10, xBot: 0.90, xMid: 0.98, xBelt: 0.96, xCrown: 0.80, yBot: 0.22, ySill: 0.52, yBelt: 1.02, yCrown: 1.07, lowMat: 13, topMat: 6, sideMat: 6 },
-            { z: -1.42, xBot: 0.92, xMid: 0.99, xBelt: 0.96, xCrown: 0.84, yBot: 0.22, ySill: 0.50, yBelt: 1.12, yCrown: 1.16, lowMat: 13, topMat: 6, sideMat: 6 },
-            { z: -0.82, xBot: 0.92, xMid: 0.98, xBelt: 0.92, xCrown: 0.78, yBot: 0.22, ySill: 0.50, yBelt: 1.88, yCrown: 1.98, lowMat: 6, topMat: 6, sideMat: 6 },
-            { z:  2.14, xBot: 0.92, xMid: 0.98, xBelt: 0.92, xCrown: 0.78, yBot: 0.22, ySill: 0.50, yBelt: 1.88, yCrown: 1.98, lowMat: 6, topMat: 6, sideMat: 6 },
+            { z: -1.42, xBot: 0.80, xMid: 0.98, xBelt: 0.96, xCrown: 0.84, yBot: 0.16, ySill: 0.50, yBelt: 1.12, yCrown: 1.16, lowMat: 13, topMat: 6, sideMat: 6 },
+            { z: -0.82, xBot: 0.80, xMid: 0.98, xBelt: 0.92, xCrown: 0.78, yBot: 0.16, ySill: 0.50, yBelt: 1.88, yCrown: 1.98, lowMat: 6, topMat: 6, sideMat: 6 },
+            { z:  1.36, xBot: 0.80, xMid: 0.98, xBelt: 0.92, xCrown: 0.78, yBot: 0.16, ySill: 0.50, yBelt: 1.88, yCrown: 1.98, lowMat: 6, topMat: 6, sideMat: 6 },
+            { z:  2.14, xBot: 0.80, xMid: 0.98, xBelt: 0.92, xCrown: 0.78, yBot: 0.16, ySill: 0.50, yBelt: 1.88, yCrown: 1.98, lowMat: 6, topMat: 6, sideMat: 6 },
             { z:  2.32, xBot: 0.82, xMid: 0.94, xBelt: 0.88, xCrown: 0.70, yBot: 0.26, ySill: 0.52, yBelt: 1.05, yCrown: 1.10, lowMat: 13, topMat: 13, sideMat: 13 },
         ],
         cabin: { zFBot: -1.38, zFTop: -0.82, zRTop: -0.05, zRBot: -0.02, wBot: 0.78, wTop: 0.72, yBot: 1.02, yTop: 1.94 },
         glass: { zFBot: -1.42, zFTop: -0.84, zRTop: -0.10, zRBot: -0.04, wBot: 0.90, wTop: 0.83, yBot: 1.00, yTop: 1.90 },
         mirrors: [-1.05, 1.05, 1.18, -1.25],
-        lights: { yH: 0.78, zH: -2.22, yT: 0.86, zT: 2.24 },
+        lights: { yH: 0.78, zH: -2.27, yT: 0.86, zT: 2.28 },
     },
 ];
 
@@ -251,23 +252,22 @@ function createBodyForArchetype(idx) {
     const spec = ARCHETYPE_SPECS[idx] || ARCHETYPE_SPECS[0];
     const m = new VehicleMeshAcc();
     m.addLoftedHull(spec.stations);
-    // Tapered cabin core (pillars/interior) + flush painted roof cap seated cleanly on the beltline
+    // Tapered cabin core + flush painted roof cap for passenger cars (van uses integral high-roof hull)
     const c = spec.cabin;
-    m.addLoftedHull([
-        { z: c.zFBot, xBot: c.wBot, xMid: c.wBot, xBelt: c.wBot, xCrown: c.wBot * 0.9, yBot: c.yBot - 0.14, ySill: c.yBot, yBelt: c.yBot + 0.04, yCrown: c.yBot + 0.06, lowMat: 13, topMat: 13, sideMat: 13 },
-        { z: c.zFTop, xBot: c.wBot, xMid: c.wTop, xBelt: c.wTop, xCrown: c.wTop * 0.9, yBot: c.yBot - 0.14, ySill: c.yTop - 0.09, yBelt: c.yTop - 0.03, yCrown: c.yTop + 0.04, lowMat: 13, topMat: 6, sideMat: 13 },
-        { z: c.zRTop, xBot: c.wBot, xMid: c.wTop, xBelt: c.wTop, xCrown: c.wTop * 0.9, yBot: c.yBot - 0.14, ySill: c.yTop - 0.09, yBelt: c.yTop - 0.03, yCrown: c.yTop + 0.04, lowMat: 13, topMat: 13, sideMat: 13 },
-        { z: c.zRBot, xBot: c.wBot, xMid: c.wBot, xBelt: c.wBot, xCrown: c.wBot * 0.9, yBot: c.yBot - 0.14, ySill: c.yBot, yBelt: c.yBot + 0.04, yCrown: c.yBot + 0.06, lowMat: 13, topMat: 13, sideMat: 13 },
-    ]);
-    // Painted roof crown matching tapered cabin top flush (zero brim overhang)
     const g = spec.glass;
     if (idx !== 3) {
+        m.addLoftedHull([
+            { z: c.zFBot, xBot: c.wBot, xMid: c.wBot, xBelt: c.wBot, xCrown: c.wBot * 0.9, yBot: c.yBot - 0.14, ySill: c.yBot, yBelt: c.yBot + 0.04, yCrown: c.yBot + 0.06, lowMat: 13, topMat: 13, sideMat: 13 },
+            { z: c.zFTop, xBot: c.wBot, xMid: c.wTop, xBelt: c.wTop, xCrown: c.wTop * 0.9, yBot: c.yBot - 0.14, ySill: c.yTop - 0.09, yBelt: c.yTop - 0.03, yCrown: c.yTop + 0.04, lowMat: 13, topMat: 6, sideMat: 13 },
+            { z: c.zRTop, xBot: c.wBot, xMid: c.wTop, xBelt: c.wTop, xCrown: c.wTop * 0.9, yBot: c.yBot - 0.14, ySill: c.yTop - 0.09, yBelt: c.yTop - 0.03, yCrown: c.yTop + 0.04, lowMat: 13, topMat: 13, sideMat: 13 },
+            { z: c.zRBot, xBot: c.wBot, xMid: c.wBot, xBelt: c.wBot, xCrown: c.wBot * 0.9, yBot: c.yBot - 0.14, ySill: c.yBot, yBelt: c.yBot + 0.04, yCrown: c.yBot + 0.06, lowMat: 13, topMat: 13, sideMat: 13 },
+        ]);
         m.addBox(-c.wTop * 0.98, g.yTop - 0.02, c.zFTop, c.wTop * 0.98, c.yTop + 0.04, c.zRTop, 6, 0.0);
     }
     // Side mirrors overlapping A-pillar shoulder (stays 1 connected island)
     const [mxL, mxR, my, mz] = spec.mirrors;
-    m.addBox(mxL - 0.08, my - 0.05, mz - 0.08, mxL + 0.18, my + 0.06, mz + 0.06, 13, 0.0);
-    m.addBox(mxR - 0.18, my - 0.05, mz - 0.08, mxR + 0.08, my + 0.06, mz + 0.06, 13, 0.0);
+    m.addBox(mxL - 0.08, my - 0.05, mz - 0.08, mxL + 0.28, my + 0.06, mz + 0.06, 13, 0.0);
+    m.addBox(mxR - 0.28, my - 0.05, mz - 0.08, mxR + 0.08, my + 0.06, mz + 0.06, 13, 0.0);
     return m.build();
 }
 
@@ -419,9 +419,9 @@ export function pushCarVisual(batches, camPos, car, headTint, tailTint) {
         );
     }
 
-    // Sleek wide LED headlights & crisp rear LED taillight bar
-    emitSubPart(batches.light, relX, relY, relZ, r00, r01, r02, r10, r11, r12, r20, r21, r22, -0.62, lightSpec.yH, lightSpec.zH, 0, 0, 0.34, 0.08, 0.09, headTint);
-    emitSubPart(batches.light, relX, relY, relZ, r00, r01, r02, r10, r11, r12, r20, r21, r22,  0.62, lightSpec.yH, lightSpec.zH, 0, 0, 0.34, 0.08, 0.09, headTint);
-    emitSubPart(batches.light, relX, relY, relZ, r00, r01, r02, r10, r11, r12, r20, r21, r22, -0.56, lightSpec.yT, lightSpec.zT, 0, 0, 0.44, 0.08, 0.09, tailTint);
-    emitSubPart(batches.light, relX, relY, relZ, r00, r01, r02, r10, r11, r12, r20, r21, r22,  0.56, lightSpec.yT, lightSpec.zT, 0, 0, 0.44, 0.08, 0.09, tailTint);
+    // Sleek wide LED headlights & crisp rear LED taillight bar (flush depth across outer hull skin)
+    emitSubPart(batches.light, relX, relY, relZ, r00, r01, r02, r10, r11, r12, r20, r21, r22, -0.62, lightSpec.yH, lightSpec.zH, 0, 0, 0.34, 0.08, 0.05, headTint);
+    emitSubPart(batches.light, relX, relY, relZ, r00, r01, r02, r10, r11, r12, r20, r21, r22,  0.62, lightSpec.yH, lightSpec.zH, 0, 0, 0.34, 0.08, 0.05, headTint);
+    emitSubPart(batches.light, relX, relY, relZ, r00, r01, r02, r10, r11, r12, r20, r21, r22, -0.56, lightSpec.yT, lightSpec.zT, 0, 0, 0.44, 0.08, 0.05, tailTint);
+    emitSubPart(batches.light, relX, relY, relZ, r00, r01, r02, r10, r11, r12, r20, r21, r22,  0.56, lightSpec.yT, lightSpec.zT, 0, 0, 0.44, 0.08, 0.05, tailTint);
 }
