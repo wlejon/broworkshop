@@ -11,12 +11,25 @@ oak 18.7 m with a 0.91 m trunk and 7 m clear bole), `leaf` is the drawn
 leaf's size against the grown one, the crown filled with proportionally more
 leaves so it covers as before.
 
+`MATURE_HEIGHT` is each species' mature height and `matureScale(name, m)`
+the scale that stands a grown tree at it (a redwood 90 m, a pine 28 m); the
+page draws every species at its mature height with 1.5x leaves.
+
+`voxelTree(world, { scale, leaf, depth })` (voxel.js) voxelizes the same
+tree, bark and leaf cards, into one bro.voxeldag archetype over its bounding
+cube and stands it in a region where the mesh tree stands. The 22 m oak at
+depth 5 is 0.35 m voxels, 3.9k bricks; against the mesh tree (bro.eye
+compare) it holds SSIM 0.90 at 60 m (denser and darker: a voxel is solid
+or empty, so no light comes through the crown), 0.99 from 150 m, for
+0.1-0.5 ms where the mesh tree takes 1.5-3.5.
+
 ## Files
 
 ```
 index.html, main.js   page + entry: a button per species, time of day
 lab.js                scene, sky, ground, the post; growSpecies, measureTree,
                       draw, clear, lookFrom
+voxel.js              voxelTree: the tree as a voxeldag archetype and region
 sheet.js              runSheet: each species' size, a still from eye height,
                       and its GPU ms over the bare frame at given distances
 ```

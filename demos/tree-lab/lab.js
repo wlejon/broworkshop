@@ -75,6 +75,19 @@ export function measureTree(world) {
     return { height, trunkD: 2 * baseR, bole: Number.isFinite(crownMin) ? crownMin : 0, crownW: 2 * rx, segments: segs.length };
 }
 
+// A mature tree's height (m), the size each species is drawn at: the presets
+// grow to 7-23 m whatever the species, a redwood no taller than a pine.
+export const MATURE_HEIGHT = {
+    oak: 22, beech: 28, elm: 22, birch: 20, willow: 14,
+    pine: 28, spruce: 35, fir: 35, cedar: 30, cypress: 22, juniper: 8, redwood: 90,
+};
+
+/** The draw scale that stands a grown tree `m` (measureTree) at its species' mature height. */
+export function matureScale(name, m) {
+    const h = MATURE_HEIGHT[name];
+    return h && m.height > 0 ? h / m.height : 1;
+}
+
 export const lab = { nodes: [], world: null, name: '' };
 
 /** Look at `target` from `dist` metres off, the eye at height `eyeY`, from compass angle `yaw`. */

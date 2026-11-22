@@ -1,7 +1,7 @@
 // Tree Lab entry: boot the kit, grow the first species and mount the panel.
 // Everything else is in lab.js, which the capture scripts import.
 import { boot, h } from "/lib/kit/index.js";
-import { sky, growSpecies, measureTree, draw, clear } from "/app/lab.js";
+import { vp, sky, person, growSpecies, measureTree, matureScale, draw, clear } from "/app/lab.js";
 
 const app = boot();
 const NAMES = ['oak', 'beech', 'elm', 'birch', 'pine', 'spruce', 'fir', 'redwood'];
@@ -11,8 +11,13 @@ function show(name) {
     const { world } = growSpecies(name);
     const m = measureTree(world);
     clear();
-    const d = draw(world);
-    app.status.set(`${name}: ${m.height.toFixed(1)} m tall, trunk ${m.trunkD.toFixed(2)} m, clear bole ${m.bole.toFixed(1)} m, crown ${m.crownW.toFixed(1)} m, ${d.leafCount} leaves`);
+    const k = matureScale(name, m);
+    const d = draw(world, { scale: k, leaf: 1.5 });
+    // The post stands clear of the trunk, under the crown's edge.
+    person.x = Math.max(2.5, k * m.crownW * 0.3); person.z = 1.5;
+    vp.reframe([0, k * m.height * 0.45, 0], k * m.height * 1.4);
+    app.status.set(`${name}: ${(k * m.height).toFixed(1)} m tall, trunk ${(k * m.trunkD).toFixed(2)} m, clear bole ${(k * m.bole).toFixed(1)} m,`
+        + ` crown ${(k * m.crownW).toFixed(1)} m, ${d.leafCount} leaves`);
 }
 
 const list = document.getElementById('species');
