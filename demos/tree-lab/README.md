@@ -71,10 +71,12 @@ with the terms bro.scene's vegetation shading takes from the crown: albedo
 darkened toward its centre with a lit rim, each leaf's normal turned to the
 eye and leaning to the crown's bulk, and the occlusion of its ambient light;
 coverage from a 4x finer capture, each sample counting the share of it a
-leaf covers. Each tree is one quad facing the eye (all of a species' quads
-in one mesh, each vertex's uv naming its tree, the vertex hook building
-the quad from the tree's record), no larger than the widest view's crown,
-that
+leaf covers. Each tree is one octagon facing the eye (all of a species'
+octagons in one mesh, each vertex's uv naming its tree and corner, the
+vertex hook building it from the tree's record): the bake's octagon round
+the crown of the view the tree is seen in (its extent in x, y and both
+diagonals, 0.46-0.58 of the view's square), mapped through the quad's
+axes in that view's so each corner lands on its texel. It
 samples the view nearest its direction in its own frame (mipmapped to the
 pixel's footprint), tinted by the tree's own leaf tone, lit as foliage
 (`s.leaf`) through the baked normal with the mesh leaves' bounce from
@@ -181,8 +183,8 @@ them at 250 m (the mesh trees' vegetation pass 1.5 ms of it, the impostors
 same dolly are slower in every pass (4.25-4.7 on average, 7-9 at the
 95th).
 
-Four changes brought it to 2.62 ms on average and 2.89 at the 95th
-percentile (2.31 and 2.45 standing still):
+Five changes brought it to 2.38 ms on average and 2.69 at the 95th
+percentile (2.06 and 2.28 standing still):
 
 - Handing the trees to the impostors at 150 m (the levels beginning at 0,
   40, 90 and 150 m, about 230 mesh trees within reach): the vegetation
@@ -193,9 +195,12 @@ percentile (2.31 and 2.45 standing still):
 - The impostors as one mesh of quads per species rather than an instanced
   quad: the GPU spends some 16 ns on each instance of a draw however small
   (56,000 one-triangle instances 0.92 ms, the same triangles as one mesh
-  0.026), which was the 0.45. Their fill is what is left, 0.78 ms: drawn
-  nearest first it is 0.06 less, every fragment discarded it is more (no
-  depth to hide the layers behind), without the normals fetch 0.13 less.
+  0.026), which was the 0.45. Their fill is what is left: drawn nearest
+  first it is 0.06 less, every fragment discarded it is more (no depth to
+  hide the layers behind), without the normals fetch 0.13 less.
+- Each drawn as its view's octagon rather than the whole square: their
+  pass from 0.78 ms to 0.52, the truth's numbers unchanged to the third
+  decimal.
 - Their atlases kept as float16 (albedo) and unorm8 (normals), 0.07 less.
 - The engine no longer culls a shadow-only draw for the camera: the
   proxies' 56,000 instances were culled for a view that never draws them,

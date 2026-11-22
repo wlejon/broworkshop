@@ -72,6 +72,23 @@ struct Params { box: vec4<f32>, views: vec4<f32>, band: vec4<f32>, gain: vec4<f3
 @binding(4, 1) var albedo: texture2d_array<vec4<f32>>;
 @binding(4, 2) var normals: texture2d_array<vec4<f32>>;
 @binding(4, 14) var trees: read_buffer<vec4<f32>>;
+@binding(4, 15) var shape: read_buffer<vec4<f32>>;
+
+// Corner k (0-7, around) of view vi's octagon: x in [x0, x1], y in
+// [y0, y1], x + y in [s0, s1], x - y in [t0, t1] (a slab that cuts no
+// corner gives that corner twice).
+fn octagon_corner(vi: i32, k: i32) -> vec2<f32> {
+    let b = shape[vi * 2];
+    let g = shape[vi * 2 + 1];
+    if (k == 0) { return vec2<f32>(b.y, max(b.z, b.y - g.w)); }
+    if (k == 1) { return vec2<f32>(b.y, min(b.w, g.y - b.y)); }
+    if (k == 2) { return vec2<f32>(min(b.y, g.y - b.w), b.w); }
+    if (k == 3) { return vec2<f32>(max(b.x, g.z + b.w), b.w); }
+    if (k == 4) { return vec2<f32>(b.x, min(b.w, b.x - g.z)); }
+    if (k == 5) { return vec2<f32>(b.x, max(b.z, g.x - b.x)); }
+    if (k == 6) { return vec2<f32>(max(b.x, g.x - b.z), b.z); }
+    return vec2<f32>(min(b.y, g.w + b.z), b.z);
+}
 
 fn yaw_to_world(p: vec3<f32>, c: f32, n: f32) -> vec3<f32> {
     return vec3<f32>(c * p.x + n * p.z, p.y, -n * p.x + c * p.z);
@@ -88,7 +105,8 @@ fn view_dir(i: i32) -> vec3<f32> {
 
 pub fn vertex(v: mesh::Vertex) -> mesh::Vertex {
     var o = v;
-    let id = floor(v.uv.x * 0.5);
+    let id = floor(v.uv.x * 0.125);
+    let corner = (v.uv.x - 8.0 * id) as i32;
     let t = trees[id as i32];
     let root = vec3<f32>(t.x, 0.0, t.y);
     let c = cos(t.z);
@@ -101,22 +119,7 @@ pub fn vertex(v: mesh::Vertex) -> mesh::Vertex {
     if (length(r) < 1.0e-4) { r = vec3<f32>(1.0, 0.0, 0.0); }
     r = normalize(r);
     let u = cross(f, r);
-    let q = vec2<f32>((v.uv.x - 2.0 * id) * 2.0 - 1.0, v.uv.y * 2.0 - 1.0);
     let R = params.box.w;
-    // Moved toward the eye by gain.w (front) of the radius, to the crown's near
-    // surface where the leaves seen are (its shadow and depth are theirs),
-    // and shrunk to cover what it covered at the centre.
-    let dist = length(to_eye);
-    let push_d = min(params.gain.w * R * s, 0.5 * dist);
-    // Only as far out as a view's crown reaches (far.y of R), the atlas
-    // mapped as it was baked (the square's half side R).
-    let fit = params.far.y;
-    o.pos = root + centre + f * push_d + (r * q.x + u * q.y) * (fit * R * s * (dist - push_d) / dist);
-    // Wholly nearer than the band, or wholly past the far fade: no impostor
-    // (a collapsed quad, no pixels).
-    if (params.band.x > 0.0 && dist + R * s < params.band.x) { o.pos = root; }
-    if (params.far.x > 0.0 && dist - R * s > 1.35 * params.far.x) { o.pos = root; }
-    o.normal = f;
     let d = world_to_yaw(f, c, n);
     var az = atan2(d.x, d.z);
     if (az < 0.0) { az = az + 6.2831853; }
@@ -124,11 +127,35 @@ pub fn vertex(v: mesh::Vertex) -> mesh::Vertex {
     let ai = (floor(az / (6.2831853 / params.views.x) + 0.5) as i32) % (params.views.x as i32);
     let ei = clamp(floor(el / params.views.z + 0.5) as i32, 0, (params.views.y as i32) - 1);
     let vi = ei * (params.views.x as i32) + ai;
-    let pl = world_to_yaw(r * q.x + u * q.y, c, n) * (fit * R);
     let dv = view_dir(vi);
     let rv = normalize(cross(vec3<f32>(0.0, 1.0, 0.0), dv));
     let uv_ = cross(dv, rv);
-    o.v0 = vec4<f32>(0.5 + 0.5 * dot(pl, rv) / R, 0.5 - 0.5 * dot(pl, uv_) / R, c, n);
+    // The corner of view vi's octagon (the bake's: its crown's extent in x,
+    // y, x + y and x - y, in R of the view's square, y up) ...
+    let a = octagon_corner(vi, corner);
+    // ... on the quad: the atlas point of quad point q is m q (the quad's
+    // axes in the view's), so q = m^-1 a puts the corner where the view's
+    // texel is.
+    let ry = world_to_yaw(r, c, n);
+    let uy = world_to_yaw(u, c, n);
+    let m00 = dot(ry, rv);
+    let m01 = dot(uy, rv);
+    let m10 = dot(ry, uv_);
+    let m11 = dot(uy, uv_);
+    let det = m00 * m11 - m01 * m10;
+    let q = vec2<f32>(m11 * a.x - m01 * a.y, -m10 * a.x + m00 * a.y) / select(abs(det) > 1.0e-3, det, 1.0e-3);
+    // Moved toward the eye by gain.w (front) of the radius, to the crown's near
+    // surface where the leaves seen are (its shadow and depth are theirs),
+    // and shrunk to cover what it covered at the centre.
+    let dist = length(to_eye);
+    let push_d = min(params.gain.w * R * s, 0.5 * dist);
+    o.pos = root + centre + f * push_d + (r * q.x + u * q.y) * (R * s * (dist - push_d) / dist);
+    // Wholly nearer than the band, or wholly past the far fade: no impostor
+    // (a collapsed quad, no pixels).
+    if (params.band.x > 0.0 && dist + R * s < params.band.x) { o.pos = root; }
+    if (params.far.x > 0.0 && dist - R * s > 1.35 * params.far.x) { o.pos = root; }
+    o.normal = f;
+    o.v0 = vec4<f32>(0.5 + 0.5 * a.x, 0.5 - 0.5 * a.y, c, n);
     o.v1 = vec4<f32>(R * s, 0.0, 0.0, 0.0);
     o.vi = vec4<i32>(vi, id as i32, 0, 0);
     return o;
@@ -291,14 +318,33 @@ export function bakeImpostor(sp, o = IMPOSTOR) {
     scene.setDebugView(null);
     for (const n of nodes) n.destroy();
     ground.visible = groundWas;
-    // How far out (a share of R, the square's half side) any view's crown
-    // reaches: the quad is drawn that size, its empty margin not shaded.
-    let fit = 0;
-    for (let vi = 0; vi < V; vi++) for (let y = 0; y < W; y++) for (let x = 0; x < W; x++) {
-        if (alb[(vi * W * W + y * W + x) * 4 + 3] <= 0.01) continue;
-        fit = Math.max(fit, Math.abs((x + 0.5) * 2 / W - 1) + 1 / W, Math.abs((y + 0.5) * 2 / W - 1) + 1 / W);
+    // Each view's octagon around its crown (in R of the square, y up): the
+    // extent of its texels in x, y, x + y and x - y, a margin out for the
+    // mips' blur. It is what is drawn, the square's empty corners not.
+    const shape = new Float32Array(V * 8), MARGIN = 0.04;
+    for (let vi = 0; vi < V; vi++) {
+        const lo = [Infinity, Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity, -Infinity];
+        for (let y = 0; y < W; y++) for (let x = 0; x < W; x++) {
+            if (alb[(vi * W * W + y * W + x) * 4 + 3] <= 0.01) continue;
+            const X = (x + 0.5) * 2 / W - 1, Y = 1 - (y + 0.5) * 2 / W;
+            const k = [X, Y, X + Y, X - Y];
+            for (let j = 0; j < 4; j++) { lo[j] = Math.min(lo[j], k[j]); hi[j] = Math.max(hi[j], k[j]); }
+        }
+        if (lo[0] === Infinity) continue;   // an empty view: a collapsed octagon
+        const pad = (j) => (j < 2 ? 1 : 2) * (1 / W + MARGIN);
+        const lim = (j) => (j < 2 ? 1 : 2);
+        for (let j = 0; j < 4; j++) {
+            shape[vi * 8 + 2 * j] = Math.max(-lim(j), lo[j] - pad(j));
+            shape[vi * 8 + 2 * j + 1] = Math.min(lim(j), hi[j] + pad(j));
+        }
     }
-    return { alb, nrm, box: [...c, R], W, V, o, fit: Math.min(1, fit) };
+    let area = 0;
+    for (let vi = 0; vi < V; vi++) {
+        const [x0, x1, y0, y1, s0, s1, t0, t1] = shape.subarray(vi * 8, vi * 8 + 8);
+        const cut = (e) => Math.max(0, e) ** 2 / 2;
+        area += ((x1 - x0) * (y1 - y0) - cut(x1 + y1 - s1) - cut(s0 - x0 - y0) - cut(t0 - x0 + y1) - cut(x1 - y0 - t1)) / 4 / V;
+    }
+    return { alb, nrm, box: [...c, R], W, V, o, shape, area };
 }
 
 // Each card (6 vertices) moved toward the crown's centre so its outer edge
@@ -362,24 +408,25 @@ function mergeMeshes(a, b) {
     return new Mesh({ positions: pos, normals: nrm, indices: idx });
 }
 
-// One quad per tree in one mesh, not one instanced quad: the GPU spends about
-// 16 ns on each instance of a draw however small it is (56,000 one-triangle
-// instances 0.92 ms, the same triangles as one mesh 0.026), so a forest of
-// instanced quads costs more than their pixels. A vertex's uv carries its
-// corner and its tree (uv.x = corner + 2 tree); the hook builds the quad from
-// the tree's record. The positions only bound the trees (the node's bounds).
-function quads(sp, trees) {
+// One octagon per tree in one mesh, not one instanced quad: the GPU spends
+// about 16 ns on each instance of a draw however small it is (56,000
+// one-triangle instances 0.92 ms, the same triangles as one mesh 0.026), so
+// a forest of instanced quads costs more than their pixels. A vertex's uv
+// carries its corner and its tree (uv.x = corner + 8 tree); the hook builds
+// the octagon of the view the tree is seen in from the tree's record. The
+// positions only bound the trees (the node's bounds).
+function octagons(sp, trees) {
     const N = trees.length, R = sp.imp.box[3];
-    const pos = new Float32Array(N * 12), nrm = new Float32Array(N * 12), uv = new Float32Array(N * 8), idx = new Uint32Array(N * 6);
-    const CX = [0, 1, 1, 0], CY = [0, 0, 1, 1];
+    const pos = new Float32Array(N * 24), nrm = new Float32Array(N * 24), uv = new Float32Array(N * 16), idx = new Uint32Array(N * 18);
     trees.forEach((t, i) => {
         const r = 2 * R * sp.k * t.size;
-        for (let c = 0; c < 4; c++) {
-            pos.set([t.x + (CX[c] * 2 - 1) * r, CY[c] * r, t.z + (CX[c] * 2 - 1) * r], (i * 4 + c) * 3);
-            nrm[(i * 4 + c) * 3 + 2] = 1;
-            uv.set([CX[c] + 2 * i, CY[c]], (i * 4 + c) * 2);
+        for (let c = 0; c < 8; c++) {
+            const a = c * Math.PI / 4;
+            pos.set([t.x + Math.cos(a) * r, (c & 1) * r, t.z + Math.sin(a) * r], (i * 8 + c) * 3);
+            nrm[(i * 8 + c) * 3 + 2] = 1;
+            uv.set([c + 8 * i, 0], (i * 8 + c) * 2);
         }
-        idx.set([0, 1, 2, 0, 2, 3].map((k) => k + i * 4), i * 6);
+        for (let k = 1; k < 7; k++) idx.set([i * 8, i * 8 + k, i * 8 + k + 1], i * 18 + (k - 1) * 3);
     });
     return new Mesh({ positions: pos, normals: nrm, uvs: uv, indices: idx });
 }
@@ -407,11 +454,12 @@ function cullSpheres(sp, trees) {
 export function impostorNode(sp, trees, { band = [0, 0], castsShadow = false, gain = IMPOSTOR.gain, front = IMPOSTOR.front, occluder = IMPOSTOR.occluder, cover = IMPOSTOR.cover, contrast = IMPOSTOR.contrast, until = 0 } = {}) {
     const data = new Float32Array(trees.length * 4);
     trees.forEach((t, i) => data.set([t.x, t.z, t.yaw, sp.k * t.size], i * 4));
-    const n = scene.createMesh({ data: quads(sp, trees), color: [1, 1, 1], metallic: 0, roughness: 0.75,
+    const n = scene.createMesh({ data: octagons(sp, trees), color: [1, 1, 1], metallic: 0, roughness: 0.75,
         alphaCutoff: 0.5, alphaToCoverage: true, doubleSided: true, castsShadow, receivesShadow: true, vertexColorTint: false });
-    const { alb, nrm, box, W, V, o } = sp.imp;
+    const { alb, nrm, box, W, V, o, shape } = sp.imp;
     n.setShader({ module: DRAW_HOOK, file: 'impostor.bk',
-        uniforms: { box, views: [o.nAz, o.nEl, o.elStep * Math.PI / 180, PX], band: [band[0], band[1], W, 0], gain: [...gain, front], light: [occluder, cover, contrast[0], contrast[1]], far: [until, sp.imp.fit ?? 1, 0, 0] } });
+        uniforms: { box, views: [o.nAz, o.nEl, o.elStep * Math.PI / 180, PX], band: [band[0], band[1], W, 0], gain: [...gain, front], light: [occluder, cover, contrast[0], contrast[1]], far: [until, 0, 0, 0] } });
+    n.setShaderBuffer('shape', bro.kernel.createBuffer(shape));
     n.setShaderTexture('albedo', { data: alb, width: W, height: W, layers: V, channels: 4, mipmap: true, format: IMPOSTOR.formats[0] });
     n.setShaderTexture('normals', { data: nrm, width: W, height: W, layers: V, channels: 4, mipmap: true, format: IMPOSTOR.formats[1] });
     n.setShaderBuffer('trees', bro.kernel.createBuffer(data));
