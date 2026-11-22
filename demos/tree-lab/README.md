@@ -161,10 +161,13 @@ height through that forest (some 580 mesh trees within reach) is 2.13-2.19
 ms on average, 2.2-2.25 at the 95th percentile and 2.3-3.5 at worst, in
 the page's 1620 x 970 view. With the view at 2560 x 1364 (`--width 2860
 --height 1470`) it is 3.2-3.6 ms on average and 3.3-4.0 at the 95th
-percentile: over a 2.8 ms frame before anything else is drawn. On the
-Vulkan device that also drives the desktop, one run in three of the same
-dolly is slower in every pass (4.3-4.5 on average, 7.6 at the 95th); on
-the other it never is (3.4-3.6 each run).
+percentile: over a 2.8 ms frame before anything else is drawn (the mesh
+trees' vegetation pass 1.5 of it, the impostors 0.8, their instance cull
+0.45). On either of this machine's two GPUs, some runs of the same dolly
+are slower in every pass (4.25-4.7 on average, 7-9 at the 95th); the
+others are 3.2-3.6. Drawing the impostors nearest first or farthest first
+changes their cost by a tenth, and without MSAA the vegetation pass is
+1.14 ms: neither is where the cost is.
 
 On the CPU, each species' level is a `scene.createGeometry` made once
 (`speciesLevels`), so a swap makes two nodes and uploads nothing; making
