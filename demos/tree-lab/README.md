@@ -31,10 +31,14 @@ tree's trunk does.
 `growStand`, `layout` and `plant` (forest.js) make a forest: the mix of
 species grown and voxelized once, the trees laid out by dart throwing so
 each keeps clear of its neighbours' crowns by a share of their radii, every
-tree a voxel tree in a region of its own (any position, turn and size). The
-nearest are swaying meshes as well, handed to their voxels from `handoff`
-metres (50): the mesh's `fadeOutDist` and the region's `minDist` dither over
-the same band pixel for pixel, and past it the mesh is not drawn.
+tree a voxel tree in a region of its own (any position, turn and size). Up
+to `slots` (8) mesh trees follow the camera (`update(eye)`, or `follow(vp)`
+each frame): a tree coming within reach of the band [handoff, 1.35 handoff]
+(30 m) takes a mesh, which dithers out over the band (`fadeOutDist`) as its
+voxels dither in (`minDist`), pixel for pixel, and casts the tree's shadow
+while it holds it (the region's `castShadow` off). A tree gives its mesh back
+only once wholly past the band, so no swap is seen. The meshes draw a 1 x 2
+segment leaf card, five times cheaper than the lab's 3 x 5.
 
 ## Files
 

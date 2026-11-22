@@ -35,10 +35,10 @@ const LEAF = { color: [0.07, 0.13, 0.04], metallic: 0, roughness: 0.7 };
 
 // A leaf card `k` times its grown size (the node's scale undone, so a tree
 // drawn 2.6x keeps leaves of a real leaf's size).
-export function leafCard(k = 1) {
+export function leafCard(k = 1, segments = [3, 5]) {
     const m = Mesh.leafCard('oval', {
         width: 0.07 * k, length: 0.12 * k, bend: 0.4, fullUV: true, shapedSilhouette: true, cup: 0.55,
-        widthSegments: 3, lengthSegments: 5,
+        widthSegments: segments[0], lengthSegments: segments[1],
     });
     m.colors = new Float32Array(0);
     return m;
@@ -102,13 +102,13 @@ export function lookFrom(target, dist, eyeY, yaw = 0.9) {
  * the grown one (1/scale keeps a leaf its grown size whatever the tree's, and
  * the crown is filled with that many times as many squared).
  */
-export function draw(world, { x = 0, z = 0, scale = 1, leaf = 1 } = {}) {
+export function draw(world, { x = 0, z = 0, scale = 1, leaf = 1, card } = {}) {
     const k = leaf / scale;
     const tubes = world.emitBranchTubes({ sides: 10 });
     const scatter = world.emitScatterSegments({ seed: 0x1eaf, perArea: 90 / (k * k) });
     const bark = scene.createInstancedMesh(Object.assign({ tube: tubes, castsShadow: true, receivesShadow: true }, BARK));
     const leaves = scene.createInstancedMesh(Object.assign({
-        mesh: leafCard(k), scatter,
+        mesh: leafCard(k, card), scatter,
         doubleSided: true, subsurface: 0.5, vertexColorTint: false, castsShadow: true, receivesShadow: true,
     }, LEAF));
     for (const n of [bark, leaves]) {
