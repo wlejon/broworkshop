@@ -6,7 +6,7 @@ function hash2(x, y) {
   return n - Math.floor(n);
 }
 
-function fbm(x, y, oct = 4) {
+export function fbm(x, y, oct = 4) {
   let v = 0, a = 0.5;
   for (let i = 0; i < oct; ++i) {
     const ix = Math.floor(x), iy = Math.floor(y);
@@ -21,7 +21,7 @@ function fbm(x, y, oct = 4) {
   return v;
 }
 
-function clampByte(v) {
+export function clampByte(v) {
   return Math.max(0, Math.min(255, Math.round(v)));
 }
 

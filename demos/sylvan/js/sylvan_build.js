@@ -21,13 +21,22 @@ import {
   makeSoftGlowTex,
 } from './pbr_textures.js';
 import {
+  makeLilyPadPbrSet,
+  makeLotusPetalPbrSet,
+  makeSedgePbrSet,
+  makeCattailHeadPbrSet,
+  makeDragonflyBodyPbrSet,
+  makeDragonflyWingPbrSet,
+} from './flora_pbr.js';
+import {
   islandHeightAt,
   createSculptedIslandTerrain,
   createPondWaterDisk,
   createSculptedBoulder,
-  createCurvedWaterfall,
+  createRockHuggingStream,
   createAnatomicalKoi,
   createCurledLilyPad,
+  createSculptedLotusMeshes,
   createSmoothTube,
   createSedgeClumpGeo,
   createCarvedLanternMeshes,
@@ -132,16 +141,17 @@ function buildJapaneseMaple(add, barkSet, leafSet, rootPos, registerPick) {
   );
   const thickened = Mesh.thickenBranches(trunkSegs, 0.007, 2.3);
 
-  // Extract real overhanging outer branch tips for tree-to-water falling leaf lifecycle
+  // Extract overhanging outer-pond twig tips so leaves detach clearly into open air over the water
   const twigTips = [];
   for (const seg of thickened) {
-    if (seg.radius < 0.022 && seg.to[0] > -1.35 && seg.to[2] > -1.05 && seg.to[1] > 0.72) {
+    if (seg.radius < 0.020 && seg.to[0] > -1.35 && seg.to[2] > -0.95 && seg.to[1] > 0.76 && seg.to[1] < 1.38) {
       twigTips.push(seg.to.slice());
     }
   }
+  twigTips.sort((a, b) => (b[0] + b[2]) - (a[0] + a[2]));
   if (twigTips.length === 0) twigTips.push([rx + 0.85, rootY + 1.25, rz + 0.65]);
 
-  // Merge 4 gnarled surface buttress roots gripping gently into terrain contour
+  // Merge 4 gnarled surface buttress roots tucked smoothly inside trunk flare (no protruding start cap!)
   const woodParts = [Mesh.meshBranches(thickened, 8)];
   for (let i = 0; i < 4; ++i) {
     const ang = (i / 4) * Math.PI * 2 + 0.45;
@@ -149,13 +159,13 @@ function buildJapaneseMaple(add, barkSet, leafSet, rootPos, registerPick) {
     const pts = [];
     for (let s = 0; s <= 4; ++s) {
       const f = s / 4;
-      const dist = 0.05 + f * 0.52;
+      const dist = f * 0.52;
       const px = rx + dx * dist, pz = rz + dz * dist;
       const gh = islandHeightAt(px, pz);
-      const py = s === 0 ? (ry + 0.18) : (s === 4 ? gh - 0.06 : gh + (1 - f) * 0.08);
+      const py = s === 0 ? (ry + 0.05) : (s === 4 ? gh - 0.06 : gh + (1 - f) * 0.07);
       pts.push([px, py, pz]);
     }
-    woodParts.push(Mesh.tube(pts, [0.10, 0.068, 0.044, 0.025, 0.015], 8));
+    woodParts.push(Mesh.tube(pts, [0.075, 0.058, 0.040, 0.024, 0.014], 8, { capStart: false, capEnd: true }));
   }
   const barkMesh = Mesh.merge(woodParts);
 
@@ -235,6 +245,13 @@ export function buildSylvanScene(scene, registerPick) {
   const barkSet = makeBarkPbrSet();
   const leafSet = makeLeafPbrSet();
   const fernSet = makeFernPbrSet();
+  const lilyPadSet = makeLilyPadPbrSet();
+  const lotusPinkSet = makeLotusPetalPbrSet('pink');
+  const lotusIvorySet = makeLotusPetalPbrSet('ivory');
+  const sedgeSet = makeSedgePbrSet();
+  const cattailSet = makeCattailHeadPbrSet();
+  const dfBodySet = makeDragonflyBodyPbrSet();
+  const dfWingSet = makeDragonflyWingPbrSet();
   const softGlowTex = makeSoftGlowTex(64);
   const bedTex = makePondBedTexture(256, 256);
   const koiSets = {
@@ -268,7 +285,8 @@ export function buildSylvanScene(scene, registerPick) {
   const terrain = add({
     name: 'Sanctuary Island Terrain',
     mesh: createSculptedIslandTerrain(72),
-    texture: bedTex, color: '#788474', roughness: 0.90, metallic: 0.02,
+    texture: bedTex, normalTexture: rockSet.normal, metallicRoughnessTexture: rockSet.mr,
+    color: '#788474', roughness: 0.90, metallic: 0.02,
   });
   attachTerrainShader(terrain, 0.85);
 
@@ -282,44 +300,59 @@ export function buildSylvanScene(scene, registerPick) {
       name: `Submerged Pebble ${i + 1}`,
       mesh: createSculptedBoulder(0.11 + (i % 3) * 0.04, 0.055, 0.09 + (i % 2) * 0.03, 19.0 + i * 2.1),
       position: [px, py, pz],
-      texture: bedTex, color: i % 2 === 0 ? '#747a78' : '#8a7e6e', roughness: 0.48, metallic: 0.04,
+      texture: bedTex, normalTexture: rockSet.normal, metallicRoughnessTexture: rockSet.mr,
+      color: i % 2 === 0 ? '#747a78' : '#8a7e6e', roughness: 0.48, metallic: 0.04,
     });
     attachTerrainShader(cob, 0.0);
   }
 
   // 2. Sculpted Mossy Garden Gorge & Natural Perimeter Basalt Boulders (PBR stratified normal + MR maps)
+  const cliffPos = [0.85, islandHeightAt(0.85, -1.78) - 0.04, -1.78];
+  const cliffMesh = createSculptedBoulder(1.12, 0.86, 0.56, 2.3);
   const cascadeCliff = add({
     name: 'Cascade Recessed Cliff',
-    mesh: createSculptedBoulder(1.12, 0.86, 0.56, 2.3),
-    position: [0.85, islandHeightAt(0.85, -1.78) - 0.04, -1.78],
+    mesh: cliffMesh,
+    position: cliffPos,
     texture: rockSet.albedo, normalTexture: rockSet.normal, metallicRoughnessTexture: rockSet.mr,
     color: '#747d7a', roughness: 1.0, metallic: 0.04,
   });
   attachTerrainShader(cascadeCliff, 1.0);
+  const shelfPos = [0.72, islandHeightAt(0.72, -1.42) + 0.14, -1.42];
+  const shelfMesh = createSculptedBoulder(0.62, 0.34, 0.42, 6.7);
   const cascadeShelf = add({
     name: 'Cascade Spill Ledge',
-    mesh: createSculptedBoulder(0.62, 0.34, 0.42, 6.7),
-    position: [0.72, islandHeightAt(0.72, -1.42) + 0.14, -1.42],
+    mesh: shelfMesh,
+    position: shelfPos,
     texture: rockSet.albedo, normalTexture: rockSet.normal, metallicRoughnessTexture: rockSet.mr,
     color: '#646e6c', roughness: 0.75, metallic: 0.05,
   });
   attachTerrainShader(cascadeShelf, 0.7);
+  const rightPos = [1.56, islandHeightAt(1.56, -1.36) - 0.03, -1.36];
+  const rightMesh = createSculptedBoulder(0.58, 0.66, 0.52, 3.7);
   const cliffRight = add({
     name: 'Cascade Right Buttress',
-    mesh: createSculptedBoulder(0.58, 0.66, 0.52, 3.7),
-    position: [1.56, islandHeightAt(1.56, -1.36) - 0.03, -1.36],
+    mesh: rightMesh,
+    position: rightPos,
     texture: rockSet.albedo, normalTexture: rockSet.normal, metallicRoughnessTexture: rockSet.mr,
     color: '#767f7c', roughness: 1.0, metallic: 0.04,
   });
   attachTerrainShader(cliffRight, 1.0);
+  const leftPos = [-0.06, islandHeightAt(-0.06, -1.56) - 0.03, -1.56];
+  const leftMesh = createSculptedBoulder(0.54, 0.52, 0.48, 5.1);
   const cliffLeft = add({
     name: 'Cascade Left Buttress',
-    mesh: createSculptedBoulder(0.54, 0.52, 0.48, 5.1),
-    position: [-0.06, islandHeightAt(-0.06, -1.56) - 0.03, -1.56],
+    mesh: leftMesh,
+    position: leftPos,
     texture: rockSet.albedo, normalTexture: rockSet.normal, metallicRoughnessTexture: rockSet.mr,
     color: '#6d7774', roughness: 0.90, metallic: 0.04,
   });
   attachTerrainShader(cliffLeft, 0.95);
+  const cascadeRockTargets = [
+    { mesh: cliffMesh, pos: cliffPos },
+    { mesh: shelfMesh, pos: shelfPos },
+    { mesh: rightMesh, pos: rightPos },
+    { mesh: leftMesh, pos: leftPos },
+  ];
   registerPick(cascadeCliff, {
     id: 'cascade', name: 'Terraced Mossy Basalt Cascade', kind: 'Garden Spring Rockery',
     desc: 'Stepped basalt gorge with slender refracting spring trickles clinging down glistening mossy rock faces.',
@@ -345,33 +378,37 @@ export function buildSylvanScene(scene, registerPick) {
     attachTerrainShader(bNode, 1.0);
   });
 
-  // 3. Refractive Depth-Absorbing Pond Water + 3 Slender Rock Spring Trickles + Mist Particles
+  // 3. Refractive Depth-Absorbing Pond Water + 3 Raycast Rock-Hugging Spring Trickles + Mist Particles
+  const streamMain = createRockHuggingStream(cascadeRockTargets, 0.80, 0.78, -1.04, 0.042, 0.088, 22, 8);
+  const streamMid  = createRockHuggingStream(cascadeRockTargets, 0.54, 0.52, -1.04, 0.034, 0.066, 18, 8);
+  const streamSide = createRockHuggingStream(cascadeRockTargets, 0.26, 0.60, -1.08, 0.030, 0.056, 18, 8);
+
   const pondWater = add({
     name: 'Crystal Pond Water',
-    mesh: createPondWaterDisk(2.08, 32, 64),
+    mesh: createPondWaterDisk(2.08, 36, 72),
     position: [0, 0.0, 0],
-    color: [0.06, 0.28, 0.32, 0.54], roughness: 0.03, metallic: 0.02,
+    color: [0.05, 0.24, 0.28, 0.54], roughness: 0.025, metallic: 0.02,
     castsShadow: false, receivesShadow: true,
   });
   pondWater.setShader({
     module: WATER_SHADER_BK, file: 'pond_water.bk',
-    uniforms: { time: 0.0, breeze: 0.52, clarity: 0.85, pad: 0.0 },
+    uniforms: {
+      time: 0.0, breeze: 0.52,
+      entry0: streamMain.entry,
+      entry1: streamMid.entry,
+      entry2: streamSide.entry,
+      pad0: [0.0, 0.0],
+    },
   });
   registerPick(pondWater, {
     id: 'pond', name: 'Refractive Spring-Fed Basin', kind: 'Optical Depth Pond · SSR',
-    desc: 'Snell-refracting water surface with Beer-Lambert absorption, SSR sky sheen, and clear view of cobbles & koi below.',
+    desc: 'Snell-refracting water surface with Beer-Lambert absorption, cellular caustics, SSR sky sheen & boulder-hugging streams.',
   });
 
   const fallMain = add({
     name: 'Main Cascade Trickle',
-    mesh: createCurvedWaterfall([
-      [0.80, 0.88, -1.48],
-      [0.80, 0.72, -1.28],
-      [0.80, 0.48, -1.11],
-      [0.80, 0.22, -1.03],
-      [0.80, -0.04, -1.00],
-    ], 0.055, 0.095, 10),
-    color: [0.80, 0.96, 1.0, 0.88], roughness: 0.08, metallic: 0.02,
+    mesh: streamMain.mesh,
+    color: [0.80, 0.96, 1.0, 0.88], roughness: 0.06, metallic: 0.02,
     twoSided: true, castsShadow: false, receivesShadow: true,
   });
   fallMain.setShader({
@@ -381,13 +418,8 @@ export function buildSylvanScene(scene, registerPick) {
 
   const fallMid = add({
     name: 'Step Cascade Trickle',
-    mesh: createCurvedWaterfall([
-      [0.54, 0.54, -1.25],
-      [0.54, 0.36, -1.14],
-      [0.54, 0.16, -1.07],
-      [0.54, -0.04, -1.04],
-    ], 0.042, 0.072, 8),
-    color: [0.82, 0.97, 1.0, 0.85], roughness: 0.08, metallic: 0.02,
+    mesh: streamMid.mesh,
+    color: [0.82, 0.97, 1.0, 0.85], roughness: 0.06, metallic: 0.02,
     twoSided: true, castsShadow: false, receivesShadow: true,
   });
   fallMid.setShader({
@@ -397,13 +429,8 @@ export function buildSylvanScene(scene, registerPick) {
 
   const fallSide = add({
     name: 'Side Spring Trickle',
-    mesh: createCurvedWaterfall([
-      [0.26, 0.64, -1.36],
-      [0.26, 0.44, -1.20],
-      [0.26, 0.20, -1.10],
-      [0.26, -0.04, -1.06],
-    ], 0.036, 0.062, 8),
-    color: [0.82, 0.97, 1.0, 0.84], roughness: 0.08, metallic: 0.02,
+    mesh: streamSide.mesh,
+    color: [0.82, 0.97, 1.0, 0.84], roughness: 0.06, metallic: 0.02,
     twoSided: true, castsShadow: false, receivesShadow: true,
   });
   fallSide.setShader({
@@ -414,7 +441,7 @@ export function buildSylvanScene(scene, registerPick) {
   const mistParticles = scene.createParticles3D({
     name: 'Cascade Plunge Mist',
     texture: softGlowTex,
-    position: [0.62, 0.03, -1.02],
+    position: [streamMid.entry[0], 0.04, streamMid.entry[1]],
     maxParticles: 36, rate: 8,
     lifetime: { min: 0.8, max: 1.5 },
     size: { start: 0.045, end: 0.11 },
@@ -446,7 +473,8 @@ export function buildSylvanScene(scene, registerPick) {
       name: `Bank Sedge Clump ${ri + 1}`,
       mesh: createSedgeClumpGeo(14, ri + 1.0),
       position: [rx, ry, rz],
-      color: '#4f7f38', roughness: 0.68, metallic: 0.0,
+      texture: sedgeSet.albedo, normalTexture: sedgeSet.normal, metallicRoughnessTexture: sedgeSet.mr,
+      color: '#ffffff', roughness: 1.0, metallic: 0.0,
     });
     sedgeNode.setShader({ module: PLANT_SWAY_BK, file: `sedge_${ri}.bk`, uniforms: { time: 0, breeze: 0.52, maxH: 0.65, phase: ri * 1.7 } });
     plantNodes.push(sedgeNode);
@@ -461,14 +489,16 @@ export function buildSylvanScene(scene, registerPick) {
         name: `Cattail Reed ${ri}_${k}`,
         mesh: stalkMesh,
         position: [sx, sy, sz],
-        color: '#507d3a', roughness: 0.66, metallic: 0.0,
+        texture: sedgeSet.albedo, normalTexture: sedgeSet.normal, metallicRoughnessTexture: sedgeSet.mr,
+        color: '#b8cc9c', roughness: 1.0, metallic: 0.0,
       });
       const headMesh = createSmoothTube([[0.018, h * 0.72, 0.011], [0.020, h * 0.84, 0.013], [0.023, h * 0.96, 0.015]], [0.016, 0.028, 0.014], 10);
       const head = add({
         name: `Cattail Seed Head ${ri}_${k}`,
         mesh: headMesh,
         position: [sx, sy, sz],
-        color: '#5c361d', roughness: 0.92, metallic: 0.0,
+        texture: cattailSet.albedo, normalTexture: cattailSet.normal, metallicRoughnessTexture: cattailSet.mr,
+        color: '#ffffff', roughness: 1.0, metallic: 0.0,
       });
       const u = { time: 0.0, breeze: 0.52, maxH: h + 0.06, phase: ri * 1.7 + k * 0.35 };
       stalk.setShader({ module: PLANT_SWAY_BK, file: `cattail_s_${ri}_${k}.bk`, uniforms: u });
@@ -477,7 +507,7 @@ export function buildSylvanScene(scene, registerPick) {
     }
   });
 
-  // 6. Rooted Water Lilies & Cupped Sacred Lotus Blossoms (stem stops -0.008u clear below pad, <0.028u structure contact)
+  // 6. Textured Rooted Water Lilies & Multi-Petal Cupped Sacred Lotus Blossoms + Stamen Rings
   const lilyCoords = [
     [-1.44, 0.42, 0.24, true, 0.4],
     [-1.08, 1.06, 0.20, false, 1.9],
@@ -485,43 +515,47 @@ export function buildSylvanScene(scene, registerPick) {
     [1.06, 1.28, 0.20, false, 4.1],
     [-0.12, 1.48, 0.24, true, 5.2],
   ];
-  const lotusGeo = Mesh.flower({
-    petalCount: 10, layers: 3, layerTwist: 0.42, petalShape: 'petal',
-    petalLength: 0.115, petalWidth: 0.068, petalBend: 0.24, petalCup: 0.75,
-    shapedPetals: true, outerTilt: -0.24, innerTilt: -0.14, centerRadius: 0.032, centerHeight: 0.022,
-    centerColor: [0.98, 0.84, 0.22],
-  });
-  const lotusPink = paintLotusColors(lotusGeo.clone(), [0.98, 0.90, 0.92], [0.96, 0.56, 0.68]);
-  const lotusIvory = paintLotusColors(lotusGeo.clone(), [1.0, 0.97, 0.94], [0.98, 0.80, 0.86]);
+  const lotusMeshes = createSculptedLotusMeshes();
   const lilyGroups = [];
   lilyCoords.forEach(([lx, lz, rad, hasBloom, yaw], li) => {
     const bedY = islandHeightAt(lx, lz) - 0.03;
     add({
       name: `Lily Submerged Stem ${li + 1}`,
       mesh: createSmoothTube([[lx, bedY, lz], [lx + 0.025, bedY * 0.5, lz - 0.02], [lx, -0.008, lz]], 0.011, 8),
-      color: '#2c5832', roughness: 0.72, metallic: 0.0,
+      texture: sedgeSet.albedo, normalTexture: sedgeSet.normal, metallicRoughnessTexture: sedgeSet.mr,
+      color: '#5a8252', roughness: 1.0, metallic: 0.0,
     });
     const padPivot = add({ name: `Water Lily ${li + 1} Pivot`, position: [lx, 0.004, lz] });
     padPivot.rotationY = yaw;
     const pad = add({
       name: `Water Lily ${li + 1} Pad`,
-      mesh: createCurledLilyPad(rad, 28),
-      color: '#ffffff', vertexColorTint: true, roughness: 0.44, metallic: 0.02,
+      mesh: createCurledLilyPad(rad, 36),
+      texture: lilyPadSet.albedo, normalTexture: lilyPadSet.normal, metallicRoughnessTexture: lilyPadSet.mr,
+      color: '#ffffff', roughness: 1.0, metallic: 0.0,
     });
     padPivot.add(pad);
     if (hasBloom) {
+      const pSet = li === 0 ? lotusPinkSet : lotusIvorySet;
       const bloom = add({
         name: `Water Lily ${li + 1} Lotus`,
-        mesh: li === 0 ? lotusPink : lotusIvory,
-        position: [0, 0.012, 0],
-        color: '#ffffff', vertexColorTint: true,
-        emissive: 0.10, emissiveColor: [0.95, 0.75, 0.84], roughness: 0.42, metallic: 0.0,
-        twoSided: true, subsurface: 0.45,
+        mesh: lotusMeshes.petals,
+        position: [0, 0.010, 0],
+        texture: pSet.albedo, normalTexture: pSet.normal, metallicRoughnessTexture: pSet.mr,
+        color: '#ffffff', roughness: 1.0, metallic: 0.0,
+        alphaCutoff: 0.42, twoSided: true, subsurface: 0.48,
+      });
+      const stamens = add({
+        name: `Water Lily ${li + 1} Stamens`,
+        mesh: lotusMeshes.stamens,
+        position: [0, 0.010, 0],
+        texture: sedgeSet.albedo, normalTexture: sedgeSet.normal, metallicRoughnessTexture: sedgeSet.mr,
+        color: '#f2c436', roughness: 0.72, metallic: 0.0,
       });
       padPivot.add(bloom);
+      padPivot.add(stamens);
       registerPick(bloom, {
         id: `lotus_${li}`, name: 'Sacred Cupped Water Lotus', kind: 'Rooted Aquatic Bloom',
-        desc: 'Three-tier cupped lotus floating flush on the translucent pond with its stem rooted into the pebble bed below.',
+        desc: 'Three-tier veined lotus with golden stamen crown floating flush on its veined pad above the pebble bed.',
       });
     }
     lilyGroups.push({ padPivot, lx, lz, phase: li * 1.4 });
@@ -575,7 +609,7 @@ export function buildSylvanScene(scene, registerPick) {
     return { ...ks, node };
   });
 
-  // 9. True Twig-to-Pond Floating Palmate Maple Leaves & 4-Winged Perp-Axis Dragonflies
+  // 9. True Twig-to-Pond Floating Palmate Maple Leaves (with underwater shadows) & PBR Chitin Dragonflies
   const driftLeafCard = paintUniformColor(Mesh.leafCard('lobed', { width: 0.075, length: 0.095, bend: 0.25, cup: 0.20, fullUV: true, shapedSilhouette: true }), 1, 1, 1, 1);
   const driftingLeaves = [];
   const tips = mapleTree.twigTips;
@@ -586,12 +620,14 @@ export function buildSylvanScene(scene, registerPick) {
       texture: leafSet.albedo, normalTexture: leafSet.normal, metallicRoughnessTexture: leafSet.mr,
       color: i % 3 === 0 ? '#a82214' : (i % 3 === 1 ? '#c83a16' : '#8e1810'),
       alphaCutoff: 0.42, twoSided: true, subsurface: 0.48, roughness: 1.0, metallic: 0.0,
-      castsShadow: false,
+      castsShadow: true,
     });
     const tip = tips[i % tips.length];
-    // Target landing spot beneath overhanging canopy in calm NW/center pool, then drift SW on pond current
-    const landX = Math.max(-1.35, Math.min(0.65, tip[0] + 0.28 * Math.cos(i * 1.9)));
-    const landZ = Math.max(-0.85, Math.min(0.85, tip[2] + 0.28 * Math.sin(i * 1.9)));
+    // Spread landing coordinates cleanly across calm NW/center pond so leaves never overlap on impact
+    const ang = i * 2.39996;
+    const rad = 0.28 + ((i % 5) / 5) * 0.72;
+    const landX = Math.max(-1.25, Math.min(0.65, -0.45 + Math.cos(ang) * rad * 0.75));
+    const landZ = Math.max(-0.82, Math.min(0.85, -0.05 + Math.sin(ang) * rad * 0.65));
     driftingLeaves.push({
       node: lf,
       sx: tip[0], sy: tip[1], sz: tip[2],
@@ -604,9 +640,26 @@ export function buildSylvanScene(scene, registerPick) {
   const dfParts = createDragonflyMeshes();
   for (let i = 0; i < 2; ++i) {
     const piv = add({ name: `Dragonfly ${i + 1}`, position: [0.58 - i * 0.25, 0.56 + i * 0.16, 0.55 + i * 0.28] });
-    piv.add(add({ name: `Dragonfly Body ${i + 1}`, mesh: dfParts.body, color: '#24c4d8', emissive: 0.18, emissiveColor: [0.12, 0.65, 0.80], roughness: 0.24, metallic: 0.62 }));
-    const wL = add({ name: `Dragonfly Wing L ${i + 1}`, mesh: dfParts.wingL, position: [-0.014, 0.008, 0.005], color: [0.80, 0.95, 1.0, 0.36], twoSided: true, roughness: 0.18, metallic: 0.08, castsShadow: false });
-    const wR = add({ name: `Dragonfly Wing R ${i + 1}`, mesh: dfParts.wingR, position: [-0.014, 0.008, -0.005], color: [0.80, 0.95, 1.0, 0.36], twoSided: true, roughness: 0.18, metallic: 0.08, castsShadow: false });
+    piv.add(add({
+      name: `Dragonfly Body ${i + 1}`,
+      mesh: dfParts.body,
+      texture: dfBodySet.albedo, normalTexture: dfBodySet.normal, metallicRoughnessTexture: dfBodySet.mr,
+      color: '#ffffff', roughness: 1.0, metallic: 1.0,
+    }));
+    const wL = add({
+      name: `Dragonfly Wing L ${i + 1}`,
+      mesh: dfParts.wingL,
+      position: [-0.014, 0.008, 0.005],
+      texture: dfWingSet.albedo, normalTexture: dfWingSet.normal, metallicRoughnessTexture: dfWingSet.mr,
+      color: [1.0, 1.0, 1.0, 0.90], alphaCutoff: 0.28, twoSided: true, roughness: 1.0, metallic: 1.0, castsShadow: false,
+    });
+    const wR = add({
+      name: `Dragonfly Wing R ${i + 1}`,
+      mesh: dfParts.wingR,
+      position: [-0.014, 0.008, -0.005],
+      texture: dfWingSet.albedo, normalTexture: dfWingSet.normal, metallicRoughnessTexture: dfWingSet.mr,
+      color: [1.0, 1.0, 1.0, 0.90], alphaCutoff: 0.28, twoSided: true, roughness: 1.0, metallic: 1.0, castsShadow: false,
+    });
     piv.add(wL);
     piv.add(wR);
     dragonflies.push({
@@ -622,8 +675,8 @@ export function buildSylvanScene(scene, registerPick) {
     position: [0.0, 0.72, 0.15],
     maxParticles: 36, rate: 0,
     lifetime: { min: 2.2, max: 3.8 },
-    size: { start: 0.016, end: 0.003 },
-    color: { start: [1.0, 0.88, 0.35, 0.85], end: [1.0, 0.65, 0.15, 0.0] },
+    size: { start: 0.022, end: 0.004 },
+    color: { start: [1.0, 0.86, 0.32, 0.92], end: [1.0, 0.58, 0.10, 0.0] },
     blend: 'additive',
     velocity: { direction: [0, 1, 0], spread: 180, speed: 0.12, speedSpread: 0.06 },
     gravity: [0, 0.02, 0], drag: 0.4, softness: 0.12,

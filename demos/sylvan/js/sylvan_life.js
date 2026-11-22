@@ -68,7 +68,7 @@ export const MOOD_PRESETS = {
     fireflyRate: 24,
     sunBoost: 0.55,
     exposure: 0.34,
-    bloom: { enabled: true, threshold: 1.85, intensity: 0.24, radius: 0.62 },
+    bloom: { enabled: true, threshold: 1.55, intensity: 0.24, radius: 0.65 },
   },
 };
 
@@ -184,7 +184,7 @@ export class SylvanController {
       df.wR.rotationX = -flap;
     }
 
-    // 6. True twig-to-pond lifecycle: detach from maple twig -> flutter down -> touch & float around lilies
+    // 6. C1-continuous twig-to-pond lifecycle: soft deceleration, zero XZ/yaw/scale magnet snap at touchdown
     const repelPads = (px, pz) => {
       for (let pass = 0; pass < 2; ++pass) {
         for (const [cx, cz, rad] of rig.lilyPads || []) {
@@ -205,38 +205,40 @@ export class SylvanController {
     for (const dl of rig.driftingLeaves) {
       const cyc = ((t * 0.045 + dl.phase) % 1 + 1) % 1;
       const [landX, landZ] = repelPads(dl.lx, dl.lz);
-      if (cyc < 0.34) {
-        const f = cyc / 0.34;
+      const yawAtTouch = dl.phase * 12.0 + 1.8;
+      if (cyc < 0.36) {
+        const f = cyc / 0.36;
         const ease = f * f * (3.0 - 2.0 * f);
-        const sway = Math.sin(f * Math.PI * 3.0) * (1.0 - f * 0.5) * 0.14 * (0.4 + 0.6 * br);
-        const [x, z] = repelPads(
-          dl.sx + (landX - dl.sx) * ease + sway,
-          dl.sz + (landZ - dl.sz) * ease + Math.cos(f * Math.PI * 2.5) * 0.08 * (1.0 - f),
-        );
-        const y = dl.sy + (0.006 - dl.sy) * (f * f * 0.8 + f * 0.2);
+        const env = Math.sin(f * Math.PI);
+        const swayX = Math.sin(f * Math.PI * 3.0) * env * 0.13 * (0.4 + 0.6 * br);
+        const swayZ = Math.sin(f * Math.PI * 2.0) * env * 0.07 * (0.4 + 0.6 * br);
+        const [x, z] = repelPads(dl.sx + (landX - dl.sx) * ease + swayX, dl.sz + (landZ - dl.sz) * ease + swayZ);
+        // C1 zero-velocity twig departure & feather-soft water kiss (dy/dt = 0 at f=0 and f=1)
+        const fallArc = 0.5 + 0.5 * Math.cos(f * Math.PI);
+        const y = 0.006 + (dl.sy - 0.006) * fallArc;
         dl.node.setPosition(x, y, z);
-        dl.node.scale = [0.95, 0.95, 0.95];
-        dl.node.rotationY = t * 0.7 + dl.phase * 12.0;
-        dl.node.rotationX = Math.sin(f * 10.0 + dl.phase * 8.0) * 0.42 * (1.0 - f);
-        dl.node.rotationZ = Math.cos(f * 8.0 + dl.phase * 6.0) * 0.28 * (1.0 - f);
-      } else if (cyc < 0.90) {
-        const u = (cyc - 0.34) / 0.56;
-        const curX = -0.32 * u + Math.sin(u * 4.0 + dl.phase * 6.0) * 0.05;
-        const curZ = 0.48 * u + Math.cos(u * 3.5 + dl.phase * 5.0) * 0.04;
-        const [px, pz] = repelPads(landX + curX, landZ + curZ);
-        const waveBob = Math.sin(px * 6.8 + pz * 4.8 + t * 2.2) * 0.002;
-        dl.node.setPosition(px, 0.005 + waveBob, pz);
         dl.node.scale = [1.0, 1.0, 1.0];
-        dl.node.rotationY = dl.phase * 12.0 + u * 1.4;
+        dl.node.rotationY = dl.phase * 12.0 + 1.8 * ease;
+        dl.node.rotationX = Math.sin(f * 9.0 + dl.phase * 8.0) * 0.40 * env;
+        dl.node.rotationZ = Math.cos(f * 7.0 + dl.phase * 6.0) * 0.26 * env;
+      } else if (cyc < 0.90) {
+        const u = (cyc - 0.36) / 0.54;
+        const curX = -0.34 * u + Math.sin(u * Math.PI * 2.0) * 0.04 * Math.cos(dl.phase * 6.0);
+        const curZ = 0.46 * u + Math.sin(u * Math.PI * 2.0) * 0.03 * Math.sin(dl.phase * 5.0);
+        const [px, pz] = repelPads(landX + curX, landZ + curZ);
+        const waveBob = Math.sin(px * 6.8 + pz * 4.8 + t * 2.2) * 0.0018 * Math.min(1.0, u * 6.0);
+        dl.node.setPosition(px, 0.006 + waveBob, pz);
+        dl.node.scale = [1.0, 1.0, 1.0];
+        dl.node.rotationY = yawAtTouch + u * 1.4;
         dl.node.rotationX = 0.0;
         dl.node.rotationZ = 0.0;
       } else {
         const u = (cyc - 0.90) / 0.10;
-        const [px, pz] = repelPads(landX - 0.32, landZ + 0.48);
-        dl.node.setPosition(px, 0.005 - u * 0.04, pz);
-        const s = 1.0 - u * 0.85;
+        const [px, pz] = repelPads(landX - 0.34, landZ + 0.46);
+        dl.node.setPosition(px, 0.006 - u * 0.045, pz);
+        const s = 1.0 - u * 0.90;
         dl.node.scale = [s, s, s];
-        dl.node.rotationY = dl.phase * 12.0 + 1.4;
+        dl.node.rotationY = yawAtTouch + 1.4;
         dl.node.rotationX = 0.0;
         dl.node.rotationZ = 0.0;
       }

@@ -31,11 +31,46 @@ fn n2(p: vec2<f32>) -> f32 {
   return mix(mix(a, b, u.x), mix(c, d, u.x), u.y);
 }
 
-fn caustic_pattern(p: vec2<f32>, t: f32) -> f32 {
-  let a = sin(p.x * 4.7 + t * 1.45 + cos(p.y * 3.9 - t * 1.15));
-  let b = sin(p.y * 5.3 - t * 1.30 + sin(p.x * 4.1 + t * 0.95));
-  let w = 1.0 - abs(a + b) * 0.5;
-  return pow(clamp(w, 0.0, 1.0), 4.0);
+fn h2_vec(p: vec2<f32>) -> vec2<f32> {
+  let q = vec2<f32>(dot(p, vec2<f32>(127.1, 311.7)), dot(p, vec2<f32>(269.5, 183.3)));
+  return fract(sin(q) * 43758.5453);
+}
+
+fn voronoi_ridge(p: vec2<f32>, t: f32) -> f32 {
+  let n = floor(p);
+  let f = fract(p);
+  var d1: f32 = 8.0;
+  var d2: f32 = 8.0;
+  for (var dy: i32 = -1; dy <= 1; dy += 1) {
+    for (var dx: i32 = -1; dx <= 1; dx += 1) {
+      let g = vec2<f32>(dx as f32, dy as f32);
+      let rnd = h2_vec(n + g);
+      let o = 0.5 + 0.42 * sin(t * 1.15 + rnd * 6.2831);
+      let r = g + o - f;
+      let d = dot(r, r);
+      if (d < d1) {
+        d2 = d1;
+        d1 = d;
+      } else if (d < d2) {
+        d2 = d;
+      }
+    }
+  }
+  let edge = sqrt(d2) - sqrt(d1);
+  return pow(1.0 - smoothstep(0.0, 0.24, edge), 2.8);
+}
+
+fn caustic_pattern(p_in: vec2<f32>, t: f32) -> f32 {
+  // Organic domain-warped Voronoi wave webs -> undulating sunlight filaments (zero polygonal cell lines)
+  let warp = vec2<f32>(
+    sin(p_in.y * 2.8 + t * 1.45) + 0.45 * cos(p_in.x * 3.7 - t * 1.15),
+    cos(p_in.x * 2.6 - t * 1.32) + 0.45 * sin(p_in.y * 3.9 + t * 1.25)
+  ) * 0.24;
+  let p = p_in + warp;
+  let rot_p = vec2<f32>(p.x * 0.78 - p.y * 0.62, p.x * 0.62 + p.y * 0.78);
+  let c1 = voronoi_ridge(p * 2.35, t);
+  let c2 = voronoi_ridge(rot_p * 3.45 + vec2<f32>(3.7, -2.1), -t * 0.85);
+  return pow(clamp(c1 * 0.58 + c2 * 0.52, 0.0, 1.0), 1.35);
 }
 
 pub fn fragment(v: mesh::Vertex, s: mesh::Surface) -> mesh::Surface {
@@ -55,21 +90,21 @@ pub fn fragment(v: mesh::Vertex, s: mesh::Surface) -> mesh::Surface {
   var col = mix(rock_col, moss_col, moss_mask);
   var rough = mix(clamp(s.roughness * (0.85 + 0.22 * (1.0 - macro_n)), 0.35, 0.96), 0.94, moss_mask);
 
-  // Dark glistening wet tide band where water laps rock & bank shoreline
-  let wet_band = (1.0 - smoothstep(-0.02, 0.095, wp.y)) * smoothstep(-0.42, -0.05, wp.y);
-  col = mix(col, col * vec3<f32>(0.52, 0.56, 0.58), wet_band * 0.72);
-  rough = mix(rough, 0.18, wet_band);
+  // Dark glistening wet rock streak mask down the cascade channel + pond tide band
+  let wet_ch = (exp(-pow((wp.x - 0.80) / 0.14, 2.0)) + exp(-pow((wp.x - 0.54) / 0.11, 2.0)) + exp(-pow((wp.x - 0.26) / 0.10, 2.0)))
+             * smoothstep(-0.02, 0.06, wp.y) * smoothstep(0.96, 0.78, wp.y) * smoothstep(-0.88, -1.65, wp.z);
+  let wet_band = max((1.0 - smoothstep(-0.02, 0.095, wp.y)) * smoothstep(-0.42, -0.05, wp.y), clamp(wet_ch, 0.0, 1.0));
+  col = mix(col, col * vec3<f32>(0.48, 0.53, 0.56), wet_band * 0.75);
+  rough = mix(rough, 0.16, wet_band);
 
-  // Submerged basin Beer-Lambert tint + animated sunlight caustic filaments
+  // Submerged basin Beer-Lambert tint + organic cellular Voronoi caustic filaments
   let sub_depth = clamp(-wp.y / 0.35, 0.0, 1.0);
   if (wp.y < 0.005) {
-    let absorb = mix(vec3<f32>(1.0), vec3<f32>(0.42, 0.78, 0.74), sub_depth * 0.85);
+    let absorb = mix(vec3<f32>(1.0), vec3<f32>(0.44, 0.76, 0.72), sub_depth * 0.82);
     col = col * absorb;
-    let c1 = caustic_pattern(wp.xz, params.time);
-    let c2 = caustic_pattern(wp.xz * 1.43 + vec2<f32>(2.4, -1.7), -params.time * 0.82);
-    let caust = (c1 + c2 * 0.7) * params.sunBoost * smoothstep(0.0, 0.08, -wp.y) * smoothstep(-0.1, 0.9, s.normal.y);
-    col += vec3<f32>(0.28, 0.44, 0.42) * caust;
-    out.emissive += vec3<f32>(0.08, 0.18, 0.18) * caust;
+    let caust = caustic_pattern(wp.xz, params.time) * params.sunBoost * smoothstep(0.0, 0.08, -wp.y) * smoothstep(-0.1, 0.9, s.normal.y);
+    col += vec3<f32>(0.18, 0.30, 0.29) * caust * 0.62;
+    out.emissive += vec3<f32>(0.03, 0.07, 0.07) * caust;
   }
 
   out.base_color = col;
@@ -86,21 +121,60 @@ import scene;
 struct Params {
   time: f32,
   breeze: f32,
-  clarity: f32,
-  pad: f32,
+  entry0: vec2<f32>,
+  entry1: vec2<f32>,
+  entry2: vec2<f32>,
+  pad0: vec2<f32>,
 }
 @binding(4, 0) var params: uniform<Params>;
 
 fn wave_h(p: vec2<f32>, t: f32, br: f32) -> f32 {
-  let d1 = length(p - vec2<f32>(0.80, -1.00));
-  let d2 = length(p - vec2<f32>(0.54, -1.04));
-  let d3 = length(p - vec2<f32>(0.26, -1.06));
-  let ring1 = sin(d1 * 22.0 - t * 6.8) * exp(-d1 * 2.2) * 0.0055;
-  let ring2 = sin(d2 * 26.0 - t * 7.4) * exp(-d2 * 2.6) * 0.0040;
-  let ring3 = sin(d3 * 28.0 - t * 7.0) * exp(-d3 * 2.8) * 0.0032;
-  let wind_w = sin(p.x * 6.8 + p.y * 4.8 + t * 2.2) * 0.0026 * (0.35 + 0.65 * br)
-             + cos(p.x * 11.0 - p.y * 8.2 - t * 2.7) * 0.0018 * (0.35 + 0.65 * br);
-  return ring1 + ring2 + ring3 + wind_w;
+  let d1 = length(p - params.entry0);
+  let d2 = length(p - params.entry1);
+  let d3 = length(p - params.entry2);
+  let ring1 = sin(d1 * 21.0 - t * 6.5) * exp(-d1 * 2.5) * 0.0042;
+  let ring2 = sin(d2 * 25.0 - t * 7.2) * exp(-d2 * 2.8) * 0.0032;
+  let ring3 = sin(d3 * 27.0 - t * 6.9) * exp(-d3 * 3.0) * 0.0026;
+  // Five golden-angle rotated directional wave trains for organic fluid movement
+  let amp = 0.0014 * (0.35 + 0.65 * br);
+  let w1 = sin(dot(p, vec2<f32>( 5.9,  3.1)) + t * 2.1) * amp;
+  let w2 = sin(dot(p, vec2<f32>(-4.2,  6.7)) - t * 2.5) * amp * 0.85;
+  let w3 = sin(dot(p, vec2<f32>( 8.3, -4.9)) + t * 2.9) * amp * 0.65;
+  let w4 = sin(dot(p, vec2<f32>(-9.8, -3.4)) - t * 3.3) * amp * 0.45;
+  return ring1 + ring2 + ring3 + w1 + w2 + w3 + w4;
+}
+
+fn hash21(p: vec2<f32>) -> f32 {
+  var q = fract(p * vec2<f32>(123.34, 456.21));
+  q += dot(q, q + 45.32);
+  return fract(q.x * q.y);
+}
+
+fn smooth_noise(p: vec2<f32>) -> f32 {
+  let i = floor(p);
+  let f = fract(p);
+  let u = f * f * (3.0 - 2.0 * f);
+  return mix(mix(hash21(i), hash21(i + vec2<f32>(1.0, 0.0)), u.x),
+             mix(hash21(i + vec2<f32>(0.0, 1.0)), hash21(i + vec2<f32>(1.0, 1.0)), u.x), u.y);
+}
+
+fn capillary_ripples(p: vec2<f32>, t: f32, br: f32) -> vec2<f32> {
+  let s = 0.7 + 0.6 * br;
+  var gx: f32 = 0.0;
+  var gz: f32 = 0.0;
+  // Rotated dual-octave organic ripple gradients (zero axis-aligned grid artifacts)
+  let p1 = vec2<f32>(p.x * 0.86 - p.y * 0.51, p.x * 0.51 + p.y * 0.86);
+  let p2 = vec2<f32>(p.x * -0.42 - p.y * 0.91, p.x * 0.91 - p.y * 0.42);
+  let n1 = smooth_noise(p1 * 6.5 + vec2<f32>(t * 0.45, -t * 0.35));
+  let n2 = smooth_noise(p2 * 13.0 + vec2<f32>(-t * 0.62, t * 0.51));
+  let eps = 0.04;
+  let nx1 = smooth_noise((p1 + vec2<f32>(eps, 0.0)) * 6.5 + vec2<f32>(t * 0.45, -t * 0.35));
+  let nz1 = smooth_noise((p1 + vec2<f32>(0.0, eps)) * 6.5 + vec2<f32>(t * 0.45, -t * 0.35));
+  let nx2 = smooth_noise((p2 + vec2<f32>(eps, 0.0)) * 13.0 + vec2<f32>(-t * 0.62, t * 0.51));
+  let nz2 = smooth_noise((p2 + vec2<f32>(0.0, eps)) * 13.0 + vec2<f32>(-t * 0.62, t * 0.51));
+  gx = ((n1 - nx1) * 0.09 + (n2 - nx2) * 0.055) * s;
+  gz = ((n1 - nz1) * 0.09 + (n2 - nz2) * 0.055) * s;
+  return vec2<f32>(gx, gz);
 }
 
 pub fn vertex(v: mesh::Vertex) -> mesh::Vertex {
@@ -118,51 +192,50 @@ pub fn vertex(v: mesh::Vertex) -> mesh::Vertex {
 pub fn fragment(v: mesh::Vertex, s: mesh::Surface) -> mesh::Surface {
   var out = s;
   let p = v.v0.xz;
-  let r = v.v0.w;
   let t = params.time;
 
-  // Dual-scale capillary wind & splash ripple normal perturbation
-  let gx = cos(p.x * 19.0 + p.y * 13.0 + t * 3.0) * 0.036 + sin(p.x * 31.0 - p.y * 23.0 - t * 3.8) * 0.022;
-  let gz = sin(p.x * 15.0 - p.y * 19.0 + t * 2.8) * 0.036 + cos(p.x * 27.0 + p.y * 29.0 + t * 3.3) * 0.022;
-  out.normal = normalize(s.normal + vec3<f32>(gx, 0.0, gz));
+  let cap = capillary_ripples(p, t, params.breeze);
+  out.normal = normalize(s.normal + vec3<f32>(cap.x, 0.0, cap.y));
 
-  // Real scene-depth thickness + Snell refraction of submerged koi, stems & river cobbles
+  // Real scene-depth thickness + Snell refraction of submerged koi, leaf shadows, stems & river cobbles
   let uv = scene::screen_uv(v.pixel);
   let surf_d = max(0.05, -scene::view_pos(v.world_pos).z);
   let bg_d = scene::linear_depth(scene::sample_scene_depth(uv));
   let water_depth = max(0.0, bg_d - surf_d);
 
-  let refr_off = out.normal.xz * 0.024 * clamp(water_depth * 3.8, 0.0, 1.0);
+  let refr_off = out.normal.xz * 0.026 * clamp(water_depth * 3.5, 0.0, 1.0);
   let cand_uv = clamp(uv + refr_off, vec2<f32>(0.002), vec2<f32>(0.998));
   let test_d = scene::linear_depth(scene::sample_scene_depth(cand_uv));
   let safe_uv = select(test_d > surf_d, cand_uv, uv);
   let thickness = max(0.0, select(test_d > surf_d, test_d, bg_d) - surf_d);
   let refr_col = scene::sample_scene_color(safe_uv);
 
-  // Beer-Lambert optical absorption (red attenuates faster than deep pond jade/blue-teal)
-  let absorb = exp(-thickness * vec3<f32>(2.1, 0.72, 0.56));
+  // Deeper Beer-Lambert optical absorption -> rich emerald/jade depth gradients without flat cyan wash
+  let absorb = exp(-thickness * vec3<f32>(2.75, 1.05, 0.78));
   let transmitted = refr_col * absorb;
 
-  // Delicate small plunge-bubble foam right at the 3 rocky trickle entry points
-  let d1 = length(p - vec2<f32>(0.80, -1.00));
-  let d2 = length(p - vec2<f32>(0.54, -1.04));
-  let d3 = length(p - vec2<f32>(0.26, -1.06));
-  let core_foam = exp(-d1 * d1 * 62.0) * 0.65 + exp(-d2 * d2 * 78.0) * 0.52 + exp(-d3 * d3 * 88.0) * 0.45;
-  let ripple_froth = pow(max(0.0, sin(d1 * 22.0 - t * 5.2)), 5.0) * exp(-d1 * 5.0) * 0.24
-                   + pow(max(0.0, sin(d2 * 24.0 - t * 5.8)), 5.0) * exp(-d2 * 5.6) * 0.18;
-  let meniscus = (1.0 - smoothstep(0.0, 0.032, water_depth)) * smoothstep(0.002, 0.012, water_depth) * 0.18;
-  let foam = clamp(core_foam + ripple_froth + meniscus, 0.0, 0.85);
+  // Noise-broken aerated plunge bubbles & delicate rock-lap meniscus foam
+  let fn1 = smooth_noise(p * 18.0 + vec2<f32>(t * 1.4, -t * 1.1));
+  let d1 = length(p - params.entry0);
+  let d2 = length(p - params.entry1);
+  let d3 = length(p - params.entry2);
+  let plunge = exp(-d1 * d1 * 56.0) * (0.48 + 0.52 * fn1) * 0.85
+             + exp(-d2 * d2 * 72.0) * (0.48 + 0.52 * fn1) * 0.72
+             + exp(-d3 * d3 * 82.0) * (0.48 + 0.52 * fn1) * 0.65;
+  let froth = pow(max(0.0, sin(d1 * 20.0 - t * 4.8)), 5.0) * exp(-d1 * 5.2) * fn1 * 0.25
+            + pow(max(0.0, sin(d2 * 22.0 - t * 5.2)), 5.0) * exp(-d2 * 5.8) * fn1 * 0.20;
+  let meniscus = (1.0 - smoothstep(0.0, 0.036, water_depth)) * smoothstep(0.003, 0.015, water_depth) * (0.12 + 0.16 * fn1);
+  let foam = clamp(plunge + froth + meniscus, 0.0, 0.85);
 
   let view_dir = normalize(-v.world_pos);
   let ndotv = clamp(dot(out.normal, view_dir), 0.0, 1.0);
-  let fresnel = 0.025 + 0.975 * pow(1.0 - ndotv, 4.6);
+  let fresnel = 0.022 + 0.978 * pow(1.0 - ndotv, 4.8);
 
-  let foam_col = vec3<f32>(0.88, 0.96, 0.99);
-  out.base_color = mix(vec3<f32>(0.015, 0.055, 0.065), foam_col, foam);
-  out.roughness = mix(0.028, 0.48, foam);
+  let foam_col = vec3<f32>(0.88, 0.95, 0.98);
+  out.base_color = mix(vec3<f32>(0.012, 0.048, 0.056), foam_col, foam);
+  out.roughness = mix(0.022, 0.44, foam);
   out.metallic = 0.02;
-  out.emissive = transmitted * (1.0 - fresnel) * (1.0 - foam) * 0.95;
-  // Feather seamlessly along curved shoreline depth -> zero sharp rim seam
+  out.emissive = transmitted * (1.0 - fresnel) * (1.0 - foam) * 0.88;
   out.alpha = smoothstep(0.0, 0.024, water_depth) * 0.985;
   return out;
 }
@@ -183,36 +256,38 @@ struct Params {
 
 pub fn vertex(v: mesh::Vertex) -> mesh::Vertex {
   var out = v;
-  let ripple = sin(v.uv.y * 18.0 - params.time * 8.2 + v.uv.x * 8.0) * 0.004;
+  let arch = smoothstep(0.0, 0.15, v.uv.y);
+  let ripple = sin(v.uv.y * 20.0 - params.time * 8.6 + v.uv.x * 10.0) * 0.003 * arch;
   out.pos += v.normal * ripple;
   return out;
 }
 
 pub fn fragment(v: mesh::Vertex, s: mesh::Surface) -> mesh::Surface {
   var out = s;
-  let t = params.time * (1.55 + 0.4 * params.flow);
+  let t = params.time * (1.65 + 0.4 * params.flow);
   let u = v.uv.x;
   let y = v.uv.y;
 
-  // Fine garden-scale glassy threads clinging to rock with natural refractive bend
-  let s1 = sin(u * 18.0 + sin(y * 11.0 - t * 1.8) * 1.4) * 0.5 + 0.5;
-  let s2 = sin((y * 16.0 - t * 3.6) + sin(u * 28.0) * 0.9) * 0.5 + 0.5;
-  let s3 = cos((y * 28.0 - t * 5.2) - u * 16.0) * 0.5 + 0.5;
-  let threads = pow(s1 * 0.45 + s2 * 0.35 + s3 * 0.20, 1.8);
+  // Fine rock-hugging glassy threads with curved organic breakup
+  let s1 = sin(u * 20.0 + sin(y * 12.0 - t * 2.1) * 1.5) * 0.5 + 0.5;
+  let s2 = sin((y * 18.0 - t * 4.2) + sin(u * 30.0) * 1.1) * 0.5 + 0.5;
+  let s3 = cos((y * 32.0 - t * 6.0) - u * 18.0) * 0.5 + 0.5;
+  let threads = pow(s1 * 0.42 + s2 * 0.36 + s3 * 0.22, 1.9);
 
   let uv = scene::screen_uv(v.pixel);
-  let refr_uv = clamp(uv + vec2<f32>((s1 - 0.5) * 0.010, (s2 - 0.5) * 0.012), vec2<f32>(0.002), vec2<f32>(0.998));
+  let refr_uv = clamp(uv + vec2<f32>((s1 - 0.5) * 0.014, (s2 - 0.5) * 0.016), vec2<f32>(0.002), vec2<f32>(0.998));
   let bg = scene::sample_scene_color(refr_uv);
 
-  let edge_fade = smoothstep(0.0, 0.24, u) * smoothstep(1.0, 0.76, u);
-  let crest_froth = smoothstep(0.14, 0.0, y) * 0.34;
-  let plunge_froth = smoothstep(0.80, 1.0, y) * 0.48;
-  let foam = clamp(threads * 0.48 + crest_froth + plunge_froth, 0.0, 0.85);
+  let edge_fade = smoothstep(0.0, 0.26, u) * smoothstep(1.0, 0.74, u);
+  let top_fade = smoothstep(0.0, 0.14, y);
+  let crest_froth = smoothstep(0.22, 0.06, y) * top_fade * 0.22;
+  let plunge_froth = smoothstep(0.76, 1.0, y) * 0.56;
+  let foam = clamp(threads * 0.52 + crest_froth + plunge_froth, 0.0, 0.88);
 
-  out.base_color = mix(vec3<f32>(0.05, 0.14, 0.17), vec3<f32>(0.90, 0.97, 1.0), foam * 0.72);
-  out.roughness = mix(0.03, 0.36, foam);
-  out.emissive = bg * (1.0 - foam * 0.68) * 0.82 + out.base_color * foam * 0.16 * params.glow;
-  out.alpha = clamp(edge_fade * (0.44 + 0.44 * foam), 0.0, 0.92);
+  out.base_color = mix(vec3<f32>(0.04, 0.12, 0.15), vec3<f32>(0.90, 0.96, 0.99), foam * 0.68);
+  out.roughness = mix(0.025, 0.34, foam);
+  out.emissive = bg * (1.0 - foam * 0.70) * 0.86 + out.base_color * foam * 0.12 * params.glow;
+  out.alpha = clamp(edge_fade * top_fade * (0.42 + 0.48 * foam), 0.0, 0.92);
   return out;
 }
 `;

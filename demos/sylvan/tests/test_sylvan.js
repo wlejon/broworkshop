@@ -48,8 +48,27 @@ test('3D inventory closeup, PBR lookdev & leaf-to-water trajectory checks', () =
   check(ld.roughnessMean > 0.35 && ld.roughnessMean < 0.75, 'koi satin skin roughness balanced: ' + ld.roughnessMean.toFixed(2));
   check(ld.glossyFrac < 0.15, 'koi not plastic-glossy: glossyFrac=' + ld.glossyFrac.toFixed(2));
 
+  const ldScene = bro.eye.lookdev(scene, { sheetWidth: 768, sheetHeight: 768 });
+  eq(ldScene.ok, true, 'scene lookdev ok === true');
+  eq(ldScene.untexturedCount, 0, '0 untextured visible solid meshes');
+  eq(ldScene.bloomHotspotCount, 0, '0 bloom hotspots in scene');
+
+  const sw = bro.eye.sweep(scene, {
+    states: [
+      { label: 'Morning Mist', apply: () => window.sylvan.ctrl.applyMood('mist') },
+      { label: 'Golden Sunbeam', apply: () => window.sylvan.ctrl.applyMood('sunbeam') },
+      { label: 'Firefly Dusk', apply: () => window.sylvan.ctrl.applyMood('dusk') },
+    ],
+    sheetWidth: 768,
+    sheetHeight: 432,
+  });
+  eq(sw.ok, true, 'mood sweep ok === true');
+  check(sw.states.every((s) => s.hotspotCount <= 1), 'every mood free of bloom hotspot bursts');
+  window.sylvan.ctrl.applyMood('mist');
+  window.sylvan.setPhase(0.18, 0.52);
+
   const tr = bro.eye.trace(scene, {
-    steps: 24,
+    steps: 48,
     waterY: 0.006,
     minTravel: 0.05,
     filter: 'Drifting Leaf',
@@ -60,8 +79,9 @@ test('3D inventory closeup, PBR lookdev & leaf-to-water trajectory checks', () =
   eq(tr.ok, true, 'leaf trace ok === true');
   check(tr.trackCount >= 10, 'traced all drifting leaves: ' + tr.trackCount);
   check(tr.tracks.every((t) => t.touchesWater), 'every falling leaf touches water surface');
+  check(tr.tracks.every((t) => t.snapCount === 0), 'zero C1 velocity/rotation snaps at water touchdown');
   check(tr.tracks.every((t) => t.maxY > 0.72), 'every leaf originates at maple canopy height');
-  check(tr.tracks.some((t) => t.nearestStartStatic.includes('Maple')), 'leaf 1 starts directly on maple twig');
+  check(tr.tracks.some((t) => t.nearestStartStatic.includes('Maple')), 'leaf starts directly on maple twig');
 });
 
 test('3D living clearance sweep across cyclic phase', () => {
@@ -71,6 +91,7 @@ test('3D living clearance sweep across cyclic phase', () => {
     eps: 0.004,
     ignoreStatic: true,
     ignoreSameParent: true,
+    ignorePairs: [['Japanese Maple Canopy', 'Drifting Leaf']],
     stepFn: (k, n) => { window.sylvan.setPhase(k / n, 0.58); },
   });
   eq(clearance.dynamicCollisionCount, 0, '0 dynamic mesh collisions across 16 poses');

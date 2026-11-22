@@ -208,31 +208,113 @@ export function createSculptedBoulder(rx = 0.6, ry = 0.4, rz = 0.5, seed = 1.0) 
   return pushSmoothTris(verts, uvs, icoF);
 }
 
-/** Smooth curved open waterfall sheet hugging cliff contour down into the pond. */
-export function createCurvedWaterfall(pts, wTop = 0.18, wBot = 0.34, segsW = 10) {
+function rayTri(ro, rd, a, b, c) {
+  const abx = b[0] - a[0], aby = b[1] - a[1], abz = b[2] - a[2];
+  const acx = c[0] - a[0], acy = c[1] - a[1], acz = c[2] - a[2];
+  const px = rd[1] * acz - rd[2] * acy;
+  const py = rd[2] * acx - rd[0] * acz;
+  const pz = rd[0] * acy - rd[1] * acx;
+  const det = abx * px + aby * py + abz * pz;
+  if (Math.abs(det) < 1e-7) return null;
+  const inv = 1.0 / det;
+  const tx = ro[0] - a[0], ty = ro[1] - a[1], tz = ro[2] - a[2];
+  const u = (tx * px + ty * py + tz * pz) * inv;
+  if (u < -1e-4 || u > 1.0001) return null;
+  const qx = ty * abz - tz * aby;
+  const qy = tz * abx - tx * abz;
+  const qz = tx * aby - ty * abx;
+  const v = (rd[0] * qx + rd[1] * qy + rd[2] * qz) * inv;
+  if (v < -1e-4 || u + v > 1.0002) return null;
+  const t = (acx * qx + acy * qy + acz * qz) * inv;
+  if (t <= 0.0) return null;
+  const n = normalize3(aby * acz - abz * acy, abz * acx - abx * acz, abx * acy - aby * acx);
+  return { t, pos: [ro[0] + rd[0] * t, ro[1] + rd[1] * t, ro[2] + rd[2] * t], normal: n };
+}
+
+function raycastRocks(targets, origin, dir) {
+  let best = null;
+  for (const tgt of targets) {
+    const pos = tgt.mesh.positions, idx = tgt.mesh.indices;
+    if (!pos || !idx) continue;
+    const [ox, oy, oz] = tgt.pos;
+    for (let k = 0; k + 2 < idx.length; k += 3) {
+      const i0 = idx[k] * 3, i1 = idx[k + 1] * 3, i2 = idx[k + 2] * 3;
+      const a = [pos[i0] + ox, pos[i0 + 1] + oy, pos[i0 + 2] + oz];
+      const b = [pos[i1] + ox, pos[i1 + 1] + oy, pos[i1 + 2] + oz];
+      const c = [pos[i2] + ox, pos[i2 + 1] + oy, pos[i2 + 2] + oz];
+      const h = rayTri(origin, dir, a, b, c);
+      if (h && (!best || h.t < best.t)) best = h;
+    }
+  }
+  return best;
+}
+
+/**
+ * Water sheet draped directly via raycasts over the actual cascade boulder surfaces down into the pond.
+ * Top edge tucks softly into rock (-0.015), middle hugs every boulder curve (+0.014), bottom plunges to y = -0.04.
+ */
+export function createRockHuggingStream(rockTargets, xCenter, yStart, zMinHit, widthTop = 0.045, widthBot = 0.088, segsV = 22, segsW = 8) {
   const verts = [], uvs = [], tris = [];
   const stride = segsW + 1;
-  for (let i = 0; i < pts.length; ++i) {
-    const v = i / (pts.length - 1);
-    const [cx, cy, cz] = pts[i];
-    const hw = wTop + (wBot - wTop) * v;
+  const dir = normalize3(0.0, -0.22, -0.975);
+  const grid = Array.from({ length: segsV + 1 }, () => new Array(stride));
+  let lastValidZ = zMinHit;
+
+  for (let i = 0; i <= segsV; ++i) {
+    const v = i / segsV;
+    const hw = widthTop + (widthBot - widthTop) * Math.pow(v, 0.82);
+    const rowY = yStart * (1.0 - v) - 0.045 * v;
     for (let j = 0; j <= segsW; ++j) {
       const u = j / segsW;
       const s = u * 2.0 - 1.0;
-      // Gently convex parabolic bow along front stream
-      const bowZ = (1.0 - s * s) * 0.035;
-      verts.push([cx + s * hw, cy, cz + bowZ]);
+      const x = xCenter + s * hw;
+      const origin = [x, rowY + 0.14 * (1.0 - v), -0.45];
+      const hit = raycastRocks(rockTargets, origin, dir);
+      const crown = (1.0 - s * s) * 0.010;
+      if (hit && hit.pos[1] > -0.04) {
+        const pushOut = v < 0.08 ? (-0.012 + (v / 0.08) * 0.026) : 0.014;
+        const nz = Math.max(0.25, hit.normal[2]);
+        const ny = Math.max(0.0, hit.normal[1]);
+        const nrm = normalize3(hit.normal[0] * 0.5, ny, nz);
+        grid[i][j] = [
+          hit.pos[0] + nrm[0] * (pushOut + crown * 0.2),
+          Math.max(-0.045, hit.pos[1] + nrm[1] * (pushOut + crown * 0.3)),
+          hit.pos[2] + nrm[2] * (pushOut + crown),
+        ];
+        lastValidZ = Math.max(lastValidZ, grid[i][j][2]);
+      } else {
+        grid[i][j] = [x, Math.max(-0.045, rowY), lastValidZ + v * 0.04 + crown];
+      }
+    }
+  }
+  // Light Laplacian smoothing along flow axis v to eliminate triangle-edge kinks while preserving boulder contour
+  for (let pass = 0; pass < 2; ++pass) {
+    for (let j = 0; j <= segsW; ++j) {
+      for (let i = 1; i < segsV; ++i) {
+        grid[i][j][1] = grid[i][j][1] * 0.5 + (grid[i - 1][j][1] + grid[i + 1][j][1]) * 0.25;
+        grid[i][j][2] = grid[i][j][2] * 0.5 + (grid[i - 1][j][2] + grid[i + 1][j][2]) * 0.25;
+      }
+    }
+  }
+  for (let i = 0; i <= segsV; ++i) {
+    const v = i / segsV;
+    for (let j = 0; j <= segsW; ++j) {
+      const u = j / segsW;
+      verts.push(grid[i][j]);
       uvs.push([u, v]);
     }
   }
-  for (let i = 0; i < pts.length - 1; ++i) {
+  for (let i = 0; i < segsV; ++i) {
     for (let j = 0; j < segsW; ++j) {
       const a = i * stride + j, b = a + stride, c = a + 1, d = b + 1;
-      // Top->bottom (y drops as i increases), left->right (+X as j increases): (d-a)x(c-a) -> +Z front outward
       tris.push([a, b, d], [a, d, c]);
     }
   }
-  return pushSmoothTris(verts, uvs, tris);
+  const midBot = grid[segsV][Math.floor(segsW / 2)];
+  return {
+    mesh: pushSmoothTris(verts, uvs, tris),
+    entry: [xCenter, midBot[2]],
+  };
 }
 
 /**
@@ -374,45 +456,89 @@ export function createAnatomicalKoi() {
   return pushSmoothTris(verts, uvs, tris);
 }
 
-/** Organic V-notched water-lily pad with subtle upturned botanical rim (flush at water surface y = 0). */
-export function createCurledLilyPad(radius = 0.25, segs = 28) {
-  const verts = [[0, 0.004, 0], [0, 0.000, 0]];
+/** Organic V-notched water-lily pad with saucer mid-ring and upturned rim for polar-UV PBR vein mapping. */
+export function createCurledLilyPad(radius = 0.25, segs = 36) {
+  const verts = [[0, 0.002, 0], [0, -0.001, 0]];
   const uvs = [[0.5, 0.5], [0.5, 0.5]];
   const tris = [];
-  const startA = 0.24, arc = Math.PI * 2 - 0.48;
-  const topRing = [], botRing = [];
+  const startA = 0.22, arc = Math.PI * 2 - 0.44;
+  const midRing = [], topRing = [], botRing = [];
   for (let i = 0; i <= segs; ++i) {
     const t = i / segs;
     const a = startA + t * arc;
     const ca = Math.cos(a), sa = Math.sin(a);
-    const wave = 0.006 + 0.004 * Math.sin(a * 5.0);
-    const x = ca * radius, z = -sa * radius;
+    const rimWave = 1.0 + 0.028 * Math.sin(a * 7.0) + 0.015 * Math.cos(a * 13.0);
+    const rm = radius * 0.56;
+    const ro = radius * rimWave;
+    const edgeLift = 0.009 + 0.005 * Math.sin(a * 5.0);
+
+    midRing.push(verts.length);
+    verts.push([ca * rm, 0.003, -sa * rm]); uvs.push([0.5 + ca * 0.27, 0.5 - sa * 0.27]);
+
     topRing.push(verts.length);
-    verts.push([x, 0.006 + wave, z]); uvs.push([0.5 + ca * 0.48, 0.5 - sa * 0.48]);
+    verts.push([ca * ro, 0.005 + edgeLift, -sa * ro]); uvs.push([0.5 + ca * 0.48, 0.5 - sa * 0.48]);
+
     botRing.push(verts.length);
-    verts.push([x, 0.000, z]); uvs.push([0.5 + ca * 0.48, 0.5 - sa * 0.48]);
+    verts.push([ca * ro, 0.000, -sa * ro]); uvs.push([0.5 + ca * 0.48, 0.5 - sa * 0.48]);
   }
   for (let i = 0; i < segs; ++i) {
-    tris.push([0, topRing[i], topRing[i + 1]]);
+    tris.push([0, midRing[i], midRing[i + 1]]);
+    tris.push([midRing[i], topRing[i], topRing[i + 1]], [midRing[i], topRing[i + 1], midRing[i + 1]]);
     tris.push([1, botRing[i + 1], botRing[i]]);
     tris.push([botRing[i], botRing[i + 1], topRing[i + 1]], [botRing[i], topRing[i + 1], topRing[i]]);
   }
-  tris.push([1, botRing[0], topRing[0]], [1, topRing[0], 0]);
-  tris.push([0, topRing[segs], botRing[segs]], [0, botRing[segs], 1]);
-  const mesh = pushSmoothTris(verts, uvs, tris);
-  const cols = new Float32Array(verts.length * 4);
-  for (let i = 0; i < verts.length; ++i) {
-    const rNorm = Math.min(1.0, Math.hypot(verts[i][0], verts[i][2]) / Math.max(1e-4, radius));
-    const a = Math.atan2(verts[i][2], verts[i][0]);
-    const vein = Math.pow(0.5 + 0.5 * Math.cos(a * 11.0), 3.0) * 0.06;
-    const cen = 1.0 - rNorm * 0.42;
-    cols[i * 4 + 0] = 0.14 + 0.16 * rNorm + vein * 0.5;
-    cols[i * 4 + 1] = 0.34 + 0.24 * rNorm + 0.06 * (1 - cen) + vein;
-    cols[i * 4 + 2] = 0.12 + 0.12 * rNorm;
-    cols[i * 4 + 3] = 1.0;
+  tris.push([1, botRing[0], topRing[0]], [1, topRing[0], midRing[0]], [1, midRing[0], 0]);
+  tris.push([0, midRing[segs], topRing[segs]], [0, topRing[segs], botRing[segs]], [0, botRing[segs], 1]);
+  return pushSmoothTris(verts, uvs, tris);
+}
+
+/** Three-tier rounded cupped sacred lotus petals + separate textured seedpod receptacle & stamen ring. */
+export function createSculptedLotusMeshes() {
+  const petalCard = Mesh.leafCard('oval', {
+    width: 0.068, length: 0.118, bend: 0.28, cup: 0.34,
+    fullUV: true, shapedSilhouette: false, widthSegments: 5, lengthSegments: 7,
+  });
+  const vc = petalCard.vertexCount;
+  const white = new Float32Array(vc * 4);
+  for (let i = 0; i < vc * 4; ++i) white[i] = 1.0;
+  petalCard.colors = white;
+
+  // Negative rotateX tilts +Z leafCard UPWARD (+Y) & OUTWARD (+Z): outer open -> mid cupped -> inner erect
+  const tiers = [
+    { count: 8, elev: 0.28, radius: 0.028, y: 0.005, scale: 1.00, twist: 0.0 },
+    { count: 8, elev: 0.62, radius: 0.022, y: 0.009, scale: 0.88, twist: Math.PI / 8 },
+    { count: 6, elev: 0.98, radius: 0.015, y: 0.014, scale: 0.72, twist: Math.PI / 12 },
+  ];
+  const petalParts = [];
+  for (const tier of tiers) {
+    for (let i = 0; i < tier.count; ++i) {
+      const a = (i / tier.count) * Math.PI * 2 + tier.twist;
+      const p = petalCard.clone()
+        .scale(tier.scale, tier.scale, tier.scale)
+        .rotate(1, 0, 0, -tier.elev)
+        .translate(0, tier.y, tier.radius)
+        .rotate(0, 1, 0, a);
+      petalParts.push(p);
+    }
   }
-  mesh.colors = cols;
-  return mesh;
+
+  // Receptacle seedpod cone + 18 curved golden stamen filaments with anther tips
+  const receptacle = Mesh.tube([[0, 0.0, 0], [0, 0.022, 0]], [0.026, 0.014], 12, { capStart: true, capEnd: true });
+  const stamenParts = [receptacle];
+  for (let i = 0; i < 18; ++i) {
+    const a = (i / 18) * Math.PI * 2;
+    const ca = Math.cos(a), sa = Math.sin(a);
+    const r0 = 0.022, r1 = 0.030;
+    stamenParts.push(Mesh.tube([
+      [ca * r0, 0.015, sa * r0],
+      [ca * (r0 + 0.006), 0.028, sa * (r0 + 0.006)],
+      [ca * r1, 0.038, sa * r1],
+    ], [0.0020, 0.0016, 0.0026], 5, { capStart: false, capEnd: true }));
+  }
+  return {
+    petals: Mesh.merge(petalParts),
+    stamens: Mesh.merge(stamenParts),
+  };
 }
 
 /** Smooth continuous vertical/arched cattail & underwater stem tube using Mesh.tube. */
@@ -503,23 +629,32 @@ export function createDragonflyMeshes() {
     [-0.135, -0.001, 0],
   ], [0.0085, 0.011, 0.0055, 0.0042, 0.0028], 8, { capStart: true, capEnd: true });
   const body = Mesh.merge([head, eyeL, eyeR, bodyTube]);
+  // Enforce continuous axial chitin UVs along +X -> -X so segmented body markings align cleanly
+  const bPos = body.positions;
+  const bUvs = new Float32Array(body.vertexCount * 2);
+  for (let i = 0; i < body.vertexCount; ++i) {
+    const px = bPos[i * 3 + 0], pz = bPos[i * 3 + 2];
+    bUvs[i * 2 + 0] = Math.max(0, Math.min(1, (0.022 - px) / 0.165));
+    bUvs[i * 2 + 1] = Math.max(0, Math.min(1, 0.5 + pz / 0.028));
+  }
+  body.uvs = bUvs;
 
+  // Forewing + hindwing pair with fullUV & white vertex colors (leafCard packs windBend into r otherwise!)
   const paintWhite = (m) => {
     const c = new Float32Array(m.vertexCount * 4);
-    for (let i = 0; i < m.vertexCount; ++i) { c[i * 4] = 1; c[i * 4 + 1] = 1; c[i * 4 + 2] = 1; c[i * 4 + 3] = 1; }
+    for (let i = 0; i < c.length; ++i) c[i] = 1.0;
     m.colors = c;
     return m;
   };
-  // Forewing + hindwing pair: leafCard already extends along +Z (lateral left), rotate PI around Y for right (-Z)
-  const foreL = paintWhite(Mesh.leafCard('oval', { width: 0.016, length: 0.115, bend: 0.04, cup: 0.04, shapedSilhouette: true })
+  const foreL = paintWhite(Mesh.leafCard('oval', { width: 0.022, length: 0.120, bend: 0.04, cup: 0.03, fullUV: true, shapedSilhouette: false })
     .rotate(0, 1, 0, -0.18));
-  const hindL = paintWhite(Mesh.leafCard('oval', { width: 0.019, length: 0.105, bend: 0.03, cup: 0.04, shapedSilhouette: true })
+  const hindL = paintWhite(Mesh.leafCard('oval', { width: 0.025, length: 0.108, bend: 0.03, cup: 0.03, fullUV: true, shapedSilhouette: false })
     .rotate(0, 1, 0, -0.42).translate(-0.018, -0.002, 0));
   const wingL = Mesh.merge([foreL, hindL]);
 
-  const foreR = paintWhite(Mesh.leafCard('oval', { width: 0.016, length: 0.115, bend: 0.04, cup: 0.04, shapedSilhouette: true })
+  const foreR = paintWhite(Mesh.leafCard('oval', { width: 0.022, length: 0.120, bend: 0.04, cup: 0.03, fullUV: true, shapedSilhouette: false })
     .rotate(0, 1, 0, Math.PI + 0.18));
-  const hindR = paintWhite(Mesh.leafCard('oval', { width: 0.019, length: 0.105, bend: 0.03, cup: 0.04, shapedSilhouette: true })
+  const hindR = paintWhite(Mesh.leafCard('oval', { width: 0.025, length: 0.108, bend: 0.03, cup: 0.03, fullUV: true, shapedSilhouette: false })
     .rotate(0, 1, 0, Math.PI + 0.42).translate(-0.018, -0.002, 0));
   const wingR = Mesh.merge([foreR, hindR]);
 
