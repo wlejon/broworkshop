@@ -61,7 +61,8 @@ export async function run(m) {
     await wait(2);
     // --bench-view=day:fly runs that view alone; with BRO_CONTROL=1 each
     // view's flight-recorder summary (bro-ctl trace, --grant spawn) follows its
-    // line.
+    // line, and with --bench-profile a native profile of its measured seconds
+    // (bro-ctl profile: perf).
     const only = bro.app.argv.find((a) => a.startsWith('--bench-view='))?.slice(13);
     const cp = process.env.BRO_CONTROL ? require('child_process') : null;
     for (const tm of ['day', 'night']) {
@@ -71,6 +72,7 @@ export async function run(m) {
             t0 = performance.now(); view = v; stamps = null;
             await wait(WARM);
             stamps = []; clocks = [];
+            const prof = cp && bro.app.argv.includes('--bench-profile') ? new Promise((r) => cp.exec(`bro-ctl -s ${process.pid} profile ${MEASURE - 1} --top=45`, { maxBuffer: 1 << 22 }, (e, out) => r(e ? `bro-ctl profile: ${e.message}` : String(out)))) : null;
             await wait(MEASURE);
             const s = stamps, c = clocks; stamps = null; clocks = null;
             let still = 0; for (let i = 1; i < c.length; i++) if (c[i] === c[i - 1]) still++;
@@ -80,6 +82,7 @@ export async function run(m) {
             console.log(`BENCH ${tm} ${name}: ${(1000 / mean).toFixed(0)} fps, mean ${mean.toFixed(2)} p99 ${d[Math.floor(d.length * 0.99)].toFixed(2)} max ${d[d.length - 1].toFixed(2)} ms, over 5 ms ${d.filter((x) => x > 5).length} over 10 ms ${d.filter((x) => x > 10).length}, clock still ${still} (${d.length} frames, ${innerWidth}x${innerHeight} @${devicePixelRatio})`);
             if (slow.length) { console.log(`SLOW ${slow.join(', ')}`); slow.length = 0; }
             // (async: bro-ctl is answered by this thread)
+            if (prof) console.log(await prof);
             if (cp) console.log(await new Promise((r) => cp.exec(`bro-ctl -s ${process.pid} trace ${MEASURE} --worst=6`, (e, out) => r(e ? `bro-ctl trace: ${e.message}` : String(out)))));
         }
     }
