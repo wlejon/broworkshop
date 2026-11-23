@@ -1,5 +1,6 @@
-// Instanced ground mesh hook for bro.tiles plane domain with organic curved road warp,
-// scenic river bed & bridge decks, cam_hi/cam_lo precision, and realistic asphalt/turf PBR.
+// Distance-invariant ground shading over bro.tiles plane domain:
+// preserves exact coarse-to-fine appearance using band-limited biome weights
+// and screen-footprint-faded micro detail (no baked roads or sub-pixel aliasing).
 module hook;
 import scene;
 import mesh;
@@ -8,9 +9,7 @@ import custom;
 const TILE: i32 = 32;
 const BORDER: i32 = 2;
 const CELLS: i32 = 36;
-const BLOCK_SIZE: f32 = 128.0;
-const URBAN_RING_R2: f32 = 2560.0 * 2560.0;
-const RIVER_HALF_W: f32 = 34.0;
+const ROOT_SIZE: f32 = 2816.0;
 
 struct GroundParams {
     cam_hi: vec3<f32>,
@@ -88,64 +87,16 @@ pub fn vertex(v_in: mesh::Vertex) -> mesh::Vertex {
     var n = normalize(cross(tv, tu));
     if (n.y < 0.0) { n = -n; }
 
-    let extent = 4096.0 / ((1 << ids.w) as f32);
+    let extent = ROOT_SIZE / ((1 << ids.w) as f32);
     let rel = (hi.xyz - params.cam_hi) + (lo.xyz - params.cam_lo);
     v.pos = rel + c_xyz - vec3<f32>(0.0, v.pos.y * extent * 0.0625, 0.0);
     v.normal = n;
 
     let world_xz = hi.xz + lo.xz + c_xyz.xz;
     v.v0 = vec4<f32>(cx as f32, cy as f32, v_in.pos.y, c0.w);
-    v.v1 = vec4<f32>(world_xz.x, world_xz.y, world_xz.x, world_xz.y);
-    v.vi = vec4<i32>(slot, ids.w, ids.y, 0);
+    v.v1 = vec4<f32>(world_xz.x, world_xz.y, 0.0, 0.0);
+    v.vi = vec4<i32>(slot, ids.w, 0, 0);
     return v;
-}
-
-fn sstep(a: f32, b: f32, x: f32) -> f32 {
-    let t = clamp((x - a) / (b - a), 0.0, 1.0);
-    return t * t * (3.0 - 2.0 * t);
-}
-
-fn warp_delta(u: f32, v: f32) -> vec2<f32> {
-    let r = length(vec2<f32>(u, v));
-    let amp = sstep(580.0, 1080.0, r) * (1.0 - sstep(5250.0, 5900.0, r));
-    let dx = amp * (26.0 * sin(v / 250.0) + 15.0 * cos((u + v) / 380.0));
-    let dz = amp * (26.0 * sin(u / 270.0 + 1.1) + 15.0 * sin((u - v) / 400.0));
-    return vec2<f32>(dx, dz);
-}
-
-fn world_to_grid(p: vec2<f32>) -> vec2<f32> {
-    if (dot(p, p) < 576.0 * 576.0) { return p; }
-    var u = p.x;
-    var v = p.y;
-    for (var i: i32 = 0; i < 4; i += 1) {
-        let d = warp_delta(u, v);
-        u = p.x - d.x;
-        v = p.y - d.y;
-    }
-    return vec2<f32>(u, v);
-}
-
-fn river_center_u(v: f32) -> f32 {
-    return 768.0 + 185.0 * sin(v / 620.0) + 70.0 * cos(v / 310.0);
-}
-
-fn line_kind(line_idx: i32, perp_idx: i32) -> i32 {
-    if ((line_idx & 3) == 0) { return 2; }
-    let lx = (line_idx as f32) * BLOCK_SIZE;
-    let lz = (perp_idx as f32) * BLOCK_SIZE;
-    return (lx * lx + lz * lz) < URBAN_RING_R2 ? 1 : 0;
-}
-
-fn road_hw(kind: i32) -> f32 {
-    if (kind == 2) { return 10.0; }
-    if (kind == 1) { return 6.0; }
-    return 4.5;
-}
-
-fn sw_w(kind: i32) -> f32 {
-    if (kind == 2) { return 3.5; }
-    if (kind == 1) { return 2.5; }
-    return 2.0;
 }
 
 fn hash2(p: vec2<f32>) -> f32 {
@@ -166,233 +117,44 @@ fn vnoise2(p: vec2<f32>) -> f32 {
     return mix(mix(a, b, u.x), mix(c, d, u.x), u.y);
 }
 
-fn fbm2(p: vec2<f32>) -> f32 {
-    var sum = 0.0;
-    sum += 0.54 * vnoise2(p);
-    sum += 0.30 * vnoise2(p * 2.13 + vec2<f32>(17.3, 9.1));
-    sum += 0.16 * vnoise2(p * 4.41 + vec2<f32>(5.7, 23.9));
-    return sum;
-}
-
-fn box_band(d: f32, c: f32, hw: f32, fw: f32) -> f32 {
-    let hfw = max(fw * 0.75, 0.015);
-    return clamp(smoothstep(c - hw - hfw, c - hw + hfw, d) - smoothstep(c + hw - hfw, c + hw + hfw, d), 0.0, 1.0);
-}
-
-fn filtered_pulse(x: f32, freq: f32, duty: f32, fw: f32) -> f32 {
-    let p = x * freq;
-    let w = clamp(fw * freq, 0.001, 1.0);
-    let p0 = p - 0.5 * w;
-    let p1 = p + 0.5 * w;
-    let i0 = floor(p0) + min(fract(p0), duty);
-    let i1 = floor(p1) + min(fract(p1), duty);
-    return clamp((i1 - i0) / w, 0.0, 1.0);
-}
-
 pub fn fragment(v: mesh::Vertex, s_in: mesh::Surface) -> mesh::Surface {
     var s = s_in;
     let slot = v.vi.x;
-    let level = v.vi.y;
     let cell = slot & 3;
     let tx = (((cell & 1) as f32) + (v.v0.x + 0.5) / (CELLS as f32)) * 0.5;
     let ty = ((((cell >> 1) & 1) as f32) + (v.v0.y + 0.5) / (CELLS as f32)) * 0.5;
-    let surf_val = surf.sample_lod(custom::linear, vec3<f32>(tx, ty, (slot >> 2) as f32), 0.0);
+    let w = surf.sample_lod(custom::linear, vec3<f32>(tx, ty, (slot >> 2) as f32), 0.0);
 
-    let dp_dx = dpdx(v.world_pos.xz);
-    let dp_dy = dpdy(v.world_pos.xz);
-    let fw_xz = max(abs(dp_dx) + abs(dp_dy), vec2<f32>(0.001, 0.001));
-    let fw_x = fw_xz.x;
-    let fw_z = fw_xz.y;
-    let fw_max = max(fw_x, fw_z);
+    let p = v.v1.xy;
+    let fw = max(length(dpdx(v.world_pos.xz)) + length(dpdy(v.world_pos.xz)), 0.02);
 
-    let world_xz = v.v1.xy;
-    let grid_uv = world_to_grid(world_xz);
-    let block_xz = mod(grid_uv, BLOCK_SIZE);
+    // Multi-scale noise faded out smoothly before Nyquist -> same albedo up close & from orbit
+    let macro_var = 0.88 + 0.24 * vnoise2(p * 0.012);
+    let med_w = 1.0 - smoothstep(1.5, 9.0, fw);
+    let med_var = 1.0 + med_w * 0.14 * (vnoise2(p * 0.09) - 0.5);
+    let fine_w = 1.0 - smoothstep(0.12, 0.85, fw);
+    let fine_var = 1.0 + fine_w * 0.12 * (vnoise2(p * 0.65) - 0.5);
 
-    let rx = floor(grid_uv.x / BLOCK_SIZE + 0.5) as i32;
-    let rz = floor(grid_uv.y / BLOCK_SIZE + 0.5) as i32;
-    let x_kind = line_kind(rx, rz);
-    let z_kind = line_kind(rz, rx);
-    let hx = road_hw(x_kind);
-    let hz = road_hw(z_kind);
-    let swx = hx + sw_w(x_kind);
-    let swz = hz + sw_w(z_kind);
+    // Linear physical palette (no synthetic bright neon greens)
+    let col_urban = vec3<f32>(0.22, 0.22, 0.21) * macro_var * med_var * fine_var;
+    let col_grass = vec3<f32>(0.09, 0.15, 0.055) * macro_var * med_var * fine_var;
+    let col_forest = vec3<f32>(0.055, 0.105, 0.042) * macro_var * med_var * fine_var;
+    let col_rock = vec3<f32>(0.18, 0.17, 0.145) * macro_var * med_var * fine_var;
 
-    let dx = min(block_xz.x, BLOCK_SIZE - block_xz.x);
-    let dz = min(block_xz.y, BLOCK_SIZE - block_xz.y);
+    let slope = clamp(1.0 - v.normal.y, 0.0, 1.0);
+    let rock_blend = smoothstep(0.12, 0.34, slope);
+    var base = col_urban * w.x + col_grass * w.y + col_forest * w.z + col_rock * w.w;
+    base = mix(base, col_rock * 1.05, rock_blend * 0.72);
 
-    // River & bridge mask in warped grid space
-    let r_dist = abs(grid_uv.x - river_center_u(grid_uv.y));
-    let ave_v = floor(grid_uv.y / 512.0 + 0.5) * 512.0;
-    let ave_vd = abs(grid_uv.y - ave_v);
-    let bridge_mask = 1.0 - smoothstep(14.5, 22.0, ave_vd);
-    let river_suppress = (1.0 - smoothstep(RIVER_HALF_W + 6.0, RIVER_HALF_W + 20.0, r_dist)) * (1.0 - bridge_mask);
-    let road_enable = 1.0 - river_suppress;
-
-    let w_x = max(fw_x * 1.35, 0.03);
-    let w_z = max(fw_z * 1.35, 0.03);
-    let cov_road_x = (1.0 - smoothstep(hx - 0.5 * w_x, hx + 0.5 * w_x, dx)) * road_enable;
-    let cov_road_z = (1.0 - smoothstep(hz - 0.5 * w_z, hz + 0.5 * w_z, dz)) * max(road_enable, z_kind == 2 ? bridge_mask : 0.0);
-    let road_cov = max(cov_road_x, cov_road_z);
-
-    let cov_sw_x = (1.0 - smoothstep(swx - 0.5 * w_x, swx + 0.5 * w_x, dx)) * road_enable;
-    let cov_sw_z = (1.0 - smoothstep(swz - 0.5 * w_z, swz + 0.5 * w_z, dz)) * max(road_enable, z_kind == 2 ? bridge_mask : 0.0);
-    let sw_cov = clamp(max(cov_sw_x, cov_sw_z) - road_cov, 0.0, 1.0);
-    let block_cov = clamp(1.0 - road_cov - sw_cov, 0.0, 1.0);
-
-    // Band-limited multi-scale natural fBm: crisp close-up aggregate (5.2/m) fading smoothly into 1.1/m mid relief
-    let dist_damp_fine = 1.0 - smoothstep(0.08, 0.42, fw_max);
-    let dist_damp_mid = 1.0 - smoothstep(0.40, 2.10, fw_max);
-    let n_macro = fbm2(world_xz * 0.024);
-    var n_mid: f32 = 0.5;
-    var g_mx: f32 = 0.0;
-    var g_mz: f32 = 0.0;
-    if (dist_damp_mid > 0.001) {
-        n_mid = mix(0.5, fbm2(world_xz * 0.55 + vec2<f32>(3.1, 7.4)), dist_damp_mid);
-        let m0 = vnoise2(world_xz * 1.15);
-        g_mx = (vnoise2(world_xz * 1.15 + vec2<f32>(0.25, 0.0)) - m0) * (2.0 * dist_damp_mid);
-        g_mz = (vnoise2(world_xz * 1.15 + vec2<f32>(0.0, 0.25)) - m0) * (2.0 * dist_damp_mid);
-    }
-    var n_fine: f32 = 0.5;
-    var g_fx: f32 = 0.0;
-    var g_fz: f32 = 0.0;
-    if (dist_damp_fine > 0.001) {
-        n_fine = mix(0.5, fbm2(world_xz * 4.8 + vec2<f32>(11.2, 4.9)), dist_damp_fine);
-        let f0 = vnoise2(world_xz * 5.2);
-        g_fx = (vnoise2(world_xz * 5.2 + vec2<f32>(0.07, 0.0)) - f0) * (2.0 * dist_damp_fine);
-        g_fz = (vnoise2(world_xz * 5.2 + vec2<f32>(0.0, 0.07)) - f0) * (2.0 * dist_damp_fine);
-    }
-    let n_grad_x = (g_fx + g_mx * 0.85) * 6.5;
-    let n_grad_z = (g_fz + g_mz * 0.85) * 6.5;
-
-    let pad_mask = surf_val.z;
-    let zone_code = surf_val.w;
-
-    let n_amp = mix(0.24, 0.22, max(road_cov, sw_cov));
-    s.normal = normalize(s.normal + vec3<f32>(n_grad_x * n_amp, 0.0, n_grad_z * n_amp));
-
-    var col = vec3<f32>(0.0);
-    var rough: f32 = 0.0;
-
-    if (road_cov > 0.001) {
-        let grit = dist_damp_fine > 0.001 ? (vnoise2(world_xz * 10.5) - 0.5) * dist_damp_fine : 0.0;
-        let lane_wear = clamp(0.92 + 0.14 * (n_macro - 0.5) + 0.16 * (n_mid - 0.5) + 0.20 * (n_fine - 0.5) + 0.18 * grit, 0.65, 1.35);
-        var road_col = vec3<f32>(0.105, 0.110, 0.118) * lane_wear;
-        var road_rough = clamp(0.78 + 0.10 * n_fine + 0.08 * grit, 0.65, 0.92);
-
-        let aa_mark = 1.0 - smoothstep(0.04, 0.11, fw_max);
-        if (aa_mark > 0.001) {
-            let in_junc = (1.0 - smoothstep(hx + 0.4 - 0.5 * w_x, hx + 0.4 + 0.5 * w_x, dx))
-                        * (1.0 - smoothstep(hz + 0.4 - 0.5 * w_z, hz + 0.4 + 0.5 * w_z, dz));
-            let not_junc = 1.0 - in_junc;
-
-            let cw_x_cov = cov_road_x * not_junc * box_band(dz, hz + 2.8, 1.5, fw_z)
-                         * (1.0 - smoothstep(hx - 1.0 - 0.5 * w_x, hx - 1.0 + 0.5 * w_x, dx))
-                         * filtered_pulse(grid_uv.x, 0.55, 0.46, fw_x);
-            let cw_z_cov = cov_road_z * not_junc * box_band(dx, hx + 2.8, 1.5, fw_x)
-                         * (1.0 - smoothstep(hz - 1.0 - 0.5 * w_z, hz - 1.0 + 0.5 * w_z, dz))
-                         * filtered_pulse(grid_uv.y, 0.55, 0.46, fw_z);
-            let cw_cov = clamp(max(cw_x_cov, cw_z_cov), 0.0, 1.0) * aa_mark;
-
-            let past_cw_z = smoothstep(hz + 4.5 - 0.5 * w_z, hz + 4.5 + 0.5 * w_z, dz);
-            let past_cw_x = smoothstep(hx + 4.5 - 0.5 * w_x, hx + 4.5 + 0.5 * w_x, dx);
-
-            var yel_cov: f32 = 0.0;
-            var wht_cov: f32 = 0.0;
-            var sub_yel_cov: f32 = 0.0;
-            if (x_kind == 2) {
-                yel_cov = max(yel_cov, cov_road_x * not_junc * past_cw_z * box_band(dx, 0.16, 0.08, fw_x));
-                wht_cov = max(wht_cov, cov_road_x * not_junc * past_cw_z * box_band(dx, 5.0, 0.07, fw_x) * filtered_pulse(grid_uv.y, 0.125, 0.40, fw_z));
-            } else if (x_kind == 1) {
-                sub_yel_cov = max(sub_yel_cov, cov_road_x * not_junc * past_cw_z * box_band(dx, 0.0, 0.08, fw_x) * filtered_pulse(grid_uv.y, 0.125, 0.40, fw_z));
-            }
-            if (z_kind == 2) {
-                yel_cov = max(yel_cov, cov_road_z * not_junc * past_cw_x * box_band(dz, 0.16, 0.08, fw_z));
-                wht_cov = max(wht_cov, cov_road_z * not_junc * past_cw_x * box_band(dz, 5.0, 0.07, fw_z) * filtered_pulse(grid_uv.x, 0.125, 0.40, fw_x));
-            } else if (z_kind == 1) {
-                sub_yel_cov = max(sub_yel_cov, cov_road_z * not_junc * past_cw_x * box_band(dz, 0.0, 0.08, fw_z) * filtered_pulse(grid_uv.x, 0.125, 0.40, fw_x));
-            }
-
-            let line_mask = clamp(1.0 - cw_cov, 0.0, 1.0) * aa_mark;
-            road_col = mix(road_col, vec3<f32>(0.72, 0.72, 0.70), cw_cov * 0.9);
-            road_col = mix(road_col, vec3<f32>(0.76, 0.56, 0.12), yel_cov * line_mask * 0.92);
-            road_col = mix(road_col, vec3<f32>(0.72, 0.72, 0.70), wht_cov * line_mask * (1.0 - yel_cov) * 0.9);
-            road_col = mix(road_col, vec3<f32>(0.70, 0.58, 0.22), sub_yel_cov * line_mask * (1.0 - yel_cov) * (1.0 - wht_cov) * 0.9);
-            road_rough = mix(road_rough, 0.65, cw_cov);
-            road_rough = mix(road_rough, 0.62, yel_cov * line_mask);
-        }
-
-        col += road_col * road_cov;
-        rough += road_rough * road_cov;
+    // Wet dark river sediment below water line
+    let rd = v.v0.w;
+    if (rd < 2.0) {
+        let wet = 1.0 - smoothstep(-6.0, 2.0, rd);
+        base = mix(base, vec3<f32>(0.045, 0.055, 0.05), wet * 0.65);
     }
 
-    if (sw_cov > 0.001) {
-        let aa_seam_x = 1.0 - smoothstep(0.025, 0.07, fw_x);
-        let aa_seam_z = 1.0 - smoothstep(0.025, 0.07, fw_z);
-        let gx = abs(fract(block_xz.x * 0.5) - 0.5);
-        let gz = abs(fract(block_xz.y * 0.5) - 0.5);
-        let seam_raw = max(smoothstep(0.45, 0.485, gx) * aa_seam_x, smoothstep(0.45, 0.485, gz) * aa_seam_z);
-        let seam = 1.0 - 0.08 * seam_raw;
-        let aa_curb = 1.0 - smoothstep(0.035, 0.10, fw_max);
-        let curb_cov = max(box_band(dx, hx + 0.175, 0.175, fw_x), box_band(dz, hz + 0.175, 0.175, fw_z)) * aa_curb;
-        let curb_shade = 1.0 - 0.09 * curb_cov;
-        let grit_sw = dist_damp_fine > 0.001 ? (vnoise2(world_xz * 9.5) - 0.5) * dist_damp_fine : 0.0;
-        let sw_var = 0.96 + 0.10 * (n_mid - 0.5) + 0.12 * (n_fine - 0.5) + 0.12 * grit_sw;
-        let sw_col = vec3<f32>(0.37, 0.37, 0.35) * seam * curb_shade * sw_var;
-        col += sw_col * sw_cov;
-        rough += 0.87 * sw_cov;
-    }
-
-    if (block_cov > 0.001) {
-        var blk_col = vec3<f32>(0.12, 0.22, 0.09);
-        var blk_rough: f32 = 0.92;
-        if (zone_code > 0.52) {
-            let aa_seam_x = 1.0 - smoothstep(0.025, 0.07, fw_x);
-            let aa_seam_z = 1.0 - smoothstep(0.025, 0.07, fw_z);
-            let px = abs(fract(block_xz.x * 0.25) - 0.5);
-            let pz = abs(fract(block_xz.y * 0.25) - 0.5);
-            let tile_raw = max(smoothstep(0.46, 0.49, px) * aa_seam_x, smoothstep(0.46, 0.49, pz) * aa_seam_z);
-            let tile_seam = 1.0 - 0.07 * tile_raw;
-            let plaza_var = 0.95 + 0.07 * (n_macro - 0.5) + 0.05 * (n_mid - 0.5);
-            let plaza = vec3<f32>(0.29, 0.29, 0.28) * tile_seam * plaza_var;
-            let pad_col = vec3<f32>(0.33, 0.33, 0.32) * tile_seam * plaza_var;
-            blk_col = mix(plaza, pad_col, pad_mask);
-            blk_rough = 0.85;
-        } else {
-            // Manicured suburban & park lawns with subtle mowing stripes & mulch borders around foundation
-            let grass_a = vec3<f32>(0.095, 0.195, 0.068);
-            let grass_b = vec3<f32>(0.165, 0.310, 0.105);
-            let organic = clamp(n_macro * 0.65 + n_mid * 0.35, 0.0, 1.0);
-            let mow = 0.97 + 0.04 * sin(world_xz.x * 0.9) * dist_damp_mid;
-            let grass = mix(grass_a, grass_b, organic) * (0.93 + 0.10 * (n_fine - 0.5)) * mow;
-            let drive_patio = smoothstep(0.72, 0.94, pad_mask);
-            let pad_col = vec3<f32>(0.32, 0.31, 0.29) * (0.96 + 0.06 * (n_mid - 0.5));
-            blk_col = mix(grass, pad_col, drive_patio);
-            blk_rough = mix(0.92, 0.86, drive_patio);
-        }
-
-        // Sandy/pebble riverbed & bank transition along the carved river channel
-        let bank_mix = (1.0 - smoothstep(RIVER_HALF_W + 2.0, RIVER_HALF_W + 14.0, r_dist)) * (1.0 - bridge_mask);
-        if (bank_mix > 0.001) {
-            let bed_col = mix(vec3<f32>(0.24, 0.21, 0.16), vec3<f32>(0.14, 0.13, 0.11), smoothstep(RIVER_HALF_W + 2.0, RIVER_HALF_W - 10.0, r_dist));
-            blk_col = mix(blk_col, bed_col * (0.92 + 0.14 * n_mid), bank_mix);
-            blk_rough = mix(blk_rough, 0.90, bank_mix);
-        }
-
-        col += blk_col * block_cov;
-        rough += blk_rough * block_cov;
-    }
-
-    s.base_color = col;
-    s.roughness = rough;
+    s.base_color = base;
+    s.roughness = mix(0.88, 0.45, clamp(1.0 - smoothstep(-2.0, 2.5, rd), 0.0, 1.0));
     s.metallic = 0.0;
-
-    if (SCENE_DEBUG(level)) {
-        let hue = ((level % 6) as f32) / 6.0;
-        s = mesh::debug(s, clamp(abs(mod(vec3<f32>(hue * 6.0) + vec3<f32>(0.0, 4.0, 2.0), 6.0) - vec3<f32>(3.0)) - vec3<f32>(1.0), vec3<f32>(0.0), vec3<f32>(1.0)) * 0.5);
-    }
-    if (SCENE_DEBUG(albedo)) { s = mesh::debug(s, s.base_color); }
-    if (SCENE_DEBUG(normal)) { s = mesh::debug(s, s.normal * 0.5 + vec3<f32>(0.5)); }
-    if (SCENE_DEBUG(skirt)) { s = mesh::debug(s, v.v0.z > 0.5 ? vec3<f32>(1.0, 0.0, 0.0) : s.base_color); }
     return s;
 }

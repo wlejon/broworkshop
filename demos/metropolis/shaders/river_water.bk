@@ -1,0 +1,54 @@
+// Animated river water shader with Fresnel sky reflection & dual-octave ripples.
+module hook;
+import scene;
+import mesh;
+
+struct WaterParams {
+    time: vec4<f32>,
+}
+@binding(4, 0) var params: uniform<WaterParams>;
+
+fn hash2(p: vec2<f32>) -> f32 {
+    var q = fract(vec3<f32>(p.x, p.y, p.x) * 0.1031);
+    let d = dot(q, vec3<f32>(q.y + 33.33, q.z + 33.33, q.x + 33.33));
+    q = q + vec3<f32>(d);
+    return fract((q.x + q.y) * q.z);
+}
+
+fn vnoise2(p: vec2<f32>) -> f32 {
+    let i = floor(p);
+    let f = fract(p);
+    let u = f * f * (vec2<f32>(3.0, 3.0) - f * 2.0);
+    return mix(
+        mix(hash2(i), hash2(i + vec2<f32>(1.0, 0.0)), u.x),
+        mix(hash2(i + vec2<f32>(0.0, 1.0)), hash2(i + vec2<f32>(1.0, 1.0)), u.x),
+        u.y
+    );
+}
+
+pub fn vertex(v: mesh::Vertex) -> mesh::Vertex {
+    return v;
+}
+
+pub fn fragment(v: mesh::Vertex, s_in: mesh::Surface) -> mesh::Surface {
+    var s = s_in;
+    let p = v.world_pos + scene::camera.eye_world.xyz;
+    let t = params.time.x;
+    let fw = max(length(dpdx(v.world_pos.xz)) + length(dpdy(v.world_pos.xz)), 0.05);
+    let amp = 1.0 - smoothstep(0.6, 3.5, fw);
+
+    let w1 = vnoise2(p.xz * 0.22 + vec2<f32>(0.0, t * 0.45));
+    let w2 = vnoise2(p.xz * 0.48 - vec2<f32>(t * 0.12, t * 0.30));
+    let dx = (vnoise2((p.xz + vec2<f32>(0.4, 0.0)) * 0.24 + vec2<f32>(0.0, t * 0.45)) - w1) * amp;
+    let dz = (vnoise2((p.xz + vec2<f32>(0.0, 0.4)) * 0.24 + vec2<f32>(0.0, t * 0.45)) - w1) * amp;
+    let n = normalize(vec3<f32>(-dx * 0.55, 1.0, -dz * 0.55 - (w2 - 0.5) * 0.18 * amp));
+
+    let edge = clamp(abs(v.uv.x - 0.5) * 2.0, 0.0, 1.0);
+    let deep = vec3<f32>(0.015, 0.055, 0.085);
+    let shallow = vec3<f32>(0.035, 0.095, 0.095);
+    s.base_color = mix(deep, shallow, smoothstep(0.55, 0.95, edge));
+    s.normal = n;
+    s.roughness = 0.06 + edge * 0.05;
+    s.metallic = 0.02;
+    return s;
+}
