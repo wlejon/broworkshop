@@ -96,11 +96,12 @@ export function createTerrainTiles(scene, layout) {
         maxLevel: MAX_LEVEL,
         minHeight: MIN_HEIGHT,
         maxHeight: MAX_HEIGHT,
-        pixelsPerCell: 2.5,
+        pixelsPerCell: 8.5,
         producePerUpdate: PRODUCE_PER_UPDATE,
         layers: { position: 16, surface: 4 },
         ranges: true,
         produce(batch) {
+            settleUpdates = 8;
             ringIdx = (ringIdx + 1) % RING_SIZE;
             const spanBuf = spanRing[ringIdx];
             const parcelBuf = parcelRing[ringIdx];
@@ -191,7 +192,7 @@ export function createTerrainTiles(scene, layout) {
         doubleSided: false,
     });
     ground.setCullBounds([-20000, -1000, -20000], [20000, 1000, 20000]);
-    ground.drawOrder = 5;
+    ground.drawOrder = 6;
 
     let shaderReady = false;
     const shaderPromise = ground.setShaderAsync({
@@ -231,6 +232,7 @@ export function createTerrainTiles(scene, layout) {
     const camHi = [0, 0, 0];
     const camLo = [0, 0, 0];
     let lastPending = -1;
+    let settleUpdates = 0;
     let disposed = false;
 
     let lastUniformX = NaN;
@@ -247,10 +249,12 @@ export function createTerrainTiles(scene, layout) {
         const dotFwd = fwd[0] * lastFwd[0] + fwd[1] * lastFwd[1] + fwd[2] * lastFwd[2];
         const needUpdate = Number.isNaN(lastEye[0])
             || cache.pending > 0
+            || settleUpdates > 0
             || (dx * dx + dy * dy + dz * dz) > thresh * thresh
             || dotFwd < 0.99995;
 
         if (needUpdate) {
+            if (cache.pending === 0 && settleUpdates > 0) settleUpdates--;
             cache.update({
                 position: camPos,
                 forward: fwd,

@@ -8,6 +8,127 @@ const WALL_THICK = 0.24;
 
 const clamp = (x, lo, hi) => (x < lo ? lo : x > hi ? hi : x);
 
+function buildFloorIndex(bp, f, minX, minZ, bnx, bnz) {
+    const fl = bp.floors[f];
+    const boxes = [];
+    const slabs = [];
+    const stairs = [];
+
+    for (let i = 0; i < fl.slabTiles.length; i++) {
+        const s = fl.slabTiles[i];
+        const sb = {
+            kind: 'slab',
+            x0: s.x0, x1: s.x1,
+            y0: fl.yBase - s.thick, y1: fl.yBase,
+            z0: s.z0, z1: s.z1,
+        };
+        slabs.push(sb);
+        boxes.push(sb);
+    }
+    if (fl.terraceSlabs) {
+        for (let i = 0; i < fl.terraceSlabs.length; i++) {
+            const s = fl.terraceSlabs[i];
+            const sb = {
+                kind: 'slab',
+                x0: s.x0, x1: s.x1,
+                y0: fl.yCeil - s.thick, y1: fl.yCeil,
+                z0: s.z0, z1: s.z1,
+            };
+            slabs.push(sb);
+            boxes.push(sb);
+        }
+    }
+
+    const hw = WALL_THICK * 0.5;
+    for (let i = 0; i < fl.wallSegs.length; i++) {
+        const w = fl.wallSegs[i];
+        const alongZ = Math.abs(Math.sin(w.ry)) > 0.7;
+        const len = w.length;
+        const pushWallBox = (u0, u1, v0, v1, kindTag = 'wall', extra = null) => {
+            const bx0 = alongZ ? (w.x - hw) : (w.x + u0);
+            const bx1 = alongZ ? (w.x + hw) : (w.x + u1);
+            const bz0 = alongZ ? (w.z + u0) : (w.z - hw);
+            const bz1 = alongZ ? (w.z + u1) : (w.z + hw);
+            boxes.push({
+                kind: kindTag,
+                x0: bx0, x1: bx1,
+                y0: fl.yBase + v0, y1: fl.yBase + v1,
+                z0: bz0, z1: bz1,
+                extra,
+            });
+        };
+
+        if (w.type === 'solid') {
+            pushWallBox(-len * 0.5, len * 0.5, 0, bp.floorHeight);
+        } else if (w.type === 'window') {
+            pushWallBox(-len * 0.5, len * 0.5, 0, bp.floorHeight * 0.28);
+            pushWallBox(-len * 0.5, len * 0.5, bp.floorHeight * 0.80, bp.floorHeight);
+            pushWallBox(-len * 0.5, -len * 0.24, bp.floorHeight * 0.26, bp.floorHeight * 0.82);
+            pushWallBox(len * 0.24, len * 0.5, bp.floorHeight * 0.26, bp.floorHeight * 0.82);
+        } else if (w.type === 'door') {
+            pushWallBox(-len * 0.5, -len * 0.36, 0, bp.floorHeight, 'door_jamb', { alongZ, wx: w.x, wz: w.z, side: -1 });
+            pushWallBox(len * 0.36, len * 0.5, 0, bp.floorHeight, 'door_jamb', { alongZ, wx: w.x, wz: w.z, side: 1 });
+            pushWallBox(-len * 0.38, len * 0.38, bp.floorHeight * 0.78, bp.floorHeight);
+            if (w.roomA === -3 || w.roomB === -3) {
+                pushWallBox(-len * 0.36, len * 0.36, 0, bp.floorHeight * 0.78, 'elev_door', { floorIndex: f });
+            }
+        }
+    }
+
+    for (let i = 0; i < fl.furniture.length; i++) {
+        const fn = fl.furniture[i];
+        boxes.push({
+            kind: 'furniture',
+            x0: fn.x - fn.hx, x1: fn.x + fn.hx,
+            y0: fl.yBase, y1: fl.yBase + fn.h,
+            z0: fn.z - fn.hz, z1: fn.z + fn.hz,
+        });
+    }
+
+    for (let i = 0; i < fl.stairs.length; i++) {
+        const st = fl.stairs[i];
+        stairs.push({
+            x0: st.x0, x1: st.x1,
+            z0: st.z0, z1: st.z1,
+            y0: fl.yBase, y1: fl.yCeil,
+            runLen: st.runLen,
+        });
+    }
+
+    const bins = Array.from({ length: bnx * bnz }, () => []);
+    for (let bi = 0; bi < boxes.length; bi++) {
+        const b = boxes[bi];
+        const ix0 = clamp(Math.floor((b.x0 - minX) / BIN), 0, bnx - 1);
+        const ix1 = clamp(Math.floor((b.x1 - minX) / BIN), 0, bnx - 1);
+        const iz0 = clamp(Math.floor((b.z0 - minZ) / BIN), 0, bnz - 1);
+        const iz1 = clamp(Math.floor((b.z1 - minZ) / BIN), 0, bnz - 1);
+        for (let iz = iz0; iz <= iz1; iz++) {
+            const rowOff = iz * bnx;
+            for (let ix = ix0; ix <= ix1; ix++) {
+                bins[rowOff + ix].push(bi);
+            }
+        }
+    }
+
+    return {
+        boxes,
+        slabs,
+        stairs,
+        bins,
+        stamp: new Uint32Array(boxes.length),
+        tick: 1,
+    };
+}
+
+function getFloorIndex(idx, f) {
+    let flIdx = idx.floors[f];
+    if (!flIdx) {
+        flIdx = buildFloorIndex(idx.bp, f, idx.minX, idx.minZ, idx.bnx, idx.bnz);
+        idx.floors[f] = flIdx;
+    }
+    return flIdx;
+}
+
 function buildBuildingIndex(bp) {
     const pad = 2.0;
     const minX = -bp.halfW - pad;
@@ -16,119 +137,7 @@ function buildBuildingIndex(bp) {
     const maxZ = bp.halfD + pad;
     const bnx = Math.max(1, Math.ceil((maxX - minX) / BIN));
     const bnz = Math.max(1, Math.ceil((maxZ - minZ) / BIN));
-
-    const floors = new Array(bp.totalFloors);
-    for (let f = 0; f < bp.totalFloors; f++) {
-        const fl = bp.floors[f];
-        const boxes = [];
-        const slabs = [];
-        const stairs = [];
-
-        for (let i = 0; i < fl.slabTiles.length; i++) {
-            const s = fl.slabTiles[i];
-            const sb = {
-                kind: 'slab',
-                x0: s.x0, x1: s.x1,
-                y0: fl.yBase - s.thick, y1: fl.yBase,
-                z0: s.z0, z1: s.z1,
-            };
-            slabs.push(sb);
-            boxes.push(sb);
-        }
-        if (fl.terraceSlabs) {
-            for (let i = 0; i < fl.terraceSlabs.length; i++) {
-                const s = fl.terraceSlabs[i];
-                const sb = {
-                    kind: 'slab',
-                    x0: s.x0, x1: s.x1,
-                    y0: fl.yCeil - s.thick, y1: fl.yCeil,
-                    z0: s.z0, z1: s.z1,
-                };
-                slabs.push(sb);
-                boxes.push(sb);
-            }
-        }
-
-        const hw = WALL_THICK * 0.5;
-        for (let i = 0; i < fl.wallSegs.length; i++) {
-            const w = fl.wallSegs[i];
-            const alongZ = Math.abs(Math.sin(w.ry)) > 0.7;
-            const len = w.length;
-            const pushWallBox = (u0, u1, v0, v1, kindTag = 'wall', extra = null) => {
-                const bx0 = alongZ ? (w.x - hw) : (w.x + u0);
-                const bx1 = alongZ ? (w.x + hw) : (w.x + u1);
-                const bz0 = alongZ ? (w.z + u0) : (w.z - hw);
-                const bz1 = alongZ ? (w.z + u1) : (w.z + hw);
-                boxes.push({
-                    kind: kindTag,
-                    x0: bx0, x1: bx1,
-                    y0: fl.yBase + v0, y1: fl.yBase + v1,
-                    z0: bz0, z1: bz1,
-                    extra,
-                });
-            };
-
-            if (w.type === 'solid') {
-                pushWallBox(-len * 0.5, len * 0.5, 0, bp.floorHeight);
-            } else if (w.type === 'window') {
-                pushWallBox(-len * 0.5, len * 0.5, 0, bp.floorHeight * 0.28);
-                pushWallBox(-len * 0.5, len * 0.5, bp.floorHeight * 0.80, bp.floorHeight);
-                pushWallBox(-len * 0.5, -len * 0.24, bp.floorHeight * 0.26, bp.floorHeight * 0.82);
-                pushWallBox(len * 0.24, len * 0.5, bp.floorHeight * 0.26, bp.floorHeight * 0.82);
-            } else if (w.type === 'door') {
-                pushWallBox(-len * 0.5, -len * 0.36, 0, bp.floorHeight, 'door_jamb', { alongZ, wx: w.x, wz: w.z, side: -1 });
-                pushWallBox(len * 0.36, len * 0.5, 0, bp.floorHeight, 'door_jamb', { alongZ, wx: w.x, wz: w.z, side: 1 });
-                pushWallBox(-len * 0.38, len * 0.38, bp.floorHeight * 0.78, bp.floorHeight);
-                if (w.roomA === -3 || w.roomB === -3) {
-                    pushWallBox(-len * 0.36, len * 0.36, 0, bp.floorHeight * 0.78, 'elev_door', { floorIndex: f });
-                }
-            }
-        }
-
-        for (let i = 0; i < fl.furniture.length; i++) {
-            const fn = fl.furniture[i];
-            boxes.push({
-                kind: 'furniture',
-                x0: fn.x - fn.hx, x1: fn.x + fn.hx,
-                y0: fl.yBase, y1: fl.yBase + fn.h,
-                z0: fn.z - fn.hz, z1: fn.z + fn.hz,
-            });
-        }
-
-        for (let i = 0; i < fl.stairs.length; i++) {
-            const st = fl.stairs[i];
-            stairs.push({
-                x0: st.x0, x1: st.x1,
-                z0: st.z0, z1: st.z1,
-                y0: fl.yBase, y1: fl.yCeil,
-                runLen: st.runLen,
-            });
-        }
-
-        const bins = Array.from({ length: bnx * bnz }, () => []);
-        for (let bi = 0; bi < boxes.length; bi++) {
-            const b = boxes[bi];
-            const ix0 = clamp(Math.floor((b.x0 - minX) / BIN), 0, bnx - 1);
-            const ix1 = clamp(Math.floor((b.x1 - minX) / BIN), 0, bnx - 1);
-            const iz0 = clamp(Math.floor((b.z0 - minZ) / BIN), 0, bnz - 1);
-            const iz1 = clamp(Math.floor((b.z1 - minZ) / BIN), 0, bnz - 1);
-            for (let iz = iz0; iz <= iz1; iz++) {
-                const rowOff = iz * bnx;
-                for (let ix = ix0; ix <= ix1; ix++) {
-                    bins[rowOff + ix].push(bi);
-                }
-            }
-        }
-
-        floors[f] = {
-            boxes,
-            slabs,
-            stairs,
-            bins,
-            stamp: new Uint32Array(boxes.length),
-            tick: 1,
-        };
-    }
+    const floors = new Array(bp.totalFloors).fill(null);
 
     const topFl = bp.floors[bp.totalFloors - 1];
     const roofBox = {
@@ -228,7 +237,7 @@ export function createBuildingCollision(streamer, layout, elevators) {
         // Iterative circle-vs-AABB push-out
         for (let iter = 0; iter < 2; iter++) {
             for (let f = fLo; f <= fHi; f++) {
-                const flIdx = idx.floors[f];
+                const flIdx = getFloorIndex(idx, f);
                 flIdx.tick = (flIdx.tick + 1) >>> 0;
                 if (flIdx.tick === 0) { flIdx.stamp.fill(0); flIdx.tick = 1; }
                 const tick = flIdx.tick;
@@ -288,7 +297,7 @@ export function createBuildingCollision(streamer, layout, elevators) {
         let supportY = -1e9;
         let ceilY = 1e9;
         for (let f = fLo; f <= fHi; f++) {
-            const flIdx = idx.floors[f];
+            const flIdx = getFloorIndex(idx, f);
             for (let si = 0; si < flIdx.slabs.length; si++) {
                 const s = flIdx.slabs[si];
                 if (lx >= s.x0 - 0.12 && lx <= s.x1 + 0.12 && lz >= s.z0 - 0.12 && lz <= s.z1 + 0.12) {

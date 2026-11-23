@@ -57,6 +57,7 @@ export function gridToWorld(u, v) {
 }
 
 export function worldToGrid(x, z) {
+    if (x * x + z * z <= 576.0 * 576.0) return [x, z];
     let u = x;
     let v = z;
     for (let i = 0; i < 6; i++) {

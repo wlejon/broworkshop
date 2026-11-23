@@ -67,10 +67,47 @@ const AWNING_COLORS = [
 
 export function createInteriorStreamer(scene, pools, layout, _horizon) {
     const parallaxSrc = fs.readFileSync(bro.resolvePath('/app/shaders/building_parallax.bk'), 'utf-8');
-    const shellMetaBuf = bro.kernel.createBuffer(MAX_PARALLAX * 2 * 16);
-    const shellMetaF32 = new Float32Array(MAX_PARALLAX * 8);
+    const createMetaRing = (maxCount, ringSize = 4) => {
+        const bufs = Array.from({ length: ringSize }, () => bro.kernel.createBuffer(maxCount * 2 * 16));
+        const f32 = new Float32Array(maxCount * 8);
+        const prev = new Float32Array(maxCount * 8);
+        let prevCount = -1;
+        let ringIdx = 0;
+        return {
+            buf0: bufs[0],
+            f32,
+            sync(batch, count) {
+                if (count <= 0) {
+                    prevCount = 0;
+                    return;
+                }
+                const n = Math.min(maxCount, count);
+                const len = n * 8;
+                let same = (n === prevCount);
+                if (same) {
+                    for (let i = 0; i < len; i++) {
+                        if (f32[i] !== prev[i]) {
+                            same = false;
+                            break;
+                        }
+                    }
+                }
+                if (!same) {
+                    prevCount = n;
+                    prev.set(f32.subarray(0, len));
+                    ringIdx = (ringIdx + 1) % ringSize;
+                    const buf = bufs[ringIdx];
+                    buf.write(f32.subarray(0, len));
+                    batch.setBuffer('shell_meta', buf);
+                }
+            },
+        };
+    };
 
-    const parallaxBatch = pools.registerBatch('parallax_shells', createParallaxShellMesh, {
+    const nearMeta = createMetaRing(MAX_PARALLAX);
+    const fadeMeta = createMetaRing(MAX_PARALLAX);
+
+    const parallaxNearBatch = pools.registerBatch('parallax_shells', createParallaxShellMesh, {
         capacity: MAX_PARALLAX,
         module: parallaxSrc,
         file: 'shaders/building_parallax.bk',
@@ -79,20 +116,34 @@ export function createInteriorStreamer(scene, pools, layout, _horizon) {
         castsShadow: true,
         receivesShadow: true,
         doubleSided: false,
-        drawOrder: 7,
+        drawOrder: 5,
+        fadeOutDist: 0,
+    });
+    parallaxNearBatch.setBuffer('shell_meta', nearMeta.buf0);
+
+    const parallaxFadeBatch = pools.registerBatch('parallax_shells_fade', createParallaxShellMesh, {
+        capacity: MAX_PARALLAX,
+        module: parallaxSrc,
+        file: 'shaders/building_parallax.bk',
+        uniforms: { glow_scale: 0.45, night_factor: 0.0, time: 0.0, pad0: 0.0 },
+        glowScale: 0.45,
+        castsShadow: true,
+        receivesShadow: true,
+        doubleSided: false,
+        drawOrder: 8,
         fadeOutDist: 420,
     });
-    parallaxBatch.setBuffer('shell_meta', shellMetaBuf);
+    parallaxFadeBatch.setBuffer('shell_meta', fadeMeta.buf0);
 
-    // Close-up enterable pools keep fadeOutDist = 0 so hardware early-Z remains enabled.
+    // Close-up enterable pools keep fadeOutDist = 0 and draw front-to-back before terrain/horizon for Early-Z.
     const extWallBatch = pools.registerBatch('bldg_ext_walls', () => createSolidBoxMesh(0, 0), {
-        capacity: 4096, glowScale: 0.45, castsShadow: true, receivesShadow: true, drawOrder: 4, fadeOutDist: 0,
+        capacity: 4096, glowScale: 0.45, castsShadow: true, receivesShadow: true, drawOrder: 3, fadeOutDist: 0,
     });
     const extDoorBatch = pools.registerBatch('bldg_ext_doors', () => createWallDoorMesh(0, 0), {
-        capacity: 512, glowScale: 0.45, castsShadow: true, receivesShadow: true, drawOrder: 4, fadeOutDist: 0,
+        capacity: 512, glowScale: 0.45, castsShadow: true, receivesShadow: true, drawOrder: 3, fadeOutDist: 0,
     });
     const extWinBatch = pools.registerBatch('bldg_ext_windows', () => createWallWindowMesh(0, 0), {
-        capacity: 2048, glowScale: 0.45, castsShadow: true, receivesShadow: true, drawOrder: 4, fadeOutDist: 0,
+        capacity: 2048, glowScale: 0.45, castsShadow: true, receivesShadow: true, drawOrder: 3, fadeOutDist: 0,
     });
     const extGlassBatch = pools.registerBatch('bldg_ext_glass', createWindowGlassMesh, {
         capacity: 2048,
@@ -105,54 +156,54 @@ export function createInteriorStreamer(scene, pools, layout, _horizon) {
         fadeOutDist: 0,
     });
     const oakSlabBatch = pools.registerBatch('bldg_Slab', () => createSolidBoxMesh(2, 1.0), {
-        capacity: 1536, glowScale: 0.45, castsShadow: true, receivesShadow: true, drawOrder: 6, fadeOutDist: 0,
+        capacity: 1536, glowScale: 0.45, castsShadow: true, receivesShadow: true, drawOrder: 3, fadeOutDist: 0,
     });
     const marbleSlabBatch = pools.registerBatch('bldg_Slab_marble', () => createSolidBoxMesh(2, 2.0), {
-        capacity: 512, glowScale: 0.45, castsShadow: true, receivesShadow: true, drawOrder: 6, fadeOutDist: 0,
+        capacity: 512, glowScale: 0.45, castsShadow: true, receivesShadow: true, drawOrder: 3, fadeOutDist: 0,
     });
     const roofBatch = pools.registerBatch('bldg_roofs', () => createSolidBoxMesh(7, 0), {
-        capacity: 512, glowScale: 0.45, castsShadow: true, receivesShadow: true, drawOrder: 6, fadeOutDist: 0,
+        capacity: 512, glowScale: 0.45, castsShadow: true, receivesShadow: true, drawOrder: 4, fadeOutDist: 0,
     });
     const intWallBatch = pools.registerBatch('bldg_int_walls', () => createSolidBoxMesh(0, 1.0), {
-        capacity: 2048, glowScale: 0.45, castsShadow: true, receivesShadow: true, drawOrder: 8, fadeOutDist: 0,
+        capacity: 2048, glowScale: 0.45, castsShadow: true, receivesShadow: true, drawOrder: 3, fadeOutDist: 0,
     });
     const intWinBatch = pools.registerBatch('bldg_int_windows', () => createWallWindowMesh(0, 1.0), {
-        capacity: 1024, glowScale: 0.45, castsShadow: true, receivesShadow: true, drawOrder: 8, fadeOutDist: 0,
+        capacity: 1024, glowScale: 0.45, castsShadow: true, receivesShadow: true, drawOrder: 3, fadeOutDist: 0,
     });
     const intDoorBatch = pools.registerBatch('bldg_int_doors', () => createWallDoorMesh(0, 1.0), {
-        capacity: 1024, glowScale: 0.45, castsShadow: true, receivesShadow: true, drawOrder: 8, fadeOutDist: 0,
+        capacity: 1024, glowScale: 0.45, castsShadow: true, receivesShadow: true, drawOrder: 3, fadeOutDist: 0,
     });
     const stairBatch = pools.registerBatch('bldg_stairs', () => createStairFlightMesh(18), {
-        capacity: 256, glowScale: 0.45, castsShadow: true, receivesShadow: true, drawOrder: 9, fadeOutDist: 0,
+        capacity: 256, glowScale: 0.45, castsShadow: true, receivesShadow: true, drawOrder: 4, fadeOutDist: 0,
     });
     const elevBatch = pools.registerBatch('bldg_elevators', createElevatorCabMesh, {
-        capacity: 64, glowScale: 0.45, castsShadow: true, receivesShadow: true, drawOrder: 9, fadeOutDist: 0,
+        capacity: 64, glowScale: 0.45, castsShadow: true, receivesShadow: true, drawOrder: 4, fadeOutDist: 0,
     });
 
     // Architectural roof/crown/awning silhouettes
     const archBatches = {
         gable:  pools.registerBatch('arch_roof_gable', createGableRoofMesh, { capacity: 512, castsShadow: true, drawOrder: 7, fadeOutDist: 420 }),
         hip:    pools.registerBatch('arch_roof_hip', createHipRoofMesh, { capacity: 512, castsShadow: true, drawOrder: 7, fadeOutDist: 420 }),
-        porch:  pools.registerBatch('arch_porch', createPorchCanopyMesh, { capacity: 256, castsShadow: true, drawOrder: 7, fadeOutDist: 160 }),
-        awning: pools.registerBatch('arch_awning', createStorefrontAwningMesh, { capacity: 256, castsShadow: true, drawOrder: 7, fadeOutDist: 200 }),
+        porch:  pools.registerBatch('arch_porch', createPorchCanopyMesh, { capacity: 256, castsShadow: true, drawOrder: 7, fadeOutDist: 0 }),
+        awning: pools.registerBatch('arch_awning', createStorefrontAwningMesh, { capacity: 256, castsShadow: true, drawOrder: 7, fadeOutDist: 0 }),
         crownA: pools.registerBatch('arch_crown_step', createSkyCrownSteppedMesh, { capacity: 256, castsShadow: true, drawOrder: 7, fadeOutDist: 420 }),
         crownB: pools.registerBatch('arch_crown_spire', createSkyCrownSpireMesh, { capacity: 256, castsShadow: true, drawOrder: 7, fadeOutDist: 420 }),
-        hvac:   pools.registerBatch('arch_hvac', createRoofHvacMesh, { capacity: 512, castsShadow: true, drawOrder: 7, fadeOutDist: 320 }),
+        hvac:   pools.registerBatch('arch_hvac', createRoofHvacMesh, { capacity: 512, castsShadow: true, drawOrder: 7, fadeOutDist: 0 }),
     };
 
     const furnBatches = {
-        table:         pools.registerBatch('furn_table', createTableMesh, { capacity: 512, castsShadow: true, drawOrder: 12, fadeOutDist: 0 }),
-        chair:         pools.registerBatch('furn_chair', createChairMesh, { capacity: 768, castsShadow: true, drawOrder: 12, fadeOutDist: 0 }),
-        desk:          pools.registerBatch('furn_desk', createDeskMesh, { capacity: 512, castsShadow: true, drawOrder: 12, fadeOutDist: 0 }),
-        sofa:          pools.registerBatch('furn_sofa', createSofaMesh, { capacity: 384, castsShadow: true, drawOrder: 12, fadeOutDist: 0 }),
-        bed:           pools.registerBatch('furn_bed', createBedMesh, { capacity: 256, castsShadow: true, drawOrder: 12, fadeOutDist: 0 }),
-        counter:       pools.registerBatch('furn_counter', createCounterMesh, { capacity: 256, castsShadow: true, drawOrder: 12, fadeOutDist: 0 }),
-        shelf:         pools.registerBatch('furn_shelf', createShelfMesh, { capacity: 512, castsShadow: true, drawOrder: 12, fadeOutDist: 0 }),
-        lamp:          pools.registerBatch('furn_lamp', createLampMesh, { capacity: 512, castsShadow: true, drawOrder: 12, fadeOutDist: 0 }),
-        plant:         pools.registerBatch('furn_plant', createPlantMesh, { capacity: 512, castsShadow: true, drawOrder: 12, fadeOutDist: 0 }),
-        rug:           pools.registerBatch('furn_rug', createRugMesh, { capacity: 512, castsShadow: true, drawOrder: 11, fadeOutDist: 0 }),
-        ceiling_light: pools.registerBatch('furn_ceil_light', createCeilingLightMesh, { capacity: 512, castsShadow: false, drawOrder: 12, fadeOutDist: 0 }),
-        wall_art:      pools.registerBatch('furn_wall_art', createWallArtMesh, { capacity: 384, castsShadow: true, drawOrder: 12, fadeOutDist: 0 }),
+        table:         pools.registerBatch('furn_table', createTableMesh, { capacity: 512, castsShadow: true, drawOrder: 4, fadeOutDist: 0 }),
+        chair:         pools.registerBatch('furn_chair', createChairMesh, { capacity: 768, castsShadow: true, drawOrder: 4, fadeOutDist: 0 }),
+        desk:          pools.registerBatch('furn_desk', createDeskMesh, { capacity: 512, castsShadow: true, drawOrder: 4, fadeOutDist: 0 }),
+        sofa:          pools.registerBatch('furn_sofa', createSofaMesh, { capacity: 384, castsShadow: true, drawOrder: 4, fadeOutDist: 0 }),
+        bed:           pools.registerBatch('furn_bed', createBedMesh, { capacity: 256, castsShadow: true, drawOrder: 4, fadeOutDist: 0 }),
+        counter:       pools.registerBatch('furn_counter', createCounterMesh, { capacity: 256, castsShadow: true, drawOrder: 4, fadeOutDist: 0 }),
+        shelf:         pools.registerBatch('furn_shelf', createShelfMesh, { capacity: 512, castsShadow: true, drawOrder: 4, fadeOutDist: 0 }),
+        lamp:          pools.registerBatch('furn_lamp', createLampMesh, { capacity: 512, castsShadow: true, drawOrder: 4, fadeOutDist: 0 }),
+        plant:         pools.registerBatch('furn_plant', createPlantMesh, { capacity: 512, castsShadow: true, drawOrder: 4, fadeOutDist: 0 }),
+        rug:           pools.registerBatch('furn_rug', createRugMesh, { capacity: 512, castsShadow: true, drawOrder: 4, fadeOutDist: 0 }),
+        ceiling_light: pools.registerBatch('furn_ceil_light', createCeilingLightMesh, { capacity: 512, castsShadow: false, drawOrder: 4, fadeOutDist: 0 }),
+        wall_art:      pools.registerBatch('furn_wall_art', createWallArtMesh, { capacity: 384, castsShadow: true, drawOrder: 4, fadeOutDist: 0 }),
     };
 
     const enterableSet = new Set();
@@ -229,23 +280,25 @@ export function createInteriorStreamer(scene, pools, layout, _horizon) {
         };
     }
 
-    function pushParallaxMass(m, camPos, yBase, height, w, d, cxLocal, czLocal, yOffset) {
-        const idx = parallaxBatch.count();
+    function pushParallaxMass(m, camPos, yBase, height, w, d, cxLocal, czLocal, yOffset, useFade = false) {
+        const batch = useFade ? parallaxFadeBatch : parallaxNearBatch;
+        const idx = batch.count();
         if (idx >= MAX_PARALLAX) return;
         const c = Math.cos(m.rot), s = Math.sin(m.rot);
         const wx = m.originX + c * cxLocal + s * czLocal;
         const wz = m.originZ - s * cxLocal + c * czLocal;
-        const pushed = parallaxBatch.pushRel(wx, yBase, wz, camPos, 0, m.rot, 0, w, height, d, m.palette);
+        const pushed = batch.pushRel(wx, yBase, wz, camPos, 0, m.rot, 0, w, height, d, m.palette);
         if (pushed < 0) return;
+        const meta = useFade ? fadeMeta.f32 : nearMeta.f32;
         const o = pushed * 8;
-        shellMetaF32[o + 0] = w;
-        shellMetaF32[o + 1] = height;
-        shellMetaF32[o + 2] = d;
-        shellMetaF32[o + 3] = m.floorHeight;
-        shellMetaF32[o + 4] = (m.seedMod ?? 0.5);
-        shellMetaF32[o + 5] = kindCode(m.kind);
-        shellMetaF32[o + 6] = yOffset;
-        shellMetaF32[o + 7] = m.archStyle ?? 0;
+        meta[o + 0] = w;
+        meta[o + 1] = height;
+        meta[o + 2] = d;
+        meta[o + 3] = m.floorHeight;
+        meta[o + 4] = (m.seedMod ?? 0.5);
+        meta[o + 5] = kindCode(m.kind);
+        meta[o + 6] = yOffset;
+        meta[o + 7] = m.archStyle ?? 0;
         stats.parallaxCount++;
     }
 
@@ -467,9 +520,7 @@ export function createInteriorStreamer(scene, pools, layout, _horizon) {
         const glowScale = atmoState?.emissiveScale ?? 0.45;
         pools.setGlowAll(glowScale);
         pools.setUniformAll('night_factor', nightFactor);
-        parallaxBatch.setFadeOutDist(lod.meshFadeStart);
-        parallaxBatch.setUniform('night_factor', nightFactor);
-        parallaxBatch.setUniform('time', simTime);
+        parallaxFadeBatch.setFadeOutDist(lod.meshFadeStart);
 
         const groundY = layout.sampleGroundHeight(camPos[0], camPos[2]);
         const groundAlt = Math.max(0, camPos[1] - groundY);
@@ -505,17 +556,18 @@ export function createInteriorStreamer(scene, pools, layout, _horizon) {
                     } else {
                         enterableSet.delete(p.id);
                         const m = getBuildingMass(p);
+                        const useFade = d >= lod.meshFadeStart - 16;
                         if (m.setbackStart < m.totalFloors) {
                             const hLo = m.setbackStart * m.floorHeight;
                             const hHi = (m.totalFloors - m.setbackStart) * m.floorHeight;
-                            pushParallaxMass(m, camPos, m.baseY - 0.45, hLo + 0.45, m.width, m.depth, 0, 0, -0.45);
-                            pushParallaxMass(m, camPos, m.baseY - 0.45, hLo + hHi + 0.45, m.sbWidth, m.sbDepth, 0, 0, -0.45);
+                            pushParallaxMass(m, camPos, m.baseY - 0.45, hLo + 0.45, m.width, m.depth, 0, 0, -0.45, useFade);
+                            pushParallaxMass(m, camPos, m.baseY - 0.45, hLo + hHi + 0.45, m.sbWidth, m.sbDepth, 0, 0, -0.45, useFade);
                             if (d < lod.meshFadeStart) {
                                 pushRoofSilhouette(m, camPos, m.sbWidth, m.sbDepth, m.baseY + hLo + hHi, 0, 0, d);
                             }
                         } else {
                             const totH = m.totalFloors * m.floorHeight;
-                            pushParallaxMass(m, camPos, m.baseY - 0.45, totH + 0.45, m.width, m.depth, 0, 0, -0.45);
+                            pushParallaxMass(m, camPos, m.baseY - 0.45, totH + 0.45, m.width, m.depth, 0, 0, -0.45, useFade);
                             if (d < lod.meshFadeStart) {
                                 pushRoofSilhouette(m, camPos, m.width, m.depth, m.baseY + totH, 0, 0, d);
                             }
@@ -538,9 +590,8 @@ export function createInteriorStreamer(scene, pools, layout, _horizon) {
             emitEnterableBuilding(bp, camPos, isAct, af, activeRoomId, furnish, elevators);
         }
 
-        if (stats.parallaxCount > 0) {
-            shellMetaBuf.write(shellMetaF32.subarray(0, stats.parallaxCount * 8));
-        }
+        nearMeta.sync(parallaxNearBatch, parallaxNearBatch.count());
+        fadeMeta.sync(parallaxFadeBatch, parallaxFadeBatch.count());
 
         return activeInfo;
     }

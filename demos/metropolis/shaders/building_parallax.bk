@@ -26,8 +26,10 @@ pub fn vertex(v_in: mesh::Vertex) -> mesh::Vertex {
 }
 
 fn hash21(p: vec2<f32>, seed: f32) -> f32 {
-    let q = vec2<f32>(dot(p, vec2<f32>(127.1, 311.7)) + seed * 17.3, dot(p, vec2<f32>(269.5, 183.3)) + seed * 43.7);
-    return fract(sin(q.x * 0.13 + q.y * 0.27) * 43758.5453);
+    var q = fract(vec3<f32>(p.x + seed * 17.3, p.y + seed * 43.7, p.x * 0.71 - p.y * 0.37) * 0.1031);
+    let d = dot(q, vec3<f32>(q.y + 33.33, q.z + 33.33, q.x + 33.33));
+    q = q + vec3<f32>(d);
+    return fract((q.x + q.y) * q.z);
 }
 
 fn vnoise2(p: vec2<f32>, seed: f32) -> f32 {
@@ -65,14 +67,6 @@ pub fn fragment(v: mesh::Vertex, s: mesh::Surface) -> mesh::Surface {
     let detail_wall = 1.0 - smoothstep(0.08, 0.38, dp_wall);
     let detail_roof = 1.0 - smoothstep(0.10, 0.45, dp_roof);
 
-    let g_wall = fbm2(wall_p * 1.8, seed) - 0.5;
-    let gx_w = (vnoise2(wall_p * 3.4 + vec2<f32>(0.08, 0.0), seed) - vnoise2(wall_p * 3.4 - vec2<f32>(0.08, 0.0), seed)) * detail_wall * 3.2;
-    let gy_w = (vnoise2(wall_p * 3.4 + vec2<f32>(0.0, 0.08), seed) - vnoise2(wall_p * 3.4 - vec2<f32>(0.0, 0.08), seed)) * detail_wall * 3.2;
-
-    let g_roof = fbm2(roof_p * 0.5, seed) - 0.5;
-    let gx_r = (vnoise2(roof_p * 2.2 + vec2<f32>(0.1, 0.0), seed) - vnoise2(roof_p * 2.2 - vec2<f32>(0.1, 0.0), seed)) * detail_roof * 3.2;
-    let gy_r = (vnoise2(roof_p * 2.2 + vec2<f32>(0.0, 0.1), seed) - vnoise2(roof_p * 2.2 - vec2<f32>(0.0, 0.1), seed)) * detail_roof * 3.2;
-
     let n = normalize(v.normal);
     let t = normalize(v.tangent.xyz);
     let b = normalize(v.bitangent);
@@ -83,6 +77,14 @@ pub fn fragment(v: mesh::Vertex, s: mesh::Surface) -> mesh::Surface {
         let rz_e = fract(abs(v.v0.z) * 0.12);
         let parapet_seam = 1.0 - 0.08 * smoothstep(0.46, 0.495, max(abs(rx_e - 0.5), abs(rz_e - 0.5))) * detail_roof;
         let roof_base = kind == 0 ? vec3<f32>(0.24, 0.22, 0.21) : vec3<f32>(0.34, 0.35, 0.37);
+        let g_roof = fbm2(roof_p * 0.5, seed) - 0.5;
+        var gx_r: f32 = 0.0;
+        var gy_r: f32 = 0.0;
+        if (detail_roof > 0.001) {
+            let r0 = vnoise2(roof_p * 2.2, seed);
+            gx_r = (vnoise2(roof_p * 2.2 + vec2<f32>(0.1, 0.0), seed) - r0) * detail_roof * 6.4;
+            gy_r = (vnoise2(roof_p * 2.2 + vec2<f32>(0.0, 0.1), seed) - r0) * detail_roof * 6.4;
+        }
         out.base_color = roof_base * clamp(1.0 + 0.14 * g_roof, 0.82, 1.16) * parapet_seam;
         out.roughness = 0.86;
         out.metallic = 0.04;
@@ -116,6 +118,14 @@ pub fn fragment(v: mesh::Vertex, s: mesh::Surface) -> mesh::Surface {
             let cornice = is_spandrel ? (kind == 2 && is_curtain ? 0.72 : 0.86) : 0.96;
             let frame_shut = (kind == 0 && bv > sill_y && bv < lintel_y && (abs(bu - margin_x) < 0.055 || abs(bu - (1.0 - margin_x)) < 0.055));
 
+            let g_wall = detail_wall > 0.001 ? (fbm2(wall_p * 1.8, seed) - 0.5) : 0.0;
+            var gx_w: f32 = 0.0;
+            var gy_w: f32 = 0.0;
+            if (detail_wall > 0.001) {
+                let w0 = vnoise2(wall_p * 3.4, seed);
+                gx_w = (vnoise2(wall_p * 3.4 + vec2<f32>(0.08, 0.0), seed) - w0) * detail_wall * 6.4;
+                gy_w = (vnoise2(wall_p * 3.4 + vec2<f32>(0.0, 0.08), seed) - w0) * detail_wall * 6.4;
+            }
             let fac_albedo = wall_tint * clamp(1.0 + 0.16 * g_wall * detail_wall, 0.82, 1.12) * clapboard * brick_row * cornice;
             out.base_color = frame_shut ? vec3<f32>(0.22, 0.26, 0.30) : min(vec3<f32>(0.50), fac_albedo);
             out.roughness = is_curtain ? 0.34 : 0.80;

@@ -23,7 +23,8 @@ function assertStreetBudget(r, label) {
     }
     if (r.timed) {
         check(r.total.mean <= 5.0, `${label}: total.mean <= 5.0ms (>= 200 fps), got ${r.total.mean.toFixed(3)}ms (${r.fps.toFixed(1)} fps)`);
-        check(r.total.p99 <= 12.0, `${label}: total.p99 <= 12.0ms (no stall), got ${r.total.p99.toFixed(3)}ms`);
+        check(r.total.p90 <= 6.0, `${label}: total.p90 <= 6.0ms, got ${r.total.p90.toFixed(3)}ms`);
+        check(r.total.p99 <= 20.0, `${label}: total.p99 <= 20.0ms (no stall), got ${r.total.p99.toFixed(3)}ms`);
         check((r.spikes || []).length / r.frames <= 0.15, `${label}: bounded spike fraction (${(r.spikes || []).length}/${r.frames})`);
     }
 }

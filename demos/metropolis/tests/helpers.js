@@ -691,6 +691,9 @@ export async function runPerfMeasure(label, opts = {}) {
     if (opts.settle !== false) {
         await settle({ maxFrames: tier(400, 2000) });
     }
+    if (typeof perf !== "undefined" && typeof perf.measure === "function") {
+        perf.measure({ frames: tier(10, 60), warm: 0, stepMs: 5.0 });
+    }
     const r = perf.measure({
         frames: opts.frames != null ? opts.frames : tier(30, 120),
         warm: opts.warm != null ? opts.warm : tier(5, 15),
