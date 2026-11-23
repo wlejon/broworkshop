@@ -382,8 +382,11 @@ pub fn fragment(v: mesh::Vertex, s_in: mesh::Surface) -> mesh::Surface {
         let mortar = max(pulse(y / 0.075, 0.0, 0.14, fy / 0.075),
                          pulse(u / 0.23 + 0.5 * (row - 2.0 * floor(row * 0.5)), 0.0, 0.05, fu / 0.23));
         let vis = 1.0 - smoothstep(0.02, 0.05, fpx);
-        wall = mix(wall, vec3<f32>(0.42, 0.40, 0.36), mortar * vis * 0.8 + 0.08 * (1.0 - vis));
-        wall *= 0.9 + 0.2 * hash3(floor(u / 0.23), row, id) * vis;
+        // Far away each term is its mean: the mortar's share of the wall
+        // (courses 0.14, joints 0.05: 1 - 0.86 * 0.95 = 0.183, at 0.8) and
+        // the bricks' mean tone (0.5 of the hash).
+        wall = mix(wall, vec3<f32>(0.42, 0.40, 0.36), (mortar * vis + 0.183 * (1.0 - vis)) * 0.8);
+        wall *= 0.9 + 0.2 * mix(0.5, hash3(floor(u / 0.23), row, id), vis);
     } else if (style == STYLE_SIDING) {
         wall *= 1.0 - 0.18 * pulse(y / 0.2, 0.0, 0.18, fy / 0.2);
     } else if (style == STYLE_INDUSTRIAL) {

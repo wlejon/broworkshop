@@ -22,7 +22,8 @@
 
 import { frames, waitFor } from "/lib/kit/test.js";
 import { riverCenterX, terrainHeight } from "/app/world/terrain_field.js";
-import { massRecord } from "/lib/city/interior.js";
+import { massRecord, floorsOf } from "/lib/city/interior.js";
+import { STYLE } from "/lib/city/buildings.js";
 import { TREE_FLOATS } from "/lib/city/trees.js";
 waitFor(() => Boolean(globalThis.__metropolis), "mounted", 60000);
 const m = globalThis.__metropolis;
@@ -411,4 +412,41 @@ function track(poses, every) {
 }
 for (const n of carN) n.visible = true;
 for (const n of treeN) n.visible = true;
+{
+  // Inside by day the outdoors' light stops at the walls: from a corner of a
+  // shop's and an office's floor, the lower half of the frame (floor, shelves,
+  // desks) is not burnt white. (The interior volume's edge fade at 0.4 m lit
+  // a band inside the walls with the sun under the room's exposure: shop
+  // 2.2 %, office 10.5 % near-white; 1.5 % and 0.4 % at 5 cm.)
+  m.setTimeMode('day');
+  m.interiors.enabled = true;
+  bro.time.paused = false;   // (the eye adapts to the room)
+  const B = m.city.masses.buildings, D = m.city.masses.data, found = {};
+  const want = {
+    shop: (M) => (M.flags & 2) && M.hw > 6 && M.hd > 6,
+    office: (M) => (M.style === STYLE.office || M.style === STYLE.glass) && M.hw > 10 && M.hd > 8,
+  };
+  for (let bi = 600; bi < B.length && Object.keys(found).length < 2; bi++) {
+    const M = massRecord(D, B[bi].first);
+    for (const [u, f] of Object.entries(want)) if (!found[u] && f(M)) found[u] = M;
+  }
+  for (const [u, M] of Object.entries(found)) {
+    const F = floorsOf(M)[u === 'office' ? Math.min(2, floorsOf(M).length - 1) : 0];
+    const c = Math.cos(M.yaw), sn = Math.sin(M.yaw);
+    const W = (lx, ly, lz) => [M.cx + c * lx + sn * lz, M.y0 + ly, M.cz - sn * lx + c * lz];
+    const e = W(-M.hw + 1.0, F.y0 + 1.65, -M.hd + 1.0), t = W(M.hw * 0.4, F.y0 + 0.9, M.hd * 0.4);
+    for (let i = 0; i < 150; i++) { m.lookAt(e, t); frames(1); }
+    m.interiors.finish(); for (let i = 0; i < 8; i++) { m.lookAt(e, t); frames(1); }
+    const im = shot();
+    let n = 0, white = 0;
+    for (let y = im.height >> 1; y < im.height - 60; y += 2) for (let x = 0; x < im.width; x += 2) {
+      const k = (y * im.width + x) * 4; n++;
+      if (im.data[k] > 245 && im.data[k + 1] > 245 && im.data[k + 2] > 245) white++;
+    }
+    globalThis.WHITE = (globalThis.WHITE ?? '') + ` ${u} ${(white / n * 100).toFixed(1)}`;
+    check(white / n < 0.04, `inside a ${u} by day the floor by the windows is not burnt white (${(white / n * 100).toFixed(1)} % of the lower half near-white)`);
+  }
+  m.interiors.enabled = false;
+  bro.time.paused = true;
+}
 console.log(failed ? `${failed} FAILED` : 'ALL PASS');
