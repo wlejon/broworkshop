@@ -190,7 +190,8 @@ struct Room {
 
 // p: the point on the window in the room's frame (x across 0..w, y up 0..h, z = 0);
 // d: the eye ray in that frame, z pointing into the room (d.z > 0).
-fn room_hit(p: vec3<f32>, d: vec3<f32>, w: f32, h: f32, depth: f32, rh: f32) -> Room {
+// (fixture_mean: the ceiling lamp by its share of the ceiling, for averages.)
+fn room_hit(p: vec3<f32>, d: vec3<f32>, w: f32, h: f32, depth: f32, rh: f32, fixture_mean: bool) -> Room {
     let tx = d.x > 0.0 ? (w - p.x) / d.x : (0.0 - p.x) / min(d.x, -0.0001);
     let ty = d.y > 0.0 ? (h - p.y) / d.y : (0.0 - p.y) / min(d.y, -0.0001);
     let tz = depth / max(d.z, 0.0001);
@@ -208,7 +209,7 @@ fn room_hit(p: vec3<f32>, d: vec3<f32>, w: f32, h: f32, depth: f32, rh: f32) -> 
             let fx = abs(hp.x - w * 0.5) / w;
             let fz = abs(hp.z - depth * 0.45) / depth;
             col = vec3<f32>(0.80, 0.79, 0.76);
-            lamp = 1.0 + 2.0 * (1.0 - smoothstep(0.06, 0.12, max(fx, fz)));
+            lamp = fixture_mean ? 1.07 : 1.0 + 2.0 * (1.0 - smoothstep(0.06, 0.12, max(fx, fz)));
         } else {
             col = floorc;
             lamp = 0.7;
@@ -230,6 +231,22 @@ fn room_hit(p: vec3<f32>, d: vec3<f32>, w: f32, h: f32, depth: f32, rh: f32) -> 
         lamp = 0.75;
     }
     return Room(col, lamp);
+}
+
+// A window's room as the eye ray sees it, averaged over the window (nine
+// points of it, blinds included; four miss the furniture block and read
+// night offices 8 % bright): what a far pixel's box filter of the
+// resolved room converges to, from whatever angle it is seen.
+fn room_mean(dr: vec3<f32>, wx0: f32, wx1: f32, wy0: f32, wy1: f32, w: f32, h: f32, depth: f32, rh: f32, blinds: bool) -> vec3<f32> {
+    var acc = vec3<f32>(0.0, 0.0, 0.0);
+    for (var k: i32 = 0; k < 9; k += 1) {
+        let sx = mix(wx0, wx1, (f32(k % 3) + 0.5) / 3.0);
+        let sy = mix(wy0, wy1, (f32(k / 3) + 0.5) / 3.0);
+        var r = room_hit(vec3<f32>(sx * w, sy * h, 0.0), dr, w, h, depth, rh, true);
+        if (blinds && sy > mix(wy0, wy1, 0.55)) { r = Room(mix(vec3<f32>(0.72, 0.68, 0.6), vec3<f32>(0.5, 0.52, 0.55), rh), 0.9); }
+        acc += r.albedo * r.lamp * (1.0 / 9.0);
+    }
+    return acc;
 }
 
 fn fw1(x: f32) -> f32 {
@@ -391,7 +408,8 @@ pub fn fragment(v: mesh::Vertex, s_in: mesh::Surface) -> mesh::Surface {
         wall *= 1.0 - 0.18 * pulse(y / 0.2, 0.0, 0.18, fy / 0.2);
     } else if (style == STYLE_INDUSTRIAL) {
         let rib = 0.5 + 0.5 * sin(u * 6.2831 / 0.3);
-        wall *= 0.88 + 0.14 * rib * (1.0 - smoothstep(0.05, 0.15, fu));
+        // (Far away the ribs' mean, 0.5: the cladding's tone holds.)
+        wall *= 0.88 + 0.14 * mix(0.5, rib, 1.0 - smoothstep(0.05, 0.15, fu));
     }
     // A slab line between floors and a cornice at the top.
     if (!ground && style != STYLE_GLASS) {
@@ -440,21 +458,23 @@ pub fn fragment(v: mesh::Vertex, s_in: mesh::Surface) -> mesh::Surface {
     if (near_k > 0.0 && win > 0.0 && dr.z > 0.0) {
         let wx0 = L.wx0 * room_w;
         let pr = vec3<f32>(bu * room_w, fy01 * fh, 0.0);
-        room = room_hit(pr, dr, room_w, fh, depth, rh);
+        room = room_hit(pr, dr, room_w, fh, depth, rh, false);
         if (blinds && fy01 > mix(L.wy0, L.wy1, 0.55)) { room = Room(mix(vec3<f32>(0.72, 0.68, 0.6), vec3<f32>(0.5, 0.52, 0.55), rh), 0.9); }
     }
-    // Far away a room is its average.
-    let avg = vec3<f32>(0.42, 0.40, 0.36);
-    let ralb = mix(avg, room.albedo, near_k);
-    let rlamp = mix(0.95, room.lamp, near_k);
+    // Far away a room is its average over the window, seen along the eye ray.
+    var rfar = vec3<f32>(0.0, 0.0, 0.0);
+    if (near_k < 1.0 && win > 0.0 && dr.z > 0.0) {
+        rfar = room_mean(dr, L.wx0, L.wx1, L.wy0, L.wy1, room_w, fh, depth, rh, blinds);
+    }
+    let rlit = mix(rfar, room.albedo * room.lamp, near_k);
 
     // Light: by day a dim room behind the glass; at night the lit ones glow,
     // and far away every window glows by the expected share lit.
     let win_k = 1.0 - smoothstep(0.3, 0.7, max(fu / bw, fy / fh));
     let lit_f = mix(lit_p, lit ? 1.0 : 0.0, win_k);
-    let night_glow = ralb * rlamp * warm * params.room_night * night * lit_f;
+    let night_glow = rlit * warm * params.room_night * night * lit_f;
     // Shops are lit by day too, several times an office's light.
-    let day_glow = ralb * rlamp * params.room_day * (ground && shop ? 8.0 : 0.55 + 0.45 * lit_f);
+    let day_glow = rlit * params.room_day * (ground && shop ? 8.0 : 0.55 + 0.45 * lit_f);
     let glow = night_glow + day_glow * (1.0 - night);
 
     let glass = glass_tint(style, hue);

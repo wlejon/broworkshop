@@ -8,7 +8,9 @@
 //    level against the finest within a third) and leaf colour across every level
 //    boundary, and the fade band's middle covers as the levels either side;
 //    a car's level swap at its switch distance changes it no more than
-//    moving 1 %;
+//    moving 1 %; a facade of every style, seen through a narrow and the
+//    normal view from one eye, has the same mean in linear light (its far
+//    shading is its near shading averaged);
 //  - dollying out from the street to 3 km over a clear path, no step changes
 //    the frame much more than the steps either side (no whole-frame pop:
 //    one object's level change is spread over many frames, so this catches
@@ -119,6 +121,76 @@ function rectOf(pts, W, H, pad = 0) {
 }
 const treeN = m.trees.nodes, carN = m.cars.nodes;
 treeN.forEach((n) => n.visible = false); carN.forEach((n) => n.visible = false);
+const FOV = 60;   // the fly camera's own
+{
+  // A facade's far shading is its near shading averaged. From one eye, a
+  // 12 m patch of a front through a narrow view (~1.5 cm pixels, every
+  // facade term resolved: bricks, mortar, ribs, the rooms behind the glass)
+  // and the normal one (~0.2 m pixels, every term at its far mean), in
+  // linear light: a linear tone curve at a fixed EV that puts the patch
+  // mid-range (averaging after ACES reads its toe's convexity as darkening,
+  // and an 8-bit mean near black is rounding). The tall styles also from
+  // below, as a street sees them: the rooms' far mean follows the angle.
+  // Old far means failed this: brick and rowhouse terms (rowhouse x0.90),
+  // a fixed room average (night glass x0.88), four room samples (night
+  // office x1.08); the spread now is 0.98-1.05 (noise floor ~1 %).
+  const lin = (q) => { q /= 255; return q <= 0.04045 ? q / 12.92 : ((q + 0.055) / 1.055) ** 2.4; };
+  const meanLin = (im) => { const a = [0, 0, 0]; let clip = 0; for (let k = 0; k < im.data.length; k += 4) { for (let ch = 0; ch < 3; ch++) a[ch] += lin(im.data[k + ch]); if (im.data[k] > 252 || im.data[k + 1] > 252 || im.data[k + 2] > 252) clip++; } const n = im.data.length / 4; return { c: a.map((v) => v / n), clip: clip / n }; };
+  const NAMES = Object.keys(STYLE).sort((a, b) => STYLE[a] - STYLE[b]);
+  const D = 200;
+  const pick = (st, els) => {
+    for (const M of allM) {
+      if (M.style !== st || M.h < 4.5 || M.hw < 4) continue;
+      const c = Math.cos(M.yaw), sn = Math.sin(M.yaw);
+      const W = (lx, ly, lz) => [M.cx + c * lx + sn * lz, M.y0 + ly, M.cz - sn * lx + c * lz];
+      const pw = Math.min(M.hw - 1, 6), y0 = M.h < 12 ? 0.6 : Math.max(4.6, M.h * 0.5 - 6), y1 = Math.min(M.h - 1.2, y0 + 12);
+      if (y1 - y0 < 2.5) continue;
+      const mid = W(0, (y0 + y1) / 2, M.hd + 0.05), corners = [W(-pw, y0, M.hd), W(pw, y0, M.hd), W(-pw, y1, M.hd), W(pw, y1, M.hd)];
+      for (const el of els) for (const a of [0.25, -0.25, 0.5, -0.5]) {
+        const fx = sn, fz = c, h = Math.cos(el);
+        const dir = [(fx * Math.cos(a) + fz * Math.sin(a)) * h, Math.sin(el), (fz * Math.cos(a) - fx * Math.sin(a)) * h];
+        const eye = [mid[0] + dir[0] * D, mid[1] + dir[1] * D, mid[2] + dir[2] * D];
+        if (eye[1] < terrainHeight(eye[0], eye[2]) + 3) continue;
+        if (corners.every((t) => !blocked(eye, t, M)) && !blocked(eye, mid, M)) return { eye, mid, corners, span: Math.max(2 * pw, y1 - y0) };
+      }
+    }
+    return null;
+  };
+  const views = [];
+  for (let st = 0; st < NAMES.length; st++) {
+    views.push({ name: NAMES[st], P: pick(st, [0.12, 0.2]) });
+    if (st === STYLE.glass || st === STYLE.office || st === STYLE.stone) views.push({ name: `${NAMES[st]} from below`, P: pick(st, [-0.1, -0.06]) });
+  }
+  for (const tm of ['day', 'night']) {
+    for (const { name, P } of views) {
+      m.setTimeMode(tm);
+      if (!P) { check(false, `${tm} ${name}: a facade seen clear from ${D} m`); continue; }
+      const narrow = 2 * Math.atan(P.span * 0.75 / D) * 180 / Math.PI;
+      const take = (fov) => {
+        m.cam.setFov(fov);
+        for (let i = 0; i < 12; i++) { m.lookAt(P.eye, P.mid); frames(1); }
+        const im = shot();
+        let r = rectOf(P.corners, im.width, im.height); const w = r[2] - r[0], h = r[3] - r[1];
+        r = [r[0] + Math.round(w * 0.12), r[1] + Math.round(h * 0.12), r[2] - Math.round(w * 0.12), r[3] - Math.round(h * 0.12)];
+        return { ...meanLin(crop(im, r)), px: r[2] - r[0] };
+      };
+      // The EV that brings the narrow view's mean to about 0.12 of white.
+      let ev = tm === 'day' ? 14 : 2;
+      m.scene.setToneMap({ mode: 'linear' });
+      for (let it = 0; it < 2; it++) {
+        m.scene.setExposure({ mode: 'fixed', ev });
+        const n = take(narrow);
+        ev += Math.log2(Math.max(1e-4, (n.c[0] + n.c[1] + n.c[2]) / 3) / 0.12);
+      }
+      m.scene.setExposure({ mode: 'fixed', ev });
+      const a = take(narrow), b = take(FOV);
+      const ratio = (b.c[0] + b.c[1] + b.c[2]) / (a.c[0] + a.c[1] + a.c[2]);
+      check(Math.abs(ratio - 1) < 0.06 && a.clip < 0.02, `${tm} ${name}: its far shading is its near shading averaged (wide view ${b.px} px across, mean x${ratio.toFixed(3)} of the narrow's, ${(a.clip * 100).toFixed(1)} % clipped)`);
+    }
+  }
+  m.cam.setFov(FOV);
+  m.setTimeMode('day');
+}
 {
   // Per style a mass and a side from which 150 m, 500 m and 2 km all see
   // its centre and its top corners (no other building in between).
@@ -150,7 +222,7 @@ treeN.forEach((n) => n.visible = false); carN.forEach((n) => n.visible = false);
         if (!r) { r = rectOf(corners, im.width, im.height); const w = r[2] - r[0], h = r[3] - r[1]; r = [r[0] + Math.round(w * 0.1), r[1] + Math.round(h * 0.1), r[2] - Math.round(w * 0.1), r[3] - Math.round(h * 0.1)]; }
         cs.push(crop(im, r));
       }
-      m.cam.setFov(58);
+      m.cam.setFov(FOV);
       // Compared at 12x12 (box-averaged: windows and brick average out, a
       // change of form stays), each channel fitted as a.x + b to the
       // reference: the air's haze (and the view's own) is such a blend toward
@@ -201,7 +273,9 @@ m.setTimeMode('day');
   };
   for (let si = 0; si < 4; si++) {
     const trees = [];
-    for (let i = 0; i < NT && trees.length < 24; i += 53) {
+    // (From the 13th record: calibration (export_trees.js AREA) used samples
+    // from offsets 0, 7, 23, 41 and 59; this one is held out from every species.)
+    for (let i = 13; i < NT && trees.length < 24; i += 53) {
       if (TR[i * TREE_FLOATS + 5] !== si || TR[i * TREE_FLOATS + 6] < 0.99) continue;
       const t = [TR[i * TREE_FLOATS], TR[i * TREE_FLOATS + 1], TR[i * TREE_FLOATS + 2]], up = [t[0], t[1] + 8, t[2]];
       if (![30, 700].some((d) => blocked([t[0] + 0.7 * d, t[1] + 0.35 * d, t[2] + 0.6 * d], up))) trees.push(t);
@@ -260,6 +334,8 @@ m.setTimeMode('day');
   treeN.forEach((n) => { n.visible = true; });
 }
 {
+  // (Trees hidden: one's shade or leaves over a 15 px car read as the car.)
+  treeN.forEach((n) => { n.visible = false; });
   const byType = {};
   for (const n of carN) { const mm = n.name.match(/city_cars_(.+)_lod(\d)/); if (mm) (byType[mm[1]] ??= [])[+mm[2]] = n; }
   treeN.forEach((n) => n.visible = false);
@@ -301,8 +377,11 @@ m.setTimeMode('day');
         const A = crop(imgs[0], r), Bc = crop(imgs[1], r), E = crop(empty, r);
         const contrast = mad(E, A), change = contrast > 0 ? mad(A, Bc) / contrast : 1, drawn = 1 - ssim(E, A);
         const control = contrast > 0 ? mad(crop(imgs[1], r), crop(moved, r)) / contrast : 1;
-        ok = ok && change < Math.max(0.15, control + 0.1) && drawn > 0.2;
-        res.push(`lod${k}->${k + 1} at ${dist} m changes ${(change * 100).toFixed(0)} % of the car's contrast, moving 1 % ${(control * 100).toFixed(0)} %`);
+        // (drawn: the level draws at all, against the empty road, where a
+        // missing one reads ~0; a grey hatch at 300 m reads 0.18-0.34 by what
+        // ran before it, so the floor is 0.1.)
+        ok = ok && change < Math.max(0.15, control + 0.1) && drawn > 0.1;
+        res.push(`lod${k}->${k + 1} at ${dist} m changes ${(change * 100).toFixed(0)} % of the car's contrast, moving 1 % ${(control * 100).toFixed(0)} %, drawn ${drawn.toFixed(2)}`);
       }
       lv.forEach((n) => { n.setInstances(new Float32Array(0)); n.visible = true; });
       check(ok, `${tm} ${name}: a car's level swap changes it no more than moving 1 % does (${res.join(', ')})`);
@@ -417,7 +496,8 @@ for (const n of treeN) n.visible = true;
   // shop's and an office's floor, the lower half of the frame (floor, shelves,
   // desks) is not burnt white. (The interior volume's edge fade at 0.4 m lit
   // a band inside the walls with the sun under the room's exposure: shop
-  // 2.2 %, office 10.5 % near-white; 1.5 % and 0.4 % at 5 cm.)
+  // 2.2 %, office 10.5 % near-white; 1.5 % and 0.4 % at 5 cm. Only the
+  // office tells them apart: the shop is lit bright by day either way.)
   m.setTimeMode('day');
   m.interiors.enabled = true;
   bro.time.paused = false;   // (the eye adapts to the room)
