@@ -7,7 +7,6 @@
 import { SKY, daylight } from "/lib/kit/sky.js";
 import { generateCity } from "/lib/city/generate.js";
 import { createBuildingRenderer } from "/lib/city/building_render.js";
-import { packGround } from "/lib/city/ground.js";
 import { terrainHeight, riverCenterX } from "/app/world/terrain_field.js";
 import { SITE } from "/app/world/site.js";
 import { createTerrainStream } from "/app/world/terrain_stream.js";
@@ -55,7 +54,7 @@ const city = generateCity(SITE);
 console.log(`metropolis: city in ${(perf.now() - t0).toFixed(0)} ms: ${city.graph.edges.length} roads, ${city.lots.length} lots, ${city.masses.count} masses`,
     JSON.stringify(Object.fromEntries(Object.entries(city.timings).map(([k, v]) => [k, Math.round(v)]))));
 
-const ground = packGround(city.graph, { half: SITE.half });
+const ground = city.ground;
 const terrain = createTerrainStream(scene, ground);
 
 let timeMode = 'day';

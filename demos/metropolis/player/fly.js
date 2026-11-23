@@ -5,7 +5,8 @@ import { terrainHeight } from "/app/world/terrain_field.js";
 
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 
-export function createFlyCamera(canvas, scene, { fov = 58 } = {}) {
+export function createFlyCamera(canvas, scene, { fov: fov0 = 58 } = {}) {
+    let fov = fov0;
     const pos = [0, 100, 0], fwd = [0, 0, -1], up = [0, 1, 0];
     let yaw = 0, pitch = 0, dragging = false;
     const keys = new Set();
@@ -44,6 +45,7 @@ export function createFlyCamera(canvas, scene, { fov = 58 } = {}) {
 
     return {
         update,
+        setFov(f) { fov = f; push(); },
         setPose(p, y, pt) { pos[0] = p[0]; pos[1] = p[1]; pos[2] = p[2]; yaw = y; pitch = pt; push(); },
         state: () => ({ pos: [...pos], fwd: [...fwd], up: [...up], yaw, pitch, fov }),
     };

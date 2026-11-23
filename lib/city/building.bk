@@ -24,6 +24,7 @@ struct Params {
 
 @binding(4, 0) var params: uniform<Params>;
 @binding(4, 14) var masses: read_buffer<vec4<f32>>;
+@binding(4, 15) var ids: read_buffer<i32>;   // the mass each instance draws
 
 const STYLE_GLASS: i32 = 0;
 const STYLE_OFFICE: i32 = 1;
@@ -48,7 +49,7 @@ fn hash3(a: f32, b: f32, c: f32) -> f32 {
 
 pub fn vertex(v_in: mesh::Vertex) -> mesh::Vertex {
     var v = v_in;
-    let i = v.instance_index;
+    let i = ids[v.instance_index];
     let r0 = masses[i * 4];
     let r1 = masses[i * 4 + 1];
     let r2 = masses[i * 4 + 2];
@@ -240,6 +241,19 @@ fn band(x: f32, a: f32, b: f32, f: f32) -> f32 {
     return lo - hi;
 }
 
+// The integral of a unit-period pulse that is 1 on [a, b) of each period.
+fn pulse_int(t: f32, a: f32, b: f32) -> f32 {
+    return floor(t) * (b - a) + clamp(fract(t), a, b) - a;
+}
+
+// Coverage of the periodic pulse [a, b) (unit period) by a pixel at x of
+// footprint f, x and f in periods: exact for any footprint, so a pattern
+// far away settles at its share (b - a) instead of fading out.
+fn pulse(x: f32, a: f32, b: f32, f: f32) -> f32 {
+    let h = max(f, 1.0e-4) * 0.5;
+    return (pulse_int(x + h, a, b) - pulse_int(x - h, a, b)) / (2.0 * h);
+}
+
 // ---------------------------------------------------------------------------
 // Fragment
 // ---------------------------------------------------------------------------
@@ -272,7 +286,7 @@ pub fn fragment(v: mesh::Vertex, s_in: mesh::Surface) -> mesh::Surface {
         } else {
             let rc = roof_color(style, hue, true);
             let f = fw1(lp.y) + 0.01;
-            let course = 1.0 - 0.25 * band(fract(lp.y * 3.2), 0.0, 0.12, f * 3.2) * (1.0 - smoothstep(0.2, 0.5, f * 3.2));
+            let course = 1.0 - 0.25 * pulse(lp.y * 3.2, 0.0, 0.12, f * 3.2);
             s.base_color = rc * course;
         }
         s.roughness = 0.78;
@@ -331,13 +345,14 @@ pub fn fragment(v: mesh::Vertex, s_in: mesh::Surface) -> mesh::Surface {
     var fl = 0.0;
     var fy01 = 0.0;
     var fh = floor_h;
+    // Continuous floor coordinate (floors above the ground floor), for the filters.
+    let yf = (y - ground_h) / floor_h;
     if (ground) {
         fh = ground_h;
         fy01 = y / ground_h;
     } else {
-        let yy = y - ground_h;
-        fl = floor(yy / floor_h) + 1.0;
-        fy01 = fract(yy / floor_h);
+        fl = floor(yf) + 1.0;
+        fy01 = fract(yf);
     }
     let nb = max(1.0, floor(W / L.bay + 0.5));
     let bw = W / nb;
@@ -346,7 +361,8 @@ pub fn fragment(v: mesh::Vertex, s_in: mesh::Surface) -> mesh::Surface {
     let bu = fract(ub);
 
     // Window coverage, box-filtered by the pixel (so it averages, not aliases, far away).
-    var win = band(bu, L.wx0, L.wx1, fu / bw) * band(fy01, L.wy0, L.wy1, fy / fh);
+    let win_v = ground ? band(fy01, L.wy0, L.wy1, fy / fh) : pulse(yf, L.wy0, L.wy1, fy / floor_h);
+    var win = pulse(ub, L.wx0, L.wx1, fu / bw) * win_v;
     // Keep the corners solid on masonry; a door on the street front's middle bay.
     let corner = min(u, W - u);
     if (style != STYLE_GLASS && corner < 0.6) { win = 0.0; }
@@ -360,22 +376,20 @@ pub fn fragment(v: mesh::Vertex, s_in: mesh::Surface) -> mesh::Surface {
     var wall = wallc;
     if (style == STYLE_BRICK || style == STYLE_ROW) {
         let row = floor(y / 0.075);
-        let bx = fract(u / 0.23 + 0.5 * (row - 2.0 * floor(row * 0.5)));
-        let mortar = max(band(fract(y / 0.075), 0.0, 0.14, fy / 0.075), band(bx, 0.0, 0.05, fu / 0.23));
+        let mortar = max(pulse(y / 0.075, 0.0, 0.14, fy / 0.075),
+                         pulse(u / 0.23 + 0.5 * (row - 2.0 * floor(row * 0.5)), 0.0, 0.05, fu / 0.23));
         let vis = 1.0 - smoothstep(0.02, 0.05, fpx);
         wall = mix(wall, vec3<f32>(0.42, 0.40, 0.36), mortar * vis * 0.8 + 0.08 * (1.0 - vis));
         wall *= 0.9 + 0.2 * hash3(floor(u / 0.23), row, id) * vis;
     } else if (style == STYLE_SIDING) {
-        let lap = fract(y / 0.2);
-        let vis = 1.0 - smoothstep(0.04, 0.1, fpx);
-        wall *= 1.0 - 0.18 * band(lap, 0.0, 0.18, fy / 0.2) * vis;
+        wall *= 1.0 - 0.18 * pulse(y / 0.2, 0.0, 0.18, fy / 0.2);
     } else if (style == STYLE_INDUSTRIAL) {
         let rib = 0.5 + 0.5 * sin(u * 6.2831 / 0.3);
         wall *= 0.88 + 0.14 * rib * (1.0 - smoothstep(0.05, 0.15, fu));
     }
     // A slab line between floors and a cornice at the top.
     if (!ground && style != STYLE_GLASS) {
-        wall = mix(wall, wall * 0.82 + vec3<f32>(0.05, 0.05, 0.05), band(fy01, 0.0, 0.05, fy / fh) * 0.8);
+        wall = mix(wall, wall * 0.82 + vec3<f32>(0.05, 0.05, 0.05), pulse(yf, 0.0, 0.05, fy / floor_h) * 0.8);
     }
     if (style == STYLE_GLASS) {
         // Spandrels between the glass, mullions between the panes.
@@ -430,15 +444,28 @@ pub fn fragment(v: mesh::Vertex, s_in: mesh::Surface) -> mesh::Surface {
 
     // Light: by day a dim room behind the glass; at night the lit ones glow,
     // and far away every window glows by the expected share lit.
-    let lit_f = mix(lit_p, lit ? 1.0 : 0.0, near_k);
+    let win_k = 1.0 - smoothstep(0.3, 0.7, max(fu / bw, fy / fh));
+    let lit_f = mix(lit_p, lit ? 1.0 : 0.0, win_k);
     let night_glow = ralb * rlamp * warm * params.room_night * night * lit_f;
-    let day_glow = ralb * rlamp * params.room_day * (0.55 + 0.45 * lit_f);
+    // Shops are lit by day too, several times an office's light.
+    let day_glow = ralb * rlamp * params.room_day * (ground && shop ? 8.0 : 0.55 + 0.45 * lit_f);
     let glow = night_glow + day_glow * (1.0 - night);
 
     let glass = glass_tint(style, hue);
     s.base_color = mix(wall, glass, win);
+
+    // The street lamps' light on the street front at night: a row of lamps
+    // (LAMP_CD candela, LAMP_SP apart, LAMP_H up) LAMP_D in front of the
+    // wall, as a line source: E = 2 I d / (sp (d^2 + dy^2)) lux.
+    var lamp_lum = vec3<f32>(0.0, 0.0, 0.0);
+    if (front && night > 0.0 && (flags & 1) != 0) {
+        let dy = y - 8.0;
+        let d = 7.0;
+        let e = 2.0 * 1600.0 * d / (30.0 * (d * d + dy * dy));
+        lamp_lum = s.base_color * vec3<f32>(1.0, 0.82, 0.62) * (e * night / 3.14159265);
+    }
     s.roughness = mix(style == STYLE_GLASS ? 0.4 : 0.82, 0.06, win);
     s.metallic = 0.0;
-    s.emissive = glow * win;
+    s.emissive = glow * win + lamp_lum;
     return s;
 }
