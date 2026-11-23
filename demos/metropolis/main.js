@@ -131,7 +131,7 @@ function tick() {
     water.update(simTime);
     sky.update(dt);
     cars?.update(dt, st.pos, st.fwd);
-    interiors?.update(st.pos, NIGHT[timeMode]);
+    interiors?.update(st.pos, NIGHT[timeMode], dt);
     showStats(dt, st);
     requestAnimationFrame(tick);
 }
