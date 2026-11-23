@@ -49,6 +49,7 @@ export function createTerrainStream(scene, city) {
     // The city's ground data (lib/city/ground.js), shared by the produce kernel and the ground shader.
     const kbuf = (a) => { const b = bro.kernel.createBuffer(Math.max(16, a.byteLength)); if (a.byteLength) b.write(a); return b; };
     const segBuf = kbuf(city.segs), startBuf = kbuf(city.cellStart), cellBuf = kbuf(city.cellSegs), surfBuf = kbuf(city.surf);
+    const paintStartBuf = kbuf(city.paintStart), paintBuf = kbuf(city.paintSegs);
     const gi = city.info;
     const produceSrc = readApp('shaders/terrain_produce.bk');
     const groundSrc = readApp('shaders/ground_mesh.bk');
@@ -72,7 +73,7 @@ export function createTerrainStream(scene, city) {
         maxLevel: MAX_LEVEL,
         minHeight: MIN_HEIGHT,
         maxHeight: MAX_HEIGHT,
-        pixelsPerCell: 3.0,
+        pixelsPerCell: 6.0,
         producePerUpdate: PRODUCE_PER_UPDATE,
         layers: { position: 16, surface: 4 },
         ranges: true,
@@ -118,7 +119,7 @@ export function createTerrainStream(scene, city) {
     const shaderPromise = ground.setShaderAsync({
         module: groundSrc,
         file: 'shaders/ground_mesh.bk',
-        uniforms: { time: 0, night: 0, pad1: 0, pad2: 0, city: [gi.half, gi.cell, gi.cells, gi.surfCell], city2: [gi.surfCells, 0, 0, 0] },
+        uniforms: { time: 0, night: 0, pad1: 0, pad2: 0, city: [gi.half, gi.paintCell, gi.paintCells, gi.surfCell], city2: [gi.surfCells, 0, 0, 0] },
     }).then(() => {
         shaderReady = true;
         ground.setShaderTexture('pos', {
@@ -127,8 +128,8 @@ export function createTerrainStream(scene, city) {
         });
         ground.setShaderBuffer('tiles', cache.drawList);
         ground.setShaderBuffer('segs', segBuf);
-        ground.setShaderBuffer('cell_start', startBuf);
-        ground.setShaderBuffer('cell_segs', cellBuf);
+        ground.setShaderBuffer('cell_start', paintStartBuf);
+        ground.setShaderBuffer('cell_segs', paintBuf);
         ground.setShaderBuffer('surf', surfBuf);
     });
 
