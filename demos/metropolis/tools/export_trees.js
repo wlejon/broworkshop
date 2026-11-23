@@ -30,7 +30,7 @@ const LEVELS = [
 // covers as much of what is behind it as the finest does there (the trees'
 // contrast against the empty view, tests/test_visual.js's tree check, within
 // some 4 %). Beech's clumps overlap most, so its cards grow most.
-const AREA = {"elm": [1, 1.155, 1.467, 2.026, 1.509], "oak": [1, 1.205, 1.376, 1.201, 1.067], "beech": [1, 1.756, 2.941, 3.513, 2.297], "birch": [1, 0.98, 0.971, 0.693, 0.625]};
+const AREA = {"elm": [1, 1.208, 1.386, 1.556, 1.193], "oak": [1, 1.051, 1.145, 1.023, 0.903], "beech": [1, 2.918, 5.225, 5.845, 4.534], "birch": [1, 0.98, 0.774, 0.493, 0.466]};
 const out = { levels: LEVELS, species: {} };
 clear();
 for (const name of NAMES) {
@@ -41,7 +41,12 @@ for (const name of NAMES) {
     const sp = { name, world, m, k };
     const levels = speciesLevels(sp, AREA[name] ? LEVELS.map((lv, i) => Object.assign({}, lv, { area: AREA[name][i] })) : LEVELS);
     saveLevels(levels, DIR, name, LEVELS);
-    out.species[name] = { k, height: m.height, crownW: m.crownW, trunkD: m.trunkD, bole: m.bole, tris: levels.map((l) => l.tris), area: levels.map((l) => l.area) };
+    // The leaves' reach from the trunk over the levels drawn within 600 m (the
+    // grown tree's metres; the farthest level's few big cards of birch and
+    // beech reach further, by a few pixels at that distance).
+    let leafR = 0;
+    for (const l of levels.slice(0, -1)) { const P = l.leaves.positions; for (let i = 0; i < P.length; i += 3) leafR = Math.max(leafR, Math.hypot(P[i], P[i + 2])); }
+    out.species[name] = { k, height: m.height, crownW: m.crownW, leafR, trunkD: m.trunkD, bole: m.bole, tris: levels.map((l) => l.tris), area: levels.map((l) => l.area) };
     console.log(`EXPORT ${name}: k ${k.toFixed(2)}, ${(k * m.height).toFixed(1)} m, tris ${levels.map((l) => l.tris).join('/')}, ${((perf.now() - t0) / 1000).toFixed(1)} s`);
 }
 require('fs').writeFileSync(`${DIR}/trees.json`, JSON.stringify(out, null, 1));

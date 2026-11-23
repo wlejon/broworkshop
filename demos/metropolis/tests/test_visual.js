@@ -3,7 +3,9 @@
 //    renders the same (no state left behind: shadow pages, LOD, ground);
 //  - LODs keep shape and colour: a building zoomed to the same size from
 //    4, 8 and 25+ times its size away (2 km at least) draws alike, the
-//    farthest allowed the air's haze (a per-channel blend toward its colour); a tree across each level boundary
+//    farthest allowed the air's haze (a per-channel blend toward its colour),
+//    and seen from one eye through a narrow and a wide view (its pixels'
+//    footprint 1 to 25 times larger) the wide one is the narrow averaged; a tree across each level boundary
 //    changes no more than across the same move within a level; a car's
 //    level swap at its switch distance changes it no more than moving 1 %;
 //  - dollying out from the street to 3 km over a clear path, no step changes
@@ -176,50 +178,81 @@ treeN.forEach((n) => n.visible = false); carN.forEach((n) => n.visible = false);
 treeN.forEach((n) => n.visible = true);
 m.setTimeMode('day');
 {
-  // Eight elms, each seen from just past every level boundary, drawn by the
-  // nearer level alone and then by the farther alone at the same pose; the
-  // change is box-averaged to ~8 cells across a tree (a leaf card's own
-  // place does not count, a clump's or the colour's does), as a share of the
-  // trees' contrast against the empty view. The levels must be alike (under
-  // 25 %: a level drawn nowhere is 100 %, tree-lab's scattered levels were
-  // 20-67 %), and the swap, spread pixel by pixel over the fade band (35 %
-  // of the distance), must change a tree less for each 1 % of the way than
-  // that 1 % of motion does itself.
-  const TR = m.treeRecs, NT = TR.length / TREE_FLOATS, trees = [];
-  for (let i = 0; i < NT && trees.length < 8; i += 97) {
-    if (TR[i * TREE_FLOATS + 5] !== 0) continue;
-    const t = [TR[i * TREE_FLOATS], TR[i * TREE_FLOATS + 1], TR[i * TREE_FLOATS + 2]], up = [t[0], t[1] + 8, t[2]];
-    if (![30, 700].some((d) => blocked([t[0] + 0.7 * d, t[1] + 0.35 * d, t[2] + 0.6 * d], up))) trees.push(t);
-  }
-  const elm = {};
-  for (const n of treeN) { const mm = n.name.match(/city_trees_elm_L(\d+)_(bark|leaves)$/); if (mm && !n.shadowOnly) (elm[+mm[1]] ??= []).push(n); }
-  const Ls = Object.keys(elm).map(Number).sort((x, y) => x - y);
+  // Every species across every level boundary, twelve full-width trees each: each level
+  // alone just past the boundary (fades off) must cover as much of what is
+  // behind (pixels differing from the settled empty view) within 12 %
+  // (tree-lab's scattered levels lost 7-22 % a step) in the same leaf colour
+  // (the covered pixels' mean within 5/255), and in the band's middle, with
+  // the city's fades, the two must cover their mean within 10 % (a gap
+  // between them: 0.5-0.86); the steps' product, the farthest level against
+  // the finest, within 12 % too (scattered: elm 0.91, oak 0.65).
+  const SP = ['elm', 'oak', 'beech', 'birch'];
+  const TR = m.treeRecs, NT = TR.length / TREE_FLOATS;
   const dv = [0.7, 0.35, 0.6], dn = Math.hypot(...dv);
-  const coarse = (im, cell) => { const W = Math.max(1, Math.floor(im.width / cell)), H = Math.max(1, Math.floor(im.height / cell)), out = new Float32Array(W * H * 3); for (let y = 0; y < H * cell; y++) for (let x = 0; x < W * cell; x++) { const k = (y * im.width + x) * 4, o = (Math.floor(y / cell) * W + Math.floor(x / cell)) * 3; out[o] += im.data[k]; out[o + 1] += im.data[k + 1]; out[o + 2] += im.data[k + 2]; } return out.map((v) => v / (cell * cell)); };
-  const madC = (a, b) => { let t = 0; for (let i = 0; i < a.length; i++) t += Math.abs(a[i] - b[i]); return t; };
-  const saved = treeN.map((n) => [n, n.visible, n.fadeInDist, n.fadeOutDist]);
-  for (let li = 0; li + 1 < Ls.length; li++) {
-    const near = elm[Ls[li]], far = elm[Ls[li + 1]], b = far[0].fadeInDist;
-    treeN.forEach((n) => { n.visible = false; });
-    for (const n of [...near, ...far]) { n.fadeInDist = 0; n.fadeOutDist = 0; }
-    let change = 0, control = 0, contrast = 0;
-    for (const tree of trees) {
-      const aim = [tree[0], tree[1] + 6, tree[2]];
-      const eyeAt = (d) => [aim[0] + dv[0] / dn * d, aim[1] + dv[1] / dn * d, aim[2] + dv[2] / dn * d];
-      const view = (nodes, d) => { treeN.forEach((n) => { n.visible = false; }); nodes.forEach((n) => { n.visible = true; }); for (let i = 0; i < 4; i++) { look(eyeAt(d), aim); frames(1); } return shot(); };
-      const d = b * 1.02;
-      const E = view([], d), A = view(near, d), B = view(far, d), Bm = view(far, d * 1.01);
-      look(eyeAt(d), aim);
-      const r = rectOf([[tree[0] - 5, tree[1], tree[2] - 5], [tree[0] + 5, tree[1] + 14, tree[2] + 5], [tree[0] - 5, tree[1] + 14, tree[2] + 5], [tree[0] + 5, tree[1], tree[2] - 5]], A.width, A.height, 2);
-      const cell = Math.max(1, Math.round((r[2] - r[0]) / 8));
-      const [cE, cA, cB, cM] = [E, A, B, Bm].map((im) => coarse(crop(im, r), cell));
-      contrast += madC(cE, cA); change += madC(cA, cB); control += madC(cB, cM);
+  const measure = (E, A, r) => {
+    let n = 0, tot = 0; const col = [0, 0, 0];
+    for (let y = r[1]; y < r[3]; y++) for (let x = r[0]; x < r[2]; x++) {
+      const k = (y * E.width + x) * 4; tot++;
+      if (Math.abs(A.data[k] - E.data[k]) + Math.abs(A.data[k + 1] - E.data[k + 1]) + Math.abs(A.data[k + 2] - E.data[k + 2]) > 18) { n++; col[0] += A.data[k]; col[1] += A.data[k + 1]; col[2] += A.data[k + 2]; }
     }
-    for (const n of [...near, ...far]) { const sv = saved.find((x) => x[0] === n); n.fadeInDist = sv[2]; n.fadeOutDist = sv[3]; }
-    const ch = change / contrast, ct = control / contrast;
-    check(trees.length === 8 && contrast > 0 && ch < 0.25 && ch / 35 < ct, `trees across their ${b} m level boundary (L${Ls[li]} -> L${Ls[li + 1]}) alike, the swap less a step than the motion (the levels differ by ${(ch * 100).toFixed(0)} % of the trees' contrast, ${(ch / 35 * 100).toFixed(1)} % for each 1 % through the band; moving 1 % changes them ${(ct * 100).toFixed(0)} %, over ${trees.length} trees)`);
+    return { n, tot, col };
+  };
+  for (let si = 0; si < 4; si++) {
+    const trees = [];
+    for (let i = 0; i < NT && trees.length < 12; i += 53) {
+      if (TR[i * TREE_FLOATS + 5] !== si || TR[i * TREE_FLOATS + 6] < 0.99) continue;
+      const t = [TR[i * TREE_FLOATS], TR[i * TREE_FLOATS + 1], TR[i * TREE_FLOATS + 2]], up = [t[0], t[1] + 8, t[2]];
+      if (![30, 700].some((d) => blocked([t[0] + 0.7 * d, t[1] + 0.35 * d, t[2] + 0.6 * d], up))) trees.push(t);
+    }
+    const lv = {};
+    for (const n of treeN) { const mm = n.name.match(new RegExp(`city_trees_${SP[si]}_L(\\d+)_(bark|leaves)$`)); if (mm && !n.shadowOnly) (lv[+mm[1]] ??= []).push(n); }
+    const Ls = Object.keys(lv).map(Number).sort((x, y) => x - y);
+    let cum = 1;
+    for (let li = 0; li + 1 < Ls.length; li++) {
+      const near = lv[Ls[li]], far = lv[Ls[li + 1]], b = far[0].fadeInDist;
+      const keep = [...near, ...far].map((n) => [n, n.fadeInDist, n.fadeOutDist]);
+      const acc = { A: { n: 0, tot: 0, col: [0, 0, 0] }, B: { n: 0, tot: 0, col: [0, 0, 0] }, Mn: { n: 0, tot: 0, col: [0, 0, 0] }, Mid: { n: 0, tot: 0, col: [0, 0, 0] }, Mf: { n: 0, tot: 0, col: [0, 0, 0] } };
+      const add = (k, r) => { acc[k].n += r.n; acc[k].tot += r.tot; for (let c = 0; c < 3; c++) acc[k].col[c] += r.col[c]; };
+      for (const tree of trees) {
+        const aim = [tree[0], tree[1] + 6, tree[2]];
+        const eyeAt = (d) => [aim[0] + dv[0] / dn * d, aim[1] + dv[1] / dn * d, aim[2] + dv[2] / dn * d];
+        const show = (nodes) => { treeN.forEach((n) => { n.visible = false; }); nodes.forEach((n) => { n.visible = true; }); };
+        const at = (d, settle) => { for (let i = 0; i < settle; i++) { look(eyeAt(d), aim); frames(1); } return shot(); };
+        // Levels alone, just past the boundary (fades off).
+        for (const n of [...near, ...far]) { n.fadeInDist = 0; n.fadeOutDist = 0; }
+        const d0 = b * 1.02;
+        show([]); const E = at(d0, 30);
+        show(near); const A = at(d0, 4);
+        show(far); const B = at(d0, 4);
+        look(eyeAt(d0), aim);
+        const r = rectOf([[tree[0] - 6, tree[1], tree[2] - 6], [tree[0] + 6, tree[1] + 15, tree[2] + 6], [tree[0] - 6, tree[1] + 15, tree[2] + 6], [tree[0] + 6, tree[1], tree[2] - 6]], A.width, A.height, 2);
+        add('A', measure(E, A, r)); add('B', measure(E, B, r));
+        // The band's middle, fades as the city sets them (GAP: farther's fade-in moved to the band's end).
+        for (const [n, fi, fo] of keep) { n.fadeInDist = fi; n.fadeOutDist = fo; }
+        const dm = b * 1.175;
+        show([]); const Em = at(dm, 30);
+        for (const n of [...near, ...far]) { n.fadeInDist = 0; n.fadeOutDist = 0; }
+        show(near); const An = at(dm, 4);
+        show(far); const Bf = at(dm, 4);
+        for (const [n, fi, fo] of keep) { n.fadeInDist = fi; n.fadeOutDist = fo; }
+        show([...near, ...far]); const Mi = at(dm, 4);
+        look(eyeAt(dm), aim);
+        const rm = rectOf([[tree[0] - 6, tree[1], tree[2] - 6], [tree[0] + 6, tree[1] + 15, tree[2] + 6], [tree[0] - 6, tree[1] + 15, tree[2] + 6], [tree[0] + 6, tree[1], tree[2] - 6]], A.width, A.height, 2);
+        add('Mn', measure(Em, An, rm)); add('Mf', measure(Em, Bf, rm)); add('Mid', measure(Em, Mi, rm));
+      }
+      for (const [n, fi, fo] of keep) { n.fadeInDist = fi; n.fadeOutDist = fo; }
+      const cov = (k) => acc[k].n / acc[k].tot, colr = (k) => acc[k].col.map((c) => c / Math.max(1, acc[k].n));
+      const cA = colr('A'), cB = colr('B');
+      const dcol = Math.hypot(cA[0] - cB[0], cA[1] - cB[1], cA[2] - cB[2]);
+      const midRatio = cov('Mid') / ((cov('Mn') + cov('Mf')) / 2);
+      const cr = cov('B') / cov('A');
+      cum *= cr;
+      check(trees.length === 12 && cr > 0.88 && cr < 1.12 && dcol < 5 && midRatio > 0.9 && midRatio < 1.12,
+        `${SP[si]} across the ${b} m level boundary (L${Ls[li]} -> L${Ls[li + 1]}): cover ${(cov('A') * 100).toFixed(1)} -> ${(cov('B') * 100).toFixed(1)} % (x${cr.toFixed(2)}), leaf colour shift ${dcol.toFixed(1)}/255, the band's middle x${midRatio.toFixed(2)} of the levels' mean cover (${trees.length} trees)`);
+    }
+    check(cum > 0.88 && cum < 1.12, `${SP[si]}: the farthest level covers as the finest does, step by step (x${cum.toFixed(2)})`);
   }
-  saved.forEach(([n, v]) => { n.visible = v; });
+  treeN.forEach((n) => { n.visible = true; });
 }
 {
   const byType = {};

@@ -150,6 +150,10 @@ function clusterLeaves(fine, per, target, area) {
         groups = group(mid);
         if (groups.size > target) lo = mid; else hi = mid;
     }
+    // The finest level's reach from the trunk (x = z = 0): no coarse card
+    // reaches past it (a grown card is pulled in), so no level spreads wider.
+    let reach = 0;
+    for (let i = 0; i < P.length; i += 3) reach = Math.max(reach, Math.hypot(P[i], P[i + 2]));
     const out = { positions: [], normals: [], uvs: [], indices: [] };
     for (const g of groups.values()) {
         let A = 0; const gc = [0, 0, 0];
@@ -158,6 +162,12 @@ function clusterLeaves(fine, per, target, area) {
         let rep = g[0], best = Infinity;
         for (const c of g) { const d = (cen[c * 3] - gc[0]) ** 2 + (cen[c * 3 + 1] - gc[1]) ** 2 + (cen[c * 3 + 2] - gc[2]) ** 2; if (d < best) { best = d; rep = c; } }
         const sc = Math.sqrt(A * area / ar[rep]), base = out.positions.length / 3;
+        let over = 0;
+        for (let v = 0; v < per; v++) {
+            const i = (rep * per + v) * 3;
+            over = Math.max(over, Math.hypot(gc[0] + (P[i] - cen[rep * 3]) * sc, gc[2] + (P[i + 2] - cen[rep * 3 + 2]) * sc) - reach);
+        }
+        if (over > 0) { const rc = Math.hypot(gc[0], gc[2]) || 1, k = Math.max(0, rc - over) / rc; gc[0] *= k; gc[2] *= k; }
         for (let v = 0; v < per; v++) {
             const i = (rep * per + v) * 3;
             for (let a = 0; a < 3; a++) { out.positions.push(gc[a] + (P[i + a] - cen[rep * 3 + a]) * sc); out.normals.push(N[i + a]); }

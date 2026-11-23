@@ -443,7 +443,7 @@ pub fn fragment(v: mesh::Vertex, s_in: mesh::Surface) -> mesh::Surface {
     // Far away a room is its average.
     let avg = vec3<f32>(0.42, 0.40, 0.36);
     let ralb = mix(avg, room.albedo, near_k);
-    let rlamp = mix(0.95, room.lamp, near_k);
+    let rlamp = mix(1.12, room.lamp, near_k);   // the rooms' mean as their pixels average it (ceiling fixtures included)
 
     // Light: by day a dim room behind the glass; at night the lit ones glow,
     // and far away every window glows by the expected share lit.
