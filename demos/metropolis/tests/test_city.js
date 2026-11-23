@@ -9,6 +9,7 @@ import { generateCity } from "/lib/city/generate.js";
 import { SEG_FLOATS } from "/lib/city/ground.js";
 import { MASS_FLOATS } from "/lib/city/buildings.js";
 import { SITE } from "/app/world/site.js";
+import { createTraffic, edgeDensity } from "/lib/city/traffic.js";
 
 const city = generateCity(SITE);
 const { graph, lots, masses, ground } = city;
@@ -74,6 +75,30 @@ check(masses.buildings.length > 50000, `a city's worth of buildings (${masses.bu
 check(km > 1000, `road network (${km.toFixed(0)} km)`);
 const zones = new Set(lots.map((l) => l.zone));
 check(zones.size >= 6, `every zone present (${[...zones].join(', ')})`);
+
+// Traffic: three minutes of it. Cars keep moving (no gridlock) and stay on
+// land or a bridge's deck.
+const traffic = createTraffic(graph, { count: 12000, edgeDensity: edgeDensity(graph, city.field.density) });
+const pose = [0, 0, 0, 0, 0];
+let wetCars = 0, movingMin = 1;
+for (let t = 0; t < 180; t += 0.1) {
+    traffic.step(0.1);
+    if (Math.round(t * 10) % 300 === 299) {
+        let moving = 0;
+        for (const c of traffic.cars) {
+            if (c.v > 0.5) moving++;
+            if (graph.edges[c.lane.edge].kind !== 'bridge' && !c.turn) {
+                traffic.pose(c, pose);
+                if (water(pose[0], pose[2]) < -2) wetCars++;
+            }
+        }
+        const f = moving / traffic.cars.length;
+        movingMin = Math.min(movingMin, f);
+        console.log(`  traffic t=${t.toFixed(0)} s: ${(f * 100).toFixed(0)} % moving`);
+    }
+}
+check(wetCars === 0, `no car off a bridge in the water (${wetCars})`);
+check(movingMin > 0.35, `traffic flows: at least 35 % of cars moving throughout (lowest ${(movingMin * 100).toFixed(0)} %)`);
 
 console.log(failed ? `FAILED ${failed}` : 'ALL PASS');
 if (failed) throw new Error(`${failed} city checks failed`);

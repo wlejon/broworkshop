@@ -8,6 +8,7 @@ import { SKY, daylight } from "/lib/kit/sky.js";
 import { generateCity } from "/lib/city/generate.js";
 import { createBuildingRenderer } from "/lib/city/building_render.js";
 import { createBridges } from "/lib/city/bridges.js";
+import { createTrafficRenderer } from "/lib/city/traffic_render.js";
 import { terrainHeight, riverCenterX, RIVER_BED_Y } from "/app/world/terrain_field.js";
 import { SITE } from "/app/world/site.js";
 import { createTerrainStream } from "/app/world/terrain_stream.js";
@@ -61,11 +62,15 @@ const terrain = createTerrainStream(scene, ground);
 let timeMode = 'day';
 let buildings = null;
 let bridges = null;
+let cars = null;
+
 const ready = Promise.all([
     // The bridges: decks along the graph's bridge edges, on piers in the river.
     createBridges(scene, city.graph, readLib('city/bridge.bk'), { waterBed: RIVER_BED_Y - 1 }).then((b) => { bridges = b; }),
     terrain.whenReady(),
     createBuildingRenderer(scene, city.masses, readLib('city/building.bk')).then((b) => { buildings = b; }),
+    // Traffic on the road graph, simulated in a worker: lanes both ways, lights at the junctions.
+    createTrafficRenderer(scene, city.graph, city.field.density, readLib('city/car.bk'), { count: 12000 }).then((c) => { cars = c; }),
 ]).then(() => { if (statusEl) statusEl.textContent = 'ready'; });
 
 const todButtons = [...document.querySelectorAll('#todButtons [data-tod]')];
@@ -76,6 +81,7 @@ function setTimeMode(tm) {
     sky.apply(tm);
     buildings?.setNight(NIGHT[tm]);
     bridges?.setNight(NIGHT[tm] > 0.5 ? 1 : 0);
+    cars?.setNight(NIGHT[tm]);
     terrain.setNight(NIGHT[tm] > 0.5 ? 1 : 0);
     for (const b of todButtons) b.classList.toggle('active', b.dataset.tod === tm);
 }
@@ -101,7 +107,7 @@ function showStats(dt, st) {
     const agl = st.pos[1] - terrainHeight(st.pos[0], st.pos[2]);
     statsEl.textContent =
         `${(statMs / statFrames).toFixed(2)} ms/frame  gpu ${(cs.frameGpuMs || 0).toFixed(2)} ms\n` +
-        `${city.masses.buildings.length} buildings · ${(city.graph.edges.reduce((a, e) => a + e.len, 0) / 1000).toFixed(0)} km of road\n` +
+        `${city.masses.buildings.length} buildings · ${(city.graph.edges.reduce((a, e) => a + e.len, 0) / 1000).toFixed(0)} km of road · ${cars?.drawn ?? 0} of ${cars?.cars ?? 0} cars drawn\n` +
         `x ${st.pos[0].toFixed(0)} z ${st.pos[2].toFixed(0)} · ${agl.toFixed(0)} m up`;
     statFrames = 0; statMs = 0;
 }
@@ -116,13 +122,14 @@ function tick() {
     terrain.update(st.pos, st.fwd, st.up, { width: canvas.width, height: canvas.height, fov: st.fov });
     water.update(simTime);
     sky.update(dt);
+    cars?.update(dt, st.pos, st.fwd);
     showStats(dt, st);
     requestAnimationFrame(tick);
 }
 requestAnimationFrame(tick);
 
 globalThis.__metropolis = {
-    scene, city, ground, terrain, cam,
+    scene, city, ground, terrain, cam, get cars() { return cars; },
     whenReady: () => ready,
     setTimeMode,
     setPose: (pos, yaw, pitch) => {

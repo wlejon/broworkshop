@@ -1,0 +1,60 @@
+// lib/city/car.bk — vehicles' surfaces. The mesh's vertex colour names the
+// part (car_mesh.js PART, in its red channel); the body keeps its albedo
+// (the instance's paint, as tint), the rest get their own materials, and at
+// night the lamps light: headlamps white, tail lamps red.
+module hook;
+import scene;
+import mesh;
+import custom;
+
+struct Params {
+    night: f32,
+    pad0: f32,
+    pad1: f32,
+    pad2: f32,
+}
+
+@binding(4, 0) var params: uniform<Params>;
+
+pub fn fragment(v: mesh::Vertex, s_in: mesh::Surface) -> mesh::Surface {
+    var s = s_in;
+    let part = (v.color.x * 10.0 + 0.5) as i32;
+    s.emissive = vec3<f32>(0.0, 0.0, 0.0);
+    if (part >= 10) {
+        // Paint: a glossy clear coat.
+        s.roughness = 0.32;
+        s.metallic = 0.0;
+    } else if (part == 1) {
+        s.base_color = vec3<f32>(0.015, 0.017, 0.02);
+        s.roughness = 0.06;
+        s.metallic = 0.0;
+    } else if (part == 2) {
+        s.base_color = vec3<f32>(0.025, 0.025, 0.025);
+        s.roughness = 0.92;
+        s.metallic = 0.0;
+    } else if (part == 3) {
+        s.base_color = vec3<f32>(0.035, 0.036, 0.038);
+        s.roughness = 0.6;
+        s.metallic = 0.0;
+    } else if (part == 4) {
+        s.base_color = vec3<f32>(0.8, 0.8, 0.78);
+        s.roughness = 0.1;
+        s.metallic = 0.0;
+        // A headlamp's lens: dipped beams run a few thousand cd/m^2 seen off axis; daytime running lights far less.
+        s.emissive = vec3<f32>(1.0, 0.95, 0.85) * (40.0 + 6000.0 * params.night);
+    } else if (part == 5) {
+        s.base_color = vec3<f32>(0.35, 0.02, 0.02);
+        s.roughness = 0.15;
+        s.metallic = 0.0;
+        s.emissive = vec3<f32>(1.0, 0.04, 0.02) * (800.0 * params.night);
+    } else {
+        s.base_color = vec3<f32>(0.32, 0.33, 0.34);
+        s.roughness = 0.4;
+        s.metallic = 0.8;
+    }
+    // The street lamps' light (the ground shader's lamp rows, averaged): some
+    // 20 lux on what faces up, 10 on the sides, warm.
+    let e = mix(10.0, 20.0, clamp(v.normal.y, 0.0, 1.0)) * params.night;
+    s.emissive += s.base_color * vec3<f32>(1.0, 0.82, 0.62) * (e / 3.14159265);
+    return s;
+}
