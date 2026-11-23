@@ -131,9 +131,11 @@ const FOV = 60;   // the fly camera's own
   // mid-range (averaging after ACES reads its toe's convexity as darkening,
   // and an 8-bit mean near black is rounding). The tall styles also from
   // below, as a street sees them: the rooms' far mean follows the angle.
-  // Old far means failed this: brick and rowhouse terms (rowhouse x0.90),
-  // a fixed room average (night glass x0.88), four room samples (night
-  // office x1.08); the spread now is 0.98-1.05 (noise floor ~1 %).
+  // Old far means failed this: brick and rowhouse terms (x0.81-0.86), a
+  // fixed room average (night glass x0.84-0.89, office from below x0.93),
+  // four room samples (night office x1.08); the spread now is 0.96-1.06
+  // (noise floor ~1 %). Old industrial ribs fail only by night (x0.934; by
+  // day x0.940 passes): the bound is 6 % for night offices' x1.05.
   const lin = (q) => { q /= 255; return q <= 0.04045 ? q / 12.92 : ((q + 0.055) / 1.055) ** 2.4; };
   const meanLin = (im) => { const a = [0, 0, 0]; let clip = 0; for (let k = 0; k < im.data.length; k += 4) { for (let ch = 0; ch < 3; ch++) a[ch] += lin(im.data[k + ch]); if (im.data[k] > 252 || im.data[k + 1] > 252 || im.data[k + 2] > 252) clip++; } const n = im.data.length / 4; return { c: a.map((v) => v / n), clip: clip / n }; };
   const NAMES = Object.keys(STYLE).sort((a, b) => STYLE[a] - STYLE[b]);

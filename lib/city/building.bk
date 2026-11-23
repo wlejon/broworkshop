@@ -190,8 +190,7 @@ struct Room {
 
 // p: the point on the window in the room's frame (x across 0..w, y up 0..h, z = 0);
 // d: the eye ray in that frame, z pointing into the room (d.z > 0).
-// (fixture_mean: the ceiling lamp by its share of the ceiling, for averages.)
-fn room_hit(p: vec3<f32>, d: vec3<f32>, w: f32, h: f32, depth: f32, rh: f32, fixture_mean: bool) -> Room {
+fn room_hit(p: vec3<f32>, d: vec3<f32>, w: f32, h: f32, depth: f32, rh: f32) -> Room {
     let tx = d.x > 0.0 ? (w - p.x) / d.x : (0.0 - p.x) / min(d.x, -0.0001);
     let ty = d.y > 0.0 ? (h - p.y) / d.y : (0.0 - p.y) / min(d.y, -0.0001);
     let tz = depth / max(d.z, 0.0001);
@@ -209,7 +208,7 @@ fn room_hit(p: vec3<f32>, d: vec3<f32>, w: f32, h: f32, depth: f32, rh: f32, fix
             let fx = abs(hp.x - w * 0.5) / w;
             let fz = abs(hp.z - depth * 0.45) / depth;
             col = vec3<f32>(0.80, 0.79, 0.76);
-            lamp = fixture_mean ? 1.07 : 1.0 + 2.0 * (1.0 - smoothstep(0.06, 0.12, max(fx, fz)));
+            lamp = 1.0 + 2.0 * (1.0 - smoothstep(0.06, 0.12, max(fx, fz)));
         } else {
             col = floorc;
             lamp = 0.7;
@@ -233,20 +232,65 @@ fn room_hit(p: vec3<f32>, d: vec3<f32>, w: f32, h: f32, depth: f32, rh: f32, fix
     return Room(col, lamp);
 }
 
-// A window's room as the eye ray sees it, averaged over the window (nine
-// points of it, blinds included; four miss the furniture block and read
-// night offices 8 % bright): what a far pixel's box filter of the
-// resolved room converges to, from whatever angle it is seen.
+// A window's room as the eye ray sees it, averaged over the window: what a
+// far pixel's box filter of room_hit converges to, from whatever angle, in
+// closed form so it is continuous in the angle (sampled points flip a whole
+// row at once: bands up a tower). Across the window the depth at which a
+// ray meets a side wall is uniform, as is the depth it meets the ceiling or
+// floor, independently: the share meeting each first is an integral of a
+// clamped ramp (first_share). The furniture block: the rays above the floor
+// at its front and below its top within its depth, an interval of the
+// window's height linear in the slope, over its share of the width. The
+// ceiling fixture by its share of the ceiling; blinds over the window's top
+// 45 % (the part that would see the ceiling from below).
+// (Off-line against a 30x30 box filter of room_hit, glass and office rooms,
+// views 0.4 rad up to 0.4 down, 0.5 rad aside: within 4 %, 12 % at the
+// steepest. test_visual checks it rendered.)
+fn ramp_int(u: f32, va: f32, vb: f32) -> f32 {
+    // The integral of clamp((vb - t) / (vb - va), 0, 1) from va to u.
+    let l = max(vb - va, 0.000001);
+    if (u < va) { return u - va; }
+    if (u < vb) { let s = u - va; return s - s * s / (2.0 * l); }
+    return 0.5 * l;
+}
+fn first_share(ua: f32, ub: f32, va: f32, vb: f32, d: f32) -> f32 {
+    // P(U < V and U < d) for U, V uniform on [ua, ub], [va, vb].
+    let up = min(max(d, ua), ub);
+    return (ramp_int(up, va, vb) - ramp_int(ua, va, vb)) / max(ub - ua, 0.000001);
+}
+fn hit_depths(dd: f32, dz: f32, a: f32, b: f32, size: f32) -> vec2<f32> {
+    // The depths at which rays from [a, b] meet the wall they head for.
+    let k = dz / max(abs(dd), 0.00001);
+    return dd > 0.0 ? vec2<f32>((size - b) * k, (size - a) * k) : vec2<f32>(a * k, b * k);
+}
 fn room_mean(dr: vec3<f32>, wx0: f32, wx1: f32, wy0: f32, wy1: f32, w: f32, h: f32, depth: f32, rh: f32, blinds: bool) -> vec3<f32> {
-    var acc = vec3<f32>(0.0, 0.0, 0.0);
-    for (var k: i32 = 0; k < 9; k += 1) {
-        let sx = mix(wx0, wx1, (f32(k % 3) + 0.5) / 3.0);
-        let sy = mix(wy0, wy1, (f32(k / 3) + 0.5) / 3.0);
-        var r = room_hit(vec3<f32>(sx * w, sy * h, 0.0), dr, w, h, depth, rh, true);
-        if (blinds && sy > mix(wy0, wy1, 0.55)) { r = Room(mix(vec3<f32>(0.72, 0.68, 0.6), vec3<f32>(0.5, 0.52, 0.55), rh), 0.9); }
-        acc += r.albedo * r.lamp * (1.0 / 9.0);
-    }
-    return acc;
+    let dz = max(dr.z, 0.0001);
+    let ya = wy0 * h;
+    let yb = max(mix(wy0, wy1, blinds ? 0.55 : 1.0) * h, ya + 0.001);
+    let xa = wx0 * w;
+    let xb = max(wx1 * w, xa + 0.001);
+    let U = hit_depths(dr.x, dz, xa, xb, w);
+    let V = hit_depths(dr.y, dz, ya, yb, h);
+    let ps = first_share(U.x, U.y, V.x, V.y, depth);
+    let pv = first_share(V.x, V.y, U.x, U.y, depth);
+    let pb = max(0.0, 1.0 - ps - pv);
+    let wallc = mix(vec3<f32>(0.62, 0.58, 0.50), vec3<f32>(0.48, 0.52, 0.56), rh);
+    let floorc = mix(vec3<f32>(0.30, 0.20, 0.12), vec3<f32>(0.32, 0.32, 0.34), fract(rh * 3.1));
+    let furn = mix(vec3<f32>(0.20, 0.14, 0.10), vec3<f32>(0.25, 0.28, 0.33), fract(rh * 9.3));
+    let cf = dr.y > 0.0 ? vec3<f32>(0.80, 0.79, 0.76) * 1.07 : floorc * 0.7;
+    let rest = (cf * pv + wallc * (0.92 * 0.9) * pb) / max(pv + pb, 0.000001);
+    let sl = dr.y / dz;
+    let by1 = h * (0.24 + 0.12 * fract(rh * 5.7));
+    let lo = -sl * depth * 0.45;
+    let hi = by1 - sl * depth * (sl < 0.0 ? 0.8 : 0.45);
+    // (Its 0.44 of the room's width as a share of the window's, behind the
+    // side wall's hits for rays that meet that before its middle depth.)
+    let zc = depth * 0.625;
+    let behind = clamp((U.x + U.y - 2.0 * zc) / max(U.y - U.x, 0.000001) * 0.5 + 0.5, 0.0, 1.0);
+    let pf = min(1.0, 0.44 * w / (xb - xa)) * max(0.0, min(hi, yb) - max(lo, ya)) / (yb - ya) * behind;
+    var room = mix(mix(rest, wallc * 0.8, ps), furn * 0.75, pf);
+    if (blinds) { room = mix(room, mix(vec3<f32>(0.72, 0.68, 0.6), vec3<f32>(0.5, 0.52, 0.55), rh) * 0.9, 0.45); }
+    return room;
 }
 
 fn fw1(x: f32) -> f32 {
@@ -458,7 +502,7 @@ pub fn fragment(v: mesh::Vertex, s_in: mesh::Surface) -> mesh::Surface {
     if (near_k > 0.0 && win > 0.0 && dr.z > 0.0) {
         let wx0 = L.wx0 * room_w;
         let pr = vec3<f32>(bu * room_w, fy01 * fh, 0.0);
-        room = room_hit(pr, dr, room_w, fh, depth, rh, false);
+        room = room_hit(pr, dr, room_w, fh, depth, rh);
         if (blinds && fy01 > mix(L.wy0, L.wy1, 0.55)) { room = Room(mix(vec3<f32>(0.72, 0.68, 0.6), vec3<f32>(0.5, 0.52, 0.55), rh), 0.9); }
     }
     // Far away a room is its average over the window, seen along the eye ray.
