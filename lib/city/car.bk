@@ -1,7 +1,9 @@
 // lib/city/car.bk — vehicles' surfaces. The mesh's vertex colour names the
 // part (car_mesh.js PART, in its red channel); the body keeps its albedo
 // (the instance's paint, as tint), the rest get their own materials, and at
-// night the lamps light: headlamps white, tail lamps red.
+// night the lamps light: headlamps white, tail lamps red. The local
+// position (passed on from the vertex stage untouched) draws the wheel
+// arches' shadow and the door seams on the body.
 module hook;
 import scene;
 import mesh;
@@ -9,12 +11,19 @@ import custom;
 
 struct Params {
     night: f32,
-    pad0: f32,
-    pad1: f32,
-    pad2: f32,
+    axle: f32,     // the axles at x = +-axle
+    wheel_r: f32,  // wheel radius
+    half_w: f32,   // half the body's width
+    seams: vec4<f32>,  // door seams' x (up to 4; 0: none)
 }
 
 @binding(4, 0) var params: uniform<Params>;
+
+pub fn vertex(v_in: mesh::Vertex) -> mesh::Vertex {
+    var v = v_in;
+    v.v0 = vec4<f32>(v.pos, 0.0);
+    return v;
+}
 
 pub fn fragment(v: mesh::Vertex, s_in: mesh::Surface) -> mesh::Surface {
     var s = s_in;
@@ -24,6 +33,20 @@ pub fn fragment(v: mesh::Vertex, s_in: mesh::Surface) -> mesh::Surface {
         // Paint: a glossy clear coat.
         s.roughness = 0.32;
         s.metallic = 0.0;
+        let lp = v.v0.xyz;
+        let fw = abs(dpdx(lp.x)) + abs(dpdy(lp.x)) + abs(dpdx(lp.y)) + abs(dpdy(lp.y)) + 0.002;
+        let sidek = smoothstep(params.half_w - 0.3, params.half_w - 0.12, abs(lp.z));
+        // The wheel arches: a dark band round each wheel on the sides.
+        let da = min(length(vec2<f32>(lp.x - params.axle, lp.y - params.wheel_r)), length(vec2<f32>(lp.x + params.axle, lp.y - params.wheel_r)));
+        let arch = (1.0 - smoothstep(params.wheel_r + 0.07, params.wheel_r + 0.07 + fw, da)) * sidek;
+        // Door seams: thin dark lines across the side, below the windows.
+        var seam = 0.0;
+        for (var k = 0; k < 4; k += 1) {
+            let sx = params.seams[k];
+            if (sx != 0.0) { seam = max(seam, 1.0 - smoothstep(0.004, 0.004 + fw, abs(lp.x - sx))); }
+        }
+        seam *= sidek * step(params.wheel_r * 0.6, lp.y);
+        s.base_color = mix(s.base_color, vec3<f32>(0.02, 0.02, 0.022), max(arch, seam * 0.7));
     } else if (part == 1) {
         s.base_color = vec3<f32>(0.015, 0.017, 0.02);
         s.roughness = 0.06;
