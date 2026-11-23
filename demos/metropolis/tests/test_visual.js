@@ -441,7 +441,7 @@ for (const n of treeN) if (!n.shadowOnly) n.visible = false;
 m.setTimeMode('day');
 function groundHit(o, d) {
   let t = 0;
-  for (let k = 0; k < 4000; k++) { t += 0.25; const x = o[0] + d[0] * t, y = o[1] + d[1] * t, z = o[2] + d[2] * t; if (y <= g(x, z)) return [x, g(x, z), z]; if (t > 400) return null; }
+  for (let k = 0; k < 20000; k++) { t += 0.25 + t * 0.002; const x = o[0] + d[0] * t, y = o[1] + d[1] * t, z = o[2] + d[2] * t; if (y <= g(x, z)) return [x, g(x, z), z]; if (t > 1500) return null; }
   return null;
 }
 function lum(img, x, y) {
@@ -485,12 +485,19 @@ function track(poses, every) {
     const eye0 = [cx - fx * back + ux * 6, gy + h, cz - fz * back + uz * 6], tg0 = [cx + fx * 60, gy, cz + fz * 60];
     return Array.from({ length: n + 1 }, (_, k) => { const t = k / n * len, [sx, sz] = side ? [ux * t, uz * t] : [fx * t, fz * t]; return [[eye0[0] + sx, eye0[1], eye0[2] + sz], [tg0[0] + sx, tg0[1], tg0[2] + sz]]; });
   };
+  // (Control: the sun's shadow bias changed every other pose, which redraws
+  // its pages and shows them mid-rebuild, fails street and canyon at p95
+  // 117-135/255. A sun turned +-0.5 degrees a pose shows nothing: a turn's
+  // clipmap is drawn behind the shown one and swapped in whole, so this
+  // checks instability in the shown shadows, not a sub-texel swim.)
   const e2 = [cx - fx * 25 + ux * 6, gy + 35, cz - fz * 25 + uz * 6];
   const paths = {
     'street, 8 m along': [strafe(1.8, 0, false, 8, 100), 100],
     'canyon 35 m up, 8 m sideways': [strafe(35, 25, true, 8, 100), 100],
     'block 120 m up, 8 m sideways': [strafe(120, 90, true, 8, 100), 100],
     'block 120 m up, 250 m sideways': [strafe(120, 90, true, 250, 250), 25],
+    'flyover 400 m up, 600 m along': [strafe(400, 300, false, 600, 120), 30],
+    'rising from 35 m to 300 m': [Array.from({ length: 121 }, (_, k) => { const h = 35 + 265 * k / 120; return [[e2[0], gy + h, e2[2]], [cx + fx * 60, gy, cz + fz * 60]]; }), 30],
     'canyon 35 m up, turning 40 degrees': [Array.from({ length: 101 }, (_, k) => { const a = (k / 100 - 0.5) * 0.7, ca = Math.cos(a), sa = Math.sin(a); return [e2, [e2[0] + (fx * ca - fz * sa) * 85, gy, e2[2] + (fx * sa + fz * ca) * 85]]; }), 100],
   };
   for (const [tag, [poses, every]] of Object.entries(paths)) {
