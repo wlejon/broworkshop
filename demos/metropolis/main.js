@@ -9,6 +9,7 @@ import { generateCity } from "/lib/city/generate.js";
 import { createBuildingRenderer } from "/lib/city/building_render.js";
 import { createBridges } from "/lib/city/bridges.js";
 import { createTrafficRenderer } from "/lib/city/traffic_render.js";
+import { placeTrees, createTrees, TREE_FLOATS } from "/lib/city/trees.js";
 import { terrainHeight, riverCenterX, RIVER_BED_Y } from "/app/world/terrain_field.js";
 import { SITE } from "/app/world/site.js";
 import { createTerrainStream } from "/app/world/terrain_stream.js";
@@ -55,6 +56,11 @@ const t0 = perf.now();
 const city = generateCity(SITE);
 console.log(`metropolis: city in ${(perf.now() - t0).toFixed(0)} ms: ${city.graph.edges.length} roads, ${city.lots.length} lots, ${city.masses.count} masses`,
     JSON.stringify(Object.fromEntries(Object.entries(city.timings).map(([k, v]) => [k, Math.round(v)]))));
+
+const t1 = perf.now();
+const treeRecs = placeTrees(city);
+const trees = createTrees(scene, treeRecs, bro.resolvePath('/app/assets/trees'));
+console.log(`metropolis: ${trees.count} trees in ${(perf.now() - t1).toFixed(0)} ms`);
 
 const ground = city.ground;
 const terrain = createTerrainStream(scene, ground);
@@ -107,7 +113,7 @@ function showStats(dt, st) {
     const agl = st.pos[1] - terrainHeight(st.pos[0], st.pos[2]);
     statsEl.textContent =
         `${(statMs / statFrames).toFixed(2)} ms/frame  gpu ${(cs.frameGpuMs || 0).toFixed(2)} ms\n` +
-        `${city.masses.buildings.length} buildings · ${(city.graph.edges.reduce((a, e) => a + e.len, 0) / 1000).toFixed(0)} km of road · ${cars?.drawn ?? 0} of ${cars?.cars ?? 0} cars drawn\n` +
+        `${city.masses.buildings.length} buildings · ${trees.count} trees · ${(city.graph.edges.reduce((a, e) => a + e.len, 0) / 1000).toFixed(0)} km of road · ${cars?.drawn ?? 0} of ${cars?.cars ?? 0} cars drawn\n` +
         `x ${st.pos[0].toFixed(0)} z ${st.pos[2].toFixed(0)} · ${agl.toFixed(0)} m up`;
     statFrames = 0; statMs = 0;
 }
@@ -129,7 +135,7 @@ function tick() {
 requestAnimationFrame(tick);
 
 globalThis.__metropolis = {
-    scene, city, ground, terrain, cam, get cars() { return cars; },
+    scene, city, ground, terrain, cam, trees, treeRecs, get cars() { return cars; },
     whenReady: () => ready,
     setTimeMode,
     setPose: (pos, yaw, pitch) => {

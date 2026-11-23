@@ -9,6 +9,7 @@ import { generateCity } from "/lib/city/generate.js";
 import { SEG_FLOATS } from "/lib/city/ground.js";
 import { MASS_FLOATS } from "/lib/city/buildings.js";
 import { SITE } from "/app/world/site.js";
+import { placeTrees, TREE_FLOATS } from "/lib/city/trees.js";
 import { createTraffic, edgeDensity } from "/lib/city/traffic.js";
 
 const city = generateCity(SITE);
@@ -53,18 +54,23 @@ check(landed.length === bridges.length, `every bridge lands on both banks and cr
 const D = masses.data;
 let inWater = 0, onRoad = 0;
 const { half, cell, cells } = ground.info, S = ground.segs;
-for (let i = 0; i < masses.count; i++) {
-    const o = i * MASS_FLOATS, x = D[o], z = D[o + 2];
-    if (water(x, z) < 0) inWater++;
+// Whether (x, z) is on a carriageway (within its half width plus `margin`).
+function onCarriageway(x, z, margin = 0) {
     const ci = Math.floor((x + half) / cell), cj = Math.floor((z + half) / cell);
-    if (ci < 0 || cj < 0 || ci >= cells || cj >= cells) continue;
+    if (ci < 0 || cj < 0 || ci >= cells || cj >= cells) return false;
     const c = cj * cells + ci;
     for (let k = ground.cellStart[c]; k < ground.cellStart[c + 1]; k++) {
         const so = ground.cellSegs[k] * SEG_FLOATS;
         const ax = S[so], az = S[so + 1], dx = S[so + 2] - ax, dz = S[so + 3] - az;
         const t = Math.max(0, Math.min(1, ((x - ax) * dx + (z - az) * dz) / (dx * dx + dz * dz || 1e-9)));
-        if (Math.hypot(x - ax - dx * t, z - az - dz * t) < S[so + 6]) { onRoad++; break; }
+        if (Math.hypot(x - ax - dx * t, z - az - dz * t) < S[so + 6] + margin) return true;
     }
+    return false;
+}
+for (let i = 0; i < masses.count; i++) {
+    const o = i * MASS_FLOATS, x = D[o], z = D[o + 2];
+    if (water(x, z) < 0) inWater++;
+    if (onCarriageway(x, z)) onRoad++;
 }
 check(inWater === 0, `no building in the water (${inWater})`);
 check(onRoad === 0, `no building on a carriageway (${onRoad})`);
@@ -100,6 +106,18 @@ for (let t = 0; t < 180; t += 0.1) {
         console.log(`  traffic t=${t.toFixed(0)} s: ${(f * 100).toFixed(0)} % moving`);
     }
 }
+// Trees: street trees and park groves, none in the water or on a carriageway.
+const treeRecs = placeTrees(city);   // (the graded height, field and graph only)
+const nTrees = treeRecs.length / TREE_FLOATS;
+let wetTrees = 0, roadTrees = 0;
+for (let i = 0; i < treeRecs.length; i += TREE_FLOATS) {
+    const x = treeRecs[i], z = treeRecs[i + 2];
+    if (water(x, z) < 2) wetTrees++;
+    if (onCarriageway(x, z, 0.3)) roadTrees++;
+}
+check(nTrees > 50000, `a city's worth of trees (${nTrees})`);
+check(wetTrees === 0, `no tree in the water (${wetTrees})`);
+check(roadTrees === 0, `no tree on a carriageway (${roadTrees})`);
 const trams = traffic.cars.filter((c) => c.route);
 const served = trams.filter((c) => c.served >= 0 || c.dwell > 0).length;
 check(trams.length > 10 && served >= trams.length * 0.8, `trams run and stop (${trams.length} trams, ${served} have served a stop)`);
