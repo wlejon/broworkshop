@@ -90,6 +90,7 @@ function setTimeMode(tm) {
     buildings?.setNight(NIGHT[tm]);
     bridges?.setNight(NIGHT[tm] > 0.5 ? 1 : 0);
     cars?.setNight(NIGHT[tm]);
+    trees.setNight(NIGHT[tm]);
     terrain.setNight(NIGHT[tm] > 0.5 ? 1 : 0);
     for (const b of todButtons) b.classList.toggle('active', b.dataset.tod === tm);
 }
