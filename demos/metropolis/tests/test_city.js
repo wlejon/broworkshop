@@ -12,6 +12,8 @@ import { SITE } from "/app/world/site.js";
 import { placeTrees, TREE_FLOATS } from "/lib/city/trees.js";
 import { createTraffic, edgeDensity } from "/lib/city/traffic.js";
 import { massRecord, interiorMesh, openingsOf, floorsOf } from "/lib/city/interior.js";
+import { carMesh, CAR_TYPES } from "/lib/city/car_mesh.js";
+import { STYLE } from "/lib/city/buildings.js";
 
 const city = generateCity(SITE);
 const { graph, lots, masses, ground } = city;
@@ -82,6 +84,43 @@ check(masses.buildings.length > 50000, `a city's worth of buildings (${masses.bu
 check(km > 1000, `road network (${km.toFixed(0)} km)`);
 const zones = new Set(lots.map((l) => l.zone));
 check(zones.size >= 6, `every zone present (${[...zones].join(', ')})`);
+
+// Not a grid: street bearings (mod 90 degrees, by length) spread over many
+// 5-degree bins rather than one.
+const bins = new Float64Array(18);
+let streetLen = 0;
+for (const e of graph.edges) {
+    const p = e.pts;
+    for (let k = 2; k < p.length; k += 2) {
+        const dx = p[k] - p[k - 2], dz = p[k + 1] - p[k - 1], l = Math.hypot(dx, dz);
+        const a = ((Math.atan2(dz, dx) * 180 / Math.PI) % 90 + 90) % 90;
+        bins[Math.min(17, Math.floor(a / 5))] += l; streetLen += l;
+    }
+}
+const topBin = Math.max(...bins) / streetLen;
+check(topBin < 0.25, `not a grid: no street bearing holds more than a quarter of the road (largest 5-degree bin ${(topBin * 100).toFixed(1)} %)`);
+// Built round the river: the towers stand near the water.
+const allM = []; for (let i = 0; i < masses.data.length / 16; i++) allM.push(massRecord(masses.data, i));
+const tall = allM.filter((M) => M.h > 40);
+const nearRiver = tall.filter((M) => water(M.cx, M.cz) < 1500).length;
+check(tall.length > 100 && nearRiver > tall.length * 0.7, `the towers stand by the river (${nearRiver}/${tall.length} within 1.5 km of the water)`);
+// Not one material: every facade style in use, and no style in one tint
+// band (brick, render, siding... each tinted by hue) above a tenth of them.
+const styleN = new Map(), combo = new Map();
+for (const M of allM) {
+    styleN.set(M.style, (styleN.get(M.style) ?? 0) + 1);
+    const k = M.style * 10 + Math.floor(M.hue * 10);
+    combo.set(k, (combo.get(k) ?? 0) + 1);
+}
+const comboMax = Math.max(...combo.values()) / allM.length;
+check(styleN.size === Object.keys(STYLE).length && combo.size >= 60 && comboMax < 0.1, `facade materials vary (${styleN.size} styles in ${combo.size} tints, the commonest ${(comboMax * 100).toFixed(1)} % of buildings)`);
+// Cars are modelled, not boxes: lofted bodies with glass, lamps and round wheels.
+const carTris = Object.keys(CAR_TYPES).map((n) => {
+    const mm = carMesh(n, 0), col = mm.colors, parts = new Set();
+    for (let k = 0; k < col.length; k += 4) parts.add(col[k]);
+    return { n, tris: mm.indices.length / 3, parts: parts.size };
+});
+check(carTris.every((c) => c.tris > 800 && c.parts >= 6), `cars are modelled, not boxes (${carTris.map((c) => `${c.n} ${c.tris} tris/${c.parts} parts`).join(', ')})`);
 
 // Traffic: three minutes of it. Cars keep moving (no gridlock) and stay on
 // land or a bridge's deck.

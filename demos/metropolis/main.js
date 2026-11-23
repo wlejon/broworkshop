@@ -137,6 +137,7 @@ function tick() {
     requestAnimationFrame(tick);
 }
 requestAnimationFrame(tick);
+if (bro.app.argv.includes('--bench')) ready.then(() => import('./tests/bench_window.js')).then((b) => b.run(globalThis.__metropolis));
 
 globalThis.__metropolis = {
     scene, sky, city, ground, terrain, cam, trees, treeRecs, get cars() { return cars; }, get interiors() { return interiors; }, get buildings() { return buildings; },
