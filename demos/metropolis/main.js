@@ -5,7 +5,7 @@
 // bro.tiles, the river is a ribbon, the sky is lib/kit's daylight.
 
 import { SKY, daylight } from "/lib/kit/sky.js";
-import { generateCity } from "/lib/city/generate.js";
+import { loadOrGenerateCity } from "/lib/city/cache.js";
 import { createBuildingRenderer } from "/lib/city/building_render.js";
 import { createBridges } from "/lib/city/bridges.js";
 import { createTrafficRenderer } from "/lib/city/traffic_render.js";
@@ -54,8 +54,9 @@ const cam = createFlyCamera(canvas, scene);
 
 const statusEl = document.getElementById('status');
 const t0 = perf.now();
-const city = generateCity(SITE);
-console.log(`metropolis: city in ${(perf.now() - t0).toFixed(0)} ms: ${city.graph.edges.length} roads, ${city.lots.length} lots, ${city.masses.count} masses`,
+// The city grown once and read back from the app's cache after that (keyed on lib/city and world/).
+const { city, hit: cityCached } = loadOrGenerateCity(SITE, { sources: ['/app/world'] });
+console.log(`metropolis: city in ${(perf.now() - t0).toFixed(0)} ms (${cityCached ? 'cache hit' : 'cache miss'}): ${city.graph.edges.length} roads, ${city.lots.length} lots, ${city.masses.count} masses`,
     JSON.stringify(Object.fromEntries(Object.entries(city.timings).map(([k, v]) => [k, Math.round(v)]))));
 
 const t1 = perf.now();
