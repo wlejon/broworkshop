@@ -1,0 +1,83 @@
+// lib/city/bridge.bk — the bridge decks' surface: the swept mesh's vertex
+// colour names its strip (r: 0 asphalt, 1 sidewalk, 2 concrete, 3 soffit;
+// g: the carriageway's half width) and its uv is (offset across the deck
+// from the centre line, arc length along it), in metres. Asphalt gets the
+// ground's markings (double yellow centre, dashed lanes, edge lines); at
+// night the deck is lit by lamp rows on both parapets, as the streets are.
+module hook;
+import scene;
+import mesh;
+import custom;
+
+struct Params {
+    night: f32,
+    pad0: f32,
+    pad1: f32,
+    pad2: f32,
+}
+
+@binding(4, 0) var params: uniform<Params>;
+
+const LAMP_H: f32 = 8.0;
+const LAMP_CD: f32 = 1600.0;
+const LAMP_SP: f32 = 30.0;
+
+fn band(x: f32, a: f32, b: f32, f: f32) -> f32 {
+    let lo = clamp((x - a) / f + 0.5, 0.0, 1.0);
+    let hi = clamp((x - b) / f + 0.5, 0.0, 1.0);
+    return lo - hi;
+}
+
+fn pulse_int(t: f32, a: f32, b: f32) -> f32 {
+    return floor(t) * (b - a) + clamp(fract(t), a, b) - a;
+}
+
+// Coverage of a unit-period pulse [a, b) by a pixel of footprint f (in periods).
+fn pulse(x: f32, a: f32, b: f32, f: f32) -> f32 {
+    let h = max(f, 1.0e-4) * 0.5;
+    return (pulse_int(x + h, a, b) - pulse_int(x - h, a, b)) / (2.0 * h);
+}
+
+pub fn fragment(v: mesh::Vertex, s_in: mesh::Surface) -> mesh::Surface {
+    var s = s_in;
+    let kind = (v.color.x + 0.5) as i32;
+    let hw = v.color.y;
+    let u = v.uv.x;
+    let sa = v.uv.y;
+    let au = abs(u);
+    let fw = abs(dpdx(u)) + abs(dpdy(u)) + abs(dpdx(sa)) + abs(dpdy(sa)) + 0.002;
+    s.metallic = 0.0;
+    var c = vec3<f32>(0.46, 0.45, 0.42);
+    s.roughness = 0.85;
+    if (kind == 0) {
+        c = vec3<f32>(0.055, 0.056, 0.058);
+        let lane_w = 3.4;
+        var paint = band(au, hw - 0.45, hw - 0.3, fw);
+        let lanes = floor(hw / lane_w);
+        for (var li = 1.0; li < 4.0; li += 1.0) {
+            if (li < lanes) {
+                paint = max(paint, band(au, li * lane_w - 0.07, li * lane_w + 0.07, fw) * pulse(sa / 9.0, 0.0, 0.33, fw / 9.0));
+            }
+        }
+        let yellow = band(au, 0.08, 0.22, fw);
+        c = mix(c, vec3<f32>(0.62, 0.62, 0.60), paint);
+        c = mix(c, vec3<f32>(0.55, 0.40, 0.08), yellow);
+        s.roughness = 0.9;
+    } else if (kind == 1) {
+        c = vec3<f32>(0.30, 0.29, 0.27) * (1.0 - 0.25 * pulse(sa / 1.5, 0.0, 0.02, fw / 1.5));
+    } else if (kind == 3) {
+        c = vec3<f32>(0.30, 0.30, 0.29);
+    }
+    s.base_color = c;
+
+    // Night: two rows of lamps on the parapets (W from the centre line), a
+    // line source each: E = 2 I H / (sp (H^2 + d^2)) on the deck.
+    if (params.night > 0.0 && v.normal.y > 0.5) {
+        let W = hw + 3.0;
+        let d0 = au - W;
+        let d1 = au + W;
+        let e = 2.0 * LAMP_CD * LAMP_H / LAMP_SP * (1.0 / (LAMP_H * LAMP_H + d0 * d0) + 1.0 / (LAMP_H * LAMP_H + d1 * d1));
+        s.emissive = c * vec3<f32>(1.0, 0.82, 0.62) * (e * params.night / 3.14159265);
+    }
+    return s;
+}

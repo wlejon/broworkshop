@@ -7,7 +7,7 @@
 import { SKY, daylight } from "/lib/kit/sky.js";
 import { generateCity } from "/lib/city/generate.js";
 import { createBuildingRenderer } from "/lib/city/building_render.js";
-import { bridgeMesh } from "/lib/city/bridges.js";
+import { createBridges } from "/lib/city/bridges.js";
 import { terrainHeight, riverCenterX, RIVER_BED_Y } from "/app/world/terrain_field.js";
 import { SITE } from "/app/world/site.js";
 import { createTerrainStream } from "/app/world/terrain_stream.js";
@@ -58,13 +58,12 @@ console.log(`metropolis: city in ${(perf.now() - t0).toFixed(0)} ms: ${city.grap
 const ground = city.ground;
 const terrain = createTerrainStream(scene, ground);
 
-// The bridges: decks along the graph's bridge edges, on piers in the river.
-const bridgesMesh = bridgeMesh(city.graph, { waterBed: RIVER_BED_Y - 1 });
-const bridges = bridgesMesh && scene.createMesh({ name: 'city_bridges', mesh: bridgesMesh, roughness: 0.85, castsShadow: true, receivesShadow: true });
-
 let timeMode = 'day';
 let buildings = null;
+let bridges = null;
 const ready = Promise.all([
+    // The bridges: decks along the graph's bridge edges, on piers in the river.
+    createBridges(scene, city.graph, readLib('city/bridge.bk'), { waterBed: RIVER_BED_Y - 1 }).then((b) => { bridges = b; }),
     terrain.whenReady(),
     createBuildingRenderer(scene, city.masses, readLib('city/building.bk')).then((b) => { buildings = b; }),
 ]).then(() => { if (statusEl) statusEl.textContent = 'ready'; });
@@ -76,6 +75,7 @@ function setTimeMode(tm) {
     timeMode = tm;
     sky.apply(tm);
     buildings?.setNight(NIGHT[tm]);
+    bridges?.setNight(NIGHT[tm] > 0.5 ? 1 : 0);
     terrain.setNight(NIGHT[tm] > 0.5 ? 1 : 0);
     for (const b of todButtons) b.classList.toggle('active', b.dataset.tod === tm);
 }
