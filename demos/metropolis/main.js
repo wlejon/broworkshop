@@ -7,7 +7,8 @@
 import { SKY, daylight } from "/lib/kit/sky.js";
 import { generateCity } from "/lib/city/generate.js";
 import { createBuildingRenderer } from "/lib/city/building_render.js";
-import { terrainHeight, riverCenterX } from "/app/world/terrain_field.js";
+import { bridgeMesh } from "/lib/city/bridges.js";
+import { terrainHeight, riverCenterX, RIVER_BED_Y } from "/app/world/terrain_field.js";
 import { SITE } from "/app/world/site.js";
 import { createTerrainStream } from "/app/world/terrain_stream.js";
 import { createRiverWater } from "/app/world/river_water.js";
@@ -56,6 +57,10 @@ console.log(`metropolis: city in ${(perf.now() - t0).toFixed(0)} ms: ${city.grap
 
 const ground = city.ground;
 const terrain = createTerrainStream(scene, ground);
+
+// The bridges: decks along the graph's bridge edges, on piers in the river.
+const bridgesMesh = bridgeMesh(city.graph, { waterBed: RIVER_BED_Y - 1 });
+const bridges = bridgesMesh && scene.createMesh({ name: 'city_bridges', mesh: bridgesMesh, roughness: 0.85, castsShadow: true, receivesShadow: true });
 
 let timeMode = 'day';
 let buildings = null;
