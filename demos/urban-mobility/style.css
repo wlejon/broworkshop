@@ -1,0 +1,59 @@
+/* Urban Mobility Twin styling layered over kit.css, sci.css, and living.css */
+
+:root {
+    --k-side-w: 332px;
+}
+
+.k-header {
+    padding: 8px var(--k-pad);
+}
+
+.k-toolbar {
+    padding: 6px var(--k-pad);
+    gap: 7px;
+}
+
+.k-side {
+    gap: 6px;
+    padding: 8px;
+}
+
+.k-side .k-panel {
+    padding: 7px 9px;
+    gap: 5px;
+}
+
+.k-side .k-field > span:first-child {
+    width: 78px;
+    font-size: 11px;
+}
+
+.sci-probe-box {
+    min-height: 50px;
+    font-size: 10.5px;
+    padding: 5px 7px;
+}
+
+.living-brush-btn.active {
+    background: var(--k-accent);
+    border-color: var(--k-accent);
+    color: #07101f;
+    font-weight: 600;
+}
+
+#top-delayed-wrap {
+    max-height: 124px;
+    overflow-y: auto;
+}
+
+.mob-badge-grid {
+    color: #36e896;
+}
+
+.mob-badge-warn {
+    color: #ffbe3b;
+}
+
+.mob-badge-crit {
+    color: #ff5b57;
+}

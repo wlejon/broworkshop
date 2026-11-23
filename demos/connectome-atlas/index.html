@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>FlyWire Connectome — Whole-Brain 3D Synaptic Organ &amp; Live Spiking Cascade</title>
+  <link rel="stylesheet" href="/lib/kit/kit.css">
+  <link rel="stylesheet" href="/lib/sci-atlas/sci.css">
+  <link rel="stylesheet" href="/app/style.css">
+</head>
+<body class="k-app">
+  <header class="k-header">
+    <h1>FlyWire Connectome</h1>
+    <span class="k-sub">Whole-Brain 3D Synaptic Organ &amp; Live Spiking Cascade · bro.table (neurons + edges) + bro.kernel HDR</span>
+    <span class="k-spacer"></span>
+    <span id="dataset-badge" class="k-badge warn">SYNTHETIC</span>
+    <span id="status" class="dim">initializing…</span>
+  </header>
+
+  <div class="k-toolbar">
+    <div id="manifold-bar" class="k-row"></div>
+    <span class="k-sep"></span>
+    <button id="btn-stim-ol" class="primary small" title="Seed 24 neurons in Left Optic Lobe (OL_L)">Stimulate Optic</button>
+    <button id="btn-stim-al" class="small" title="Seed 24 neurons in Antennal Lobe (AL_L)">Stimulate AL</button>
+    <button id="btn-stim-cx" class="small" title="Seed 24 neurons in Central Complex (CX)">Stimulate CX</button>
+    <button id="btn-step-hop" class="small" title="Advance spiking cascade by 1 synaptic hop">Step Hop</button>
+    <button id="btn-clear-wave" class="small" title="Zero per-neuron activation buffer">Reset Wave</button>
+    <span class="k-sep"></span>
+    <button id="btn-autorotate" class="small">Auto-Orbit</button>
+    <button id="btn-sonify" class="small">Sonify: Off</button>
+    <button id="btn-fibers" class="small active" title="Toggle GPU splatting of all directed synaptic fibers">Fibers</button>
+  </div>
+
+  <div class="k-body">
+    <aside class="k-side">
+      <div class="k-panel">
+        <h2>Manifolds</h2>
+        <div id="manifold-list" class="sci-manifold-row"></div>
+        <div id="manifold-desc" class="k-note"></div>
+      </div>
+
+      <div class="k-panel">
+        <h2>Circuit Filters <span id="filter-match" class="k-counter">all</span></h2>
+        <label class="k-field"><span>Region</span>
+          <select id="filter-region">
+            <option value="">All Regions</option>
+          </select>
+        </label>
+        <label class="k-field"><span>Transmitter</span>
+          <select id="filter-nt">
+            <option value="">All Transmitters</option>
+          </select>
+        </label>
+        <label class="k-field"><span>Flow Class</span>
+          <select id="filter-flow">
+            <option value="">All Flows</option>
+          </select>
+        </label>
+        <label class="k-field"><span>Min Out-Syn</span>
+          <input type="range" id="filter-outsyn" min="0" max="200" step="5" value="0">
+          <output class="k-val" id="filter-outsyn-val">0</output>
+        </label>
+        <label class="k-field"><span>Cell Type</span>
+          <div class="k-row k-nowrap k-grow">
+            <input type="search" id="filter-celltype" class="k-grow" placeholder="e.g. Mi1, KC, EPG">
+            <button id="btn-reset-filters" class="small">Reset</button>
+          </div>
+        </label>
+      </div>
+
+      <div class="k-panel">
+        <h2>Selected Neuron Probe</h2>
+        <div id="probe-box" class="sci-probe-box">Click anywhere on the brain to seed 24 neurons and inspect the nearest cell.</div>
+      </div>
+
+      <div class="k-panel">
+        <h2>Engine Proof (bro.table + AVX2)</h2>
+        <div id="proof-panel"></div>
+      </div>
+
+      <div class="k-panel fold folded">
+        <h2>HDR Splat Optics</h2>
+        <label class="k-field"><span>Exposure</span>
+          <input type="range" id="opt-exposure" min="0.2" max="2.5" step="0.05" value="0.78">
+          <output class="k-val" id="opt-exposure-val">0.78</output>
+        </label>
+        <label class="k-field"><span>HDR Bloom</span>
+          <input type="range" id="opt-bloom" min="0.0" max="0.9" step="0.05" value="0.34">
+          <output class="k-val" id="opt-bloom-val">0.34</output>
+        </label>
+        <label class="k-field"><span>Point Size</span>
+          <select id="opt-radius">
+            <option value="1">2x2 HDR Tap</option>
+            <option value="0" selected>1px Sharp (2x2 Spikes)</option>
+          </select>
+        </label>
+      </div>
+    </aside>
+
+    <main class="k-main">
+      <div class="sci-viewport-wrap" id="viewport-wrap">
+        <canvas id="gpu-canvas" class="sci-gpu"></canvas>
+        <canvas id="overlay-canvas" class="sci-overlay"></canvas>
+        <div class="sci-hud-top">
+          <div class="sci-pill" id="hud-cascade">
+            <b>Cascade</b> idle · click brain or Stimulate
+          </div>
+          <div class="sci-pill sci-pill-perf" id="hud-camera">
+            <b>Neurons</b> <span id="hud-ncount">—</span> · <b>Edges</b> <span id="hud-ecount">—</span>
+          </div>
+        </div>
+        <div class="connectome-legend" id="nt-legend"></div>
+        <div class="sci-hint-bar">Drag: orbit · Shift+drag: pan · Scroll: zoom · Click brain: fire signal</div>
+      </div>
+      <div class="sci-chart-strip">
+        <div class="sci-chart-box">
+          <canvas id="chart-nt"></canvas>
+          <div class="sci-chart-title">Neurotransmitter Census (groupBy nt_id)</div>
+        </div>
+        <div class="sci-chart-box">
+          <canvas id="chart-cascade"></canvas>
+          <div class="sci-chart-title">Spiking Cascade Wave · Left vs Right Hemisphere (Hops 0–10)</div>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <footer class="k-statusbar k-stats" id="statusbar">
+    <span>fps <b id="st-fps">0</b></span>
+    <span>neurons <b id="st-neurons">—</b></span>
+    <span>edges <b id="st-edges">—</b></span>
+    <span>active spikes <b id="st-active">0</b></span>
+    <span>hop <b id="st-hop">0/10</b></span>
+    <span>edge lookup <b id="st-lookup">—</b></span>
+    <span>gpu <b id="st-gpu">—</b></span>
+  </footer>
+  <script type="module" src="/app/main.js"></script>
+</body>
+</html>

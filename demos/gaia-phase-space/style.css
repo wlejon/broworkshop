@@ -1,0 +1,82 @@
+/* Gaia DR3 6D Phase-Space Observatory styling layered on kit.css + sci.css */
+
+:root {
+    --k-side-w: 288px;
+}
+
+.gaia-pop-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+}
+
+.gaia-chip-btn {
+    padding: 3px 7px;
+    font-size: 11px;
+    border-radius: 12px;
+}
+
+.gaia-pop-list {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.gaia-pop-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 11px;
+}
+
+.gaia-pop-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    flex: none;
+}
+
+.gaia-pop-bar {
+    flex: 1;
+    height: 5px;
+    background: var(--k-input);
+    border-radius: 3px;
+    overflow: hidden;
+}
+
+.gaia-pop-bar > i {
+    display: block;
+    height: 100%;
+    border-radius: 3px;
+}
+
+.gaia-probe-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 10.5px;
+    color: #c8d7f0;
+}
+
+.gaia-probe-table th {
+    text-align: left;
+    color: var(--k-dim);
+    font-weight: 600;
+    border-bottom: 1px solid var(--k-border);
+    padding: 2px 3px;
+}
+
+.gaia-probe-table td {
+    padding: 2px 3px;
+    border-bottom: 1px solid rgba(35, 48, 72, 0.45);
+}
+
+.gaia-btn-row {
+    display: flex;
+    gap: 5px;
+    flex-wrap: wrap;
+}
+
+.gaia-btn-row > button {
+    flex: 1;
+    min-width: 90px;
+}

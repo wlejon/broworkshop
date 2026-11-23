@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Planetary Thermodynamic Memory — 125 Years of Earth's Atmosphere</title>
+<link rel="stylesheet" href="/lib/kit/kit.css">
+<link rel="stylesheet" href="/lib/sci-atlas/sci.css">
+<link rel="stylesheet" href="/app/style.css">
+</head>
+<body class="k-app">
+  <header class="k-header">
+    <h1>Planetary Thermodynamic Memory — 125 Years of Earth's Atmosphere</h1>
+    <span class="k-sub">NOAA GHCN-Daily · bro.table columnar mmap/AVX2/Range/SpatialIndex · bro.kernel HDR splat · SpatialSonifier</span>
+    <span class="k-spacer"></span>
+    <span id="status" class="dim">initializing…</span>
+  </header>
+
+  <div class="k-body">
+    <aside class="k-side">
+      <div class="k-panel">
+        <h2>Thermodynamic Manifolds</h2>
+        <div class="sci-manifold-row">
+          <button class="sci-manifold-btn active" data-manifold="0">0 · Earth Shell</button>
+          <button class="sci-manifold-btn" data-manifold="1">1 · Climate Helix</button>
+          <button class="sci-manifold-btn" data-manifold="2">2 · Phase-Space</button>
+          <button class="sci-manifold-btn" data-manifold="3">3 · Hovmöller</button>
+        </div>
+      </div>
+
+      <div class="k-panel">
+        <h2>Century Scrubber (1900–2025)</h2>
+        <label class="k-field">
+          <span>Year Min</span>
+          <input type="range" id="year-lo" min="1900" max="2025" step="1" value="1900">
+          <span class="k-val" id="year-lo-val">1900</span>
+        </label>
+        <label class="k-field">
+          <span>Year Max</span>
+          <input type="range" id="year-hi" min="1900" max="2025" step="1" value="2025">
+          <span class="k-val" id="year-hi-val">2025</span>
+        </label>
+        <div class="thermo-chips" id="era-chips">
+          <button class="thermo-chip-btn active" data-era="1900,2025">All 125y</button>
+          <button class="thermo-chip-btn" data-era="1900,1940">1900–40</button>
+          <button class="thermo-chip-btn" data-era="1951,1980">1951–80 Base</button>
+          <button class="thermo-chip-btn" data-era="1981,2005">1981–05</button>
+          <button class="thermo-chip-btn" data-era="2010,2025">2010–25</button>
+        </div>
+        <div class="thermo-btn-row">
+          <button class="small" id="btn-century-play">Play Century</button>
+          <button class="small" id="btn-century-reset">Reset 1900–2025</button>
+          <button class="small" id="btn-autorotate">Auto-Rotate</button>
+        </div>
+      </div>
+
+      <div class="k-panel">
+        <h2>AVX2 Extremes Engine <span id="filter-matched" class="k-counter">all</span></h2>
+        <div class="thermo-chips" id="extreme-chips">
+          <button class="thermo-chip-btn active" data-preset="all">All</button>
+          <button class="thermo-chip-btn" data-preset="heat">Heatwaves &gt;+4°C</button>
+          <button class="thermo-chip-btn" data-preset="cold">Polar Blasts &lt;-4°C</button>
+          <button class="thermo-chip-btn" data-preset="arctic">Arctic &gt;60°N</button>
+          <button class="thermo-chip-btn" data-preset="tropics">Tropics ±23.5°</button>
+        </div>
+        <label class="k-field">
+          <span>Anom min (°C)</span>
+          <input type="range" id="anom-min" min="-12" max="12" step="0.5" value="-12">
+          <span class="k-val" id="anom-min-val">-12.0</span>
+        </label>
+        <label class="k-field">
+          <span>Anom max (°C)</span>
+          <input type="range" id="anom-max" min="-12" max="12" step="0.5" value="12">
+          <span class="k-val" id="anom-max-val">+12.0</span>
+        </label>
+        <label class="k-field">
+          <span>Lat min (°)</span>
+          <input type="range" id="lat-min" min="-90" max="90" step="0.5" value="-90">
+          <span class="k-val" id="lat-min-val">-90.0</span>
+        </label>
+        <label class="k-field">
+          <span>Lat max (°)</span>
+          <input type="range" id="lat-max" min="-90" max="90" step="0.5" value="90">
+          <span class="k-val" id="lat-max-val">+90.0</span>
+        </label>
+        <div class="thermo-btn-row">
+          <button class="small" id="btn-filter-reset">Reset Filters</button>
+        </div>
+      </div>
+
+      <div class="k-panel">
+        <h2>Atmosphere Probe &amp; Audio</h2>
+        <div class="thermo-btn-row">
+          <button class="small" id="btn-probe">Spatial Probe</button>
+          <button class="small" id="btn-sound">Sonify: Off</button>
+        </div>
+      </div>
+
+      <div class="k-panel">
+        <h2>Decade Warming Trajectory</h2>
+        <div id="decade-breakdown" class="thermo-decade-list"></div>
+      </div>
+    </aside>
+
+    <main class="k-main">
+      <div class="sci-viewport-wrap">
+        <canvas id="view" class="sci-gpu"></canvas>
+        <canvas id="overlay" class="sci-overlay"></canvas>
+        <div class="sci-hud-top">
+          <div class="sci-pill" id="hud-manifold">
+            <b>0 · 3D Planetary Thermodynamic Shell</b><br>Loading atmospheric archive…
+          </div>
+          <div class="sci-pill sci-pill-perf" id="hud-perf">
+            <b>FPS</b> <span id="hud-fps">—</span> · <b>Render</b> <span id="hud-backend">Vulkan HDR</span> · <b>Obs</b> <span id="hud-count">—</span>
+          </div>
+        </div>
+        <div class="sci-legend-bar">
+          <span class="sci-legend-swatch"><i class="sci-legend-dot" style="background:#3da3ff"></i>Cooler (&lt;1951–80 norm)</span>
+          <span class="sci-legend-swatch"><i class="sci-legend-dot" style="background:#8aa0b2"></i>Normal (0°C ΔT)</span>
+          <span class="sci-legend-swatch"><i class="sci-legend-dot" style="background:#ff942e"></i>Warming Dome</span>
+          <span class="sci-legend-swatch"><i class="sci-legend-dot" style="background:#ff3b24"></i>Extreme Heatwave</span>
+        </div>
+        <div class="sci-hint-bar">Drag: orbit · Shift+drag: pan · Scroll: zoom · Click: probe 10 nearest stations</div>
+      </div>
+
+      <div class="sci-chart-strip">
+        <div class="sci-chart-box">
+          <div class="sci-chart-title">Global Mean Anomaly by Decade (1900–2020 · groupBy('decade'))</div>
+          <canvas id="chart-warming"></canvas>
+        </div>
+        <div class="sci-chart-box">
+          <div class="sci-chart-title">Latitudinal Warming Profile (−90°S → +90°N · Arctic Amplification)</div>
+          <canvas id="chart-lat"></canvas>
+        </div>
+      </div>
+    </main>
+
+    <aside class="k-side right">
+      <div class="k-panel">
+        <h2>Engine Proof</h2>
+        <div id="proof-panel"></div>
+      </div>
+
+      <div class="k-panel">
+        <h2>Spatial Probe Inspector</h2>
+        <div id="probe-box" class="sci-probe-box">Click Earth/Helix or press Spatial Probe to query SpatialIndex('earth3d').</div>
+        <table class="thermo-probe-table">
+          <thead>
+            <tr><th>d(km)</th><th>Lat / Lon</th><th>Yr·Doy</th><th>Tmin/Max</th><th>Anom</th></tr>
+          </thead>
+          <tbody id="probe-list"></tbody>
+        </table>
+      </div>
+
+      <div class="k-panel">
+        <h2>Thermodynamic Telemetry</h2>
+        <div id="regime-box"></div>
+      </div>
+    </aside>
+  </div>
+
+  <footer class="k-statusbar k-stats">
+    <span>obs <b id="st-rows">0</b></span>
+    <span>manifold <b id="st-manifold">0</b></span>
+    <span>window <b id="st-window">1900–2025</b></span>
+    <span>mean ΔT <b id="st-mean">—</b></span>
+    <span>active mask <b id="st-mask">all</b></span>
+    <span>probe <b id="st-probe">—</b></span>
+    <span>fps <b id="st-fps">0</b></span>
+  </footer>
+
+  <script type="module" src="/app/main.js"></script>
+</body>
+</html>

@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>DESI DR1 — 11-Billion-Light-Year Cosmic Web &amp; BAO Radar</title>
+<link rel="stylesheet" href="/lib/kit/kit.css">
+<link rel="stylesheet" href="/lib/sci-atlas/sci.css">
+<link rel="stylesheet" href="/app/style.css">
+</head>
+<body class="k-app">
+  <header class="k-header">
+    <h1>DESI DR1 — 11-Billion-Light-Year Cosmic Web &amp; BAO Radar</h1>
+    <span class="k-sub">bro.table mmap/AVX2/RangeIndex/SpatialIndex · bro.kernel 64³ GPU Void Sculptor · BAO Standing-Wave Sonifier</span>
+    <span class="k-spacer"></span>
+    <span id="status" class="dim">initializing…</span>
+  </header>
+
+  <div class="k-body">
+    <aside class="k-side">
+      <div class="k-panel">
+        <h2>Cosmic Manifolds</h2>
+        <div class="sci-manifold-row">
+          <button class="sci-manifold-btn active" data-manifold="0">0 · Cosmic Web 3D</button>
+          <button class="sci-manifold-btn" data-manifold="1">1 · 12-Gyr Light-Cone</button>
+          <button class="sci-manifold-btn" data-manifold="2">2 · Color–Color–z</button>
+          <button class="sci-manifold-btn" data-manifold="3">3 · Void Sculptor 64³</button>
+        </div>
+      </div>
+
+      <div class="k-panel">
+        <h2>Redshift &amp; AVX2 Filters <span id="filter-matched" class="k-counter">all</span></h2>
+        <label class="k-field">
+          <span>z min</span>
+          <input type="range" id="z-min" min="0.0" max="3.5" step="0.05" value="0.0">
+          <span class="k-val" id="z-min-val">0.00</span>
+        </label>
+        <label class="k-field">
+          <span>z max</span>
+          <input type="range" id="z-max" min="0.0" max="3.5" step="0.05" value="3.5">
+          <span class="k-val" id="z-max-val">3.50</span>
+        </label>
+        <label class="k-field">
+          <span>g − r min</span>
+          <input type="range" id="gr-min" min="-0.5" max="2.5" step="0.1" value="-0.5">
+          <span class="k-val" id="gr-min-val">-0.5</span>
+        </label>
+        <label class="k-field">
+          <span>g − r max</span>
+          <input type="range" id="gr-max" min="-0.5" max="2.5" step="0.1" value="2.5">
+          <span class="k-val" id="gr-max-val">+2.5</span>
+        </label>
+        <div class="cosmo-chips" id="spec-chips">
+          <button class="cosmo-chip-btn active" data-spec="-1">All</button>
+          <button class="cosmo-chip-btn" data-spec="0">GALAXY</button>
+          <button class="cosmo-chip-btn" data-spec="1">LRG</button>
+          <button class="cosmo-chip-btn" data-spec="2">QSO</button>
+          <button class="cosmo-chip-btn" data-spec="3">STAR</button>
+        </div>
+        <div class="cosmo-btn-row">
+          <button class="small" id="btn-filter-reset">Reset Filters</button>
+          <button class="small" id="btn-autorotate">Auto-Orbit</button>
+        </div>
+      </div>
+
+      <div class="k-panel">
+        <h2>Void Sculptor (64³ GPU)</h2>
+        <label class="k-field">
+          <span>Void Threshold</span>
+          <input type="range" id="void-thresh" min="0.10" max="1.00" step="0.02" value="0.46">
+          <span class="k-val" id="void-thresh-val">0.46</span>
+        </label>
+        <label class="k-field">
+          <span>Bubble Glow</span>
+          <input type="range" id="void-glow" min="0.20" max="2.00" step="0.05" value="1.15">
+          <span class="k-val" id="void-glow-val">1.15</span>
+        </label>
+        <div class="cosmo-btn-row">
+          <button class="small" id="btn-revox">Rebuild 64³ Grid</button>
+          <button class="small" id="btn-sound">Sonify: Off</button>
+        </div>
+      </div>
+
+      <div class="k-panel">
+        <h2>Spectral Breakdown</h2>
+        <div id="spec-breakdown" class="cosmo-spec-list"></div>
+      </div>
+    </aside>
+
+    <main class="k-main">
+      <div class="sci-viewport-wrap">
+        <canvas id="view" class="sci-gpu"></canvas>
+        <canvas id="overlay" class="sci-overlay"></canvas>
+        <div class="sci-hud-top">
+          <div class="sci-pill" id="hud-manifold">
+            <b>0 · 3D Comoving Cosmic Web</b><br>Loading DESI DR1 catalog…
+          </div>
+          <div class="sci-pill sci-pill-perf" id="hud-perf">
+            <b>FPS</b> <span id="hud-fps">—</span> · <b>Render</b> <span id="hud-backend">Vulkan HDR</span> · <b>Objects</b> <span id="hud-count">—</span>
+          </div>
+        </div>
+        <div class="sci-legend-bar">
+          <span class="sci-legend-swatch"><i class="sci-legend-dot" style="background:#74b9ff"></i>Galaxies</span>
+          <span class="sci-legend-swatch"><i class="sci-legend-dot" style="background:#ffb05c"></i>LRGs (Old Red)</span>
+          <span class="sci-legend-swatch"><i class="sci-legend-dot" style="background:#d980ff"></i>Quasars (Deep z)</span>
+          <span class="sci-legend-swatch"><i class="sci-legend-dot" style="background:#66f2b8"></i>BAO Probe</span>
+          <span class="sci-legend-swatch"><i class="sci-legend-dot" style="background:#38e5ff"></i>64³ Void Bubbles</span>
+        </div>
+        <div class="sci-hint-bar">Drag: orbit · Shift+drag: pan · Scroll: zoom · Click: measure BAO shell</div>
+      </div>
+
+      <div class="sci-chart-strip">
+        <div class="sci-chart-box">
+          <div class="sci-chart-title">BAO Spherical Shell Correlation r² · ξ(r)  [0–220 Mpc/h]</div>
+          <canvas id="chart-bao"></canvas>
+        </div>
+        <div class="sci-chart-box">
+          <div class="sci-chart-title">Redshift Shell Distribution N(z) &amp; Lookback Time (0–11.8 Gyr)</div>
+          <canvas id="chart-redshift"></canvas>
+        </div>
+      </div>
+    </main>
+
+    <aside class="k-side right">
+      <div class="k-panel">
+        <h2>Engine Proof</h2>
+        <div id="proof-panel"></div>
+      </div>
+
+      <div class="k-panel">
+        <h2>BAO Acoustic Radar</h2>
+        <div class="cosmo-btn-row" style="margin-bottom: 6px;">
+          <button class="small" id="btn-probe">Probe Filament/Void</button>
+          <button class="small" id="btn-probe-void">Probe Deep Void</button>
+        </div>
+        <div id="probe-box" class="sci-probe-box">Click viewport or Probe Filament/Void to run SpatialIndex('cosmo3d').whereInRadius(220 Mpc/h).</div>
+        <table class="cosmo-probe-table">
+          <thead>
+            <tr><th>Shell</th><th>Obs N</th><th>Exp N</th><th>ξ(r)</th><th>r²·ξ</th></tr>
+          </thead>
+          <tbody id="probe-list"></tbody>
+        </table>
+      </div>
+
+      <div class="k-panel">
+        <h2>Redshift Shell &amp; 64³ Volume</h2>
+        <div id="shell-box" class="sci-probe-box">Awaiting RangeIndex('z') &amp; 64³ GPU volume pass…</div>
+      </div>
+    </aside>
+  </div>
+
+  <footer class="k-statusbar k-stats">
+    <span>objects <b id="st-rows">0</b></span>
+    <span>manifold <b id="st-manifold">0</b></span>
+    <span>z-shell <b id="st-zshell">0.00..3.50</b></span>
+    <span>active mask <b id="st-mask">all</b></span>
+    <span>BAO radar <b id="st-probe">—</b></span>
+    <span>fps <b id="st-fps">0</b></span>
+  </footer>
+
+  <script type="module" src="/app/main.js"></script>
+</body>
+</html>

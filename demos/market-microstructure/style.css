@@ -1,0 +1,76 @@
+/* Market Microstructure Observatory styling layered over kit.css, sci.css, and living.css */
+
+:root {
+    --k-side-w: 338px;
+}
+
+.k-header {
+    padding: 8px var(--k-pad);
+}
+
+.k-toolbar {
+    padding: 6px var(--k-pad);
+    gap: 7px;
+}
+
+.k-side {
+    gap: 6px;
+    padding: 8px 8px 14px;
+}
+
+.k-side .k-panel {
+    padding: 7px 9px;
+    gap: 5px;
+}
+
+.k-side .k-field > span:first-child {
+    width: 78px;
+    font-size: 11px;
+}
+
+.sci-probe-box {
+    min-height: 54px;
+    font-size: 10.5px;
+    padding: 5px 7px;
+}
+
+.living-brush-btn.active {
+    background: var(--k-accent);
+    border-color: var(--k-accent);
+    color: #07101f;
+    font-weight: 600;
+}
+
+.mm-topk-head {
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--k-dim);
+    margin-top: 4px;
+    margin-bottom: 2px;
+}
+
+.mm-topk-wrap {
+    max-height: 112px;
+    overflow-y: auto;
+}
+
+.mm-bid {
+    color: #36e8d4;
+}
+
+.mm-ask {
+    color: #ff9c3b;
+}
+
+.mm-warn {
+    color: #ffbe3b;
+}
+
+.mm-crit {
+    color: #ff5b6b;
+}
+
+.mm-gold {
+    color: #ffd84d;
+}

@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Evolutionary Biosphere — Living Genomes &amp; Timeline Branching on bro.table</title>
+<link rel="stylesheet" href="/lib/kit/kit.css">
+<link rel="stylesheet" href="/lib/sci-atlas/sci.css">
+<link rel="stylesheet" href="/lib/living-table/living.css">
+<link rel="stylesheet" href="/app/style.css">
+</head>
+<body class="k-app">
+  <header class="k-header">
+    <h1>Evolutionary Biosphere</h1>
+    <span class="k-sub">Living Genomes, Bitwise Selection &amp; Timeline Branching · bro.table + bro.kernel HDR + bro.tensor</span>
+    <span class="k-spacer"></span>
+    <span id="dataset-badge" class="k-badge ok">32 CHUNKS · 131,072 ORGANISMS</span>
+    <span id="status" class="dim">initializing…</span>
+  </header>
+
+  <div class="k-toolbar">
+    <div id="manifold-bar" class="k-row"></div>
+    <span class="k-sep"></span>
+    <button id="btn-sim-play" class="small active">Evolve: On</button>
+    <button id="btn-speciate" class="small primary" title="Insert 2,048 evolved offspring via creatures.insertMany()">Speciation Burst</button>
+    <button id="btn-compact" class="small" title="Reclaim Asteroid extinction tombstones via creatures.compact()">Compact</button>
+    <span class="k-sep"></span>
+    <button id="btn-autorotate" class="small">Auto-Orbit</button>
+    <button id="btn-sound" class="small">Sonify: Off</button>
+  </div>
+
+  <div class="k-body">
+    <aside class="k-side">
+      <div class="k-panel">
+        <h2>3D Evolutionary Manifolds</h2>
+        <div id="manifold-list" class="sci-manifold-row"></div>
+      </div>
+
+      <div class="k-panel">
+        <h2>Spatial Evolution Brushes</h2>
+        <div class="living-brush-grid" id="brush-mode-row">
+          <button class="living-brush-btn active" data-brush="probe">Probe Nearest</button>
+          <button class="living-brush-btn" data-brush="mutagen">Mutagen (XOR ^5)</button>
+          <button class="living-brush-btn" data-brush="asteroid">Asteroid (AABB)</button>
+        </div>
+        <div class="evo-btn-row">
+          <button id="btn-mutagen-blast" class="small" title="Apply whereInRadius('hab3d', pt, 0.48) bitwise XOR ^5 + gene drift">Mutagen Blast</button>
+          <button id="btn-asteroid-strike" class="small danger" title="Apply whereInAABB('hab3d') mass extinction">Asteroid Strike</button>
+        </div>
+        <label class="k-field">
+          <span>Selection</span>
+          <input type="range" id="sel-pressure" min="0.0" max="2.5" step="0.05" value="1.05">
+          <output class="k-val" id="sel-pressure-val">1.05</output>
+        </label>
+        <label class="k-field">
+          <span>Genetic Drift</span>
+          <input type="range" id="drift-amp" min="0.0" max="0.25" step="0.005" value="0.045">
+          <output class="k-val" id="drift-amp-val">0.045</output>
+        </label>
+        <div class="evo-subhead">Bitwise Trait Mask Filter <span id="trait-matched" class="k-counter">all</span></div>
+        <div class="evo-chips" id="trait-chips">
+          <button class="evo-chip-btn active" data-trait="0">All</button>
+          <button class="evo-chip-btn" data-trait="1">Biolum (1)</button>
+          <button class="evo-chip-btn" data-trait="2">Thermo (2)</button>
+          <button class="evo-chip-btn" data-trait="4">Armored (4)</button>
+          <button class="evo-chip-btn" data-trait="8">Aerial (8)</button>
+          <button class="evo-chip-btn" data-trait="16">Venom (16)</button>
+          <button class="evo-chip-btn" data-trait="32">Symbio (32)</button>
+        </div>
+      </div>
+
+      <div class="k-panel">
+        <h2>Timeline Branching (.brotable v3)</h2>
+        <div class="evo-branch-controls">
+          <button id="btn-save-branch" class="small primary">Save Branch .brotable</button>
+          <button id="btn-fork-branch" class="small">Fork Memory Clone</button>
+        </div>
+        <div id="branch-audit-box" class="evo-delta-pill">Save or audit a .brotable v3 branch to verify zero-copy OS mmap indexes &amp; fitness delta.</div>
+        <div id="branch-list" class="living-ckpt-list"></div>
+      </div>
+
+      <div class="k-panel fold folded">
+        <h2>HDR Splat Optics</h2>
+        <label class="k-field">
+          <span>Exposure</span>
+          <input type="range" id="opt-exposure" min="0.2" max="1.6" step="0.05" value="0.65">
+          <output class="k-val" id="opt-exposure-val">0.65</output>
+        </label>
+        <label class="k-field">
+          <span>HDR Bloom</span>
+          <input type="range" id="opt-bloom" min="0.0" max="0.7" step="0.02" value="0.22">
+          <output class="k-val" id="opt-bloom-val">0.22</output>
+        </label>
+      </div>
+    </aside>
+
+    <main class="k-main">
+      <div class="sci-viewport-wrap" id="viewport-wrap">
+        <canvas id="view" class="sci-gpu"></canvas>
+        <canvas id="overlay" class="sci-overlay"></canvas>
+        <div class="sci-hud-top">
+          <div class="sci-pill" id="hud-manifold">
+            <b>0 · 3D Habitat</b><br>Loading evolutionary biosphere…
+          </div>
+          <div class="sci-pill sci-pill-perf" id="hud-perf">
+            <b>FPS</b> <span id="hud-fps">—</span> · <b>Render</b> <span id="hud-backend">Vulkan HDR</span> · <b>Alive</b> <span id="hud-count">—</span>
+          </div>
+        </div>
+        <div class="sci-legend-bar" id="trait-legend">
+          <span class="sci-legend-swatch"><i class="sci-legend-dot" style="background:#46e2ff"></i>Biolum (1)</span>
+          <span class="sci-legend-swatch"><i class="sci-legend-dot" style="background:#ff703d"></i>Thermo (2)</span>
+          <span class="sci-legend-swatch"><i class="sci-legend-dot" style="background:#9aa8c4"></i>Armored (4)</span>
+          <span class="sci-legend-swatch"><i class="sci-legend-dot" style="background:#9dff7a"></i>Aerial (8)</span>
+          <span class="sci-legend-swatch"><i class="sci-legend-dot" style="background:#d95eff"></i>Venom (16)</span>
+          <span class="sci-legend-swatch"><i class="sci-legend-dot" style="background:#ffd94a"></i>Symbio (32)</span>
+        </div>
+        <div class="sci-hint-bar">Drag: orbit · Shift+drag: pan · Scroll: zoom · Click: Probe / Mutagen / Asteroid</div>
+      </div>
+
+      <div class="sci-chart-strip">
+        <div class="sci-chart-box">
+          <div class="sci-chart-title">Clade Fitness &amp; Bitwise Trait Prevalence (leftJoin clades · bitAnd)</div>
+          <canvas id="chart-traits"></canvas>
+        </div>
+        <div class="sci-chart-box">
+          <div class="sci-chart-title">Phenotype Fitness Distribution &amp; Timeline Branch Delta (.brotable v3)</div>
+          <canvas id="chart-phenotype"></canvas>
+        </div>
+      </div>
+    </main>
+
+    <aside class="k-side right">
+      <div class="k-panel">
+        <h2>Living Table Engine Vitals</h2>
+        <div id="vitals-panel"></div>
+      </div>
+
+      <div class="k-panel">
+        <h2>Relational Join &amp; Tensor Analytics</h2>
+        <div id="analytics-kv"></div>
+        <div class="evo-subhead">Apex Organisms (RangeIndex fitness Top-8)</div>
+        <table class="evo-probe-table">
+          <thead>
+            <tr><th>ID</th><th>Taxon</th><th>Parent</th><th>Traits</th><th>Fit</th></tr>
+          </thead>
+          <tbody id="elite-list"></tbody>
+        </table>
+      </div>
+
+      <div class="k-panel">
+        <h2>Spatial Organism Probe (hab3d)</h2>
+        <div id="probe-box" class="sci-probe-box">Click anywhere on the biosphere to inspect nearest organisms or strike with Mutagen / Asteroid.</div>
+        <table class="evo-probe-table">
+          <thead>
+            <tr><th>d</th><th>Lineage</th><th>Gen</th><th>Traits</th><th>Fit</th></tr>
+          </thead>
+          <tbody id="probe-list"></tbody>
+        </table>
+      </div>
+    </aside>
+  </div>
+
+  <footer class="k-statusbar k-stats">
+    <span>alive <b id="st-rows">0</b></span>
+    <span>manifold <b id="st-manifold">0</b></span>
+    <span>max gen <b id="st-gen">0</b></span>
+    <span>endangered <b id="st-endangered">0</b></span>
+    <span>reused <b id="st-reused">—</b></span>
+    <span>branches <b id="st-branches">0</b></span>
+    <span>fps <b id="st-fps">0</b></span>
+  </footer>
+
+  <script type="module" src="/app/main.js"></script>
+</body>
+</html>

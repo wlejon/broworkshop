@@ -1,0 +1,89 @@
+/* DESI DR1 Cosmic Web & BAO Radar styling layered on kit.css + sci.css */
+
+:root {
+    --k-side-w: 292px;
+}
+
+.cosmo-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+}
+
+.cosmo-chip-btn {
+    padding: 3px 7px;
+    font-size: 11px;
+    border-radius: 12px;
+}
+
+.cosmo-spec-list {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.cosmo-spec-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 11px;
+}
+
+.cosmo-spec-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    flex: none;
+}
+
+.cosmo-spec-bar {
+    flex: 1;
+    height: 5px;
+    background: var(--k-input);
+    border-radius: 3px;
+    overflow: hidden;
+}
+
+.cosmo-spec-bar > i {
+    display: block;
+    height: 100%;
+    border-radius: 3px;
+}
+
+.cosmo-probe-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 10.5px;
+    color: #c8d7f0;
+    margin-top: 4px;
+}
+
+.cosmo-probe-table th {
+    text-align: left;
+    color: var(--k-dim);
+    font-weight: 600;
+    border-bottom: 1px solid var(--k-border);
+    padding: 2px 3px;
+}
+
+.cosmo-probe-table td {
+    padding: 2px 3px;
+    border-bottom: 1px solid rgba(35, 48, 72, 0.45);
+}
+
+.cosmo-probe-table tr.bao-peak td {
+    color: #66f2b8;
+    font-weight: 600;
+    background: rgba(102, 242, 184, 0.08);
+}
+
+.cosmo-btn-row {
+    display: flex;
+    gap: 5px;
+    flex-wrap: wrap;
+}
+
+.cosmo-btn-row > button {
+    flex: 1;
+    min-width: 90px;
+}

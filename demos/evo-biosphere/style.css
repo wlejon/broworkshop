@@ -1,0 +1,109 @@
+/* Evolutionary Biosphere — Living Table showcase styling on kit.css + sci.css + living.css */
+
+:root {
+    --k-side-w: 298px;
+}
+
+.evo-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+}
+
+.evo-chip-btn {
+    padding: 3px 7px;
+    font-size: 10.5px;
+    border-radius: 12px;
+}
+
+.evo-btn-row {
+    display: flex;
+    gap: 4px;
+    flex-wrap: wrap;
+}
+
+.evo-btn-row > button {
+    flex: 1;
+    min-width: 82px;
+    padding: 4px 7px;
+    font-size: 11px;
+}
+
+.evo-branch-controls {
+    display: flex;
+    gap: 4px;
+    flex-wrap: wrap;
+}
+
+.evo-branch-controls > button {
+    flex: 1;
+    min-width: 110px;
+    padding: 4px 7px;
+    font-size: 11px;
+}
+
+.evo-ckpt-meta {
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+    min-width: 0;
+}
+
+.evo-ckpt-title {
+    color: #dbe8ff;
+    font-weight: 600;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.evo-ckpt-sub {
+    color: var(--k-dim);
+    font-size: 9.5px;
+}
+
+.evo-ckpt-actions {
+    display: flex;
+    gap: 3px;
+    flex: none;
+}
+
+.evo-delta-pill {
+    font-size: 10px;
+    padding: 3px 6px;
+    border-radius: 4px;
+    background: rgba(20, 32, 52, 0.85);
+    border: 1px solid var(--k-border-hi);
+    color: #a8d4ff;
+    line-height: 1.35;
+}
+
+.evo-probe-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 10px;
+    color: #c8d7f0;
+    font-variant-numeric: tabular-nums;
+}
+
+.evo-probe-table th {
+    text-align: left;
+    color: var(--k-dim);
+    font-weight: 600;
+    border-bottom: 1px solid var(--k-border);
+    padding: 2px 3px;
+}
+
+.evo-probe-table td {
+    padding: 2px 3px;
+    border-bottom: 1px solid rgba(35, 48, 72, 0.45);
+    white-space: nowrap;
+}
+
+.evo-subhead {
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--k-dim);
+    margin-top: 2px;
+}

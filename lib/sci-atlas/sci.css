@@ -1,0 +1,192 @@
+/* Shared styling extensions for sci-atlas showcase apps layered on /lib/kit/kit.css */
+
+.sci-viewport-wrap {
+    position: relative;
+    flex: 1;
+    min-height: 0;
+    background: #060911;
+    overflow: hidden;
+}
+
+.sci-viewport-wrap canvas.sci-gpu {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    display: block;
+}
+
+.sci-viewport-wrap canvas.sci-overlay {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    display: block;
+    pointer-events: none;
+}
+
+.sci-hud-top {
+    position: absolute;
+    top: 10px;
+    left: 12px;
+    right: 12px;
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    pointer-events: none;
+    gap: 10px;
+}
+
+.sci-hud-top > .sci-pill:first-child {
+    flex: 0 1 560px;
+    min-width: 240px;
+}
+
+.sci-pill {
+    background: rgba(10, 15, 26, 0.78);
+    border: 1px solid rgba(110, 160, 255, 0.25);
+    border-radius: 6px;
+    padding: 6px 10px;
+    font-size: 12px;
+    color: #d8e4ff;
+    line-height: 1.35;
+}
+
+.sci-pill b {
+    color: #8cc4ff;
+}
+
+.sci-chart-strip {
+    height: 132px;
+    flex: none;
+    border-top: 1px solid var(--k-border);
+    background: #090d16;
+    display: flex;
+    gap: 8px;
+    padding: 6px 10px;
+}
+
+.sci-chart-box {
+    flex: 1;
+    position: relative;
+    border: 1px solid var(--k-border);
+    border-radius: 4px;
+    background: #0b101b;
+    overflow: hidden;
+}
+
+.sci-chart-box canvas {
+    width: 100%;
+    height: 100%;
+    display: block;
+}
+
+.sci-chart-title {
+    position: absolute;
+    top: 4px;
+    left: 8px;
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--k-muted);
+    pointer-events: none;
+}
+
+.sci-manifold-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+}
+
+.sci-manifold-btn {
+    flex: 1 1 46%;
+    text-align: left;
+    padding: 5px 8px;
+    font-size: 11px;
+}
+
+.sci-probe-box {
+    font-size: 11px;
+    line-height: 1.4;
+    color: #c9d6ee;
+    background: rgba(18, 25, 40, 0.7);
+    border: 1px solid var(--k-border);
+    border-radius: 4px;
+    padding: 6px 8px;
+    white-space: pre-wrap;
+    min-height: 54px;
+}
+
+.k-statusbar {
+    flex-wrap: nowrap;
+    overflow: hidden;
+    white-space: nowrap;
+    gap: 14px;
+    height: 30px;
+    min-height: 30px;
+    max-height: 30px;
+    font-variant-numeric: tabular-nums;
+}
+
+.sci-pill-perf {
+    flex: none;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+}
+
+.sci-guide {
+    font-size: 11px;
+    color: #b8cae8;
+    margin-top: 3px;
+    line-height: 1.38;
+    max-width: 560px;
+}
+
+.sci-formula {
+    font-size: 10px;
+    color: #7f95ba;
+    margin-top: 2px;
+}
+
+.sci-legend-bar {
+    position: absolute;
+    bottom: 8px;
+    left: 12px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    align-items: center;
+    background: rgba(8, 12, 22, 0.72);
+    border: 1px solid rgba(110, 160, 255, 0.18);
+    border-radius: 5px;
+    padding: 4px 9px;
+    font-size: 10.5px;
+    color: #c7d6ef;
+    pointer-events: none;
+}
+
+.sci-legend-swatch {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+}
+
+.sci-legend-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    display: inline-block;
+}
+
+.sci-hint-bar {
+    position: absolute;
+    bottom: 8px;
+    right: 12px;
+    font-size: 10.5px;
+    color: rgba(176, 198, 236, 0.78);
+    background: rgba(8, 12, 22, 0.68);
+    border: 1px solid rgba(110, 160, 255, 0.16);
+    border-radius: 5px;
+    padding: 4px 9px;
+    pointer-events: none;
+}

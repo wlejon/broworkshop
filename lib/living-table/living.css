@@ -1,0 +1,89 @@
+/* Shared styling extensions for Living Table closed-loop demos */
+
+.living-badge-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    margin-bottom: 6px;
+}
+
+.k-badge.info {
+    background: rgba(52, 128, 224, 0.22);
+    border-color: rgba(92, 157, 255, 0.45);
+    color: #9ecbff;
+}
+
+.living-bar-caption {
+    margin-top: 6px;
+    font-size: 10px;
+    color: var(--k-muted);
+}
+
+.living-bar-track {
+    margin-top: 3px;
+    height: 6px;
+    background: var(--k-input);
+    border: 1px solid var(--k-border);
+    border-radius: 4px;
+    overflow: hidden;
+}
+
+.living-bar-fill {
+    height: 100%;
+    width: 0%;
+    background: linear-gradient(90deg, #2fb878, #58d8ff);
+    transition: width 140ms ease;
+}
+
+.living-brush-grid {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+}
+
+.living-brush-btn {
+    flex: 1 1 46%;
+    padding: 4px 7px;
+    font-size: 11px;
+    text-align: center;
+}
+
+.living-table-grid {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 10.5px;
+    color: #c8d7f0;
+    font-variant-numeric: tabular-nums;
+}
+
+.living-table-grid th {
+    text-align: left;
+    color: var(--k-dim);
+    font-weight: 600;
+    border-bottom: 1px solid var(--k-border);
+    padding: 2px 3px;
+}
+
+.living-table-grid td {
+    padding: 2px 3px;
+    border-bottom: 1px solid rgba(35, 48, 72, 0.45);
+}
+
+.living-ckpt-list {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    margin-top: 4px;
+}
+
+.living-ckpt-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 10.5px;
+    padding: 4px 6px;
+    background: rgba(19, 25, 39, 0.72);
+    border: 1px solid var(--k-border);
+    border-radius: 4px;
+    gap: 6px;
+}

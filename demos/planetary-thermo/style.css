@@ -1,0 +1,78 @@
+/* Planetary Thermodynamic Memory styling layered on kit.css + sci.css */
+
+:root {
+    --k-side-w: 292px;
+}
+
+.thermo-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+}
+
+.thermo-chip-btn {
+    padding: 3px 7px;
+    font-size: 11px;
+    border-radius: 12px;
+}
+
+.thermo-btn-row {
+    display: flex;
+    gap: 5px;
+    flex-wrap: wrap;
+}
+
+.thermo-btn-row > button {
+    flex: 1;
+    min-width: 86px;
+}
+
+.thermo-decade-list {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+}
+
+.thermo-decade-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 10.5px;
+}
+
+.thermo-decade-bar {
+    flex: 1;
+    height: 6px;
+    background: var(--k-input);
+    border-radius: 3px;
+    position: relative;
+    overflow: hidden;
+}
+
+.thermo-decade-bar > i {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    border-radius: 2px;
+}
+
+.thermo-probe-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 10.5px;
+    color: #c8d7f0;
+}
+
+.thermo-probe-table th {
+    text-align: left;
+    color: var(--k-dim);
+    font-weight: 600;
+    border-bottom: 1px solid var(--k-border);
+    padding: 2px 3px;
+}
+
+.thermo-probe-table td {
+    padding: 2px 3px;
+    border-bottom: 1px solid rgba(35, 48, 72, 0.45);
+    white-space: nowrap;
+}

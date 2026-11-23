@@ -1,0 +1,7 @@
+{
+  "title": "DESI DR1 — 11-Billion-Light-Year Cosmic Web & BAO Radar",
+  "width": 1280,
+  "height": 800,
+  "lib": "../../lib",
+  "permissions": ["files"]
+}

@@ -1,0 +1,29 @@
+/* Living Biosphere showcase styling layered on kit.css + sci.css + living.css */
+
+:root {
+    --k-side-w: 294px;
+}
+
+.eco-seg-row {
+    display: flex;
+    gap: 4px;
+    margin-bottom: 4px;
+}
+
+.eco-seg-row > button {
+    flex: 1;
+    text-align: center;
+    padding: 4px 5px;
+    font-size: 11px;
+}
+
+.eco-ckpt-box {
+    min-height: 46px;
+    font-size: 10.5px;
+}
+
+.k-side .k-panel h2 {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+}

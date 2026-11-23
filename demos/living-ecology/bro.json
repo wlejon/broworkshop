@@ -1,0 +1,7 @@
+{
+  "title": "Living Biosphere — Artificial Ecology on Mutable bro.table + Vulkan GPU",
+  "width": 1440,
+  "height": 900,
+  "lib": "../../lib",
+  "permissions": ["files"]
+}

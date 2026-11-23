@@ -1,0 +1,7 @@
+{
+  "title": "FlyWire Connectome — Whole-Brain 3D Synaptic Organ & Live Spiking Cascade",
+  "width": 1440,
+  "height": 900,
+  "lib": "../../lib",
+  "permissions": ["files"]
+}

@@ -1,0 +1,7 @@
+{
+  "title": "Market Microstructure — Live Financial Orderbook, Multi-Agent Exchange & Systemic Risk Observatory",
+  "width": 1440,
+  "height": 900,
+  "lib": "../../lib",
+  "permissions": ["files"]
+}

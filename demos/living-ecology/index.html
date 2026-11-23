@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Living Biosphere — Closed-Loop Artificial Ecology &amp; Relational Table Engine</title>
+<link rel="stylesheet" href="/lib/kit/kit.css">
+<link rel="stylesheet" href="/lib/sci-atlas/sci.css">
+<link rel="stylesheet" href="/lib/living-table/living.css">
+<link rel="stylesheet" href="/app/style.css">
+</head>
+<body class="k-app">
+  <header class="k-header">
+    <h1>Living Biosphere — Artificial Ecology &amp; Relational Table Engine</h1>
+    <span class="k-sub">131k mutable bro.table rows · Hash/Range/SpatialIndex · Vulkan GPU advection &amp; writeback · O(1) COW Worker · .brotable v3</span>
+    <span class="k-spacer"></span>
+    <span id="status" class="dim">initializing biosphere…</span>
+  </header>
+
+  <div class="k-body">
+    <aside class="k-side">
+      <div class="k-panel">
+        <h2>Ecological Manifolds</h2>
+        <div class="sci-manifold-row" id="manifold-btns">
+          <button class="sci-manifold-btn active" data-manifold="0">0 · 3D Biosphere</button>
+          <button class="sci-manifold-btn" data-manifold="1">1 · Trophic Pyramid</button>
+          <button class="sci-manifold-btn" data-manifold="2">2 · Energy × Stress</button>
+          <button class="sci-manifold-btn" data-manifold="3">3 · Metabolic Helix</button>
+        </div>
+      </div>
+
+      <div class="k-panel">
+        <h2>Closed-Loop GPU ↔ Table</h2>
+        <label class="k-field">
+          <span>Currents</span>
+          <input type="range" id="flow-amp" min="0" max="2.5" step="0.1" value="1.0">
+          <span class="k-val" id="flow-amp-val">1.0</span>
+        </label>
+        <label class="k-field">
+          <span>Metabolism</span>
+          <input type="range" id="metab-rate" min="0" max="2.5" step="0.1" value="1.0">
+          <span class="k-val" id="metab-rate-val">1.0</span>
+        </label>
+        <div class="living-brush-grid">
+          <button class="small living-brush-btn active" id="btn-sim-play">Sim: Live</button>
+          <button class="small living-brush-btn" id="btn-gpu-step">Step GPU → Table</button>
+          <button class="small living-brush-btn" id="btn-autorotate">Auto-Orbit</button>
+          <button class="small living-brush-btn" id="btn-sound">Sonify: Off</button>
+        </div>
+      </div>
+
+      <div class="k-panel">
+        <h2>Spatial Brushes &amp; Lifecycle</h2>
+        <div class="eco-seg-row" id="brush-mode"></div>
+        <div class="living-brush-grid">
+          <button class="small living-brush-btn" id="btn-bloom">Nutrient Bloom</button>
+          <button class="small living-brush-btn danger" id="btn-toxin">Toxin Cull</button>
+          <button class="small living-brush-btn" id="btn-birth">Birth Wave +512</button>
+          <button class="small living-brush-btn" id="btn-cull">Starve Cull</button>
+          <button class="small living-brush-btn" id="btn-compact">Compact Table</button>
+        </div>
+      </div>
+
+      <div class="k-panel">
+        <h2>.brotable v3 Checkpoints</h2>
+        <div class="living-brush-grid">
+          <button class="small living-brush-btn" id="btn-save-v3">Save v3 Checkpoint</button>
+          <button class="small living-brush-btn" id="btn-load-v3">Rewind / Load v3</button>
+        </div>
+        <div id="ckpt-info" class="sci-probe-box eco-ckpt-box">No v3 checkpoint saved yet. Save to audit zero-copy mmap indexes (Hash + Range + Spatial).</div>
+      </div>
+    </aside>
+
+    <main class="k-main">
+      <div class="sci-viewport-wrap">
+        <canvas id="view" class="sci-gpu"></canvas>
+        <canvas id="overlay" class="sci-overlay"></canvas>
+        <div class="sci-hud-top">
+          <div class="sci-pill" id="hud-manifold">
+            <b>0 · 3D Biosphere</b>
+            <div class="sci-guide">Loading biosphere tables…</div>
+          </div>
+          <div class="sci-pill sci-pill-perf" id="hud-perf">
+            <b>FPS</b> <span id="hud-fps">—</span> · <b>GPU</b> <span id="hud-backend">Vulkan HDR</span> · <b>Alive</b> <span id="hud-count">—</span>
+          </div>
+        </div>
+        <div class="sci-legend-bar">
+          <span class="sci-legend-swatch"><i class="sci-legend-dot" style="background:#2ef2c2"></i>Producers</span>
+          <span class="sci-legend-swatch"><i class="sci-legend-dot" style="background:#7cf05e"></i>Grazers</span>
+          <span class="sci-legend-swatch"><i class="sci-legend-dot" style="background:#ff9f3c"></i>Predators</span>
+          <span class="sci-legend-swatch"><i class="sci-legend-dot" style="background:#d662ff"></i>Decomposers</span>
+          <span class="sci-legend-swatch"><i class="sci-legend-dot" style="background:#ff4b5e"></i>Critical Stress</span>
+        </div>
+        <div class="sci-hint-bar">Drag: orbit · Shift+drag: pan · Scroll: zoom · Click: apply active brush</div>
+      </div>
+
+      <div class="sci-chart-strip">
+        <div class="sci-chart-box">
+          <div class="sci-chart-title">Species Biomass &amp; Net Fitness (Relational Join + Fused JIT)</div>
+          <canvas id="chart-species"></canvas>
+        </div>
+        <div class="sci-chart-box">
+          <div class="sci-chart-title">Energy × Stress Phase Density &amp; Reactive Chunk Reuse</div>
+          <canvas id="chart-phase"></canvas>
+        </div>
+      </div>
+    </main>
+
+    <aside class="k-side right">
+      <div class="k-panel">
+        <h2>Living Table Engine Vitals</h2>
+        <div id="vitals-panel"></div>
+      </div>
+
+      <div class="k-panel">
+        <h2>Critical &amp; Zone Alerts <span id="crit-badge" class="k-counter">—</span></h2>
+        <div id="critical-summary" class="sci-probe-box">Initializing ReactiveQuery &amp; zones join…</div>
+      </div>
+
+      <div class="k-panel">
+        <h2>Top Thriving (RangeIndex)</h2>
+        <table class="living-table-grid">
+          <thead>
+            <tr><th>ID</th><th>Species</th><th>Energy</th><th>Stress</th><th>Biome</th></tr>
+          </thead>
+          <tbody id="top-thriving-list"></tbody>
+        </table>
+      </div>
+
+      <div class="k-panel">
+        <h2>Spatial Probe &amp; Tensor Score</h2>
+        <div id="probe-box" class="sci-probe-box">Click biosphere or apply a spatial brush to query SpatialIndex('bio3d').</div>
+      </div>
+    </aside>
+  </div>
+
+  <footer class="k-statusbar k-stats">
+    <span>organisms <b id="st-rows">0</b></span>
+    <span>version <b id="st-ver">v0 / s0</b></span>
+    <span>dead <b id="st-dead">0</b></span>
+    <span>critical <b id="st-crit">0</b></span>
+    <span>tensor <b id="st-tensor">—</b></span>
+    <span>fps <b id="st-fps">0</b></span>
+  </footer>
+
+  <script type="module" src="/app/main.js"></script>
+</body>
+</html>

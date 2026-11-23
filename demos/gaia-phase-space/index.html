@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Gaia DR3 — 6D Phase-Space Observatory</title>
+<link rel="stylesheet" href="/lib/kit/kit.css">
+<link rel="stylesheet" href="/lib/sci-atlas/sci.css">
+<link rel="stylesheet" href="/app/style.css">
+</head>
+<body class="k-app">
+  <header class="k-header">
+    <h1>Gaia DR3 — 6D Galactic Phase-Space Observatory</h1>
+    <span class="k-sub">bro.table columnar mmap/AVX2 · bro.kernel HDR splat · bro.tensor stream clustering · 3D SpatialSonifier</span>
+    <span class="k-spacer"></span>
+    <span id="status" class="dim">initializing…</span>
+  </header>
+
+  <div class="k-body">
+    <aside class="k-side">
+      <div class="k-panel">
+        <h2>Phase-Space Manifolds</h2>
+        <div class="sci-manifold-row">
+          <button class="sci-manifold-btn active" data-manifold="0">0 · Galactic Disk</button>
+          <button class="sci-manifold-btn" data-manifold="1">1 · 3D HR Diagram</button>
+          <button class="sci-manifold-btn" data-manifold="2">2 · Toomre Streams</button>
+          <button class="sci-manifold-btn" data-manifold="3">3 · Vertical Snail</button>
+        </div>
+      </div>
+
+      <div class="k-panel">
+        <h2>Stellar Time-Machine</h2>
+        <label class="k-field">
+          <span>Epoch (Myr)</span>
+          <input type="range" id="time-myr" min="-50" max="50" step="0.5" value="0">
+          <span class="k-val" id="time-val">+0.0</span>
+        </label>
+        <div class="gaia-btn-row">
+          <button class="small" id="btn-time-play">Orbit Play</button>
+          <button class="small" id="btn-time-reset">Epoch t=0</button>
+          <button class="small" id="btn-autorotate">Auto-Orbit</button>
+        </div>
+      </div>
+
+      <div class="k-panel">
+        <h2>AVX2 SIMD Filters <span id="filter-matched" class="k-counter">all</span></h2>
+        <label class="k-field">
+          <span>[Fe/H] min</span>
+          <input type="range" id="feh-min" min="-2.5" max="0.6" step="0.1" value="-2.5">
+          <span class="k-val" id="feh-min-val">-2.5</span>
+        </label>
+        <label class="k-field">
+          <span>[Fe/H] max</span>
+          <input type="range" id="feh-max" min="-2.5" max="0.6" step="0.1" value="0.6">
+          <span class="k-val" id="feh-max-val">+0.6</span>
+        </label>
+        <label class="k-field">
+          <span>M_G min</span>
+          <input type="range" id="mg-min" min="-6" max="15" step="0.5" value="-6">
+          <span class="k-val" id="mg-min-val">-6.0</span>
+        </label>
+        <label class="k-field">
+          <span>M_G max</span>
+          <input type="range" id="mg-max" min="-6" max="15" step="0.5" value="15">
+          <span class="k-val" id="mg-max-val">+15.0</span>
+        </label>
+        <div class="gaia-pop-chips" id="pop-chips">
+          <button class="gaia-chip-btn active" data-pop="-1">All</button>
+          <button class="gaia-chip-btn" data-pop="0">Thin Disk</button>
+          <button class="gaia-chip-btn" data-pop="1">Thick Disk</button>
+          <button class="gaia-chip-btn" data-pop="2">Halo / GSE</button>
+          <button class="gaia-chip-btn" data-pop="3">Clusters</button>
+        </div>
+        <div class="gaia-btn-row">
+          <button class="small" id="btn-filter-reset">Reset Filters</button>
+        </div>
+      </div>
+
+      <div class="k-panel">
+        <h2>Observatory Tools</h2>
+        <div class="gaia-btn-row">
+          <button class="small" id="btn-probe">Spatial Probe</button>
+          <button class="small" id="btn-cluster">Tensor Cluster</button>
+          <button class="small" id="btn-sound">Sonify: Off</button>
+        </div>
+      </div>
+
+      <div class="k-panel">
+        <h2>Population Breakdown</h2>
+        <div id="pop-breakdown" class="gaia-pop-list"></div>
+      </div>
+    </aside>
+
+    <main class="k-main">
+      <div class="sci-viewport-wrap">
+        <canvas id="view" class="sci-gpu"></canvas>
+        <canvas id="overlay" class="sci-overlay"></canvas>
+        <div class="sci-hud-top">
+          <div class="sci-pill" id="hud-manifold">
+            <b>0 · 3D Galactic Disk</b><br>Loading Gaia catalog…
+          </div>
+          <div class="sci-pill sci-pill-perf" id="hud-perf">
+            <b>FPS</b> <span id="hud-fps">—</span> · <b>Render</b> <span id="hud-backend">Vulkan HDR</span> · <b>Stars</b> <span id="hud-count">—</span>
+          </div>
+        </div>
+        <div class="sci-legend-bar">
+          <span class="sci-legend-swatch"><i class="sci-legend-dot" style="background:#6bb6ff"></i>Hot O/B Stars</span>
+          <span class="sci-legend-swatch"><i class="sci-legend-dot" style="background:#fff4df"></i>Sun-like F/G</span>
+          <span class="sci-legend-swatch"><i class="sci-legend-dot" style="background:#ff9447"></i>Cool Red Giants / M</span>
+          <span class="sci-legend-swatch"><i class="sci-legend-dot" style="background:#66f2b8"></i>Selected / Probe</span>
+        </div>
+        <div class="sci-hint-bar">Drag: orbit · Shift+drag: pan · Scroll: zoom · Click: probe 8 nearest stars</div>
+      </div>
+
+      <div class="sci-chart-strip">
+        <div class="sci-chart-box">
+          <div class="sci-chart-title">2D HR Diagram (BP-RP vs M_G)</div>
+          <canvas id="chart-hr"></canvas>
+        </div>
+        <div class="sci-chart-box">
+          <div class="sci-chart-title">Toomre (v_φ vs v_⊥) &amp; [Fe/H] Distribution</div>
+          <canvas id="chart-toomre"></canvas>
+        </div>
+      </div>
+    </main>
+
+    <aside class="k-side right">
+      <div class="k-panel">
+        <h2>Engine Proof</h2>
+        <div id="proof-panel"></div>
+      </div>
+
+      <div class="k-panel">
+        <h2>Spatial Probe Inspector</h2>
+        <div id="probe-box" class="sci-probe-box">Click galaxy or press Spatial Probe to query SpatialIndex('gal3d').</div>
+        <table class="gaia-probe-table">
+          <thead>
+            <tr><th>d(pc)</th><th>Pop</th><th>M_G</th><th>BP-RP</th><th>[Fe/H]</th><th>v_φ</th></tr>
+          </thead>
+          <tbody id="probe-list"></tbody>
+        </table>
+      </div>
+
+      <div class="k-panel">
+        <h2>Tensor Stream Clusters</h2>
+        <div id="cluster-box" class="sci-probe-box">Press Tensor Cluster to run K-means on (v_φ, v_⊥, [Fe/H], v_z).</div>
+      </div>
+    </aside>
+  </div>
+
+  <footer class="k-statusbar k-stats">
+    <span>stars <b id="st-rows">0</b></span>
+    <span>manifold <b id="st-manifold">0</b></span>
+    <span>epoch <b id="st-epoch">+0.0 Myr</b></span>
+    <span>active mask <b id="st-mask">all</b></span>
+    <span>probe <b id="st-probe">—</b></span>
+    <span>fps <b id="st-fps">0</b></span>
+  </footer>
+
+  <script type="module" src="/app/main.js"></script>
+</body>
+</html>

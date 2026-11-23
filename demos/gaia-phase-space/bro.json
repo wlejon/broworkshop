@@ -1,0 +1,7 @@
+{
+  "title": "Gaia DR3 — 6D Phase-Space Observatory",
+  "width": 1280,
+  "height": 800,
+  "lib": "../../lib",
+  "permissions": ["files"]
+}

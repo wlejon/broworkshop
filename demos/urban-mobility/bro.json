@@ -1,0 +1,7 @@
+{
+  "title": "Urban Mobility Twin — Live Fleet, Dispatch Orders & Grid Analytics on bro.table",
+  "width": 1440,
+  "height": 900,
+  "lib": "../../lib",
+  "permissions": ["files"]
+}
