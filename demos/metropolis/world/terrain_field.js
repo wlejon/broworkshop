@@ -62,12 +62,13 @@ export function terrainHeight(x, z) {
 
     // Gentle valley floor rolling +5.5..+14m near city cores, rising into +40..+145m foothills & ridges.
     const valleyFloor = 5.5 + 5.0 * nBig + 2.4 * nMed + 1.0 * nFine + 0.3 * nMicro;
-    const outerRise = smoothstep(1350, 3800, r);
+    const outerRise = smoothstep(3300, 5800, r);
     const ridgeNoise = Math.abs(valueNoise(x + 600, z - 400, 1400, 71) - 0.48) * 2.0;
     const foothills = outerRise * (28.0 + 52.0 * nBig + 30.0 * ridgeNoise + 12.0 * nMed + 3.5 * nFine);
-    const neBoost = (1.0 - smoothstep(450, 2600, Math.hypot(x - 3100, z + 2800))) * 34.0;
-    const nwBoost = (1.0 - smoothstep(450, 2700, Math.hypot(x + 3300, z + 2600))) * 38.0;
-    const upland = valleyFloor + foothills + neBoost + nwBoost;
+    const neBoost = (1.0 - smoothstep(450, 2600, Math.hypot(x - 4400, z + 4200))) * 34.0;
+    const nwBoost = (1.0 - smoothstep(450, 2700, Math.hypot(x + 4500, z + 4100))) * 38.0;
+    const innerHills = 18.0 * smoothstep(0.5, 0.9, valueNoise(x + 211, z - 97, 1700, 83));
+    const upland = valleyFloor + foothills + neBoost + nwBoost + innerHills;
 
     // Gentle flattening near immediate downtown riverbank terrace so piers/embankments seat naturally
     const riverValley = 4.6 + 1.8 * nMed + 0.6 * nFine;

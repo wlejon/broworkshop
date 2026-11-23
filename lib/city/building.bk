@@ -1,0 +1,444 @@
+// lib/city/building.bk — every building of a city, one instanced box (and one
+// roof prism), drawn the same way at every distance.
+//
+// The vertex stage places a unit box from the instance's mass record (see
+// buildings.js: centre, yaw, half extents, height, foundation). The fragment
+// stage draws the facade from the same record: floors, bays, windows, a shop
+// front, and behind every window a room (interior mapping: the eye ray meets
+// the room's walls, floor and ceiling and a piece of furniture), lit or dark
+// at night by a hash of the building, floor and bay. Detail fades by the
+// pixel's footprint into its own average (wall and glass by their share, the
+// rooms by their expected light), so a far building is the near one, blurred:
+// no switch of model or colour with distance.
+module hook;
+import scene;
+import mesh;
+import custom;
+
+struct Params {
+    night: f32,      // 0 day .. 1 night: how many rooms are lit, how bright
+    room_day: f32,   // a room's luminance by day, cd/m^2 per unit albedo
+    room_night: f32, // a lit room's luminance at night, cd/m^2 per unit albedo
+    part: f32,       // 0 walls (box), 1 roof (prism)
+}
+
+@binding(4, 0) var params: uniform<Params>;
+@binding(4, 14) var masses: read_buffer<vec4<f32>>;
+
+const STYLE_GLASS: i32 = 0;
+const STYLE_OFFICE: i32 = 1;
+const STYLE_BRICK: i32 = 2;
+const STYLE_STONE: i32 = 3;
+const STYLE_STUCCO: i32 = 4;
+const STYLE_ROW: i32 = 5;
+const STYLE_SIDING: i32 = 6;
+const STYLE_PLASTER: i32 = 7;
+const STYLE_INDUSTRIAL: i32 = 8;
+
+// Integer hashes of whole-number inputs (floors, bays, a building's id).
+fn hash3(a: f32, b: f32, c: f32) -> f32 {
+    let ia = bitcast<u32>(a) * 0x9e3779b1u;
+    let ib = bitcast<u32>(b);
+    return scene::hash2(ia ^ (bitcast<u32>(c) * 0x85ebca77u), ib);
+}
+
+// ---------------------------------------------------------------------------
+// Vertex
+// ---------------------------------------------------------------------------
+
+pub fn vertex(v_in: mesh::Vertex) -> mesh::Vertex {
+    var v = v_in;
+    let i = v.instance_index;
+    let r0 = masses[i * 4];
+    let r1 = masses[i * 4 + 1];
+    let r2 = masses[i * 4 + 2];
+    let r3 = masses[i * 4 + 3];
+    let yaw = r0.w;
+    let hw = r1.x;
+    let h = r1.y;
+    let hd = r1.z;
+    let roof = r3.x;
+    let roof_h = r3.y;
+    let p = v.pos;
+    var lp = vec3<f32>(0.0, 0.0, 0.0);
+    var ln = v.normal;
+
+    if (params.part < 0.5) {
+        // Unit box centred on the origin: x, z in [-0.5, 0.5], y in [-0.5, 0.5].
+        let ty = p.y + 0.5;
+        lp = vec3<f32>(p.x * 2.0 * hw, mix(-r2.y, h, ty), p.z * 2.0 * hd);
+    } else {
+        // Roof prism: base rectangle at y 0, ridge at y 1 along x.
+        if (roof < 0.5) {
+            lp = vec3<f32>(0.0, -100000.0, 0.0);     // no pitched roof: collapse
+        } else {
+            let over = 0.45;
+            let rw = hw + over;
+            let rd = hd + over;
+            var x = p.x * 2.0 * rw;
+            if (p.y > 0.5 && roof > 1.5) {
+                // Hip: the ridge shortened by the depth, so the ends slope too.
+                x = sign(p.x) * max(0.0, hw - hd);
+            }
+            let y = h + p.y * roof_h - 0.12 * (1.0 - p.y);
+            lp = vec3<f32>(x, y, p.z * 2.0 * rd * (1.0 - p.y));
+            // Analytic normals of the slopes and the ends.
+            if (abs(v.normal.z) > 0.1) {
+                ln = normalize(vec3<f32>(0.0, rd, sign(v.normal.z) * roof_h));
+            } else if (abs(v.normal.x) > 0.1) {
+                if (roof > 1.5) {
+                    ln = normalize(vec3<f32>(sign(v.normal.x) * roof_h, max(rw - max(0.0, hw - hd), 0.1), 0.0));
+                } else {
+                    ln = vec3<f32>(sign(v.normal.x), 0.0, 0.0);
+                }
+            } else {
+                ln = vec3<f32>(0.0, -1.0, 0.0);
+            }
+        }
+    }
+
+    let c = cos(yaw);
+    let s = sin(yaw);
+    let wx = r0.x + c * lp.x + s * lp.z;
+    let wz = r0.z - s * lp.x + c * lp.z;
+    let wy = r0.y + lp.y;
+    // Node space: the engine takes it eye-relative (the node's model matrix less the eye).
+    v.pos = vec3<f32>(wx, wy, wz);
+    v.normal = vec3<f32>(c * ln.x + s * ln.z, ln.y, -s * ln.x + c * ln.z);
+    v.v0 = vec4<f32>(lp, 0.0);
+    v.v1 = vec4<f32>(hw, h, hd, r1.w);
+    v.v2 = r2;
+    v.v3 = r3;
+    v.v4 = vec4<f32>(ln, yaw);
+    v.v5 = vec4<f32>(r0.xyz, 0.0);
+    return v;
+}
+
+// ---------------------------------------------------------------------------
+// Palettes (linear)
+// ---------------------------------------------------------------------------
+
+fn pick4(t: f32, a: vec3<f32>, b: vec3<f32>, c: vec3<f32>, d: vec3<f32>) -> vec3<f32> {
+    if (t < 0.25) { return a; }
+    if (t < 0.5) { return b; }
+    if (t < 0.75) { return c; }
+    return d;
+}
+
+fn wall_color(style: i32, hue: f32) -> vec3<f32> {
+    if (style == STYLE_GLASS) { return pick4(hue, vec3<f32>(0.20, 0.22, 0.24), vec3<f32>(0.33, 0.33, 0.32), vec3<f32>(0.12, 0.13, 0.15), vec3<f32>(0.42, 0.40, 0.36)); }
+    if (style == STYLE_OFFICE) { return pick4(hue, vec3<f32>(0.42, 0.41, 0.38), vec3<f32>(0.50, 0.48, 0.44), vec3<f32>(0.30, 0.30, 0.30), vec3<f32>(0.46, 0.42, 0.36)); }
+    if (style == STYLE_BRICK || style == STYLE_ROW) { return pick4(hue, vec3<f32>(0.34, 0.12, 0.07), vec3<f32>(0.42, 0.20, 0.11), vec3<f32>(0.26, 0.14, 0.10), vec3<f32>(0.50, 0.36, 0.24)); }
+    if (style == STYLE_STONE) { return pick4(hue, vec3<f32>(0.58, 0.52, 0.42), vec3<f32>(0.50, 0.47, 0.42), vec3<f32>(0.62, 0.58, 0.50), vec3<f32>(0.44, 0.40, 0.34)); }
+    if (style == STYLE_STUCCO) { return pick4(hue, vec3<f32>(0.66, 0.58, 0.44), vec3<f32>(0.62, 0.40, 0.28), vec3<f32>(0.52, 0.56, 0.54), vec3<f32>(0.70, 0.66, 0.58)); }
+    if (style == STYLE_SIDING) { return pick4(hue, vec3<f32>(0.72, 0.72, 0.68), vec3<f32>(0.40, 0.46, 0.52), vec3<f32>(0.62, 0.58, 0.40), vec3<f32>(0.42, 0.48, 0.40)); }
+    if (style == STYLE_PLASTER) { return pick4(hue, vec3<f32>(0.74, 0.68, 0.56), vec3<f32>(0.66, 0.46, 0.34), vec3<f32>(0.76, 0.74, 0.70), vec3<f32>(0.60, 0.56, 0.50)); }
+    return pick4(hue, vec3<f32>(0.36, 0.38, 0.40), vec3<f32>(0.24, 0.30, 0.38), vec3<f32>(0.44, 0.42, 0.38), vec3<f32>(0.30, 0.22, 0.18));
+}
+
+fn roof_color(style: i32, hue: f32, pitched: bool) -> vec3<f32> {
+    if (pitched) {
+        return pick4(fract(hue * 7.31), vec3<f32>(0.30, 0.11, 0.06), vec3<f32>(0.10, 0.11, 0.13), vec3<f32>(0.17, 0.16, 0.15), vec3<f32>(0.24, 0.15, 0.11));
+    }
+    return pick4(fract(hue * 3.7), vec3<f32>(0.24, 0.24, 0.23), vec3<f32>(0.42, 0.42, 0.40), vec3<f32>(0.18, 0.18, 0.19), vec3<f32>(0.30, 0.29, 0.27));
+}
+
+fn glass_tint(style: i32, hue: f32) -> vec3<f32> {
+    if (style == STYLE_GLASS) {
+        return pick4(fract(hue * 5.3), vec3<f32>(0.05, 0.08, 0.10), vec3<f32>(0.04, 0.07, 0.06), vec3<f32>(0.08, 0.07, 0.06), vec3<f32>(0.06, 0.07, 0.08));
+    }
+    return vec3<f32>(0.035, 0.04, 0.045);
+}
+
+// ---------------------------------------------------------------------------
+// The facade's layout: bays, windows, floors
+// ---------------------------------------------------------------------------
+
+struct Layout {
+    bay: f32,        // bay width (m)
+    wx0: f32,        // window across the bay, 0..1
+    wx1: f32,
+    wy0: f32,        // window up the floor, 0..1
+    wy1: f32,
+    frame: f32,      // frame width (m)
+}
+
+fn layout_for(style: i32, ground: bool, shop: bool) -> Layout {
+    if (ground && shop) { return Layout(4.2, 0.06, 0.94, 0.05, 0.72, 0.10); }
+    if (style == STYLE_GLASS) { return Layout(1.55, 0.03, 0.97, 0.22, 0.98, 0.05); }
+    if (style == STYLE_OFFICE) { return Layout(3.0, 0.14, 0.86, 0.30, 0.86, 0.08); }
+    if (style == STYLE_BRICK) { return Layout(3.2, 0.26, 0.74, 0.28, 0.80, 0.07); }
+    if (style == STYLE_STONE) { return Layout(3.6, 0.28, 0.72, 0.22, 0.84, 0.08); }
+    if (style == STYLE_STUCCO) { return Layout(3.4, 0.22, 0.78, 0.26, 0.82, 0.07); }
+    if (style == STYLE_ROW) { return Layout(2.4, 0.24, 0.76, 0.28, 0.82, 0.07); }
+    if (style == STYLE_SIDING) { return Layout(2.9, 0.28, 0.72, 0.30, 0.78, 0.07); }
+    if (style == STYLE_PLASTER) { return Layout(3.0, 0.27, 0.73, 0.30, 0.80, 0.07); }
+    return Layout(6.0, 0.05, 0.95, 0.70, 0.92, 0.10);
+}
+
+// ---------------------------------------------------------------------------
+// Interior mapping: the room behind a window
+// ---------------------------------------------------------------------------
+
+struct Room {
+    albedo: vec3<f32>,
+    lamp: f32,       // how much of the room's light this point gets (ceiling fixture brighter)
+}
+
+// p: the point on the window in the room's frame (x across 0..w, y up 0..h, z = 0);
+// d: the eye ray in that frame, z pointing into the room (d.z > 0).
+fn room_hit(p: vec3<f32>, d: vec3<f32>, w: f32, h: f32, depth: f32, rh: f32) -> Room {
+    let tx = d.x > 0.0 ? (w - p.x) / d.x : (0.0 - p.x) / min(d.x, -0.0001);
+    let ty = d.y > 0.0 ? (h - p.y) / d.y : (0.0 - p.y) / min(d.y, -0.0001);
+    let tz = depth / max(d.z, 0.0001);
+    let wallc = mix(vec3<f32>(0.62, 0.58, 0.50), vec3<f32>(0.48, 0.52, 0.56), rh);
+    let floorc = mix(vec3<f32>(0.30, 0.20, 0.12), vec3<f32>(0.32, 0.32, 0.34), fract(rh * 3.1));
+    var t = tz;
+    var col = wallc * 0.92;
+    var lamp = 0.9;
+    if (tx < t) { t = tx; col = wallc; lamp = 0.8; }
+    if (ty < t) {
+        t = ty;
+        if (d.y > 0.0) {
+            // Ceiling with a fixture at the bay's middle.
+            let hp = p + d * t;
+            let fx = abs(hp.x - w * 0.5) / w;
+            let fz = abs(hp.z - depth * 0.45) / depth;
+            col = vec3<f32>(0.80, 0.79, 0.76);
+            lamp = 1.0 + 2.0 * (1.0 - smoothstep(0.06, 0.12, max(fx, fz)));
+        } else {
+            col = floorc;
+            lamp = 0.7;
+        }
+    }
+    // A piece of furniture: a block in the back half of the room.
+    let bx0 = w * (0.18 + 0.2 * rh);
+    let bx1 = w * (0.62 + 0.2 * rh);
+    let by1 = h * (0.24 + 0.12 * fract(rh * 5.7));
+    let bz0 = depth * 0.45;
+    let bz1 = depth * 0.8;
+    let inv = vec3<f32>(1.0 / (abs(d.x) > 0.0001 ? d.x : 0.0001), 1.0 / (abs(d.y) > 0.0001 ? d.y : -0.0001), 1.0 / max(d.z, 0.0001));
+    let t0 = (vec3<f32>(bx0, 0.0, bz0) - p) * inv;
+    let t1 = (vec3<f32>(bx1, by1, bz1) - p) * inv;
+    let tmin = max(max(min(t0.x, t1.x), min(t0.y, t1.y)), min(t0.z, t1.z));
+    let tmax = min(min(max(t0.x, t1.x), max(t0.y, t1.y)), max(t0.z, t1.z));
+    if (tmax > max(tmin, 0.0) && tmin < t) {
+        col = mix(vec3<f32>(0.20, 0.14, 0.10), vec3<f32>(0.25, 0.28, 0.33), fract(rh * 9.3));
+        lamp = 0.75;
+    }
+    return Room(col, lamp);
+}
+
+fn fw1(x: f32) -> f32 {
+    return abs(dpdx(x)) + abs(dpdy(x));
+}
+
+// Coverage of [a, b] by a pixel at x of footprint f (box-filtered step).
+fn band(x: f32, a: f32, b: f32, f: f32) -> f32 {
+    let lo = clamp((x - a) / f + 0.5, 0.0, 1.0);
+    let hi = clamp((x - b) / f + 0.5, 0.0, 1.0);
+    return lo - hi;
+}
+
+// ---------------------------------------------------------------------------
+// Fragment
+// ---------------------------------------------------------------------------
+
+pub fn fragment(v: mesh::Vertex, s_in: mesh::Surface) -> mesh::Surface {
+    var s = s_in;
+    let lp = v.v0.xyz;
+    let ln = v.v4.xyz;
+    let yaw = v.v4.w;
+    let hw = v.v1.x;
+    let h = v.v1.y;
+    let hd = v.v1.z;
+    let floor_h = v.v1.w;
+    let ground_h = v.v2.x;
+    let seed = v.v2.z;
+    let style = (v.v2.w + 0.5) as i32;
+    let roof = v.v3.x;
+    let flags = (v.v3.z + 0.5) as i32;
+    let hue = v.v3.w;
+    let id = floor(seed * 1048576.0);
+    let night = params.night;
+
+    s.metallic = 0.0;
+    s.emissive = vec3<f32>(0.0, 0.0, 0.0);
+
+    // Roofs: the prism's slopes, or the box's flat top.
+    if (params.part > 0.5) {
+        if (abs(ln.y) < 0.2) {
+            s.base_color = wall_color(style, hue);   // gable ends are wall
+        } else {
+            let rc = roof_color(style, hue, true);
+            let f = fw1(lp.y) + 0.01;
+            let course = 1.0 - 0.25 * band(fract(lp.y * 3.2), 0.0, 0.12, f * 3.2) * (1.0 - smoothstep(0.2, 0.5, f * 3.2));
+            s.base_color = rc * course;
+        }
+        s.roughness = 0.78;
+        return s;
+    }
+    if (ln.y > 0.5) {
+        let pitched = roof > 0.5;
+        var rc = roof_color(style, hue, pitched);
+        // Parapet edge, and rooftop plant as darker patches.
+        let edge = min(hw - abs(lp.x), hd - abs(lp.z));
+        let f = fw1(lp.x) + fw1(lp.z) + 0.01;
+        rc *= 1.0 - 0.35 * band(edge, -1.0, 0.45, f);
+        let cell = floor(lp.xz / 3.0);
+        let unit = hash3(cell.x, cell.y, id);
+        if (unit > 0.86 && edge > 2.0 && f < 1.5) { rc *= 0.7; }
+        s.base_color = rc;
+        s.roughness = 0.85;
+        return s;
+    }
+
+    // Walls. The face: its across axis u (0..W) and its normal, in the building's frame.
+    var u = 0.0;
+    var W = 0.0;
+    var nloc = vec3<f32>(0.0, 0.0, 1.0);
+    var tloc = vec3<f32>(1.0, 0.0, 0.0);
+    if (abs(ln.z) > abs(ln.x)) {
+        let sg = sign(ln.z);
+        u = lp.x * sg + hw;
+        W = 2.0 * hw;
+        nloc = vec3<f32>(0.0, 0.0, sg);
+        tloc = vec3<f32>(sg, 0.0, 0.0);
+    } else {
+        let sg = sign(ln.x);
+        u = -lp.z * sg + hd;
+        W = 2.0 * hd;
+        nloc = vec3<f32>(sg, 0.0, 0.0);
+        tloc = vec3<f32>(0.0, 0.0, -sg);
+    }
+    let front = nloc.z > 0.5;
+    let y = lp.y;
+    let wallc = wall_color(style, hue);
+    let fu = fw1(u) + 0.002;
+    let fy = fw1(y) + 0.002;
+    let fpx = max(fu, fy);
+
+    // Foundation below the ground floor.
+    if (y < 0.0) {
+        s.base_color = wallc * 0.55 + vec3<f32>(0.08, 0.08, 0.08);
+        s.roughness = 0.9;
+        return s;
+    }
+
+    let shop = (flags & 2) != 0;
+    let ground = y < ground_h;
+    let L = layout_for(style, ground, shop);
+    var fl = 0.0;
+    var fy01 = 0.0;
+    var fh = floor_h;
+    if (ground) {
+        fh = ground_h;
+        fy01 = y / ground_h;
+    } else {
+        let yy = y - ground_h;
+        fl = floor(yy / floor_h) + 1.0;
+        fy01 = fract(yy / floor_h);
+    }
+    let nb = max(1.0, floor(W / L.bay + 0.5));
+    let bw = W / nb;
+    let ub = u / bw;
+    let bay = floor(ub);
+    let bu = fract(ub);
+
+    // Window coverage, box-filtered by the pixel (so it averages, not aliases, far away).
+    var win = band(bu, L.wx0, L.wx1, fu / bw) * band(fy01, L.wy0, L.wy1, fy / fh);
+    // Keep the corners solid on masonry; a door on the street front's middle bay.
+    let corner = min(u, W - u);
+    if (style != STYLE_GLASS && corner < 0.6) { win = 0.0; }
+    let door_bay = floor(nb * 0.5);
+    let is_door = front && ground && !shop && bay == door_bay && (flags & 1) != 0;
+    if (style == STYLE_INDUSTRIAL && ground && front && abs(u - W * 0.5) < 2.6 && y < 4.5) { win = 0.0; }
+    let top_floor = y > h - 0.9 && style != STYLE_GLASS;
+    if (top_floor) { win = 0.0; }
+
+    // Wall surface: courses, floor bands, cornice; each fades below a pixel.
+    var wall = wallc;
+    if (style == STYLE_BRICK || style == STYLE_ROW) {
+        let row = floor(y / 0.075);
+        let bx = fract(u / 0.23 + 0.5 * (row - 2.0 * floor(row * 0.5)));
+        let mortar = max(band(fract(y / 0.075), 0.0, 0.14, fy / 0.075), band(bx, 0.0, 0.05, fu / 0.23));
+        let vis = 1.0 - smoothstep(0.02, 0.05, fpx);
+        wall = mix(wall, vec3<f32>(0.42, 0.40, 0.36), mortar * vis * 0.8 + 0.08 * (1.0 - vis));
+        wall *= 0.9 + 0.2 * hash3(floor(u / 0.23), row, id) * vis;
+    } else if (style == STYLE_SIDING) {
+        let lap = fract(y / 0.2);
+        let vis = 1.0 - smoothstep(0.04, 0.1, fpx);
+        wall *= 1.0 - 0.18 * band(lap, 0.0, 0.18, fy / 0.2) * vis;
+    } else if (style == STYLE_INDUSTRIAL) {
+        let rib = 0.5 + 0.5 * sin(u * 6.2831 / 0.3);
+        wall *= 0.88 + 0.14 * rib * (1.0 - smoothstep(0.05, 0.15, fu));
+    }
+    // A slab line between floors and a cornice at the top.
+    if (!ground && style != STYLE_GLASS) {
+        wall = mix(wall, wall * 0.82 + vec3<f32>(0.05, 0.05, 0.05), band(fy01, 0.0, 0.05, fy / fh) * 0.8);
+    }
+    if (style == STYLE_GLASS) {
+        // Spandrels between the glass, mullions between the panes.
+        wall = mix(glass_tint(style, hue) * 1.8, wallc, 0.55);
+    }
+    if (ground && shop) {
+        // A fascia above the shop window, in the shop's colour.
+        let sc = pick4(fract(hue * 13.7 + bay * 0.37), vec3<f32>(0.45, 0.08, 0.06), vec3<f32>(0.06, 0.20, 0.14), vec3<f32>(0.08, 0.10, 0.24), vec3<f32>(0.40, 0.30, 0.10));
+        wall = mix(wall, sc, band(fy01, 0.78, 0.95, fy / fh));
+    }
+    if (is_door) {
+        let dw = band(bu, 0.3, 0.7, fu / bw) * band(fy01, 0.0, 0.62, fy / fh);
+        wall = mix(wall, vec3<f32>(0.12, 0.08, 0.06), dw);
+    }
+    if (top_floor && style != STYLE_SIDING && style != STYLE_PLASTER) {
+        wall = mix(wall, wall * 0.75, band(y, h - 0.6, h - 0.35, fy));
+    }
+
+    // The room behind the window.
+    let room_w = bw;
+    let depth = min(7.0, min(hw, hd) * 1.2 + 1.0);
+    let rh = hash3(bay, fl, id);
+    // Office floors light together; homes room by room.
+    // The share of rooms lit at night: each building its own (some nearly dark),
+    // offices by floor (cleaners, late teams), shops nearly all.
+    let bshare = 0.25 + 1.5 * hash3(id, 7.0, 1.0) * hash3(id, 11.0, 2.0);
+    var lit_p = 0.3 * bshare;
+    if (style == STYLE_GLASS || style == STYLE_OFFICE) { lit_p = (hash3(fl, 3.0, id) < 0.3 ? 0.7 : 0.06) * bshare; }
+    if (ground && shop) { lit_p = 0.85; }
+    let lit = hash3(bay * 1.7, fl * 2.3, id + 5.0) < lit_p;
+    let warm = mix(vec3<f32>(1.0, 0.78, 0.52), vec3<f32>(0.86, 0.92, 1.0), (style == STYLE_GLASS || style == STYLE_OFFICE) ? 0.8 : fract(rh * 4.3) * 0.3);
+    let blinds = fract(rh * 11.3) < 0.35;
+
+    // The eye ray in the building's frame, then the room's.
+    let c = cos(yaw);
+    let sn = sin(yaw);
+    let dw = normalize(v.world_pos);
+    let dl = vec3<f32>(c * dw.x - sn * dw.z, dw.y, sn * dw.x + c * dw.z);
+    let dr = vec3<f32>(dot(dl, tloc), dl.y, -dot(dl, nloc));
+    var room = Room(vec3<f32>(0.4, 0.38, 0.35), 0.8);
+    let near_k = 1.0 - smoothstep(0.03, 0.12, fpx);   // rooms resolve within ~0.1 m pixels
+    if (near_k > 0.0 && win > 0.0 && dr.z > 0.0) {
+        let wx0 = L.wx0 * room_w;
+        let pr = vec3<f32>(bu * room_w, fy01 * fh, 0.0);
+        room = room_hit(pr, dr, room_w, fh, depth, rh);
+        if (blinds && fy01 > mix(L.wy0, L.wy1, 0.55)) { room = Room(mix(vec3<f32>(0.72, 0.68, 0.6), vec3<f32>(0.5, 0.52, 0.55), rh), 0.9); }
+    }
+    // Far away a room is its average.
+    let avg = vec3<f32>(0.42, 0.40, 0.36);
+    let ralb = mix(avg, room.albedo, near_k);
+    let rlamp = mix(0.95, room.lamp, near_k);
+
+    // Light: by day a dim room behind the glass; at night the lit ones glow,
+    // and far away every window glows by the expected share lit.
+    let lit_f = mix(lit_p, lit ? 1.0 : 0.0, near_k);
+    let night_glow = ralb * rlamp * warm * params.room_night * night * lit_f;
+    let day_glow = ralb * rlamp * params.room_day * (0.55 + 0.45 * lit_f);
+    let glow = night_glow + day_glow * (1.0 - night);
+
+    let glass = glass_tint(style, hue);
+    s.base_color = mix(wall, glass, win);
+    s.roughness = mix(style == STYLE_GLASS ? 0.4 : 0.82, 0.06, win);
+    s.metallic = 0.0;
+    s.emissive = glow * win;
+    return s;
+}

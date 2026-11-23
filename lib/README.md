@@ -27,10 +27,7 @@ its usage in the file's header comment.
 | `crosshair.js` | screen-centre reticle overlay (bloom, ADS) | games/fps, demos/terrain |
 | `system-menu.js` | `bro.menu` bar: File, View, Debug (inspector, perf HUD) | kit/app.js `boot()`, games/torque, the hands-off speech/image labs |
 | `sweep-runner.js` | content-addressed parameter sweeps rendered to disk | demos/krea2-lab |
-| `flora-trees.js` | terrain-aware `bro.flora` tree LODs, disk-cached 8×4 impostors, and static shadow proxies | demos/metropolis |
-| `pbr-materials.js` | strictly tile-periodic urban PBR albedo/normal/roughness-metallic generator | demos/metropolis |
-| `city-building-blueprint.js` | single-source multi-archetype building blueprints & differentiated floor plans | demos/metropolis |
-| `city-building-mesh.js` | matched LOD2/LOD1/enterable LOD0 builders with `InteriorVolume` & tiled lights | demos/metropolis |
+| `city/` | a city grown from a site: street field and tensor streamlines (`field.js`, `streets.js`), planar road graph with blocks (`graph.js`), frontage lots (`lots.js`), building masses (`buildings.js`), all in `generate.js`; GPU-side: `building.bk` + `building_render.js` (every building one instanced record: facade, rooms, night windows), `ground.js` (road segments and block surfaces for a terrain kernel and ground shader) | demos/metropolis |
 
 `system-menu.js` and `sweep-runner.js` would belong in the kit, but the
 hands-off labs import them by these paths; they move when those labs do.

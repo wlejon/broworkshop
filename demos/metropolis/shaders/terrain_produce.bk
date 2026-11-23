@@ -59,12 +59,13 @@ fn terrain_height(x: f32, z: f32) -> f32 {
     let rd = river_signed_dist(x, z);
 
     let valley_floor = 5.5 + 5.0 * n_big + 2.4 * n_med + 1.0 * n_fine + 0.3 * n_micro;
-    let outer_rise = sstep(1350.0, 3800.0, r);
+    let outer_rise = sstep(3300.0, 5800.0, r);
     let ridge_noise = abs(value_noise(x + 600.0, z - 400.0, 1400.0, 71) - 0.48) * 2.0;
     let foothills = outer_rise * (28.0 + 52.0 * n_big + 30.0 * ridge_noise + 12.0 * n_med + 3.5 * n_fine);
-    let ne_boost = (1.0 - sstep(450.0, 2600.0, length(vec2<f32>(x - 3100.0, z + 2800.0)))) * 34.0;
-    let nw_boost = (1.0 - sstep(450.0, 2700.0, length(vec2<f32>(x + 3300.0, z + 2600.0)))) * 38.0;
-    let upland = valley_floor + foothills + ne_boost + nw_boost;
+    let ne_boost = (1.0 - sstep(450.0, 2600.0, length(vec2<f32>(x - 4400.0, z + 4200.0)))) * 34.0;
+    let nw_boost = (1.0 - sstep(450.0, 2700.0, length(vec2<f32>(x + 4500.0, z + 4100.0)))) * 38.0;
+    let inner_hills = 18.0 * sstep(0.5, 0.9, value_noise(x + 211.0, z - 97.0, 1700.0, 83));
+    let upland = valley_floor + foothills + ne_boost + nw_boost + inner_hills;
 
     let river_valley = 4.6 + 1.8 * n_med + 0.6 * n_fine;
     let terrace_blend = sstep(-5.0, 240.0, rd);
@@ -87,7 +88,14 @@ fn k_tile(
     h_span: rw_store<i32, 1>,
     border: f32,
     inv_size: f32,
-    bottom: f32
+    bottom: f32,
+    segs: read_store<vec4<f32>, 1>,
+    cell_start: read_store<i32, 1>,
+    cell_segs: read_store<i32, 1>,
+    city_half: f32,
+    city_cell: f32,
+    city_cells: i32,
+    reach: f32
 ) {
     let rec = tiles::record(table, g.z());
     let s = ((g.x() as f32) - border) * inv_size;
@@ -97,7 +105,37 @@ fn k_tile(
     let wz = rec.anchor.z + d.z;
     let local_xz = d.xz + rec.point.xz;
 
-    let h = terrain_height(wx, wz);
+    var h = terrain_height(wx, wz);
+    // The roads' grade (lib/city/ground.js gradedHeight, its JS twin): the
+    // nearest road's height under it and its sidewalks, eased back to the
+    // land over `reach` metres past them.
+    let ci = floor((wx + city_half) / city_cell) as i32;
+    let cj = floor((wz + city_half) / city_cell) as i32;
+    if (ci >= 0 && cj >= 0 && ci < city_cells && cj < city_cells) {
+        let c = cj * city_cells + ci;
+        var best = 1.0e9;
+        var by = h;
+        for (var k = cell_start[c]; k < cell_start[c + 1]; k += 1) {
+            let si = cell_segs[k];
+            let a = segs[si * 3];
+            let b = segs[si * 3 + 1];
+            let dx = a.z - a.x;
+            let dz = a.w - a.y;
+            let l2 = max(dx * dx + dz * dz, 1.0e-9);
+            let t = clamp(((wx - a.x) * dx + (wz - a.y) * dz) / l2, 0.0, 1.0);
+            let ex = wx - a.x - dx * t;
+            let ez = wz - a.y - dz * t;
+            let d = sqrt(ex * ex + ez * ez) - (b.z + b.w);
+            if (d < best) {
+                best = d;
+                by = b.x + (b.y - b.x) * t;
+            }
+        }
+        if (best < reach) {
+            let w = best <= 0.0 ? 1.0 : 1.0 - sstep(0.0, 1.0, best / reach);
+            h = h + (by - h) * w;
+        }
+    }
     let rd = river_signed_dist(wx, wz);
     let r = length(vec2<f32>(wx, wz));
     let n = value_noise(wx, wz, 280.0, 97);
@@ -106,25 +144,14 @@ fn k_tile(
     let slope_rock = sstep(52.0, 92.0, h);
     let rock_sand = max(bank_sand, slope_rock * 0.78);
 
-    let west_d = length(vec2<f32>(wx - (-460.0), wz - 50.0));
-    let east_d = length(vec2<f32>(wx - 620.0, wz - 160.0));
-    let north_d = length(vec2<f32>(wx - (-420.0), wz + 1450.0));
-    let harbor_d = length(vec2<f32>(wx - (-300.0), wz - 1550.0));
-    let urban_core = max(
-        max(1.0 - sstep(420.0, 1250.0, west_d), 1.0 - sstep(380.0, 1120.0, east_d)),
-        max(1.0 - sstep(360.0, 960.0, north_d), 1.0 - sstep(360.0, 980.0, harbor_d))
-    ) * sstep(8.0, 36.0, rd);
-
-    let sub_density = (1.0 - sstep(1400.0, 4400.0, r)) * sstep(20.0, 60.0, rd) * (1.0 - sstep(38.0, 72.0, h));
-    let urban = min(1.0, urban_core * 0.9 + sub_density * 0.42);
     let outer_bias = sstep(1200.0, 3200.0, r) * 0.22;
-    let forest = max(0.0, sstep(0.46, 0.76, n + outer_bias) * (1.0 - urban_core * 0.9) * sstep(14.0, 48.0, rd) * (1.0 - bank_sand));
-    let grass = max(0.05, 1.0 - min(1.0, urban + forest + rock_sand));
-    let inv_sum = 1.0 / max(urban + grass + forest + rock_sand, 0.001);
+    let forest = max(0.0, sstep(0.46, 0.76, n + outer_bias) * sstep(14.0, 48.0, rd) * (1.0 - bank_sand));
+    let grass = max(0.05, 1.0 - min(1.0, forest + rock_sand));
+    let inv_sum = 1.0 / max(grass + forest + rock_sand, 0.001);
 
     pos_out[g.x(), g.y(), rec.slot] = vec4<f32>(local_xz.x, h, local_xz.y, rd);
     surf_out[g.x(), g.y(), rec.slot] =
-        unorm8(urban * inv_sum) |
+        0u |
         (unorm8(grass * inv_sum) << 8u) |
         (unorm8(forest * inv_sum) << 16u) |
         (unorm8(rock_sand * inv_sum) << 24u);

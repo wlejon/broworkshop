@@ -45,7 +45,11 @@ function patchMesh() {
     return new Mesh({ positions: new Float32Array(pos), normals, indices: new Uint32Array(idx) });
 }
 
-export function createTerrainStream(scene) {
+export function createTerrainStream(scene, city) {
+    // The city's ground data (lib/city/ground.js), shared by the produce kernel and the ground shader.
+    const kbuf = (a) => { const b = bro.kernel.createBuffer(Math.max(16, a.byteLength)); if (a.byteLength) b.write(a); return b; };
+    const segBuf = kbuf(city.segs), startBuf = kbuf(city.cellStart), cellBuf = kbuf(city.cellSegs), surfBuf = kbuf(city.surf);
+    const gi = city.info;
     const produceSrc = readApp('shaders/terrain_produce.bk');
     const groundSrc = readApp('shaders/ground_mesh.bk');
 
@@ -83,6 +87,8 @@ export function createTerrainStream(scene) {
                 BORDER,
                 1 / TILE,
                 MIN_HEIGHT,
+                segBuf, startBuf, cellBuf,
+                gi.half, gi.cell, gi.cells, gi.reach,
             );
             kRange.dispatch(
                 [batch.count],
@@ -112,7 +118,7 @@ export function createTerrainStream(scene) {
     const shaderPromise = ground.setShaderAsync({
         module: groundSrc,
         file: 'shaders/ground_mesh.bk',
-        uniforms: { cam_hi: [0, 0, 0], time: 0, cam_lo: [0, 0, 0], pad0: 0 },
+        uniforms: { time: 0, night: 0, pad1: 0, pad2: 0, city: [gi.half, gi.cell, gi.cells, gi.surfCell], city2: [gi.surfCells, 0, 0, 0] },
     }).then(() => {
         shaderReady = true;
         ground.setShaderTexture('pos', {
@@ -120,11 +126,13 @@ export function createTerrainStream(scene) {
             width: CELLS, height: CELLS, layers: CAPACITY, atlas: 2, channels: 4, format: 'float32',
         });
         ground.setShaderBuffer('tiles', cache.drawList);
+        ground.setShaderBuffer('segs', segBuf);
+        ground.setShaderBuffer('cell_start', startBuf);
+        ground.setShaderBuffer('cell_segs', cellBuf);
+        ground.setShaderBuffer('surf', surfBuf);
     });
 
     const lastEye = [NaN, 0, 0], lastFwd = [0, 0, -1];
-    const camHi = [0, 0, 0], camLo = [0, 0, 0];
-    let lastUniformX = NaN, lastUniformY = NaN, lastUniformZ = NaN;
     let lastPending = -1, disposed = false;
 
     function update(camPos, fwd = [0, -0.3, -0.95], up = [0, 1, 0], viewport = { width: 1600, height: 960, fov: 60 }) {
@@ -149,17 +157,12 @@ export function createTerrainStream(scene) {
             scene.setPendingWork?.('terrain tiles', lastPending);
         }
         if (ground.instanceCount !== cache.drawCount) ground.setInstanceCount(cache.drawCount);
-        if (shaderReady && (camPos[0] !== lastUniformX || camPos[1] !== lastUniformY || camPos[2] !== lastUniformZ)) {
-            lastUniformX = camPos[0]; lastUniformY = camPos[1]; lastUniformZ = camPos[2];
-            for (let k = 0; k < 3; k++) { camHi[k] = Math.fround(camPos[k]); camLo[k] = camPos[k] - camHi[k]; }
-            ground.setShaderUniform('cam_hi', camHi);
-            ground.setShaderUniform('cam_lo', camLo);
-        }
     }
 
     return {
         cache,
         node: ground,
+        setNight(n) { if (shaderReady) ground.setShaderUniform('night', n); },
         whenReady: () => shaderPromise,
         update,
         stats: () => ({ drawCount: cache.drawCount, wanted: cache.wanted, resident: cache.resident, pending: cache.pending }),
