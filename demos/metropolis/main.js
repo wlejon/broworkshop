@@ -5,7 +5,7 @@
 // bro.tiles, the river is a ribbon, the sky is lib/kit's daylight.
 
 import { SKY, daylight } from "/lib/kit/sky.js";
-import { loadOrGenerateCity } from "/lib/city/cache.js";
+import { loadOrGenerateCity, loadOrPlaceTrees, growInWorker } from "/lib/city/cache.js";
 import { createBuildingRenderer } from "/lib/city/building_render.js";
 import { createBridges } from "/lib/city/bridges.js";
 import { createTrafficRenderer } from "/lib/city/traffic_render.js";
@@ -53,15 +53,23 @@ const water = createRiverWater(scene);
 const cam = createFlyCamera(canvas, scene);
 
 const statusEl = document.getElementById('status');
+// The city and its trees are grown in a worker into the app's cache (world/
+// grow_worker.js, lib/city/city_worker.js; keyed on lib/city, world/ and the trees' export), so a cold
+// start or a lib/city edit leaves the window live while they grow; the page
+// then reads both back.
+const treeDir = bro.resolvePath('/app/assets/trees');
+const tg = perf.now();
+if (statusEl) statusEl.textContent = 'growing the city';
+const grown = await growInWorker(new URL('./world/grow_worker.js', import.meta.url), { sources: ['/app/world'], treeDir });
+if (!grown.ok) console.warn(`metropolis: city worker failed (${grown.error}); growing it here`);
+else console.log(`metropolis: city grown in a worker in ${(perf.now() - tg).toFixed(0)} ms (${grown.hit ? 'cached' : 'generated'})`);
 const t0 = perf.now();
-// The city grown once and read back from the app's cache after that (keyed on lib/city and world/).
-const { city, hit: cityCached } = loadOrGenerateCity(SITE, { sources: ['/app/world'] });
+const { city, hit: cityCached, path: cityPath } = loadOrGenerateCity(SITE, { sources: ['/app/world'] });
 console.log(`metropolis: city in ${(perf.now() - t0).toFixed(0)} ms (${cityCached ? 'cache hit' : 'cache miss'}): ${city.graph.edges.length} roads, ${city.lots.length} lots, ${city.masses.count} masses`,
     JSON.stringify(Object.fromEntries(Object.entries(city.timings).map(([k, v]) => [k, Math.round(v)]))));
 
 const t1 = perf.now();
-const treeDir = bro.resolvePath('/app/assets/trees');
-const treeRecs = placeTrees(city, { crownR: crownRadii(treeDir) });
+const treeRecs = loadOrPlaceTrees(city, cityPath, treeDir, (c) => placeTrees(c, { crownR: crownRadii(treeDir) }));
 const trees = createTrees(scene, treeRecs, treeDir);
 console.log(`metropolis: ${trees.count} trees in ${(perf.now() - t1).toFixed(0)} ms`);
 
