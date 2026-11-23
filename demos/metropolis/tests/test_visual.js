@@ -12,9 +12,8 @@
 //    normal view from one eye, has the same mean in linear light (its far
 //    shading is its near shading averaged);
 //  - dollying out from the street to 3 km over a clear path, no step changes
-//    the frame much more than the steps either side (no whole-frame pop:
-//    one object's level change is spread over many frames, so this catches
-//    only what changes everywhere at once, like ground or lighting);
+//    the frame's brightness much more than the steps either side (no
+//    whole-frame pop: lighting, exposure, the ground's shade at once);
 //  - strafing (8 m, 250 m) and turning, fixed points of the ground keep
 //    their brightness, and no less steadily with the sun's shadows than
 //    without them (no shadow swim; what moves without shadows is occluders).
@@ -380,8 +379,11 @@ m.setTimeMode('day');
         const contrast = mad(E, A), change = contrast > 0 ? mad(A, Bc) / contrast : 1, drawn = 1 - ssim(E, A);
         const control = contrast > 0 ? mad(crop(imgs[1], r), crop(moved, r)) / contrast : 1;
         // (drawn: the level draws at all, against the empty road, where a
-        // missing one reads ~0; a grey hatch at 300 m reads 0.18-0.34 by what
-        // ran before it, so the floor is 0.1.)
+        // missing one reads ~0. The dark red hatch at 300 m is some 12x4 px on
+        // a road in shade (under 30/255): SSIM there swings 0.18-0.34 with the
+        // car's sub-pixel placement, which differs by what ran before (its
+        // projected crop 30 px wide fresh, 29 after the facade check; exposure
+        // the same within 0.01 EV), so the floor is 0.1.)
         ok = ok && change < Math.max(0.15, control + 0.1) && drawn > 0.1;
         res.push(`lod${k}->${k + 1} at ${dist} m changes ${(change * 100).toFixed(0)} % of the car's contrast, moving 1 % ${(control * 100).toFixed(0)} %, drawn ${drawn.toFixed(2)}`);
       }
@@ -404,22 +406,29 @@ for (const el of [0.3, 0.45, 0.6]) for (let az = 0; az < 360 && !dir; az += 7.5)
 }
 m.setTimeMode('day'); frames(5);
 {
-  let prev = null; const out = [];
+  // A whole-frame pop (lighting, exposure, the ground's or sky's shade all at
+  // once): each step's change of the frame's mean brightness against the
+  // steps either side (their median, but never under 1 %: moving past
+  // downtown's towers alone changes it up to 9 % a step, as roofs come into
+  // view). Measured: the worst step x3.9 its neighbours; a 20 % sun drop at
+  // 500 m x11.8. (Structure is not measured here: a step's own motion moves
+  // SSIM by 0.5 at full scale and 0.1-0.7 at 1/8, burying even the ground
+  // moved 3 m; the return-to-pose check above is the ground's: 0.3 m fails.)
+  const lum = (im) => { let t = 0; for (let k = 0; k < im.data.length; k += 4) t += im.data[k] * 0.2126 + im.data[k + 1] * 0.7152 + im.data[k + 2] * 0.0722; return t / (im.data.length / 4); };
+  let prevL = -1; const out = [];
   for (let d = 25; d < 3000; d *= 1.012) {
     look([tgt[0] + dir[0] * d, tgt[1] + dir[1] * d, tgt[2] + dir[2] * d], tgt);
-    const f = shot();
-    if (prev) out.push([d, ssim(prev, f)]);
-    prev = f;
+    const L = lum(shot());
+    if (prevL >= 0) out.push([d, Math.abs(L - prevL) / Math.max(1, prevL)]);
+    prevL = L;
   }
-  // A pop is one step well below the steps either side (moving alone
-  // changes every step about alike).
   let worst = 0, at = 0;
   for (let i = 1; i < out.length; i++) {
     const w = out.slice(Math.max(1, i - 6), i + 7).map((x) => x[1]).sort((p, q) => p - q);
-    const drop = w[w.length >> 1] - out[i][1];
-    if (drop > worst) { worst = drop; at = out[i][0]; }
+    const r = out[i][1] / Math.max(w[w.length >> 1], 0.01);
+    if (r > worst) { worst = r; at = out[i][0]; }
   }
-  check(worst < 0.1, `dollying out 25 m to 3 km, no step stands out from its neighbours (largest dip ${worst.toFixed(3)} at ${at.toFixed(0)} m)`);
+  check(worst < 6, `dollying out 25 m to 3 km, no step's brightness change stands out from its neighbours' (largest x${worst.toFixed(1)} their median, at ${at.toFixed(0)} m)`);
 }
 
 // Shadow swim: ground points (not behind a building, trees drawn as shadows
