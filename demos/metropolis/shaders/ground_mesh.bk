@@ -347,6 +347,17 @@ pub fn fragment(v: mesh::Vertex, s_in: mesh::Surface) -> mesh::Surface {
             }
             road_c = mix(road_c, vec3<f32>(0.62, 0.62, 0.60), paint * 0.9);
             road_c = mix(road_c, vec3<f32>(0.62, 0.45, 0.10), yellow * 0.9);
+            // Tram rails: a grooved pair (1.435 m gauge) in each inner lane,
+            // through the junctions too.
+            if ((flags & 4) != 0) {
+                let lc = 1.7;
+                let r0 = abs(au - (lc - 0.7175));
+                let r1 = abs(au - (lc + 0.7175));
+                let rail = 1.0 - smoothstep(0.035, 0.035 + fw, min(r0, r1));
+                let groove = 1.0 - smoothstep(0.012, 0.012 + fw, min(r0, r1));
+                road_c = mix(road_c, vec3<f32>(0.30, 0.30, 0.31), rail * 0.9);
+                road_c = mix(road_c, vec3<f32>(0.02, 0.02, 0.02), groove * 0.8);
+            }
             // Coverage of the carriageway against the sidewalk, and of the sidewalk against the block.
             let on_road = band(best, -100.0, 0.0, fw);
             let on_walk = band(best, 0.0, walk, fw);

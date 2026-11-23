@@ -15,6 +15,7 @@ struct Params {
     wheel_r: f32,  // wheel radius
     half_w: f32,   // half the body's width
     seams: vec4<f32>,  // door seams' x (up to 4; 0: none)
+    cabin: vec4<f32>,  // x: the saloon's light behind the glass at night, cd/m^2 (trams)
 }
 
 @binding(4, 0) var params: uniform<Params>;
@@ -51,6 +52,13 @@ pub fn fragment(v: mesh::Vertex, s_in: mesh::Surface) -> mesh::Surface {
         s.base_color = vec3<f32>(0.015, 0.017, 0.02);
         s.roughness = 0.06;
         s.metallic = 0.0;
+        // A lit saloon seen through the glass, brightest at the ceiling.
+        let up = clamp((v.v0.y - params.cabin.y) / 1.9, 0.0, 1.0);
+        // Seat backs and riders shade the lower half; a ceiling strip light runs above.
+        let seats = 0.2 + 0.8 * smoothstep(0.35, 0.6, up);
+        let strip = 1.0 + 2.0 * smoothstep(0.88, 0.96, up);
+        let rider = 0.5 + 0.5 * step(0.5, fract(v.v0.x * 0.9 + 0.3 * sin(v.v0.x * 2.3)));
+        s.emissive = vec3<f32>(1.0, 0.93, 0.80) * params.cabin.x * params.night * seats * strip * mix(rider, 1.0, smoothstep(0.55, 0.75, up));
     } else if (part == 2) {
         s.base_color = vec3<f32>(0.025, 0.025, 0.025);
         s.roughness = 0.92;

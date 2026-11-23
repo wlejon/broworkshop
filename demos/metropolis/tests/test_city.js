@@ -78,7 +78,10 @@ check(zones.size >= 6, `every zone present (${[...zones].join(', ')})`);
 
 // Traffic: three minutes of it. Cars keep moving (no gridlock) and stay on
 // land or a bridge's deck.
-const traffic = createTraffic(graph, { count: 12000, edgeDensity: edgeDensity(graph, city.field.density) });
+check(city.transit.length === 4, `tram lines planned (${city.transit.map((l) => `${l.name}: ${(l.length / 1000).toFixed(1)} km, ${l.stops.length} stops`).join('; ')})`);
+const crossesRiver = city.transit.filter((l) => l.steps.some((st) => graph.edges[st.edge].kind === 'bridge')).length;
+check(crossesRiver >= 2, `tram lines crossing the river (${crossesRiver})`);
+const traffic = createTraffic(graph, { count: 12000, edgeDensity: edgeDensity(graph, city.field.density), lines: city.transit });
 const pose = [0, 0, 0, 0, 0];
 let wetCars = 0, movingMin = 1;
 for (let t = 0; t < 180; t += 0.1) {
@@ -97,6 +100,9 @@ for (let t = 0; t < 180; t += 0.1) {
         console.log(`  traffic t=${t.toFixed(0)} s: ${(f * 100).toFixed(0)} % moving`);
     }
 }
+const trams = traffic.cars.filter((c) => c.route);
+const served = trams.filter((c) => c.served >= 0 || c.dwell > 0).length;
+check(trams.length > 10 && served >= trams.length * 0.8, `trams run and stop (${trams.length} trams, ${served} have served a stop)`);
 check(wetCars === 0, `no car off a bridge in the water (${wetCars})`);
 check(movingMin > 0.35, `traffic flows: at least 35 % of cars moving throughout (lowest ${(movingMin * 100).toFixed(0)} %)`);
 

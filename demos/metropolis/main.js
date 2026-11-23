@@ -70,7 +70,7 @@ const ready = Promise.all([
     terrain.whenReady(),
     createBuildingRenderer(scene, city.masses, readLib('city/building.bk')).then((b) => { buildings = b; }),
     // Traffic on the road graph, simulated in a worker: lanes both ways, lights at the junctions.
-    createTrafficRenderer(scene, city.graph, city.field.density, readLib('city/car.bk'), { count: 12000 }).then((c) => { cars = c; }),
+    createTrafficRenderer(scene, city.graph, city.field.density, readLib('city/car.bk'), { count: 12000, lines: city.transit }).then((c) => { cars = c; }),
 ]).then(() => { if (statusEl) statusEl.textContent = 'ready'; });
 
 const todButtons = [...document.querySelectorAll('#todButtons [data-tod]')];
