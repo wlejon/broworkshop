@@ -430,6 +430,50 @@ m.setTimeMode('day'); frames(5);
   }
   check(worst < 6, `dollying out 25 m to 3 km, no step's brightness change stands out from its neighbours' (largest x${worst.toFixed(1)} their median, at ${at.toFixed(0)} m)`);
 }
+{
+  // The ground's tiles swap level by the eye's distance: at each step out
+  // the same pose drawn with its own tiles and with the next step's (the
+  // tiles chosen from an eye 5 % farther, terrain.update's eye wrapped), the
+  // ground alone (buildings, trees and cars hidden). What differs is what a
+  // swap at that step shows, without the step's own motion. Measured at 1/8
+  // scale in luminance: the mean change and the largest 8x8-block change.
+  // Measured: worst block 15.1/255 at 467 m (a corner's narrow ridge in the
+  // height field, sampled a little differently a level coarser), mean 0.02;
+  // the same tiles drawn twice differ by up to 6. Controls: a parent drawn on
+  // a merge from its own parent's shape (bro's tile cache before 767ce53b)
+  // jumps the river's bank at 1.3 km, block 21.8; tiles chosen from 4x as
+  // far, block 49.5, mean 0.41.
+  const TILE_MEAN = 0.1, TILE_BLOCK = 16;
+  const hide = [...m.buildings.nodes, ...treeN, ...carN];
+  hide.forEach((n) => { n.visible = false; });
+  // Exposed as the eye meters the scene: auto exposure adapts on the paused
+  // clock, so it would hold whatever EV a section before left it at (the
+  // facade check's fixed EV, 0.8 brighter, scales every change here by 1.5).
+  for (let i = 0; i < 4; i++) frames(1);
+  m.scene.setExposure({ mode: 'fixed', ev: m.scene.cullStats().meteredEv });
+  const upd = m.terrain.update;
+  let selScale = 1;
+  m.terrain.update = (pos, ...rest) => upd(selScale === 1 ? pos : [tgt[0] + (pos[0] - tgt[0]) * selScale, tgt[1] + (pos[1] - tgt[1]) * selScale, tgt[2] + (pos[2] - tgt[2]) * selScale], ...rest);
+  const L8 = (im) => { const w = im.width >> 3, h = im.height >> 3, o = new Float32Array(w * h); for (let y = 0; y < h * 8; y++) for (let x = 0; x < w * 8; x++) { const k = (y * im.width + x) * 4; o[(y >> 3) * w + (x >> 3)] += (0.2126 * im.data[k] + 0.7152 * im.data[k + 1] + 0.0722 * im.data[k + 2]) / 64; } return o; };
+  // Settled: the tiles in and the shadow pages caught up (a tile change
+  // redraws the pages over it, a ration a frame).
+  const settled = (e) => { for (let i = 0; i < 240; i++) { look(e, tgt); frames(1); const cs = m.scene.cullStats(); if (i > 6 && m.terrain.stats().pending === 0 && !cs.shadowPagesWanted && !cs.shadowPagesDrawn && !cs.shadowPagesBuilding) break; } return L8(frameImage()); };
+  const diff = (a, b) => { let sum = 0, mx = 0; for (let i = 0; i < a.length; i++) { const d = Math.abs(a[i] - b[i]); sum += d; if (d > mx) mx = d; } return [sum / a.length, mx]; };
+  let worstMean = 0, worstBlock = 0, atM = 0, atB = 0;
+  const SWAP = 1.05;
+  for (let d = 25; d < 3000; d *= 1.05) {
+    const e = [tgt[0] + dir[0] * d, tgt[1] + dir[1] * d, tgt[2] + dir[2] * d];
+    selScale = 1; const A = settled(e);
+    selScale = SWAP; const B = settled(e);
+    const [mean, block] = diff(A, B);
+    if (mean > worstMean) { worstMean = mean; atM = d; }
+    if (block > worstBlock) { worstBlock = block; atB = d; }
+  }
+  m.terrain.update = upd; selScale = 1;
+  m.setTimeMode('day');
+  hide.forEach((n) => { n.visible = true; });
+  check(worstMean < TILE_MEAN && worstBlock < TILE_BLOCK, `the ground's tiles swap level unseen: the same view with the next step's tiles (mean change ${worstMean.toFixed(2)}/255 at ${atM.toFixed(0)} m, largest 8x8 block ${worstBlock.toFixed(1)}/255 at ${atB.toFixed(0)} m)`);
+}
 
 // Shadow swim: ground points (not behind a building, trees drawn as shadows
 // only, cars hidden) followed while the eye moves; each path with the sun's

@@ -78,7 +78,10 @@ export function createTerrainStream(scene, city) {
         layers: { position: 16, surface: 4 },
         ranges: true,
         produce(batch) {
-            settleUpdates = 6;
+            // Selects go on past the last production for a late tile's ramp
+            // in from its parent (24 selects, bro's tile cache): a still eye
+            // would otherwise leave it part way, its parent's shape showing.
+            settleUpdates = 26;
             kTile.dispatch(
                 [CELLS, CELLS, batch.count],
                 batch.table,
