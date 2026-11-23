@@ -125,13 +125,17 @@ export function createCityGraph() {
         }
     }
 
-    // 4. 4 Independently Rotated Urban District Street Networks
+    // 4. 4 Independently Rotated Urban District Street Networks (kept cleanly behind riverfront boulevards)
     const districts = [
-        { name: 'downtown', cx: riverCenterX(0) - 520,   cz: 40,    yaw: 14 * Math.PI / 180,  rad: 680, step: 122, halfW: 7.0 },
-        { name: 'oldtown',  cx: riverCenterX(180) + 560, cz: 180,   yaw: -22 * Math.PI / 180, rad: 610, step: 110, halfW: 6.0 },
-        { name: 'midtown',  cx: riverCenterX(-1450) - 500, cz: -1450, yaw: 32 * Math.PI / 180, rad: 540, step: 130, halfW: 7.2 },
-        { name: 'harbor',   cx: riverCenterX(1550) - 420,  cz: 1550,  yaw: -9 * Math.PI / 180,  rad: 560, step: 138, halfW: 7.5 },
+        { name: 'downtown', bank: 'west', cx: riverCenterX(0) - 520,     cz: 40,    yaw: 14 * Math.PI / 180,  rad: 740, step: 142, halfW: 8.0 },
+        { name: 'oldtown',  bank: 'east', cx: riverCenterX(180) + 560,   cz: 180,   yaw: -22 * Math.PI / 180, rad: 650, step: 126, halfW: 6.6 },
+        { name: 'midtown',  bank: 'west', cx: riverCenterX(-1450) - 520, cz: -1450, yaw: 32 * Math.PI / 180,  rad: 600, step: 142, halfW: 7.6 },
+        { name: 'harbor',   bank: 'west', cx: riverCenterX(1550) - 480,  cz: 1550,  yaw: -9 * Math.PI / 180,  rad: 600, step: 144, halfW: 7.6 },
     ];
+    const onBank = (bank, x, z) => {
+        const rx = riverCenterX(z), hw = riverHalfWidth(z);
+        return bank === 'west' ? x < rx - hw - 52 : x > rx + hw + 52;
+    };
     for (const d of districts) {
         const ca = Math.cos(d.yaw), sa = Math.sin(d.yaw);
         const toW = (u, v) => [d.cx + ca * u - sa * v, d.cz + sa * u + ca * v];
@@ -142,7 +146,7 @@ export function createCityGraph() {
                 const v0 = j * d.step, v1 = (j + 1) * d.step;
                 if (Math.hypot(u, 0.5 * (v0 + v1)) > d.rad) continue;
                 const p0 = toW(u, v0), p1 = toW(u, v1);
-                if (isDrySegment(p0[0], p0[1], p1[0], p1[1], 32)) {
+                if (onBank(d.bank, p0[0], p0[1]) && onBank(d.bank, p1[0], p1[1]) && isDrySegment(p0[0], p0[1], p1[0], p1[1], 32)) {
                     addSeg(p0[0], p0[1], p1[0], p1[1], { halfW: i === 0 ? d.halfW + 1.5 : d.halfW, sidewalkW: 2.6, kind: 'urban' });
                 }
             }
@@ -153,7 +157,7 @@ export function createCityGraph() {
                 const u0 = i * d.step, u1 = (i + 1) * d.step;
                 if (Math.hypot(0.5 * (u0 + u1), v) > d.rad) continue;
                 const p0 = toW(u0, v), p1 = toW(u1, v);
-                if (isDrySegment(p0[0], p0[1], p1[0], p1[1], 32)) {
+                if (onBank(d.bank, p0[0], p0[1]) && onBank(d.bank, p1[0], p1[1]) && isDrySegment(p0[0], p0[1], p1[0], p1[1], 32)) {
                     addSeg(p0[0], p0[1], p1[0], p1[1], { halfW: j === 0 ? d.halfW + 1.5 : d.halfW, sidewalkW: 2.6, kind: 'urban' });
                 }
             }
@@ -253,8 +257,16 @@ export function createCityGraph() {
             const [tx, tz] = catmullRom(p0, p1, p2, p3, s / SUB);
             const rd = riverSignedDist(tx, tz);
             const gy = terrainHeight(tx, tz);
-            const deckY = Math.max(gy + 8.5, rd < 45 ? 15.0 : -100);
-            transitPts.push({ x: tx, z: tz, y: deckY });
+            const deckY = Math.max(gy + 8.0, rd < 45 ? 15.0 : -100);
+            transitPts.push({ x: tx, z: tz, y: deckY, minY: Math.max(gy + 7.2, rd < 45 ? 14.5 : -100) });
+        }
+    }
+    for (let pass = 0; pass < 4; pass++) {
+        const prevY = transitPts.map((p) => p.y);
+        for (let i = 0; i < transitPts.length; i++) {
+            const ym = prevY[(i - 1 + transitPts.length) % transitPts.length];
+            const yp = prevY[(i + 1) % transitPts.length];
+            transitPts[i].y = Math.max(transitPts[i].minY, 0.25 * ym + 0.5 * prevY[i] + 0.25 * yp);
         }
     }
     const transitLoop = [];
@@ -328,15 +340,19 @@ export function createCityGraph() {
         const placedCircles = [];
         const srng = rngFor(((sx * 73856093) ^ (sz * 19349663) ^ 0x4242) >>> 0);
 
-        const clearOfRoads = (cx, cz, rad) => {
-            if (riverSignedDist(cx, cz) < rad + 18) return false;
+        const clearOfRoads = (cx, cz, bw, bd, facingSegId) => {
+            const halfDiag = Math.hypot(bw, bd) * 0.5;
+            if (riverSignedDist(cx, cz) < halfDiag + 18) return false;
             for (const r of nearbyRoads) {
-                if (pointToSegDistSq(cx, cz, r.x0, r.z0, r.x1, r.z1) < (r.halfW + r.sidewalkW + rad + 2.2) ** 2) {
+                const clearNeed = r.id === facingSegId
+                    ? r.halfW + r.sidewalkW + bd * 0.5 + 1.5
+                    : r.halfW + r.sidewalkW + halfDiag + 2.6;
+                if (pointToSegDistSq(cx, cz, r.x0, r.z0, r.x1, r.z1) < clearNeed * clearNeed) {
                     return false;
                 }
             }
             for (const p of placedCircles) {
-                if (Math.hypot(cx - p[0], cz - p[1]) < p[2] + rad + 3.0) return false;
+                if (Math.hypot(cx - p[0], cz - p[1]) < p[2] + halfDiag + 4.5) return false;
             }
             return true;
         };
@@ -351,7 +367,7 @@ export function createCityGraph() {
                     x: st.x, z: st.z, groundY: gy, slopeDrop: 1.0, yaw: 0,
                 });
                 buildings.push(bp);
-                placedCircles.push([st.x, st.z, Math.hypot(bp.width, bp.depth) * 0.55]);
+                placedCircles.push([st.x, st.z, Math.hypot(bp.width, bp.depth) * 0.5]);
             }
         }
 
@@ -361,25 +377,27 @@ export function createCityGraph() {
             const len = Math.hypot(seg.x1 - seg.x0, seg.z1 - seg.z0);
             const tx = (seg.x1 - seg.x0) / len, tz = (seg.z1 - seg.z0) / len;
             const nx = -tz, nz = tx;
-            const lotStep = seg.kind === 'suburb' ? 30 : 34;
-            for (let dist = 18; dist <= len - 18; dist += lotStep) {
+            const lotStep = seg.kind === 'suburb' ? 30 : 38;
+            const endPad = seg.kind === 'urban' ? 28 : 20;
+            for (let dist = endPad; dist <= len - endPad; dist += lotStep) {
                 const bx0 = seg.x0 + tx * dist, bz0 = seg.z0 + tz * dist;
                 for (const side of [-1, 1]) {
                     const distCenter = districtAt(bx0, bz0);
                     if (distCenter === 'river' || distCenter === 'park') continue;
-                    const arch = distCenter === 'downtown' ? (srng() < 0.72 ? 'skyscraper' : 'midrise')
-                        : distCenter === 'midtown' ? (srng() < 0.48 ? 'skyscraper' : 'midrise')
-                        : distCenter === 'oldtown' ? (srng() < 0.55 ? 'midrise' : 'shopfront')
-                        : distCenter === 'harbor' ? (srng() < 0.5 ? 'midrise' : 'shopfront')
+                    const rPick = srng();
+                    const arch = distCenter === 'downtown' ? (rPick < 0.36 ? 'skyscraper' : rPick < 0.78 ? 'midrise' : 'shopfront')
+                        : distCenter === 'midtown' ? (rPick < 0.28 ? 'skyscraper' : rPick < 0.72 ? 'midrise' : 'shopfront')
+                        : distCenter === 'oldtown' ? (rPick < 0.45 ? 'midrise' : 'shopfront')
+                        : distCenter === 'harbor' ? (rPick < 0.42 ? 'midrise' : 'shopfront')
                         : 'house';
-                    const bWidth = arch === 'skyscraper' ? 24 + srng() * 10 : arch === 'midrise' ? 18 + srng() * 8 : arch === 'shopfront' ? 13 + srng() * 4 : 10 + srng() * 4;
-                    const bDepth = arch === 'house' ? 9 + srng() * 3 : bWidth * (0.76 + srng() * 0.14);
-                    const setback = seg.halfW + seg.sidewalkW + bDepth * 0.5 + (arch === 'house' ? 5.5 : 3.0);
+                    const bWidth = arch === 'skyscraper' ? 20 + srng() * 9 : arch === 'midrise' ? 15 + srng() * 7 : arch === 'shopfront' ? 11 + srng() * 4 : 10 + srng() * 4;
+                    const bDepth = arch === 'house' ? 9 + srng() * 3 : bWidth * (0.74 + srng() * 0.14);
+                    const setback = seg.halfW + seg.sidewalkW + bDepth * 0.5 + (arch === 'house' ? 4.8 : 2.8);
                     const cx = bx0 + nx * side * setback;
                     const cz = bz0 + nz * side * setback;
+                    if (seg.kind === 'boulevard' && riverSignedDist(cx, cz) < riverSignedDist(bx0, bz0)) continue;
                     if (cx < xMin || cx >= xMax || cz < zMin || cz >= zMax) continue;
-                    const rad = Math.hypot(bWidth, bDepth) * 0.5;
-                    if (!clearOfRoads(cx, cz, rad)) continue;
+                    if (!clearOfRoads(cx, cz, bWidth, bDepth, seg.id)) continue;
                     // Slope drop across building corners so hillside foundations never float
                     const c0 = terrainHeight(cx - bWidth * 0.45, cz - bDepth * 0.45);
                     const c1 = terrainHeight(cx + bWidth * 0.45, cz + bDepth * 0.45);
@@ -393,12 +411,13 @@ export function createCityGraph() {
                     const toRoadX = -nx * side, toRoadZ = -nz * side;
                     const yaw = Math.atan2(toRoadX, toRoadZ);
                     const bid = (((sx + 32) & 63) << 18) | (((sz + 32) & 63) << 12) | buildings.length;
+                    const floors = arch === 'skyscraper' ? 10 + Math.floor(srng() * 24) : undefined;
                     const bp = generateBuildingBlueprint({
                         id: bid, seed: bid * 2654435761, archetype: arch,
-                        width: bWidth, depth: bDepth, groundY, slopeDrop, yaw, x: cx, z: cz,
+                        width: bWidth, depth: bDepth, floors, groundY, slopeDrop, yaw, x: cx, z: cz,
                     });
                     buildings.push(bp);
-                    placedCircles.push([cx, cz, rad]);
+                    placedCircles.push([cx, cz, Math.hypot(bWidth, bDepth) * 0.48]);
                 }
             }
         }

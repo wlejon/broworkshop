@@ -1,97 +1,174 @@
-// Metropolis — Phase 3 clean boot entry (terrain + river hydrology + non-grid roads & bridges).
-// Phase 4 adds streamed buildings, interior volumes, vehicles, rail cars, and flora trees.
+// Metropolis — 120 km^2 Streamed City & Suburbs on Natural Terrain
+// Combines bro.tiles terrain, curved river hydrology + bridges, non-grid districts,
+// hillside suburbs, bro.flora trees & cached impostors, single-source LOD2/LOD1/LOD0
+// enterable buildings with InteriorVolume + GPU-tiled lights, traffic & commuter rail.
 
-import { sceneViewport, orbitRotation } from "/lib/kit/viewport3d.js";
-import { daylight } from "/lib/kit/sky.js";
+import { SKY, AIR, SUN_LUX, daylight } from "/lib/kit/sky.js";
 import { createUrbanMaterialLibrary } from "/lib/pbr-materials.js";
-import { SECTOR_SIZE, terrainHeight, riverCenterX } from "/app/world/terrain_field.js";
+import { terrainHeight, riverCenterX } from "/app/world/terrain_field.js";
 import { createCityGraph } from "/app/world/city_graph.js";
 import { createTerrainStream } from "/app/world/terrain_stream.js";
 import { createRiverWater } from "/app/world/river_water.js";
-import { buildSectorRoadAndBridgeNodes } from "/app/world/road_bridge_mesh.js";
+import { createCityStreamer } from "/app/world/city_streamer.js";
+import { createTrafficAndTransit } from "/app/traffic/traffic_transit.js";
+import { createTraversalController } from "/app/player/traversal_modes.js";
+import { createHud } from "/app/player/hud.js";
 
-const statusEl = document.getElementById('status');
-const perfEl = document.getElementById('perfStats');
+const canvas = document.getElementById('stage');
+canvas.width = window.innerWidth || 1600;
+canvas.height = window.innerHeight || 960;
+const scene = canvas.getContext('scene');
+const unavailableEl = document.getElementById('unavailable');
 
-const vp = sceneViewport('#stage', {
-    orbit: {
-        target: [riverCenterX(0) - 80, 12, 0],
-        dist: 240,
-        fov: 58,
-        near: 0.6,
-        far: 14000,
-        rot: orbitRotation(0.65, -0.32),
-    },
-    controls: { orbitButton: 0, panButton: 2, minDist: 2, maxDist: 4500 },
-});
-
-const { scene } = vp;
-const sky = daylight(scene, { order: ['noon', 'golden', 'dawn', 'night'], pcf: 2, ground: [0.10, 0.14, 0.08] });
-sky.apply('noon');
-sky.setScale(14);
-
-const graph = createCityGraph();
-const mats = createUrbanMaterialLibrary(128);
-const terrain = createTerrainStream(scene);
-const water = createRiverWater(scene);
-const activeSectors = new Map();
-
-function syncSectors(eye) {
-    const csx = Math.floor(eye[0] / SECTOR_SIZE), csz = Math.floor(eye[2] / SECTOR_SIZE);
-    const keep = new Set();
-    for (let dz = -2; dz <= 2; dz++) for (let dx = -2; dx <= 2; dx++) {
-        const sx = csx + dx, sz = csz + dz;
-        const k = `${sx},${sz}`;
-        keep.add(k);
-        if (!activeSectors.has(k)) {
-            activeSectors.set(k, buildSectorRoadAndBridgeNodes(scene, graph, graph.getSectorData(sx, sz), mats));
-        }
-    }
-    for (const [k, built] of activeSectors) {
-        if (keep.has(k)) continue;
-        built.destroy();
-        activeSectors.delete(k);
-    }
+if (!scene || !bro.tiles || !bro.flora) {
+    if (unavailableEl) unavailableEl.hidden = false;
+    throw new Error('Metropolis requires bro.scene, bro.tiles, and bro.flora');
 }
 
-let curPos = [riverCenterX(0) - 180, 120, 220];
-let curFwd = [0.5, -0.35, -0.78];
-let curUp = [0, 1, 0];
+const SKY_PRESETS = {
+    day:   { ...SKY.afternoon, exposure: { mode: 'auto', meter: 'incident' } },
+    dusk:  { ...SKY.golden,    exposure: { mode: 'auto', meter: 'incident' } },
+    night: {
+        label: 'Night',
+        hdri: 'dikhololo_night', envIntensity: 1.25, envRotation: 0.0,
+        sun: { direction: [-0.35, -0.78, -0.50], color: [0.58, 0.70, 0.96], intensity: 1.35 },
+        shadow: false,
+        exposure: { mode: 'fixed', ev: 5.8 },
+        fog: { start: 28, end: 260, color: [0.03, 0.05, 0.11] },
+        ambientFallback: [0.12, 0.15, 0.25],
+        emissiveGain: 1.6, fireflies: 0,
+    },
+};
 
-vp.onView((view) => {
-    curPos = view.position;
-    const dx = view.target[0] - curPos[0], dy = view.target[1] - curPos[1], dz = view.target[2] - curPos[2];
-    const dl = Math.hypot(dx, dy, dz) || 1;
-    curFwd = [dx / dl, dy / dl, dz / dl];
-    curUp = view.up || [0, 1, 0];
+let timeMode = 'day';
+const sky = daylight(scene, {
+    presets: SKY_PRESETS,
+    order: ['day', 'dusk', 'night'],
+    pcf: 2,
+    ground: [0.09, 0.13, 0.06],
+});
+sky.apply('day');
+sky.setScale(16);
+
+const mats = createUrbanMaterialLibrary(256);
+const graph = createCityGraph();
+const terrain = createTerrainStream(scene);
+const water = createRiverWater(scene);
+const traffic = createTrafficAndTransit(scene, graph);
+const streamer = createCityStreamer({ scene, graph, mats, hideOnBake: [terrain.node, water.node, ...traffic.getNodes()] });
+
+const hud = createHud({
+    onSetMode: (m) => traversal.setMode(m),
+    onSetTimeMode: (tm) => setTimeMode(tm),
 });
 
-let simTime = 0;
-vp.onFrame((dt) => {
-    simTime += dt;
-    terrain.update(curPos, curFwd, curUp, { width: 1600, height: 960, fov: 58 });
-    water.update(simTime);
-    syncSectors(curPos);
-    sky.update(dt);
-    if (perfEl) {
-        const ts = terrain.stats();
-        const st = scene.cullStats();
-        perfEl.textContent = `tiles ${ts.drawCount} (${ts.pending} pend) | sectors ${activeSectors.size} | gpu ${(st.frameGpuMs || 0).toFixed(2)} ms`;
-    }
+const traversal = createTraversalController({
+    canvas, scene, graph, streamer, traffic,
+    onModeChange: (m) => hud.syncMode(m),
+});
+
+// Start overlooking central bridge, riverfront promenade, and downtown skyline (clear East riverbank overlook)
+const initPos = [riverCenterX(165) + 52, terrainHeight(riverCenterX(165) + 52, 165) + 22, 165];
+traversal.setPose(initPos, 0.62, -0.14);
+
+function nightFactorFor(tm) {
+    return tm === 'night' ? 1.0 : (tm === 'dusk' ? 0.55 : 0.0);
+}
+
+function setTimeMode(tm) {
+    if (!SKY_PRESETS[tm]) return;
+    timeMode = tm;
+    sky.apply(tm);
+    hud.syncTod(tm);
+}
+
+window.addEventListener('keydown', (e) => {
+    if (e.key === '1') setTimeMode('day');
+    else if (e.key === '2') setTimeMode('dusk');
+    else if (e.key === '3') setTimeMode('night');
+    else if (e.key.toLowerCase() === 'h') hud.toggleVisibility();
 });
 
 let readyFlag = false;
-terrain.whenReady().then(() => {
-    syncSectors(curPos);
+let simTime = 0;
+let lastTime = performance.now();
+let fpsSmooth = 120;
+let meanMsSmooth = 3.0;
+
+const initPromise = terrain.whenReady().then(() => {
+    streamer.init(traversal.getState().pos);
+    // Restore initial hero vista after any impostor bake
+    traversal.setPose(initPos, 0.62, -0.14);
     readyFlag = true;
-    if (statusEl) statusEl.textContent = 'ready';
+    hud.setReady('ready');
 });
+
+function tick() {
+    const now = performance.now();
+    const dt = Math.min(0.05, Math.max(0.0001, (now - lastTime) / 1000));
+    lastTime = now;
+    simTime += dt;
+
+    const nightFactor = nightFactorFor(timeMode);
+    traffic.update(dt, nightFactor, traversal.getState().pos);
+    traversal.update(dt);
+
+    const st = traversal.getState();
+    terrain.update(st.pos, st.fwd, st.up, { width: canvas.width, height: canvas.height, fov: st.mode === 'drive' ? 62 : 58 });
+    water.update(simTime);
+    if (readyFlag) streamer.update(st.pos, dt, nightFactor);
+    sky.update(dt);
+
+    const cs = scene.cullStats();
+    const ms = dt * 1000;
+    meanMsSmooth += (ms - meanMsSmooth) * 0.1;
+    fpsSmooth = 1000 / Math.max(0.1, meanMsSmooth);
+
+    hud.update({
+        mode: st.mode,
+        timeMode,
+        pos: st.pos,
+        district: st.district,
+        inBuilding: st.inBuilding,
+        stationName: st.stationName,
+        speed: st.speed,
+        tiles: terrain.stats(),
+        stream: streamer.stats(),
+        traffic: traffic.stats(),
+        shadowPagesDynamic: cs.shadowPagesDynamic || 0,
+        perf: { fps: fpsSmooth, meanMs: meanMsSmooth, gpuMs: cs.frameGpuMs || 0 },
+    });
+
+    requestAnimationFrame(tick);
+}
+requestAnimationFrame(tick);
 
 globalThis.__metropolis = {
     get ready() { return readyFlag; },
-    whenReady: () => terrain.whenReady(),
+    whenReady: () => initPromise,
     scene,
     graph,
     terrain,
+    streamer,
+    traffic,
+    traversal,
+    setMode: (m) => traversal.setMode(m),
+    setTimeMode,
+    setPose: (pos, yaw, pitch) => {
+        traversal.setPose(pos, yaw, pitch);
+        const st = traversal.getState();
+        terrain.update(st.pos, st.fwd, st.up, { width: canvas.width, height: canvas.height, fov: 58 });
+        if (readyFlag) streamer.update(st.pos, 0, nightFactorFor(timeMode), true);
+    },
+    setWalkInput: (inp) => traversal.setWalkInput(inp),
+    setDriveInput: (inp) => traffic.setDriveInput(inp),
     sampleTerrainHeight: terrainHeight,
+    getState: () => ({ ...traversal.getState(), timeMode, stream: streamer.stats(), traffic: traffic.stats() }),
+    getPerfStats: () => ({
+        cull: scene.cullStats(),
+        tiles: terrain.stats(),
+        stream: streamer.stats(),
+        fps: fpsSmooth,
+        meanMs: meanMsSmooth,
+    }),
 };

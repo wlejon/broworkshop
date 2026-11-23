@@ -60,18 +60,18 @@ export function terrainHeight(x, z) {
     const r = Math.hypot(x, z);
     const rd = riverSignedDist(x, z);
 
-    // Gentle valley floor rolling +6..+18m near city cores, rising into +40..+118m foothills & ridges.
-    const valleyFloor = 6.0 + 9.0 * nBig + 4.5 * nMed + 1.8 * nFine + 0.4 * nMicro;
-    const outerRise = smoothstep(1300, 3800, r);
+    // Gentle valley floor rolling +5.5..+14m near city cores, rising into +40..+145m foothills & ridges.
+    const valleyFloor = 5.5 + 5.0 * nBig + 2.4 * nMed + 1.0 * nFine + 0.3 * nMicro;
+    const outerRise = smoothstep(1350, 3800, r);
     const ridgeNoise = Math.abs(valueNoise(x + 600, z - 400, 1400, 71) - 0.48) * 2.0;
-    const foothills = outerRise * (24.0 + 48.0 * nBig + 28.0 * ridgeNoise + 12.0 * nMed + 3.5 * nFine);
-    const neBoost = smoothstep(1500, 4400, Math.hypot(x - 2800, z + 2600)) * 22.0;
-    const nwBoost = smoothstep(1600, 4500, Math.hypot(x + 3100, z + 2400)) * 26.0;
+    const foothills = outerRise * (28.0 + 52.0 * nBig + 30.0 * ridgeNoise + 12.0 * nMed + 3.5 * nFine);
+    const neBoost = (1.0 - smoothstep(450, 2600, Math.hypot(x - 3100, z + 2800))) * 34.0;
+    const nwBoost = (1.0 - smoothstep(450, 2700, Math.hypot(x + 3300, z + 2600))) * 38.0;
     const upland = valleyFloor + foothills + neBoost + nwBoost;
 
     // Gentle flattening near immediate downtown riverbank terrace so piers/embankments seat naturally
-    const riverValley = 4.2 + 2.4 * nMed + 0.8 * nFine;
-    const terraceBlend = smoothstep(-5, 220, rd);
+    const riverValley = 4.6 + 1.8 * nMed + 0.6 * nFine;
+    const terraceBlend = smoothstep(-5, 240, rd);
     const dryElev = riverValley + (upland - riverValley) * terraceBlend;
 
     // Carve river channel smoothly from bank (+4m) down to RIVER_BED_Y (-6.5m)
@@ -91,7 +91,7 @@ export function terrainGradient(x, z, eps = 2.0) {
 export function districtAt(x, z) {
     const rd = riverSignedDist(x, z);
     if (rd < 0) return 'river';
-    if (rd < 42 && Math.abs(z) < 2200) return 'park';
+    if (rd < 24 && Math.abs(z) < 2200) return 'park';
     const dDowntown = Math.hypot(x - (riverCenterX(0) - 520), z - 40);
     if (dDowntown < 760) return 'downtown';
     const dOldtown = Math.hypot(x - (riverCenterX(180) + 560), z - 180);

@@ -119,10 +119,6 @@ export function createTerrainStream(scene) {
             buffer: cache.layer('position'),
             width: CELLS, height: CELLS, layers: CAPACITY, atlas: 2, channels: 4, format: 'float32',
         });
-        ground.setShaderTexture('surf', {
-            buffer: cache.layer('surface'),
-            width: CELLS, height: CELLS, layers: CAPACITY, atlas: 2, channels: 4, format: 'unorm8',
-        });
         ground.setShaderBuffer('tiles', cache.drawList);
     });
 

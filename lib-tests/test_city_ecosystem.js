@@ -73,8 +73,8 @@ for (let i = 0; i < 24; i++) {
 const stand = createTreeStand(scene, [spOak], slopedTrees, { handoff: 55, shadowProxy: true, closeLod: true });
 scene.setCamera({ fov: 50, near: 0.5, far: 1200, position: [0, 32, 160], target: [0, 10, -40] });
 stand.update([0, 32, 160]);
-for (let f = 0; f < 6; f++) scene.captureFrame();
-const treeFrame = scene.captureFrame();
+for (let f = 0; f < 6; f++) scene.captureFrame(256, 256);
+const treeFrame = scene.captureFrame(256, 256);
 ok(treeFrame && treeFrame.width === 256, `sloped tree stand captured cleanly (width=${treeFrame?.width})`);
 for (let step = 1; step <= 4; step++) {
     const eye = [step * 6, 32, 160 - step * 8];

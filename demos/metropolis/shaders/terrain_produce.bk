@@ -58,16 +58,16 @@ fn terrain_height(x: f32, z: f32) -> f32 {
     let r = length(vec2<f32>(x, z));
     let rd = river_signed_dist(x, z);
 
-    let valley_floor = 6.0 + 9.0 * n_big + 4.5 * n_med + 1.8 * n_fine + 0.4 * n_micro;
-    let outer_rise = sstep(1300.0, 3800.0, r);
+    let valley_floor = 5.5 + 5.0 * n_big + 2.4 * n_med + 1.0 * n_fine + 0.3 * n_micro;
+    let outer_rise = sstep(1350.0, 3800.0, r);
     let ridge_noise = abs(value_noise(x + 600.0, z - 400.0, 1400.0, 71) - 0.48) * 2.0;
-    let foothills = outer_rise * (24.0 + 48.0 * n_big + 28.0 * ridge_noise + 12.0 * n_med + 3.5 * n_fine);
-    let ne_boost = sstep(1500.0, 4400.0, length(vec2<f32>(x - 2800.0, z + 2600.0))) * 22.0;
-    let nw_boost = sstep(1600.0, 4500.0, length(vec2<f32>(x + 3100.0, z + 2400.0))) * 26.0;
+    let foothills = outer_rise * (28.0 + 52.0 * n_big + 30.0 * ridge_noise + 12.0 * n_med + 3.5 * n_fine);
+    let ne_boost = (1.0 - sstep(450.0, 2600.0, length(vec2<f32>(x - 3100.0, z + 2800.0)))) * 34.0;
+    let nw_boost = (1.0 - sstep(450.0, 2700.0, length(vec2<f32>(x + 3300.0, z + 2600.0)))) * 38.0;
     let upland = valley_floor + foothills + ne_boost + nw_boost;
 
-    let river_valley = 4.2 + 2.4 * n_med + 0.8 * n_fine;
-    let terrace_blend = sstep(-5.0, 220.0, rd);
+    let river_valley = 4.6 + 1.8 * n_med + 0.6 * n_fine;
+    let terrace_blend = sstep(-5.0, 240.0, rd);
     let dry_elev = river_valley + (upland - river_valley) * terrace_blend;
 
     let bank_slope = sstep(-10.0, 42.0, rd);

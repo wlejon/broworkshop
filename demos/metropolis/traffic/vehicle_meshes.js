@@ -185,7 +185,7 @@ class VehicleMeshAcc {
     }
 }
 
-const ARCHETYPE_SPECS = [
+export const ARCHETYPE_SPECS = [
     {
         // 0: Sports Sedan
         stations: [
@@ -248,7 +248,7 @@ const ARCHETYPE_SPECS = [
     },
 ];
 
-function createBodyForArchetype(idx) {
+export function createBodyForArchetype(idx) {
     const spec = ARCHETYPE_SPECS[idx] || ARCHETYPE_SPECS[0];
     const m = new VehicleMeshAcc();
     m.addLoftedHull(spec.stations);
@@ -271,7 +271,7 @@ function createBodyForArchetype(idx) {
     return m.build();
 }
 
-function createGlassForArchetype(idx) {
+export function createGlassForArchetype(idx) {
     const g = (ARCHETYPE_SPECS[idx] || ARCHETYPE_SPECS[0]).glass;
     const m = new VehicleMeshAcc();
     const ref = [0, 0.5 * (g.yBot + g.yTop), 0.5 * (g.zFBot + g.zRBot)];

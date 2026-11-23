@@ -49,7 +49,7 @@ function appendRibbonStrip(acc, samples, halfOffsetL, halfOffsetR, yOffset, skir
         acc.uvs.push(halfOffsetL * uvScale, dist * uvScale, halfOffsetR * uvScale, dist * uvScale);
         if (i > 0) {
             const b = base + (i - 1) * 2;
-            acc.idx.push(b, b + 2, b + 1, b + 1, b + 2, b + 3);
+            acc.idx.push(b, b + 1, b + 2, b + 1, b + 3, b + 2);
         }
     }
     if (skirtDepth > 0) {
@@ -89,6 +89,7 @@ export function buildSectorRoadAndBridgeNodes(scene, graph, sectorData, mats) {
 
     const ownsPoint = (x, z) => x >= xMin && x < xMax && z >= zMin && z < zMax;
     const asphaltAcc = makeEmptyAcc();
+    const sidewalkAcc = makeEmptyAcc();
     const concreteAcc = makeEmptyAcc();
     const steelAcc = makeEmptyAcc();
 
@@ -98,7 +99,7 @@ export function buildSectorRoadAndBridgeNodes(scene, graph, sectorData, mats) {
         if (!ownsPoint(mx, mz)) continue;
 
         const len = Math.hypot(seg.x1 - seg.x0, seg.z1 - seg.z0);
-        const steps = Math.max(4, Math.ceil(len / (seg.isBridge ? 8 : 10)));
+        const steps = Math.max(6, Math.ceil(len / (seg.isBridge ? 8 : 6)));
         const samples = [];
         for (let i = 0; i <= steps; i++) {
             const t = i / steps;
@@ -109,12 +110,13 @@ export function buildSectorRoadAndBridgeNodes(scene, graph, sectorData, mats) {
             });
         }
 
-        // Road surface strip (+ embankment skirt down into hillside)
-        appendRibbonStrip(asphaltAcc, samples, -seg.halfW, seg.halfW, 0.04, seg.isBridge ? 0.5 : 2.6, 0.12);
+        // Road surface strip (+ gentle embankment skirt down into hillside)
+        appendRibbonStrip(asphaltAcc, samples, -seg.halfW, seg.halfW, 0.04, seg.isBridge ? 0.6 : 1.4, 0.12);
 
         if (seg.hasSidewalk) {
-            appendRibbonStrip(concreteAcc, samples, -seg.halfW - seg.sidewalkW, -seg.halfW, 0.18, seg.isBridge ? 0.9 : 2.8, 0.2);
-            appendRibbonStrip(concreteAcc, samples, seg.halfW, seg.halfW + seg.sidewalkW, 0.18, seg.isBridge ? 0.9 : 2.8, 0.2);
+            const swTarget = seg.isBridge ? concreteAcc : sidewalkAcc;
+            appendRibbonStrip(swTarget, samples, -seg.halfW - seg.sidewalkW, -seg.halfW, 0.16, seg.isBridge ? 0.9 : 1.4, 0.2);
+            appendRibbonStrip(swTarget, samples, seg.halfW, seg.halfW + seg.sidewalkW, 0.16, seg.isBridge ? 0.9 : 1.4, 0.2);
         }
 
         // Sculpted Bridge Piers, Arch/Towers & Deck Underside
@@ -176,12 +178,14 @@ export function buildSectorRoadAndBridgeNodes(scene, graph, sectorData, mats) {
         appendRibbonStrip(concreteAcc, samples, -3.4, 3.4, 0.0, 1.6, 0.15);
         appendRibbonStrip(steelAcc, samples, -1.25, -0.95, 0.12, 0.2, 0.25);
         appendRibbonStrip(steelAcc, samples, 0.95, 1.25, 0.12, 0.2, 0.25);
-        // Support column down to terrainHeight - 2.0
+        // Refined pier column + crosshead cap down to terrainHeight - 2.0
         const gy = terrainHeight(mx, mz);
         const topY = 0.5 * (tr.y0 + tr.y1) - 1.3;
         const botY = Math.min(gy - 2.0, WATER_Y - 5.0);
         if (topY > botY + 0.5) {
-            appendMeshToArrays(concreteAcc, uvBox(1.5, topY - botY, 1.5, 4).translate(mx, 0.5 * (topY + botY), mz));
+            const yaw = Math.atan2(tr.x1 - tr.x0, tr.z1 - tr.z0);
+            appendMeshToArrays(concreteAcc, uvBox(4.8, 0.75, 1.5, 4).rotate(0, 1, 0, yaw).translate(mx, topY + 0.15, mz));
+            appendMeshToArrays(concreteAcc, uvBox(1.15, topY - botY, 1.15, 4).rotate(0, 1, 0, yaw).translate(mx, 0.5 * (topY + botY), mz));
         }
     }
 
@@ -197,7 +201,8 @@ export function buildSectorRoadAndBridgeNodes(scene, graph, sectorData, mats) {
     };
 
     pushBucket(asphaltAcc, mats.asphalt, [1, 1, 1], false);
-    pushBucket(concreteAcc, mats.concrete, [0.92, 0.91, 0.89], true);
+    pushBucket(sidewalkAcc, mats.concrete, [0.88, 0.87, 0.85], false);
+    pushBucket(concreteAcc, mats.concrete, [0.90, 0.89, 0.87], true);
     pushBucket(steelAcc, mats.brushedMetal, [0.72, 0.76, 0.80], true);
 
     return {

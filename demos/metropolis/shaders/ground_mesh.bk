@@ -20,7 +20,6 @@ struct GroundParams {
 
 @binding(4, 0) var params: uniform<GroundParams>;
 @binding(4, 1) var pos: texture2d_array<vec4<f32>>;
-@binding(4, 2) var surf: texture2d_array<vec4<f32>>;
 @binding(4, 14) var tiles: read_buffer<vec4<i32>>;
 
 fn pos_at(slot: i32, x: i32, y: i32) -> vec4<f32> {
@@ -93,10 +92,16 @@ pub fn vertex(v_in: mesh::Vertex) -> mesh::Vertex {
     v.normal = n;
 
     let world_xz = hi.xz + lo.xz + c_xyz.xz;
+    let world_y = hi.y + lo.y + c_xyz.y;
     v.v0 = vec4<f32>(cx as f32, cy as f32, v_in.pos.y, c0.w);
-    v.v1 = vec4<f32>(world_xz.x, world_xz.y, 0.0, 0.0);
+    v.v1 = vec4<f32>(world_xz.x, world_xz.y, world_y, 0.0);
     v.vi = vec4<i32>(slot, ids.w, 0, 0);
     return v;
+}
+
+fn sstep(a: f32, b: f32, x: f32) -> f32 {
+    let t = clamp((x - a) / (b - a), 0.0, 1.0);
+    return t * t * (3.0 - 2.0 * t);
 }
 
 fn hash2(p: vec2<f32>) -> f32 {
@@ -119,14 +124,33 @@ fn vnoise2(p: vec2<f32>) -> f32 {
 
 pub fn fragment(v: mesh::Vertex, s_in: mesh::Surface) -> mesh::Surface {
     var s = s_in;
-    let slot = v.vi.x;
-    let cell = slot & 3;
-    let tx = (((cell & 1) as f32) + (v.v0.x + 0.5) / (CELLS as f32)) * 0.5;
-    let ty = ((((cell >> 1) & 1) as f32) + (v.v0.y + 0.5) / (CELLS as f32)) * 0.5;
-    let w = surf.sample_lod(custom::linear, vec3<f32>(tx, ty, (slot >> 2) as f32), 0.0);
-
     let p = v.v1.xy;
+    let h = v.v1.z;
+    let rd = v.v0.w;
     let fw = max(length(dpdx(v.world_pos.xz)) + length(dpdy(v.world_pos.xz)), 0.02);
+
+    // Continuous world-space macro biome weights (zero tile-boundary quantization seams)
+    let r = length(p);
+    let n = vnoise2(p * 0.0036 + vec2<f32>(11.3, 4.7));
+    let bank_sand = 1.0 - sstep(-2.0, 16.0, rd);
+    let slope_rock = sstep(48.0, 92.0, h);
+    let rock_sand = max(bank_sand, slope_rock * 0.78);
+
+    let west_d = length(p - vec2<f32>(-330.0, 40.0));
+    let east_d = length(p - vec2<f32>(740.0, 180.0));
+    let north_d = length(p - vec2<f32>(-420.0, -1450.0));
+    let harbor_d = length(p - vec2<f32>(-300.0, 1550.0));
+    let urban_core = max(
+        max(1.0 - sstep(440.0, 1280.0, west_d), 1.0 - sstep(400.0, 1140.0, east_d)),
+        max(1.0 - sstep(380.0, 980.0, north_d), 1.0 - sstep(380.0, 1000.0, harbor_d))
+    ) * sstep(8.0, 32.0, rd);
+    let sub_density = (1.0 - sstep(1400.0, 4400.0, r)) * sstep(20.0, 60.0, rd) * (1.0 - sstep(36.0, 74.0, h));
+    let urban = min(1.0, urban_core * 0.88 + sub_density * 0.35);
+    let outer_bias = sstep(1200.0, 3200.0, r) * 0.22;
+    let forest = max(0.0, sstep(0.46, 0.76, n + outer_bias) * (1.0 - urban_core * 0.88) * sstep(14.0, 48.0, rd) * (1.0 - bank_sand));
+    let grass = max(0.05, 1.0 - min(1.0, urban + forest + rock_sand));
+    let inv_sum = 1.0 / max(urban + grass + forest + rock_sand, 0.001);
+    let w = vec4<f32>(urban, grass, forest, rock_sand) * inv_sum;
 
     // Multi-scale noise faded out smoothly before Nyquist -> same albedo up close & from orbit
     let macro_var = 0.88 + 0.24 * vnoise2(p * 0.012);
@@ -135,19 +159,18 @@ pub fn fragment(v: mesh::Vertex, s_in: mesh::Surface) -> mesh::Surface {
     let fine_w = 1.0 - smoothstep(0.12, 0.85, fw);
     let fine_var = 1.0 + fine_w * 0.12 * (vnoise2(p * 0.65) - 0.5);
 
-    // Linear physical palette (no synthetic bright neon greens)
-    let col_urban = vec3<f32>(0.22, 0.22, 0.21) * macro_var * med_var * fine_var;
-    let col_grass = vec3<f32>(0.09, 0.15, 0.055) * macro_var * med_var * fine_var;
-    let col_forest = vec3<f32>(0.055, 0.105, 0.042) * macro_var * med_var * fine_var;
+    // Linear physical palette (rich natural greens & warm urban slate)
+    let col_urban = vec3<f32>(0.14, 0.15, 0.145) * macro_var * med_var * fine_var;
+    let col_grass = vec3<f32>(0.085, 0.145, 0.052) * macro_var * med_var * fine_var;
+    let col_forest = vec3<f32>(0.052, 0.100, 0.040) * macro_var * med_var * fine_var;
     let col_rock = vec3<f32>(0.18, 0.17, 0.145) * macro_var * med_var * fine_var;
 
     let slope = clamp(1.0 - v.normal.y, 0.0, 1.0);
-    let rock_blend = smoothstep(0.12, 0.34, slope);
+    let rock_blend = smoothstep(0.14, 0.36, slope);
     var base = col_urban * w.x + col_grass * w.y + col_forest * w.z + col_rock * w.w;
     base = mix(base, col_rock * 1.05, rock_blend * 0.72);
 
     // Wet dark river sediment below water line
-    let rd = v.v0.w;
     if (rd < 2.0) {
         let wet = 1.0 - smoothstep(-6.0, 2.0, rd);
         base = mix(base, vec3<f32>(0.045, 0.055, 0.05), wet * 0.65);

@@ -41,14 +41,14 @@ pub fn fragment(v: mesh::Vertex, s_in: mesh::Surface) -> mesh::Surface {
     let w2 = vnoise2(p.xz * 0.48 - vec2<f32>(t * 0.12, t * 0.30));
     let dx = (vnoise2((p.xz + vec2<f32>(0.4, 0.0)) * 0.24 + vec2<f32>(0.0, t * 0.45)) - w1) * amp;
     let dz = (vnoise2((p.xz + vec2<f32>(0.0, 0.4)) * 0.24 + vec2<f32>(0.0, t * 0.45)) - w1) * amp;
-    let n = normalize(vec3<f32>(-dx * 0.55, 1.0, -dz * 0.55 - (w2 - 0.5) * 0.18 * amp));
+    let n = normalize(vec3<f32>(-dx * 0.22, 1.0, -dz * 0.22 - (w2 - 0.5) * 0.09 * amp));
 
     let edge = clamp(abs(v.uv.x - 0.5) * 2.0, 0.0, 1.0);
-    let deep = vec3<f32>(0.015, 0.055, 0.085);
-    let shallow = vec3<f32>(0.035, 0.095, 0.095);
+    let deep = vec3<f32>(0.025, 0.075, 0.115);
+    let shallow = vec3<f32>(0.045, 0.115, 0.125);
     s.base_color = mix(deep, shallow, smoothstep(0.55, 0.95, edge));
     s.normal = n;
-    s.roughness = 0.06 + edge * 0.05;
+    s.roughness = 0.14 + edge * 0.06;
     s.metallic = 0.02;
     return s;
 }
