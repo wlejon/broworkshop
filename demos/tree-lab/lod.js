@@ -116,6 +116,59 @@ function leafCover(leaves, box, res = 768) {
     return out;
 }
 
+// A coarse level from the finest one's cards (each `per` vertices, its
+// indices consecutive): the cards grouped by a grid of cells sized to make
+// `target` groups, each group drawn as one of its own cards (the one nearest
+// its centre, so its orientation is one the crown has) scaled about its own
+// centre to the group's area times `area` and moved to the group's centre.
+// The crown keeps the finest level's clumps and gaps where they are, which
+// cards scattered afresh do not.
+function clusterLeaves(fine, per, target, area) {
+    const P = fine.positions, N = fine.normals, U = fine.uvs, n = P.length / 3 / per;
+    const cen = new Float64Array(n * 3), ar = new Float64Array(n);
+    for (let c = 0; c < n; c++) {
+        for (let v = 0; v < per; v++) for (let a = 0; a < 3; a++) cen[c * 3 + a] += P[(c * per + v) * 3 + a] / per;
+        // The card's area: its triangles'.
+        for (let t = 0; t < per - 2; t++) {
+            const i0 = fine.indices[(c * (per - 2) + t) * 3] * 3, i1 = fine.indices[(c * (per - 2) + t) * 3 + 1] * 3, i2 = fine.indices[(c * (per - 2) + t) * 3 + 2] * 3;
+            const e1 = [P[i1] - P[i0], P[i1 + 1] - P[i0 + 1], P[i1 + 2] - P[i0 + 2]], e2 = [P[i2] - P[i0], P[i2 + 1] - P[i0 + 1], P[i2 + 2] - P[i0 + 2]];
+            ar[c] += 0.5 * Math.hypot(e1[1] * e2[2] - e1[2] * e2[1], e1[2] * e2[0] - e1[0] * e2[2], e1[0] * e2[1] - e1[1] * e2[0]);
+        }
+    }
+    const group = (size) => {
+        const m = new Map();
+        for (let c = 0; c < n; c++) {
+            const k = `${Math.floor(cen[c * 3] / size)},${Math.floor(cen[c * 3 + 1] / size)},${Math.floor(cen[c * 3 + 2] / size)}`;
+            let g = m.get(k); if (!g) m.set(k, g = []); g.push(c);
+        }
+        return m;
+    };
+    // The cell size giving about `target` groups (bisected in log space).
+    let lo = 1e-3, hi = 100, groups = null;
+    for (let it = 0; it < 30; it++) {
+        const mid = Math.sqrt(lo * hi);
+        groups = group(mid);
+        if (groups.size > target) lo = mid; else hi = mid;
+    }
+    const out = { positions: [], normals: [], uvs: [], indices: [] };
+    for (const g of groups.values()) {
+        let A = 0; const gc = [0, 0, 0];
+        for (const c of g) { A += ar[c]; for (let a = 0; a < 3; a++) gc[a] += cen[c * 3 + a] * ar[c]; }
+        for (let a = 0; a < 3; a++) gc[a] /= A;
+        let rep = g[0], best = Infinity;
+        for (const c of g) { const d = (cen[c * 3] - gc[0]) ** 2 + (cen[c * 3 + 1] - gc[1]) ** 2 + (cen[c * 3 + 2] - gc[2]) ** 2; if (d < best) { best = d; rep = c; } }
+        const sc = Math.sqrt(A * area / ar[rep]), base = out.positions.length / 3;
+        for (let v = 0; v < per; v++) {
+            const i = (rep * per + v) * 3;
+            for (let a = 0; a < 3; a++) { out.positions.push(gc[a] + (P[i + a] - cen[rep * 3 + a]) * sc); out.normals.push(N[i + a]); }
+            out.uvs.push(U[(rep * per + v) * 2], U[(rep * per + v) * 2 + 1]);
+        }
+        const i0 = rep * (per - 2) * 3;
+        for (let t = 0; t < (per - 2) * 3; t++) out.indices.push(fine.indices[i0 + t] - rep * per + base);
+    }
+    return new Mesh({ positions: new Float32Array(out.positions), normals: new Float32Array(out.normals), uvs: new Float32Array(out.uvs), indices: new Uint32Array(out.indices) });
+}
+
 function boundsOf(m) {
     const P = m.positions, lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity];
     for (let i = 0; i < P.length; i += 3) for (let a = 0; a < 3; a++) { lo[a] = Math.min(lo[a], P[i + a]); hi[a] = Math.max(hi[a], P[i + a]); }
@@ -127,8 +180,12 @@ function boundsOf(m) {
  * A species' meshes at each level: [{ bark, leaves, tris, area, barkGeometry,
  * leavesGeometry }], the geometries shared by every tree drawn at that level
  * (scene.createGeometry: made and uploaded once). `sp` is { world, k (draw scale) }.
- * A level is { from, L, sides } and optionally `area` and `minRadius` (m,
- * drawn: the thinnest branch kept, else half a pixel where it begins).
+ * A level is { from, L, sides } and optionally `area`, `minRadius` (m,
+ * drawn: the thinnest branch kept, else half a pixel where it begins) and
+ * `cluster`: its cards made from the finest level's, grouped (L0/L)^2 to a
+ * card where they stand (clusterLeaves), rather than scattered afresh, so
+ * its clumps and gaps are the finest level's; its `area` (default 1) then
+ * scales each card, and is not measured.
  *
  * A level's cards hold the crown's leaf area times `area`. Left unset, it is
  * measured: L^2 fewer cards L times larger cover more of the crown than the
@@ -150,12 +207,15 @@ export function speciesLevels(sp, levels = LEVELS) {
         const kk = 1.5 * lv.L / sp.k;
         return sp.world.emitFoliageMesh(leafCard(kk, [1, 2]), { seed: 0x1eaf, perArea: area * 90 / (kk * kk) });
     };
-    let ref = null, box = null;
+    let ref = null, box = null, fine = null;
     return levels.map((lv, i) => {
         let area = lv.area ?? 1;
-        let leaves = emit(lv, area);
+        // A clustered level: the finest level's cards grouped L^2/L0^2 to a
+        // card (as many cards as scattering would make).
+        let leaves = lv.cluster && fine ? clusterLeaves(fine, 6, Math.max(1, Math.round(fine.indices.length / 12 * (levels[0].L / lv.L) ** 2)), area) : emit(lv, area);
+        if (i === 0) fine = leaves;
         if (i === 0) { box = boundsOf(leaves); if (lv.area === undefined && levels.length > 1) ref = leafCover(leaves, box); }
-        else if (ref && lv.area === undefined) {
+        else if (ref && lv.area === undefined && !lv.cluster) {
             // Fewer cards cover less than in proportion (they thin within
             // clumps that still overlap), so the overlap model's step is
             // taken from each measured cover in turn.

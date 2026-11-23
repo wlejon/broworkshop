@@ -9,7 +9,7 @@ import { generateCity } from "/lib/city/generate.js";
 import { createBuildingRenderer } from "/lib/city/building_render.js";
 import { createBridges } from "/lib/city/bridges.js";
 import { createTrafficRenderer } from "/lib/city/traffic_render.js";
-import { placeTrees, createTrees } from "/lib/city/trees.js";
+import { placeTrees, createTrees, crownRadii } from "/lib/city/trees.js";
 import { createInteriors } from "/lib/city/interior.js";
 import { terrainHeight, riverCenterX, RIVER_BED_Y } from "/app/world/terrain_field.js";
 import { SITE } from "/app/world/site.js";
@@ -59,8 +59,9 @@ console.log(`metropolis: city in ${(perf.now() - t0).toFixed(0)} ms: ${city.grap
     JSON.stringify(Object.fromEntries(Object.entries(city.timings).map(([k, v]) => [k, Math.round(v)]))));
 
 const t1 = perf.now();
-const treeRecs = placeTrees(city);
-const trees = createTrees(scene, treeRecs, bro.resolvePath('/app/assets/trees'));
+const treeDir = bro.resolvePath('/app/assets/trees');
+const treeRecs = placeTrees(city, { crownR: crownRadii(treeDir) });
+const trees = createTrees(scene, treeRecs, treeDir);
 console.log(`metropolis: ${trees.count} trees in ${(perf.now() - t1).toFixed(0)} ms`);
 
 const ground = city.ground;

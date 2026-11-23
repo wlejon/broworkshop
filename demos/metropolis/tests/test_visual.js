@@ -20,6 +20,7 @@
 import { frames, waitFor } from "/lib/kit/test.js";
 import { riverCenterX, terrainHeight } from "/app/world/terrain_field.js";
 import { massRecord } from "/lib/city/interior.js";
+import { TREE_FLOATS } from "/lib/city/trees.js";
 waitFor(() => Boolean(globalThis.__metropolis), "mounted", 60000);
 const m = globalThis.__metropolis;
 let ready = false; m.whenReady().then(() => { ready = true; });
@@ -175,23 +176,50 @@ treeN.forEach((n) => n.visible = false); carN.forEach((n) => n.visible = false);
 treeN.forEach((n) => n.visible = true);
 m.setTimeMode('day');
 {
-  const TR = m.treeRecs, NT = TR.length / 6;
-  let tree = null;
-  for (let i = 0; i < NT && !tree; i += 97) {
-    if (TR[i * 6 + 5] !== 0) continue;
-    const t = [TR[i * 6], TR[i * 6 + 1], TR[i * 6 + 2]], up = [t[0], t[1] + 8, t[2]];
-    if (![30, 700].some((d) => blocked([t[0] + 0.7 * d, t[1] + 0.35 * d, t[2] + 0.6 * d], up))) tree = t;
+  // Eight elms, each seen from just past every level boundary, drawn by the
+  // nearer level alone and then by the farther alone at the same pose; the
+  // change is box-averaged to ~8 cells across a tree (a leaf card's own
+  // place does not count, a clump's or the colour's does), as a share of the
+  // trees' contrast against the empty view. The levels must be alike (under
+  // 25 %: a level drawn nowhere is 100 %, tree-lab's scattered levels were
+  // 20-67 %), and the swap, spread pixel by pixel over the fade band (35 %
+  // of the distance), must change a tree less for each 1 % of the way than
+  // that 1 % of motion does itself.
+  const TR = m.treeRecs, NT = TR.length / TREE_FLOATS, trees = [];
+  for (let i = 0; i < NT && trees.length < 8; i += 97) {
+    if (TR[i * TREE_FLOATS + 5] !== 0) continue;
+    const t = [TR[i * TREE_FLOATS], TR[i * TREE_FLOATS + 1], TR[i * TREE_FLOATS + 2]], up = [t[0], t[1] + 8, t[2]];
+    if (![30, 700].some((d) => blocked([t[0] + 0.7 * d, t[1] + 0.35 * d, t[2] + 0.6 * d], up))) trees.push(t);
   }
-  const aim = [tree[0], tree[1] + 6, tree[2]], dv = [0.7, 0.35, 0.6], dn = Math.hypot(...dv);
-  const eyeAt = (d) => [aim[0] + dv[0] / dn * d, aim[1] + dv[1] / dn * d, aim[2] + dv[2] / dn * d];
-  const at = (d) => { for (let i = 0; i < 3; i++) { look(eyeAt(d), aim); frames(1); } return shot(); };
-  for (const b of [40, 100, 220, 600]) {
-    const a0 = at(b * 0.9), a1 = at(b * 1.1), c0 = at(b * 1.25), c1 = at(b * 1.5);
-    look(eyeAt(b), aim);
-    const r = rectOf([[tree[0] - 9, tree[1], tree[2] - 9], [tree[0] + 9, tree[1] + 16, tree[2] + 9], [tree[0] - 9, tree[1] + 16, tree[2] + 9], [tree[0] + 9, tree[1], tree[2] - 9]], a0.width, a0.height, 4);
-    const across = ssim(crop(a0, r), crop(a1, r)), control = ssim(crop(c0, r), crop(c1, r));
-    check(across > control - 0.05, `a tree across its ${b} m level boundary changes no more than within a level (ssim ${across.toFixed(3)}, the same move within a level ${control.toFixed(3)})`);
+  const elm = {};
+  for (const n of treeN) { const mm = n.name.match(/city_trees_elm_L(\d+)_(bark|leaves)$/); if (mm && !n.shadowOnly) (elm[+mm[1]] ??= []).push(n); }
+  const Ls = Object.keys(elm).map(Number).sort((x, y) => x - y);
+  const dv = [0.7, 0.35, 0.6], dn = Math.hypot(...dv);
+  const coarse = (im, cell) => { const W = Math.max(1, Math.floor(im.width / cell)), H = Math.max(1, Math.floor(im.height / cell)), out = new Float32Array(W * H * 3); for (let y = 0; y < H * cell; y++) for (let x = 0; x < W * cell; x++) { const k = (y * im.width + x) * 4, o = (Math.floor(y / cell) * W + Math.floor(x / cell)) * 3; out[o] += im.data[k]; out[o + 1] += im.data[k + 1]; out[o + 2] += im.data[k + 2]; } return out.map((v) => v / (cell * cell)); };
+  const madC = (a, b) => { let t = 0; for (let i = 0; i < a.length; i++) t += Math.abs(a[i] - b[i]); return t; };
+  const saved = treeN.map((n) => [n, n.visible, n.fadeInDist, n.fadeOutDist]);
+  for (let li = 0; li + 1 < Ls.length; li++) {
+    const near = elm[Ls[li]], far = elm[Ls[li + 1]], b = far[0].fadeInDist;
+    treeN.forEach((n) => { n.visible = false; });
+    for (const n of [...near, ...far]) { n.fadeInDist = 0; n.fadeOutDist = 0; }
+    let change = 0, control = 0, contrast = 0;
+    for (const tree of trees) {
+      const aim = [tree[0], tree[1] + 6, tree[2]];
+      const eyeAt = (d) => [aim[0] + dv[0] / dn * d, aim[1] + dv[1] / dn * d, aim[2] + dv[2] / dn * d];
+      const view = (nodes, d) => { treeN.forEach((n) => { n.visible = false; }); nodes.forEach((n) => { n.visible = true; }); for (let i = 0; i < 4; i++) { look(eyeAt(d), aim); frames(1); } return shot(); };
+      const d = b * 1.02;
+      const E = view([], d), A = view(near, d), B = view(far, d), Bm = view(far, d * 1.01);
+      look(eyeAt(d), aim);
+      const r = rectOf([[tree[0] - 5, tree[1], tree[2] - 5], [tree[0] + 5, tree[1] + 14, tree[2] + 5], [tree[0] - 5, tree[1] + 14, tree[2] + 5], [tree[0] + 5, tree[1], tree[2] - 5]], A.width, A.height, 2);
+      const cell = Math.max(1, Math.round((r[2] - r[0]) / 8));
+      const [cE, cA, cB, cM] = [E, A, B, Bm].map((im) => coarse(crop(im, r), cell));
+      contrast += madC(cE, cA); change += madC(cA, cB); control += madC(cB, cM);
+    }
+    for (const n of [...near, ...far]) { const sv = saved.find((x) => x[0] === n); n.fadeInDist = sv[2]; n.fadeOutDist = sv[3]; }
+    const ch = change / contrast, ct = control / contrast;
+    check(trees.length === 8 && contrast > 0 && ch < 0.25 && ch / 35 < ct, `trees across their ${b} m level boundary (L${Ls[li]} -> L${Ls[li + 1]}) alike, the swap less a step than the motion (the levels differ by ${(ch * 100).toFixed(0)} % of the trees' contrast, ${(ch / 35 * 100).toFixed(1)} % for each 1 % through the band; moving 1 % changes them ${(ct * 100).toFixed(0)} %, over ${trees.length} trees)`);
   }
+  saved.forEach(([n, v]) => { n.visible = v; });
 }
 {
   const byType = {};
@@ -213,7 +241,9 @@ m.setTimeMode('day');
       const res = []; let ok = true;
       for (const [k, dist] of [[0, 120], [1, 300]]) {
         const e = [px + side[0] * dist, py + side[1] * dist, pz + side[2] * dist];
-        const empty = (lv.forEach((n) => n.visible = false), look(e, [px, py + 0.7, pz]), shot());
+        lv.forEach((n) => n.visible = false);
+        for (let i = 0; i < 30; i++) { look(e, [px, py + 0.7, pz]); frames(1); }   // settled at this view
+        const empty = shot();
         const imgs = [];
         for (const j of [k, k + 1]) {
           lv.forEach((n) => n.visible = false);

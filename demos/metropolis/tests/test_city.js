@@ -9,7 +9,7 @@ import { generateCity } from "/lib/city/generate.js";
 import { SEG_FLOATS } from "/lib/city/ground.js";
 import { MASS_FLOATS } from "/lib/city/buildings.js";
 import { SITE } from "/app/world/site.js";
-import { placeTrees, TREE_FLOATS } from "/lib/city/trees.js";
+import { placeTrees, crownRadii, TREE_FLOATS } from "/lib/city/trees.js";
 import { createTraffic, edgeDensity } from "/lib/city/traffic.js";
 import { massRecord, interiorMesh, openingsOf, floorsOf } from "/lib/city/interior.js";
 import { carMesh, CAR_TYPES } from "/lib/city/car_mesh.js";
@@ -147,7 +147,8 @@ for (let t = 0; t < 180; t += 0.1) {
     }
 }
 // Trees: street trees and park groves, none in the water or on a carriageway.
-const treeRecs = placeTrees(city);   // (the graded height, field and graph only)
+const crownR = crownRadii(bro.resolvePath('/app/assets/trees'));
+const treeRecs = placeTrees(city, { crownR });
 const nTrees = treeRecs.length / TREE_FLOATS;
 let wetTrees = 0, roadTrees = 0;
 for (let i = 0; i < treeRecs.length; i += TREE_FLOATS) {
@@ -155,7 +156,26 @@ for (let i = 0; i < treeRecs.length; i += TREE_FLOATS) {
     if (water(x, z) < 2) wetTrees++;
     if (onCarriageway(x, z, 0.3)) roadTrees++;
 }
+// No crown through a wall: each tree's crown circle (its export's width at
+// its size) against every mass footprint near it.
+let crownIn = 0, worstIn = 0;
+{
+    const D = masses.data, GC = 50, grid = new Map();
+    for (let i = 0; i < masses.count; i++) {
+        const o = i * MASS_FLOATS, gx = Math.floor(D[o] / GC), gz = Math.floor(D[o + 2] / GC);
+        for (let a = -2; a <= 2; a++) for (let b = -2; b <= 2; b++) { const k = (gx + a) * 65536 + gz + b; let l = grid.get(k); if (!l) grid.set(k, l = []); l.push(i); }
+    }
+    for (let t = 0; t < treeRecs.length; t += TREE_FLOATS) {
+        const x = treeRecs[t], z = treeRecs[t + 2], r = crownR[treeRecs[t + 5]] * treeRecs[t + 4] * treeRecs[t + 6];
+        for (const i of grid.get(Math.floor(x / GC) * 65536 + Math.floor(z / GC)) || []) {
+            const o = i * MASS_FLOATS, c = Math.cos(D[o + 3]), s = Math.sin(D[o + 3]), dx = x - D[o], dz = z - D[o + 2];
+            const d = Math.hypot(Math.max(0, Math.abs(c * dx - s * dz) - D[o + 4]), Math.max(0, Math.abs(s * dx + c * dz) - D[o + 6]));
+            if (d < r) { crownIn++; worstIn = Math.max(worstIn, r - d); break; }
+        }
+    }
+}
 check(nTrees > 50000, `a city's worth of trees (${nTrees})`);
+check(crownIn === 0, `no tree's crown through a building's wall (${crownIn}, deepest ${worstIn.toFixed(1)} m)`);
 check(wetTrees === 0, `no tree in the water (${wetTrees})`);
 check(roadTrees === 0, `no tree on a carriageway (${roadTrees})`);
 const trams = traffic.cars.filter((c) => c.route);
