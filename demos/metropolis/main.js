@@ -138,7 +138,7 @@ function tick() {
 requestAnimationFrame(tick);
 
 globalThis.__metropolis = {
-    scene, city, ground, terrain, cam, trees, treeRecs, get cars() { return cars; }, get interiors() { return interiors; },
+    scene, sky, city, ground, terrain, cam, trees, treeRecs, get cars() { return cars; }, get interiors() { return interiors; }, get buildings() { return buildings; },
     whenReady: () => ready,
     setTimeMode,
     setPose: (pos, yaw, pitch) => {
