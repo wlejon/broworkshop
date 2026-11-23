@@ -1,11 +1,18 @@
 // The metropolis acceptance list, rendered: what test_city.js cannot see.
 //  - a still view renders the same twice, and a view left and returned to
 //    renders the same (no state left behind: shadow pages, LOD, ground);
+//  - LODs keep shape and colour: a building zoomed to the same size from
+//    4, 8 and 25+ times its size away (2 km at least) draws alike, the
+//    farthest allowed the air's haze (a per-channel blend toward its colour); a tree across each level boundary
+//    changes no more than across the same move within a level; a car's
+//    level swap at its switch distance changes it no more than moving 1 %;
 //  - dollying out from the street to 3 km over a clear path, no step changes
-//    the frame much more than the steps either side (no LOD pops: shape or
-//    colour changing at a distance);
-//  - strafing, fixed points of the ground keep their brightness (no shadow
-//    swim: the shadows stay put in the world as the eye moves).
+//    the frame much more than the steps either side (no whole-frame pop:
+//    one object's level change is spread over many frames, so this catches
+//    only what changes everywhere at once, like ground or lighting);
+//  - strafing (8 m, 250 m) and turning, fixed points of the ground keep
+//    their brightness, and no less steadily with the sun's shadows than
+//    without them (no shadow swim; what moves without shadows is occluders).
 // Time is paused (traffic, sky, wind still), interiors off.
 //
 //   bro-headless --grant files demos/metropolis tests/test_visual.js
@@ -76,11 +83,12 @@ for (const tm of ['day', 'night']) {
   }
 }
 
-// The dolly.
+// (helpers below need the masses)
 const allM = []; for (let i = 0; i < nM; i++) allM.push(massRecord(MD, i));
-function blocked(a, b) {
+function blocked(a, b, skip = null) {
   const dx = b[0] - a[0], dy = b[1] - a[1], dz = b[2] - a[2];
   for (const M of allM) {
+    if (M === skip) continue;
     if (Math.hypot(M.cx - a[0], M.cz - a[2]) > Math.hypot(dx, dz) + 300 && Math.hypot(M.cx - b[0], M.cz - b[2]) > 300) continue;
     const c = Math.cos(M.yaw), s = Math.sin(M.yaw);
     const ox = a[0] - M.cx, oz = a[2] - M.cz;
@@ -91,6 +99,151 @@ function blocked(a, b) {
   }
   return false;
 }
+
+// Levels of detail keep shape and colour.
+const canvas = document.querySelector('canvas');
+const cssW = canvas.getBoundingClientRect().width;
+function crop(img, r) { const w = r[2] - r[0], h = r[3] - r[1], out = new ImageData(w, h); for (let y = 0; y < h; y++) out.data.set(img.data.subarray(((r[1] + y) * img.width + r[0]) * 4, ((r[1] + y) * img.width + r[2]) * 4), y * w * 4); return out; }
+const meanC = (im) => { let a = [0, 0, 0]; for (let k = 0; k < im.data.length; k += 4) { a[0] += im.data[k]; a[1] += im.data[k + 1]; a[2] += im.data[k + 2]; } const n = im.data.length / 4; return a.map((v) => v / n); };
+const dC = (a, b) => { const p = meanC(a), q = meanC(b); return Math.hypot(p[0] - q[0], p[1] - q[1], p[2] - q[2]); };
+// rect (device px) of world points under the current camera, grown by `pad` px
+function rectOf(pts, W, H, pad = 0) {
+  const sc = W / cssW; let x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9;
+  for (const p of pts) { const q = m.scene.projectLocal(p); x0 = Math.min(x0, q.x); x1 = Math.max(x1, q.x); y0 = Math.min(y0, q.y); y1 = Math.max(y1, q.y); }
+  return [Math.max(0, Math.round(x0 * sc) - pad), Math.max(0, Math.round(y0 * sc) - pad), Math.min(W, Math.round(x1 * sc) + pad), Math.min(H, Math.round(y1 * sc) + pad)];
+}
+const treeN = m.trees.nodes, carN = m.cars.nodes;
+treeN.forEach((n) => n.visible = false); carN.forEach((n) => n.visible = false);
+{
+  // Per style a mass and a side from which 150 m, 500 m and 2 km all see
+  // its centre and its top corners (no other building in between).
+  const clearSide = (M) => {
+    const fx = Math.sin(M.yaw), fz = Math.cos(M.yaw);
+    for (const [a, el] of [[0.34, 0.2], [-0.34, 0.2], [0.34, 0.4], [-0.34, 0.4], [0.8, 0.3], [-0.8, 0.3]]) {
+      const h = Math.cos(el), dir = [(fx * Math.cos(a) + fz * Math.sin(a)) * h, Math.sin(el), (fz * Math.cos(a) - fx * Math.sin(a)) * h];
+      const tops = [0.2, 0.5, 1].map((t) => [M.cx, M.y0 + M.h * t, M.cz]);
+      if ([100, 300, 2000, 6000].every((d) => tops.every((t) => { const e = [t[0] + dir[0] * d, t[1] + dir[1] * d, t[2] + dir[2] * d]; return !blocked(e, t, M); }))) return dir;
+    }
+    return null;
+  };
+  const pick = (f) => { for (const M of allM) { if (!f(M)) continue; const dir = clearSide(M); if (dir) return { M, dir }; } return null; };
+  const cases = { tower: pick((M) => M.h > 80 && M.style === 0), office: pick((M) => M.style === 1 && M.h > 30), brick: pick((M) => M.style === 2 && M.h > 12), rowhouse: pick((M) => M.style === 5 && M.hw > 4), house: pick((M) => M.style === 6) };
+  for (const tm of ['day', 'night']) {
+    m.setTimeMode(tm);
+    for (const [name, { M, dir }] of Object.entries(cases)) {
+      const mid = [M.cx, M.y0 + M.h * 0.5, M.cz];
+      const view = Math.max(M.h, 2 * M.hw, 2 * M.hd) * 1.3;
+      const c = Math.cos(M.yaw), sn = Math.sin(M.yaw), corners = [];
+      for (const lx of [-M.hw, M.hw]) for (const lz of [-M.hd, M.hd]) for (const ly of [0, M.h]) corners.push([M.cx + c * lx + sn * lz, M.y0 + ly, M.cz - sn * lx + c * lz]);
+      const cs = []; let r = null;
+      const dMid = Math.max(300, view * 8), dists = [dMid, Math.max(100, view * 4), Math.max(2000, dMid * 3)];
+      for (const d of dists) {
+        const eye = [mid[0] + dir[0] * d, mid[1] + dir[1] * d, mid[2] + dir[2] * d];
+        m.cam.setFov(2 * Math.atan(view / 2 / d) * 180 / Math.PI);
+        for (let i = 0; i < 20; i++) { m.lookAt(eye, mid); frames(1); }
+        const im = shot();
+        if (!r) { r = rectOf(corners, im.width, im.height); const w = r[2] - r[0], h = r[3] - r[1]; r = [r[0] + Math.round(w * 0.1), r[1] + Math.round(h * 0.1), r[2] - Math.round(w * 0.1), r[3] - Math.round(h * 0.1)]; }
+        cs.push(crop(im, r));
+      }
+      m.cam.setFov(58);
+      // Compared at 12x12 (box-averaged: windows and brick average out, a
+      // change of form stays), each channel fitted as a.x + b to the
+      // reference: the air's haze (and the view's own) is such a blend toward
+      // its colour, so what must be small is the fit's residual (the near
+      // one also carries the perspective's shift), and the mean colour may
+      // move only as far as the air between explains.
+      const small = (im) => { const N = 12, out = []; for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) { const xa = Math.floor(x * im.width / N), xb = Math.max(xa + 1, Math.floor((x + 1) * im.width / N)), ya = Math.floor(y * im.height / N), yb = Math.max(ya + 1, Math.floor((y + 1) * im.height / N)); const acc = [0, 0, 0]; let n = 0; for (let v = ya; v < yb; v++) for (let u = xa; u < xb; u++) { const k = (v * im.width + u) * 4; acc[0] += im.data[k]; acc[1] += im.data[k + 1]; acc[2] += im.data[k + 2]; n++; } out.push(acc.map((c) => c / n)); } return out; };
+      const fit = (ref, x) => {
+        let worst = 0;
+        for (let c = 0; c < 3; c++) {
+          const X = ref.map((p) => p[c]), Y = x.map((p) => p[c]), n = X.length;
+          const mx = X.reduce((s, v) => s + v, 0) / n, my = Y.reduce((s, v) => s + v, 0) / n;
+          let sxy = 0, sxx = 0; for (let i = 0; i < n; i++) { sxy += (X[i] - mx) * (Y[i] - my); sxx += (X[i] - mx) ** 2; }
+          const ka = sxx > 1 ? sxy / sxx : 1, kb = my - ka * mx;
+          let r = 0; for (let i = 0; i < n; i++) r += (Y[i] - ka * X[i] - kb) ** 2;
+          worst = Math.max(worst, Math.sqrt(r / n));
+        }
+        return { resid: worst };
+      };
+      const sm = cs.map(small), fn = fit(sm[0], sm[1]), ff = fit(sm[0], sm[2]);
+      const shiftN = dC(cs[0], cs[1]), shiftF = dC(cs[0], cs[2]);
+      check(fn.resid < 12 && ff.resid < 10 && shiftN < 15 && shiftF < 35,
+        `${tm} ${name}: the same at ${dists.map((d) => `${d.toFixed(0)} m`).join(', ')} (against the first, at 12x12 after each channel's blend: residual ${fn.resid.toFixed(1)} near, ${ff.resid.toFixed(1)} far /255; mean colour shift ${shiftN.toFixed(1)} near, ${shiftF.toFixed(1)} far, the air's haze)`);
+    }
+  }
+}
+treeN.forEach((n) => n.visible = true);
+m.setTimeMode('day');
+{
+  const TR = m.treeRecs, NT = TR.length / 6;
+  let tree = null;
+  for (let i = 0; i < NT && !tree; i += 97) {
+    if (TR[i * 6 + 5] !== 0) continue;
+    const t = [TR[i * 6], TR[i * 6 + 1], TR[i * 6 + 2]], up = [t[0], t[1] + 8, t[2]];
+    if (![30, 700].some((d) => blocked([t[0] + 0.7 * d, t[1] + 0.35 * d, t[2] + 0.6 * d], up))) tree = t;
+  }
+  const aim = [tree[0], tree[1] + 6, tree[2]], dv = [0.7, 0.35, 0.6], dn = Math.hypot(...dv);
+  const eyeAt = (d) => [aim[0] + dv[0] / dn * d, aim[1] + dv[1] / dn * d, aim[2] + dv[2] / dn * d];
+  const at = (d) => { for (let i = 0; i < 3; i++) { look(eyeAt(d), aim); frames(1); } return shot(); };
+  for (const b of [40, 100, 220, 600]) {
+    const a0 = at(b * 0.9), a1 = at(b * 1.1), c0 = at(b * 1.25), c1 = at(b * 1.5);
+    look(eyeAt(b), aim);
+    const r = rectOf([[tree[0] - 9, tree[1], tree[2] - 9], [tree[0] + 9, tree[1] + 16, tree[2] + 9], [tree[0] - 9, tree[1] + 16, tree[2] + 9], [tree[0] + 9, tree[1], tree[2] - 9]], a0.width, a0.height, 4);
+    const across = ssim(crop(a0, r), crop(a1, r)), control = ssim(crop(c0, r), crop(c1, r));
+    check(across > control - 0.05, `a tree across its ${b} m level boundary changes no more than within a level (ssim ${across.toFixed(3)}, the same move within a level ${control.toFixed(3)})`);
+  }
+}
+{
+  const byType = {};
+  for (const n of carN) { const mm = n.name.match(/city_cars_(.+)_lod(\d)/); if (mm) (byType[mm[1]] ??= [])[+mm[2]] = n; }
+  treeN.forEach((n) => n.visible = false);
+  const [px, pz] = along(best * 0.5), [qx, qz] = along(best * 0.5 + 1), py = g(px, pz);
+  const yawC = Math.atan2(qx - px, qz - pz), cy = Math.cos(yawC), sy = Math.sin(yawC);
+  const row = new Float32Array([cy, 0, -sy, px, 0, 1, 0, py, sy, 0, cy, pz, 0.55, 0.08, 0.06, 1]);
+  const box = [[px - 3, py, pz - 3], [px + 3, py + 2, pz + 3], [px - 3, py + 2, pz + 3], [px + 3, py, pz - 3]];
+  // A side from which both switch distances see the car (not across a tower).
+  let side = null;
+  for (let az = 0; az < 360 && !side; az += 5) {
+    const a = az * Math.PI / 180, dd = [Math.cos(a) * 0.99, 0.12, Math.sin(a) * 0.99];
+    if ([120, 300].every((d) => { const e = [px + dd[0] * d, py + dd[1] * d, pz + dd[2] * d]; return e[1] > g(e[0], e[2]) + 2 && !blocked(e, [px, py + 0.7, pz]); })) side = dd;
+  }
+  for (const tm of ['day', 'night']) {
+    m.setTimeMode(tm);
+    for (const [name, lv] of Object.entries(byType)) {
+      const res = []; let ok = true;
+      for (const [k, dist] of [[0, 120], [1, 300]]) {
+        const e = [px + side[0] * dist, py + side[1] * dist, pz + side[2] * dist];
+        const empty = (lv.forEach((n) => n.visible = false), look(e, [px, py + 0.7, pz]), shot());
+        const imgs = [];
+        for (const j of [k, k + 1]) {
+          lv.forEach((n) => n.visible = false);
+          lv[j].visible = true; lv[j].setInstances(row);
+          for (let i = 0; i < 4; i++) { look(e, [px, py + 0.7, pz]); frames(1); }
+          imgs.push(shot());
+        }
+        // The control: the same level, the eye 1 % farther (what moving does).
+        const e2 = [px + side[0] * dist * 1.01, py + side[1] * dist * 1.01, pz + side[2] * dist * 1.01];
+        for (let i = 0; i < 4; i++) { look(e2, [px, py + 0.7, pz]); frames(1); }
+        const moved = shot();
+        look(e, [px, py + 0.7, pz]);
+        const r = rectOf(box, imgs[0].width, imgs[0].height, 3);
+        // The share of the car's own contrast (against the empty road) that
+        // the swap changes: SSIM over-weighs single pixels on a 15 px car.
+        const mad = (a, b) => { let t = 0; for (let q = 0; q < a.data.length; q += 4) t += Math.abs(a.data[q] - b.data[q]) + Math.abs(a.data[q + 1] - b.data[q + 1]) + Math.abs(a.data[q + 2] - b.data[q + 2]); return t; };
+        const A = crop(imgs[0], r), Bc = crop(imgs[1], r), E = crop(empty, r);
+        const contrast = mad(E, A), change = contrast > 0 ? mad(A, Bc) / contrast : 1, drawn = 1 - ssim(E, A);
+        const control = contrast > 0 ? mad(crop(imgs[1], r), crop(moved, r)) / contrast : 1;
+        ok = ok && change < Math.max(0.15, control + 0.1) && drawn > 0.2;
+        res.push(`lod${k}->${k + 1} at ${dist} m changes ${(change * 100).toFixed(0)} % of the car's contrast, moving 1 % ${(control * 100).toFixed(0)} %`);
+      }
+      lv.forEach((n) => { n.setInstances(new Float32Array(0)); n.visible = true; });
+      check(ok, `${tm} ${name}: a car's level swap changes it no more than moving 1 % does (${res.join(', ')})`);
+    }
+  }
+  treeN.forEach((n) => n.visible = true);
+}
+
+// The dolly.
 const [cx, cz] = along(best * 0.5);
 const tgt = [cx, g(cx, cz) + 3, cz];
 let dir = null;
@@ -121,11 +274,13 @@ m.setTimeMode('day'); frames(5);
 }
 
 // Shadow swim: ground points (not behind a building, trees drawn as shadows
-// only, cars hidden) followed while the eye moves 8 m.
-for (const n of m.cars.nodes) n.visible = false;
-for (const n of m.trees.nodes) if (!n.shadowOnly) n.visible = false;
-const canvas = document.querySelector('canvas');
-const cssW = canvas.getBoundingClientRect().width;
+// only, cars hidden) followed while the eye moves; each path with the sun's
+// shadows and without them. Without shadows what changes is occluders
+// (posts, rails), so shadows must add nothing: their p95 no worse than
+// without plus 3/255, and their jumps (over 20/255) no more.
+for (const n of carN) n.visible = false;
+for (const n of treeN) if (!n.shadowOnly) n.visible = false;
+m.setTimeMode('day');
 function groundHit(o, d) {
   let t = 0;
   for (let k = 0; k < 4000; k++) { t += 0.25; const x = o[0] + d[0] * t, y = o[1] + d[1] * t, z = o[2] + d[2] * t; if (y <= g(x, z)) return [x, g(x, z), z]; if (t > 400) return null; }
@@ -136,39 +291,57 @@ function lum(img, x, y) {
   const L = (i, j) => { const k = (j * W + i) * 4; return 0.2126 * img.data[k] + 0.7152 * img.data[k + 1] + 0.0722 * img.data[k + 2]; };
   return (L(x0, y0) * (1 - fx) + L(x0 + 1, y0) * fx) * (1 - fy) + (L(x0, y0 + 1) * (1 - fx) + L(x0 + 1, y0 + 1) * fx) * fy;
 }
-{
-  const [ax, az] = along(best * 0.5 + 1);
-  const fx = ax - cx, fz = az - cz, ux = -fz, uz = fx;
-  for (const [tag, h, back, side] of [['street', 1.8, 0, false], ['canyon 35 m up', 35, 25, true], ['block 120 m up', 120, 90, true]]) {
-    const eye0 = [cx - fx * back + ux * 6, g(cx, cz) + h, cz - fz * back + uz * 6];
-    const tg0 = [cx + fx * 60, g(cx, cz), cz + fz * 60];
-    const pose = (k) => { const [sx, sz] = side ? [ux * k, uz * k] : [fx * k, fz * k]; return [[eye0[0] + sx, eye0[1], eye0[2] + sz], [tg0[0] + sx, tg0[1], tg0[2] + sz]]; };
-    look(...pose(0)); frames(30);
-    const img0 = shot(), sc = img0.width / cssW;
-    const Ms = allM.filter((M) => Math.hypot(M.cx - eye0[0], M.cz - eye0[2]) < 500);
-    const pts = [];
+// The largest change of each ground point over `poses` (re-sampled every
+// `every` poses, as the view moves on).
+function track(poses, every) {
+  const all = [];
+  for (let s0 = 0; s0 < poses.length - 1; s0 += every) {
+    look(...poses[s0]); frames(10);
+    const img0 = shot(), sc = img0.width / cssW, pts = [];
     for (let j = 0; j < 28; j++) for (let i = 0; i < 48; i++) {
       const r = m.scene.unprojectLocal((i + 0.5) / 48 * cssW, (j + 0.5) / 28 * (img0.height / sc));
       const p = r && groundHit(r.origin, r.dir);
       if (p) pts.push(p);
     }
     const L0 = [], dev = new Float64Array(pts.length), valid = new Uint8Array(pts.length).fill(1);
-    for (let k = 0; k <= 100; k++) {
-      const [e, t] = pose(k * 0.08); look(e, t); frames(2);
+    for (let k = s0; k <= Math.min(poses.length - 1, s0 + every); k++) {
+      const [e, t] = poses[k]; look(e, t); frames(2);
       const img = frameImage();
       pts.forEach((p, i) => {
         if (!valid[i]) return;
         const q = m.scene.projectLocal(p);
         if (!q || q.behind || q.x < 2 || q.y < 2 || q.x * sc > img.width - 3 || q.y * sc > img.height - 3 || blocked(e, p)) { valid[i] = 0; return; }
         const L = lum(img, q.x * sc, q.y * sc);
-        if (k === 0) L0[i] = L; else dev[i] = Math.max(dev[i], Math.abs(L - L0[i]));
+        if (k === s0) L0[i] = L; else dev[i] = Math.max(dev[i], Math.abs(L - L0[i]));
       });
     }
-    const ds = [...dev].filter((_, i) => valid[i]).sort((a, b) => a - b);
-    const p95 = ds[Math.floor(ds.length * 0.95)], jumps = ds.filter((d) => d > 20).length;
-    check(ds.length > 50 && p95 < 12 && jumps < ds.length * 0.05, `${tag}: the ground's shading stays put as the eye moves 8 m (${ds.length} points, p95 change ${p95.toFixed(1)}/255, ${jumps} over 20)`);
+    dev.forEach((d, i) => { if (valid[i]) all.push(d); });
+  }
+  all.sort((a, b) => a - b);
+  return { n: all.length, p95: all[Math.floor(all.length * 0.95)] ?? 0, jumps: all.filter((d) => d > 20).length };
+}
+{
+  const [ax, az] = along(best * 0.5 + 1);
+  const fx = ax - cx, fz = az - cz, ux = -fz, uz = fx, gy = g(cx, cz);
+  const strafe = (h, back, side, len, n) => {
+    const eye0 = [cx - fx * back + ux * 6, gy + h, cz - fz * back + uz * 6], tg0 = [cx + fx * 60, gy, cz + fz * 60];
+    return Array.from({ length: n + 1 }, (_, k) => { const t = k / n * len, [sx, sz] = side ? [ux * t, uz * t] : [fx * t, fz * t]; return [[eye0[0] + sx, eye0[1], eye0[2] + sz], [tg0[0] + sx, tg0[1], tg0[2] + sz]]; });
+  };
+  const e2 = [cx - fx * 25 + ux * 6, gy + 35, cz - fz * 25 + uz * 6];
+  const paths = {
+    'street, 8 m along': [strafe(1.8, 0, false, 8, 100), 100],
+    'canyon 35 m up, 8 m sideways': [strafe(35, 25, true, 8, 100), 100],
+    'block 120 m up, 8 m sideways': [strafe(120, 90, true, 8, 100), 100],
+    'block 120 m up, 250 m sideways': [strafe(120, 90, true, 250, 250), 25],
+    'canyon 35 m up, turning 40 degrees': [Array.from({ length: 101 }, (_, k) => { const a = (k / 100 - 0.5) * 0.7, ca = Math.cos(a), sa = Math.sin(a); return [e2, [e2[0] + (fx * ca - fz * sa) * 85, gy, e2[2] + (fx * sa + fz * ca) * 85]]; }), 100],
+  };
+  for (const [tag, [poses, every]] of Object.entries(paths)) {
+    m.sky.sun.castsShadow = true; const on = track(poses, every);
+    m.sky.sun.castsShadow = false; const off = track(poses, every);
+    m.sky.sun.castsShadow = true;
+    check(on.n > 50 && on.p95 < off.p95 + 3 && on.jumps <= off.jumps, `${tag}: the ground's shadows stay put (${on.n} points: p95 change ${on.p95.toFixed(1)}/255 and ${on.jumps} over 20 with shadows, ${off.p95.toFixed(1)} and ${off.jumps} without)`);
   }
 }
-for (const n of m.cars.nodes) n.visible = true;
-for (const n of m.trees.nodes) n.visible = true;
+for (const n of carN) n.visible = true;
+for (const n of treeN) n.visible = true;
 console.log(failed ? `${failed} FAILED` : 'ALL PASS');

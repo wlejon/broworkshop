@@ -207,6 +207,21 @@ check(movingMin > 0.35, `traffic flows: at least 35 % of cars moving throughout 
         if (plan(fl[1]) === plan(fl[2])) same++;
     }
     check(pairs > 20 && same < pairs * 0.2, `storeys furnished differently (${pairs - same}/${pairs} pairs differ)`);
+    // Furnished, not empty boxes: what a floor holds, by use (offices,
+    // shops, sheds, flats), averaged over sampled floors.
+    const byUse = {};
+    for (let i = 0; i < nM; i += 53) {
+        const M = massRecord(masses.data, i);
+        for (const F of floorsOf(M).slice(0, 3)) {
+            const it = interiorMesh(M, [F.y0 + 0.01, F.y1 - 0.01]).items;
+            const use = it.desk ? 'office' : it.shelving ? 'shop' : it.racking ? 'shed' : it.rug ? 'flat' : 'empty';
+            const u = (byUse[use] ??= { floors: 0, kinds: 0, pieces: 0 });
+            u.floors++; u.kinds += Object.keys(it).length; u.pieces += Object.values(it).reduce((a, b) => a + b, 0);
+        }
+    }
+    const useLine = Object.entries(byUse).map(([k, u]) => `${k} ${u.floors} floors: ${(u.kinds / u.floors).toFixed(1)} kinds, ${(u.pieces / u.floors).toFixed(0)} pieces`).join('; ');
+    const furnished = ['office', 'shop', 'flat'].every((k) => byUse[k] && byUse[k].kinds / byUse[k].floors >= 4) && byUse.shed && byUse.shed.kinds / byUse.shed.floors >= 2 && !(byUse.empty?.floors > 0.05 * Object.values(byUse).reduce((a, u) => a + u.floors, 0));
+    check(furnished, `floors furnished by use (${useLine})`);
 }
 
 console.log(failed ? `FAILED ${failed}` : 'ALL PASS');
