@@ -27,10 +27,13 @@ const LEVELS = [
 // Each level's leaf area (against the grown tree's) by species, calibrated
 // in the city: a coarse level's cards are the finest level's grouped where
 // they stand (cluster), and each grows by this factor until the level
-// covers as much of what is behind it as the finest does there (the trees'
-// contrast against the empty view, tests/test_visual.js's tree check, within
-// some 4 %). Beech's clumps overlap most, so its cards grow most.
-const AREA = {"elm": [1, 1.208, 1.386, 1.556, 1.193], "oak": [1, 1.051, 1.145, 1.023, 0.903], "beech": [1, 2.918, 5.225, 5.845, 4.534], "birch": [1, 0.98, 0.774, 0.493, 0.466]};
+// covers as much of what is behind it as the finest does there (the share of
+// pixels the trees change against the empty view, tests/test_visual.js's
+// tree check, over 48 trees of the city's other than the test's 24, within
+// some 7 % a boundary). Beech's clumps overlap most, so its cards grow most;
+// elm's coarse clusters cannot fill the finest's gaps, so past ~1.3 more area
+// gains it little cover.
+const AREA = {"elm": [1, 1.666, 2.675, 3.757, 2.694], "oak": [1, 1.158, 1.283, 1.186, 1.097], "beech": [1, 2.652, 4.715, 5.234, 3.418], "birch": [1, 0.876, 0.808, 0.613, 0.585]};
 const out = { levels: LEVELS, species: {} };
 clear();
 for (const name of NAMES) {

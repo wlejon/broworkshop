@@ -175,6 +175,13 @@ let crownIn = 0, worstIn = 0;
     }
 }
 check(nTrees > 50000, `a city's worth of trees (${nTrees})`);
+{
+    // Downtown's narrow sidewalks under the walls too: most kerb slots on dry
+    // ground off the carriageway planted (before birch and saplings stood in
+    // where the species picked had no room: 39 % urban, 60 % tower).
+    const k = treeRecs.kerbs, share = (z) => k[z].planted / k[z].slots;
+    check(share('tower') > 0.7 && share('urban') > 0.7, `street trees line downtown's kerbs (tower ${(share('tower') * 100).toFixed(0)} %, urban ${(share('urban') * 100).toFixed(0)} % of slots planted)`);
+}
 check(crownIn === 0, `no tree's crown through a building's wall (${crownIn}, deepest ${worstIn.toFixed(1)} m)`);
 check(wetTrees === 0, `no tree in the water (${wetTrees})`);
 check(roadTrees === 0, `no tree on a carriageway (${roadTrees})`);
