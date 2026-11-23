@@ -157,6 +157,17 @@ check(movingMin > 0.35, `traffic flows: at least 35 % of cars moving throughout 
     check(badOpen === 0, `interior openings within their walls and floors (${badOpen} bad)`);
     check(doors === doorMasses, `a street door into every building whose facade draws one (${doors}/${doorMasses})`);
     check(rooms > 1000 && lit > rooms * 0.1 && lit < rooms * 0.9, `rooms with lamps, some lit at night (${lit}/${rooms})`);
+    // Storeys differ: the furniture of floors 1 and 2 of flats, in plan.
+    let same = 0, pairs = 0;
+    for (let i = 0; i < nM && pairs < 100; i += 37) {
+        const M = massRecord(masses.data, i);
+        const fl = floorsOf(M);
+        if (fl.length < 3 || M.style === 0 || M.style === 1 || M.style === 8) continue;
+        const plan = (F) => { const P = interiorMesh(M, [F.y0 + 0.01, F.y1 - 0.01]).mesh.positions; let h = 0; for (let k = 0; k < P.length; k += 3) h += P[k] * 0.37 + P[k + 2] * 0.61; return `${P.length}:${h.toFixed(1)}`; };
+        pairs++;
+        if (plan(fl[1]) === plan(fl[2])) same++;
+    }
+    check(pairs > 20 && same < pairs * 0.2, `storeys furnished differently (${pairs - same}/${pairs} pairs differ)`);
 }
 
 console.log(failed ? `FAILED ${failed}` : 'ALL PASS');
