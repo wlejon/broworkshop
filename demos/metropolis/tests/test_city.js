@@ -11,6 +11,7 @@ import { MASS_FLOATS } from "/lib/city/buildings.js";
 import { SITE } from "/app/world/site.js";
 import { placeTrees, TREE_FLOATS } from "/lib/city/trees.js";
 import { createTraffic, edgeDensity } from "/lib/city/traffic.js";
+import { massRecord, interiorMesh, openingsOf, floorsOf } from "/lib/city/interior.js";
 
 const city = generateCity(SITE);
 const { graph, lots, masses, ground } = city;
@@ -123,6 +124,40 @@ const served = trams.filter((c) => c.served >= 0 || c.dwell > 0).length;
 check(trams.length > 10 && served >= trams.length * 0.8, `trams run and stop (${trams.length} trams, ${served} have served a stop)`);
 check(wetCars === 0, `no car off a bridge in the water (${wetCars})`);
 check(movingMin > 0.35, `traffic flows: at least 35 % of cars moving throughout (lowest ${(movingMin * 100).toFixed(0)} %)`);
+
+// Interiors: every vertex and light inside its mass, every opening within its
+// wall, a door where the facade draws one, rooms lit by lamps.
+{
+    let bad = 0, outside = 0, badOpen = 0, doors = 0, doorMasses = 0, lit = 0, rooms = 0, tris = 0;
+    const nM = masses.data.length / MASS_FLOATS;
+    for (let k = 0; k < 400; k++) {
+        const M = massRecord(masses.data, Math.floor((k + 0.5) * nM / 400));
+        const r = interiorMesh(M, [0, 30]);
+        tris += r.tris;
+        const c = Math.cos(M.yaw), s = Math.sin(M.yaw);
+        const local = (x, y, z) => [c * (x - M.cx) - s * (z - M.cz), y - M.y0, s * (x - M.cx) + c * (z - M.cz)];
+        const inMass = (p) => Math.abs(p[0]) <= M.hw + 0.01 && Math.abs(p[2]) <= M.hd + 0.01 && p[1] >= -0.01 && p[1] <= M.h + 0.01;
+        const P = r.mesh.positions ?? r.mesh.getPositions?.();
+        if (P) for (let i = 0; i < P.length; i += 3) {
+            if (!Number.isFinite(P[i] + P[i + 1] + P[i + 2])) bad++;
+            else if (!inMass(local(P[i], P[i + 1], P[i + 2]))) outside++;
+        }
+        for (const l of [...r.lights, ...r.windows]) { if (!inMass(local(...l.p))) outside++; }
+        rooms += r.lights.length; lit += r.lights.filter((l) => l.lit).length;
+        for (const F of floorsOf(M).filter((F) => F.y0 < 30)) for (let face = 0; face < 4; face++) {
+            const W = face < 2 ? 2 * M.hw : 2 * M.hd;
+            for (const o of openingsOf(M, face, F).list) {
+                if (o.u0 < 0 || o.u1 > W || o.u0 >= o.u1 || o.y0 < F.y0 - 0.01 || o.y1 > F.y1 + 0.01) badOpen++;
+                if (o.door) doors++;
+            }
+        }
+        if (M.flags & 1 && !(M.flags & 2) && M.style !== 8) doorMasses++;
+    }
+    check(bad === 0 && outside === 0, `interiors inside their buildings (${bad} non-finite, ${outside} outside; ${(tris / 400).toFixed(0)} tris a mass)`);
+    check(badOpen === 0, `interior openings within their walls and floors (${badOpen} bad)`);
+    check(doors === doorMasses, `a street door into every building whose facade draws one (${doors}/${doorMasses})`);
+    check(rooms > 1000 && lit > rooms * 0.1 && lit < rooms * 0.9, `rooms with lamps, some lit at night (${lit}/${rooms})`);
+}
 
 console.log(failed ? `FAILED ${failed}` : 'ALL PASS');
 if (failed) throw new Error(`${failed} city checks failed`);

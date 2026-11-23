@@ -9,7 +9,8 @@ import { generateCity } from "/lib/city/generate.js";
 import { createBuildingRenderer } from "/lib/city/building_render.js";
 import { createBridges } from "/lib/city/bridges.js";
 import { createTrafficRenderer } from "/lib/city/traffic_render.js";
-import { placeTrees, createTrees, TREE_FLOATS } from "/lib/city/trees.js";
+import { placeTrees, createTrees } from "/lib/city/trees.js";
+import { createInteriors } from "/lib/city/interior.js";
 import { terrainHeight, riverCenterX, RIVER_BED_Y } from "/app/world/terrain_field.js";
 import { SITE } from "/app/world/site.js";
 import { createTerrainStream } from "/app/world/terrain_stream.js";
@@ -69,12 +70,13 @@ let timeMode = 'day';
 let buildings = null;
 let bridges = null;
 let cars = null;
+let interiors = null;
 
 const ready = Promise.all([
     // The bridges: decks along the graph's bridge edges, on piers in the river.
     createBridges(scene, city.graph, readLib('city/bridge.bk'), { waterBed: RIVER_BED_Y - 1 }).then((b) => { bridges = b; }),
     terrain.whenReady(),
-    createBuildingRenderer(scene, city.masses, readLib('city/building.bk')).then((b) => { buildings = b; }),
+    createBuildingRenderer(scene, city.masses, readLib('city/building.bk')).then((b) => { buildings = b; interiors = createInteriors(scene, city.masses, b.walls); }),
     // Traffic on the road graph, simulated in a worker: lanes both ways, lights at the junctions.
     createTrafficRenderer(scene, city.graph, city.field.density, readLib('city/car.bk'), { count: 12000, lines: city.transit }).then((c) => { cars = c; }),
 ]).then(() => { if (statusEl) statusEl.textContent = 'ready'; });
@@ -129,13 +131,14 @@ function tick() {
     water.update(simTime);
     sky.update(dt);
     cars?.update(dt, st.pos, st.fwd);
+    interiors?.update(st.pos, NIGHT[timeMode]);
     showStats(dt, st);
     requestAnimationFrame(tick);
 }
 requestAnimationFrame(tick);
 
 globalThis.__metropolis = {
-    scene, city, ground, terrain, cam, trees, treeRecs, get cars() { return cars; },
+    scene, city, ground, terrain, cam, trees, treeRecs, get cars() { return cars; }, get interiors() { return interiors; },
     whenReady: () => ready,
     setTimeMode,
     setPose: (pos, yaw, pitch) => {

@@ -20,6 +20,7 @@ struct Params {
     room_day: f32,   // a room's luminance by day, cd/m^2 per unit albedo
     room_night: f32, // a lit room's luminance at night, cd/m^2 per unit albedo
     part: f32,       // 0 walls (box), 1 roof (prism)
+    open: vec4<f32>, // an open building (interior.js): masses [x, y), its windows and door cut from world height z to w
 }
 
 @binding(4, 0) var params: uniform<Params>;
@@ -111,7 +112,7 @@ pub fn vertex(v_in: mesh::Vertex) -> mesh::Vertex {
     v.v2 = r2;
     v.v3 = r3;
     v.v4 = vec4<f32>(ln, yaw);
-    v.v5 = vec4<f32>(r0.xyz, 0.0);
+    v.v5 = vec4<f32>(r0.xyz, i as f32);
     return v;
 }
 
@@ -367,7 +368,8 @@ pub fn fragment(v: mesh::Vertex, s_in: mesh::Surface) -> mesh::Surface {
     let corner = min(u, W - u);
     if (style != STYLE_GLASS && corner < 0.6) { win = 0.0; }
     let door_bay = floor(nb * 0.5);
-    let is_door = front && ground && !shop && bay == door_bay && (flags & 1) != 0;
+    let is_door = front && ground && !shop && bay == door_bay && (flags & 1) != 0 && style != STYLE_INDUSTRIAL;
+    if (is_door) { win = 0.0; }
     if (style == STYLE_INDUSTRIAL && ground && front && abs(u - W * 0.5) < 2.6 && y < 4.5) { win = 0.0; }
     let top_floor = y > h - 0.9 && style != STYLE_GLASS;
     if (top_floor) { win = 0.0; }
@@ -467,5 +469,14 @@ pub fn fragment(v: mesh::Vertex, s_in: mesh::Surface) -> mesh::Surface {
     s.roughness = mix(style == STYLE_GLASS ? 0.4 : 0.82, 0.06, win);
     s.metallic = 0.0;
     s.emissive = glow * win + lamp_lum;
+
+    // An open building (interior.js builds its rooms): the glass of its
+    // windows and its door are cut over the floors built, to see in and go in.
+    let wy = v.v5.y + y;
+    if (v.v5.w > params.open.x - 0.5 && v.v5.w < params.open.y - 0.5 && wy > params.open.z && wy < params.open.w) {
+        var hole = win;
+        if (is_door) { hole = band(bu, 0.3, 0.7, fu / bw) * band(fy01, 0.0, 0.62, fy / fh); }
+        if (hole > 0.5) { s.alpha = 0.0; }
+    }
     return s;
 }
