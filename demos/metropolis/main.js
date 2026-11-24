@@ -131,6 +131,11 @@ function showStats(dt, st) {
     statFrames = 0; statMs = 0;
 }
 
+// The view the tile cache selects for: the canvas as shown (its CSS box fills
+// the window, which can be resized after canvas.width was set), so tiles at
+// the screen's edges are inside its frustum.
+const viewOf = (st) => ({ width: canvas.clientWidth || canvas.width, height: canvas.clientHeight || canvas.height, fov: st.fov });
+
 let last = performance.now(), simTime = 0;
 function tick() {
     const now = performance.now();
@@ -138,7 +143,7 @@ function tick() {
     last = now; simTime += dt;
     cam.update(dt);
     const st = cam.state();
-    terrain.update(st.pos, st.fwd, st.up, { width: canvas.width, height: canvas.height, fov: st.fov });
+    terrain.update(st.pos, st.fwd, st.up, viewOf(st));
     water.update(simTime);
     sky.update(dt);
     cars?.update(dt, st.pos, st.fwd);
@@ -156,7 +161,7 @@ globalThis.__metropolis = {
     setPose: (pos, yaw, pitch) => {
         cam.setPose(pos, yaw, pitch);
         const st = cam.state();
-        terrain.update(st.pos, st.fwd, st.up, { width: canvas.width, height: canvas.height, fov: st.fov });
+        terrain.update(st.pos, st.fwd, st.up, viewOf(st));
     },
     lookAt(eye, target) {
         const dx = target[0] - eye[0], dy = target[1] - eye[1], dz = target[2] - eye[2];
