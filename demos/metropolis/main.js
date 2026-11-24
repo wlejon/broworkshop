@@ -45,7 +45,7 @@ const SKY_PRESETS = {
 };
 const NIGHT = { day: 0, dusk: 0.55, night: 1 };
 
-const sky = daylight(scene, { presets: SKY_PRESETS, order: ['day', 'dusk', 'night'], pcf: 2, ground: [0.09, 0.13, 0.06] });
+const sky = daylight(scene, { presets: SKY_PRESETS, order: ['day', 'dusk', 'night'], pcf: 3, ground: [0.09, 0.13, 0.06] });
 sky.apply('day');
 sky.setScale(16);
 // Contact shading at a room's scale (corners, under shelves and desks); from
