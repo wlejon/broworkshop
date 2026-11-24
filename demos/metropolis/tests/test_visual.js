@@ -244,13 +244,16 @@ const FOV = 60;   // the fly camera's own
         cs.push(crop(im, r));
       }
       m.cam.setFov(FOV);
-      // Compared at 12x12 (box-averaged: windows and brick average out, a
-      // change of form stays), each channel fitted as a.x + b to the
-      // reference: the air's haze (and the view's own) is such a blend toward
-      // its colour, so what must be small is the fit's residual (the near
-      // one also carries the perspective's shift), and the mean colour may
-      // move only as far as the air between explains.
-      const small = (im) => { const N = 12, out = []; for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) { const xa = Math.floor(x * im.width / N), xb = Math.max(xa + 1, Math.floor((x + 1) * im.width / N)), ya = Math.floor(y * im.height / N), yb = Math.max(ya + 1, Math.floor((y + 1) * im.height / N)); const acc = [0, 0, 0]; let n = 0; for (let v = ya; v < yb; v++) for (let u = xa; u < xb; u++) { const k = (v * im.width + u) * 4; acc[0] += im.data[k]; acc[1] += im.data[k + 1]; acc[2] += im.data[k + 2]; n++; } out.push(acc.map((c) => c / n)); } return out; };
+      // Compared at 12x12 (each cell the mean over twice its size, centred:
+      // windows and brick average out, a change of form stays; cells only
+      // their own size beat against a window grid near their pitch, which the
+      // near view's perspective slides across their edges), each channel
+      // fitted as a.x + b to the reference: the air's haze (and the view's
+      // own) is such a blend toward its colour, so what must be small is the
+      // fit's residual (the near one also carries the perspective's shift:
+      // a tower's 8.5), and the mean colour may move only as far as the air
+      // between explains.
+      const small = (im) => { const N = 12, cw = im.width / N, ch = im.height / N, out = []; for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) { const xa = Math.max(0, Math.floor((x - 0.5) * cw)), xb = Math.min(im.width, Math.max(xa + 1, Math.floor((x + 1.5) * cw))), ya = Math.max(0, Math.floor((y - 0.5) * ch)), yb = Math.min(im.height, Math.max(ya + 1, Math.floor((y + 1.5) * ch))); const acc = [0, 0, 0]; let n = 0; for (let v = ya; v < yb; v++) for (let u = xa; u < xb; u++) { const k = (v * im.width + u) * 4; acc[0] += im.data[k]; acc[1] += im.data[k + 1]; acc[2] += im.data[k + 2]; n++; } out.push(acc.map((c) => c / n)); } return out; };
       const fit = (ref, x) => {
         let worst = 0;
         for (let c = 0; c < 3; c++) {
@@ -265,7 +268,7 @@ const FOV = 60;   // the fly camera's own
       };
       const sm = cs.map(small), fn = fit(sm[0], sm[1]), ff = fit(sm[0], sm[2]);
       const shiftN = dC(cs[0], cs[1]), shiftF = dC(cs[0], cs[2]);
-      check(fn.resid < 12 && ff.resid < 10 && shiftN < 15 && shiftF < 35,
+      check(fn.resid < 11 && ff.resid < 8 && shiftN < 15 && shiftF < 35,
         `${tm} ${name}: the same at ${dists.map((d) => `${d.toFixed(0)} m`).join(', ')} (against the first, at 12x12 after each channel's blend: residual ${fn.resid.toFixed(1)} near, ${ff.resid.toFixed(1)} far /255; mean colour shift ${shiftN.toFixed(1)} near, ${shiftF.toFixed(1)} far, the air's haze)`);
     }
   }
