@@ -34,6 +34,7 @@ const KIND_FOUNDATION: i32 = 0;
 const KIND_SLAB: i32 = 1;
 const KIND_COLUMN: i32 = 2;
 const KIND_WALL: i32 = 3;
+const KIND_ROOF: i32 = 4;
 const MAT_CONCRETE: i32 = 0;
 const MAT_MASONRY: i32 = 1;
 const MAT_GLASS: i32 = 2;
@@ -82,6 +83,40 @@ fn is_broken(rough: i32, n: vec3<f32>) -> bool {
     return has_bit(rough, bit);
 }
 
+// A pitched roof's box laid onto building.bk's prism (eaves 0.45 m out and
+// 0.12 m down, ridge along x; a hip's ends slope in to a ridge shortened by
+// the depth), as building.bk shapes it: a point no higher than the long
+// slope over it, then (a hip) drawn in along x onto the end's slope at its
+// height. Both slopes stay planes, the hip line where they meet.
+fn roof_point(lp: vec3<f32>, r1: vec4<f32>, r3: vec4<f32>) -> vec3<f32> {
+    let rw = r1.x + 0.45;
+    let rd = r1.z + 0.45;
+    let rh = r3.y + 0.12;
+    let y0 = r1.y - 0.12;
+    let y = clamp(lp.y, y0, y0 + rh * (1.0 - min(abs(lp.z) / rd, 1.0)));
+    var x = lp.x;
+    if (r3.x > 1.5) {
+        let a = max(0.0, r1.x - r1.z);
+        x = sign(lp.x) * min(abs(lp.x), a + (rw - a) * (1.0 - (y - y0) / rh));
+    }
+    return vec3<f32>(x, y, lp.z);
+}
+
+// The roof's normal (its mass's frame) on a face of a roof member's box:
+// its top the long slope on the member's side of the ridge (zc its centre's
+// z), an end the hip's slope (a gable's end its wall), else the box's own.
+fn roof_normal(n: vec3<f32>, end: bool, zc: f32, r1: vec4<f32>, r3: vec4<f32>) -> vec3<f32> {
+    let rw = r1.x + 0.45;
+    let rd = r1.z + 0.45;
+    let rh = r3.y + 0.12;
+    if (n.y > 0.5) { return normalize(vec3<f32>(0.0, rd, select(zc < 0.0, -rh, rh))); }
+    if (end && r3.x > 1.5) {
+        let a = max(0.0, r1.x - r1.z);
+        return normalize(vec3<f32>(sign(n.x) * rh, rw - a, 0.0));
+    }
+    return n;
+}
+
 pub fn vertex(v_in: mesh::Vertex) -> mesh::Vertex {
     var v = v_in;
     let k = v.instance_index;
@@ -108,11 +143,20 @@ pub fn vertex(v_in: mesh::Vertex) -> mesh::Vertex {
     if (abs(u.y) > 0.499 && has_bit(rough, select(u.y > 0.0, 3, 2))) { lp.y += jag(rest, 1u) * min(0.45, 0.7 * p1.y); }
     if (abs(u.z) > 0.499 && has_bit(rough, select(u.z > 0.0, 5, 4))) { lp.z += jag(rest, 2u) * min(0.45, 0.7 * p1.z); }
 
+    // A roof's box laid down to its slope: no point over the roof's surface.
+    var nn = n;
+    if ((p2.x + 0.5) as i32 == KIND_ROOF) {
+        lp = roof_point(lp, r1, r3);
+        // (An end face: on the box's x side that reaches the eaves' end.)
+        let end = abs(n.x) > 0.5 && abs(p0.x) + p1.x >= r1.x + 0.44;
+        nn = roof_normal(n, end, p0.z, r1, r3);
+    }
+
     let yaw = r0.w;
     let c = cos(yaw);
     let s = sin(yaw);
     let rw = vec3<f32>(r0.x + c * lp.x + s * lp.z, r0.y + lp.y, r0.z - s * lp.x + c * lp.z);
-    let nw0 = vec3<f32>(c * n.x + s * n.z, n.y, -s * n.x + c * n.z);
+    let nw0 = vec3<f32>(c * nn.x + s * nn.z, nn.y, -s * nn.x + c * nn.z);
     let bi = (p1.w + 0.5) as i32 - 1;
     var q = vec4<f32>(0.0, 0.0, 0.0, 1.0);
     var w = rw;
@@ -177,7 +221,17 @@ pub fn fragment(v: mesh::Vertex, s_in: mesh::Surface) -> mesh::Surface {
     let outer = !broken && ((n.z > 0.5 && lp.z > hd - e) || (n.z < -0.5 && lp.z < -hd + e) ||
                             (n.x > 0.5 && lp.x > hw - e) || (n.x < -0.5 && lp.x < -hw + e) ||
                             (n.y > 0.5 && lp.y > h - e) || (n.y < -0.5 && lp.y < -plinth + e));
-    if (outer) {
+    let roofk = kind == KIND_ROOF;
+    // The roof's normal in its mass's frame, as the vertex stage set it.
+    let nr = normalize(s_in.normal);
+    let nloc = vec3<f32>(dot(nr, X), dot(nr, Y), dot(nr, Z));
+    // A roof's slope, a hip's end, or a gable's end wall: the roof as the
+    // building drew it.
+    let roof_out = roofk && !broken && (n.y > 0.5 || (abs(n.x) > 0.5 && (nloc.y > 0.05 || abs(lp.x) > hw + 0.4)));
+    if (roof_out) {
+        let m = facade::mass_of(v.v1, v.v2, v.v3, id);
+        s = facade::shade(m, lp, nloc, true, X, Y, Z, eye, s_in, params.night, params.room_day, params.room_night).s;
+    } else if (outer && !roofk) {
         // The building's outside, as it drew it.
         let m = facade::mass_of(v.v1, v.v2, v.v3, id);
         s = facade::shade(m, lp, n, false, X, Y, Z, eye, s_in, params.night, params.room_day, params.room_night).s;
@@ -263,6 +317,11 @@ pub fn fragment(v: mesh::Vertex, s_in: mesh::Surface) -> mesh::Surface {
                 s.base_color = mix(wc, vec3<f32>(0.85, 0.84, 0.80), skirt);
                 s.roughness = 0.85;
             }
+        } else if (roofk) {
+            // Under a pitched roof: rafters 0.6 m apart over boards.
+            let raf = facade::pulse(lp.x / 0.6, 0.0, 0.12, fpx / 0.6);
+            s.base_color = mix(vec3<f32>(0.40, 0.30, 0.20), vec3<f32>(0.30, 0.21, 0.13), raf) * (0.85 + 0.3 * vn3(vec3<f32>(lp.x * 0.5, 0.0, lp.z * 6.0), 29u));
+            s.roughness = 0.85;
         } else {
             // Columns, slab edges, foundations: cast concrete, its formwork's lines.
             let fl = facade::pulse(lp.y / 1.2, 0.0, 0.02, fpx / 1.2);
