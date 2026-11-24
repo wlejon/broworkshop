@@ -219,13 +219,15 @@ const crossesRiver = city.transit.filter((l) => l.steps.some((st) => graph.edges
 check(crossesRiver >= 2, `tram lines crossing the river (${crossesRiver})`);
 const traffic = createTraffic(graph, { count: 12000, edgeDensity: edgeDensity(graph, city.field.density), lines: city.transit });
 const pose = [0, 0, 0, 0, 0];
-let wetCars = 0, movingMin = 1;
+let wetCars = 0, movingMin = 1, onRails = 0;
+const railed = new Set(city.transit.flatMap((l) => l.steps.map((st) => st.edge)));
 for (let t = 0; t < 180; t += 0.1) {
     traffic.step(0.1);
     if (Math.round(t * 10) % 300 === 299) {
         let moving = 0;
         for (const c of traffic.cars) {
             if (c.v > 0.5) moving++;
+            if (!c.route && railed.has(c.lane.edge) && c.lane.per > 1 && c.lane.idx === 0) onRails++;
             if (graph.edges[c.lane.edge].kind !== 'bridge' && !c.turn) {
                 traffic.pose(c, pose);
                 if (water(pose[0], pose[2]) < -2) wetCars++;
@@ -236,6 +238,7 @@ for (let t = 0; t < 180; t += 0.1) {
         console.log(`  traffic t=${t.toFixed(0)} s: ${(f * 100).toFixed(0)} % moving`);
     }
 }
+check(onRails === 0, `cars keep off the tram lane where the road has another (${onRails} seen on it)`);
 const trams = traffic.cars.filter((c) => c.route);
 const served = trams.filter((c) => c.served >= 0 || c.dwell > 0).length;
 check(trams.length > 10 && served >= trams.length * 0.8, `trams run and stop (${trams.length} trams, ${served} have served a stop)`);
