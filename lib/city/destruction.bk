@@ -18,7 +18,7 @@ struct Params {
     night: f32,
     room_day: f32,
     room_night: f32,
-    pad: f32,
+    debug: f32,   // 1: the shading branch's colour (outside red, break green, inside blue)
 }
 
 @binding(4, 0) var params: uniform<Params>;
@@ -134,13 +134,14 @@ pub fn vertex(v_in: mesh::Vertex) -> mesh::Vertex {
     return v;
 }
 
-// The rebar of a concrete member's broken face: rods 0.2 m apart on a grid of
-// the face's two other axes, a few left standing out rusted.
-fn rebar(a: f32, b: f32, fpx: f32) -> f32 {
-    let ga = fract(a / 0.2 + 0.5) - 0.5;
-    let gb = fract(b / 0.2 + 0.5) - 0.5;
-    let d = length(vec2<f32>(ga, gb)) * 0.2;
-    return 1.0 - smoothstep(0.012, 0.012 + fpx, d);
+// The rebar a concrete member's break bares: bars 16 mm thick, 0.2 m apart,
+// running along the face (a, across b), bared only where the concrete
+// spalled off them (`bare`, a patch noise), and gone where a bar is under a
+// pixel, so the far rubble does not shimmer.
+fn rebar(a: f32, b: f32, fpx: f32, bare: f32) -> f32 {
+    let gb = abs(fract(b / 0.2 + 0.5) - 0.5) * 0.2;
+    let bar = 1.0 - smoothstep(0.008, 0.008 + fpx, gb);
+    return bar * smoothstep(0.62, 0.7, bare) * (1.0 - smoothstep(0.006, 0.02, fpx));
 }
 
 pub fn fragment(v: mesh::Vertex, s_in: mesh::Surface) -> mesh::Surface {
@@ -210,12 +211,14 @@ pub fn fragment(v: mesh::Vertex, s_in: mesh::Surface) -> mesh::Surface {
         } else {
             // Concrete: cement paste, aggregate in it, voids, and its rebar.
             var cc = vec3<f32>(0.52, 0.51, 0.48) * (0.86 + 0.28 * grain);
-            cc = mix(cc, vec3<f32>(0.36, 0.35, 0.33), select(speck > 0.82, 0.8, 0.0));
-            cc = mix(cc, vec3<f32>(0.66, 0.64, 0.60), select(speck < 0.1, 0.7, 0.0));
-            let rb = rebar(a, b, fpx) * select(kind == KIND_FOUNDATION, 0.0, 1.0);
-            s.base_color = mix(cc, vec3<f32>(0.30, 0.17, 0.10), rb);
-            s.metallic = 0.6 * rb;
-            s.roughness = mix(0.95, 0.5, rb);
+            let near = 1.0 - smoothstep(0.01, 0.03, fpx);
+            cc = mix(cc, vec3<f32>(0.36, 0.35, 0.33), select(speck > 0.82, 0.8 * near, 0.0));
+            cc = mix(cc, vec3<f32>(0.66, 0.64, 0.60), select(speck < 0.1, 0.7 * near, 0.0));
+            let bare = vn3(vec3<f32>(a * 1.3, b * 1.3, 0.0) + lp * 0.4, 23u);
+            let rb = rebar(a, b, fpx, bare) * select(kind == KIND_FOUNDATION, 0.0, 1.0);
+            s.base_color = mix(cc, vec3<f32>(0.22, 0.13, 0.08), rb);
+            s.metallic = 0.4 * rb;
+            s.roughness = mix(0.95, 0.6, rb);
         }
     } else {
         // Inside the building: a floor, a ceiling, a wall's inner face, a column.
@@ -276,6 +279,11 @@ pub fn fragment(v: mesh::Vertex, s_in: mesh::Surface) -> mesh::Surface {
         s.base_color = mix(s.base_color, vec3<f32>(0.56, 0.54, 0.50), k);
         s.roughness = mix(s.roughness, 0.95, k);
         s.metallic *= 1.0 - k;
+        s.emissive = vec3<f32>(0.0, 0.0, 0.0);
+    }
+    if (params.debug > 0.5) {
+        s.base_color = select(outer, vec3<f32>(0.8, 0.1, 0.1), select(broken, vec3<f32>(0.1, 0.8, 0.1), vec3<f32>(0.1, 0.1, 0.8)));
+        s.metallic = 0.0;
         s.emissive = vec3<f32>(0.0, 0.0, 0.0);
     }
     return s;
