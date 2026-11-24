@@ -18,6 +18,9 @@ struct Params {
     sigma: f32,     // extinction (1/m) at density 1
     pad: f32,
     albedo: vec4<f32>,
+    // The light of the place around from below and the sides (a city's
+    // lit windows and streets at night), radiance over pi like sky_light's.
+    glow: vec4<f32>,
 }
 
 @binding(4, 0) var params: uniform<Params>;
@@ -153,7 +156,9 @@ pub fn volume(ray: volume::Ray) -> volume::Light {
         // Single scattering, plus what thick dust scatters on (a softer, wider share).
         let lit_sun = sun * (phase * Ts + 0.06 * pow(Ts, 0.25));
         let sky = volume::sky_light(rel, vec3<f32>(0.0, 1.0, 0.0)) * (0.35 + 0.65 * exp(-params.sigma * d * 3.0));
-        let S = albedo * (lit_sun + sky);
+        // The glow reaches into the dust from around, its depths less.
+        let glow = params.glow.xyz * (0.4 + 0.6 * exp(-params.sigma * d * 2.0));
+        let S = albedo * (lit_sun + sky + glow);
         let sg = params.sigma * d;
         let a = exp(-sg * dt);
         rad += T * S * (1.0 - a);
