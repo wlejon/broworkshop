@@ -122,7 +122,7 @@ export function createTerrainStream(scene, city) {
     const shaderPromise = ground.setShaderAsync({
         module: groundSrc,
         file: 'shaders/ground_mesh.bk',
-        uniforms: { time: 0, night: 0, pad1: 0, pad2: 0, city: [gi.half, gi.paintCell, gi.paintCells, gi.surfCell], city2: [gi.surfCells, 0, 0, 0] },
+        uniforms: { time: 0, night: 0, pad1: 0, pad2: 0, city: [gi.half, gi.paintCell, gi.paintCells, gi.surfCell], city2: [gi.surfCells, 0, 0, 0], open: [-1, -1, 0, 0] },
     }).then(() => {
         shaderReady = true;
         ground.setShaderTexture('pos', {

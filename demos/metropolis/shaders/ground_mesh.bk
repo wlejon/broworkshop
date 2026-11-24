@@ -22,6 +22,7 @@ struct GroundParams {
     pad2: f32,
     city: vec4<f32>,     // half, cell, cells, surf cell
     city2: vec4<f32>,    // surf cells
+    open: vec4<f32>,     // the open building's masses [x, y) (lib/city/interior.js): no ground inside them
 }
 
 @binding(4, 0) var params: uniform<GroundParams>;
@@ -31,6 +32,26 @@ struct GroundParams {
 @binding(4, 16) var cell_start: read_buffer<i32>;
 @binding(4, 17) var cell_segs: read_buffer<i32>;
 @binding(4, 18) var surf: read_buffer<u32>;
+@binding(4, 19) var masses: read_buffer<vec4<f32>>;   // lib/city/buildings.js records, 4 a mass
+
+// Inside a mass of the open building: a building stands at its street
+// front's height and cuts into a rise behind, so the ground there is above
+// its floor, hidden by its walls until its rooms are shown.
+fn in_open(p: vec2<f32>) -> bool {
+    let a = params.open.x as i32;
+    let b = min(params.open.y as i32, a + 8);
+    if a < 0 || masses.len() == 0 { return false; }
+    for (var k: i32 = a; k < b; k += 1) {
+        let m0 = masses[4 * k];
+        let m1 = masses[4 * k + 1];
+        let c = cos(m0.w);
+        let sn = sin(m0.w);
+        let dx = p.x - m0.x;
+        let dz = p.y - m0.z;
+        if abs(c * dx - sn * dz) < m1.x && abs(sn * dx + c * dz) < m1.z { return true; }
+    }
+    return false;
+}
 
 fn pos_at(slot: i32, x: i32, y: i32) -> vec4<f32> {
     let cell = slot & 3;
@@ -207,6 +228,10 @@ fn block_surface(code: i32, p: vec2<f32>, fw: f32, nat: vec3<f32>, var_k: f32) -
 pub fn fragment(v: mesh::Vertex, s_in: mesh::Surface) -> mesh::Surface {
     var s = s_in;
     let p = v.v1.xy;
+    if in_open(p) {
+        s.alpha = 0.0;
+        return s;
+    }
     let h = v.v1.z;
     let rd = v.v0.w;
     let fw = max(length(dpdx(v.world_pos.xz)) + length(dpdy(v.world_pos.xz)), 0.02);

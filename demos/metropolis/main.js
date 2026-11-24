@@ -48,6 +48,9 @@ const NIGHT = { day: 0, dusk: 0.55, night: 1 };
 const sky = daylight(scene, { presets: SKY_PRESETS, order: ['day', 'dusk', 'night'], pcf: 2, ground: [0.09, 0.13, 0.06] });
 sky.apply('day');
 sky.setScale(16);
+// Contact shading at a room's scale (corners, under shelves and desks); from
+// a street or the air it is under a pixel and costs the same.
+scene.setSSAO({ enabled: true, radius: 0.6, intensity: 1, bias: 0.02 });
 
 const water = createRiverWater(scene);
 const cam = createFlyCamera(canvas, scene);
@@ -79,8 +82,12 @@ let interiors = null;
 const ready = Promise.all([
     // The bridges: decks along the graph's bridge edges, on piers in the river.
     createBridges(scene, city.graph, readLib('city/bridge.bk'), { waterBed: RIVER_BED_Y - 1 }).then((b) => { bridges = b; }),
-    terrain.whenReady(),
-    createBuildingRenderer(scene, city.masses, readLib('city/building.bk')).then((b) => { buildings = b; interiors = createInteriors(scene, city.masses, b.walls); }),
+    // The interiors cut the open building's footprint out of the ground too.
+    Promise.all([terrain.whenReady(), createBuildingRenderer(scene, city.masses, readLib('city/building.bk'))]).then(([, b]) => {
+        buildings = b;
+        terrain.node.setShaderBuffer('masses', b.masses);
+        interiors = createInteriors(scene, city.masses, b.walls, [terrain.node]);
+    }),
     // Traffic on the road graph, simulated in a worker: lanes both ways, lights at the junctions.
     createTrafficRenderer(scene, city.graph, city.field.density, readLib('city/car.bk'), { count: 12000, lines: city.transit }).then((c) => { cars = c; }),
 ]).then(() => { if (statusEl) statusEl.textContent = 'ready'; });
