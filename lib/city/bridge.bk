@@ -38,6 +38,60 @@ fn pulse(x: f32, a: f32, b: f32, f: f32) -> f32 {
     return (pulse_int(x + h, a, b) - pulse_int(x - h, a, b)) / (2.0 * h);
 }
 
+fn sstep(a: f32, b: f32, x: f32) -> f32 {
+    let t = clamp((x - a) / (b - a), 0.0, 1.0);
+    return t * t * (3.0 - 2.0 * t);
+}
+
+fn hash2(p: vec2<f32>) -> f32 {
+    var q = fract(vec3<f32>(p.x, p.y, p.x) * 0.1031);
+    let d = dot(q, vec3<f32>(q.y + 33.33, q.z + 33.33, q.x + 33.33));
+    q = q + vec3<f32>(d);
+    return fract((q.x + q.y) * q.z);
+}
+
+fn vnoise2(p: vec2<f32>) -> f32 {
+    let i = floor(p);
+    let f = fract(p);
+    let u = f * f * (vec2<f32>(3.0, 3.0) - f * 2.0);
+    return mix(mix(hash2(i), hash2(i + vec2<f32>(1.0, 0.0)), u.x),
+               mix(hash2(i + vec2<f32>(0.0, 1.0)), hash2(i + vec2<f32>(1.0, 1.0)), u.x), u.y);
+}
+
+// Cellular noise: (nearest jittered point's distance, second nearest's, nearest's cell).
+fn worley(p: vec2<f32>) -> vec4<f32> {
+    let i = floor(p);
+    var f1 = 9.0;
+    var f2 = 9.0;
+    var id = vec2<f32>(0.0);
+    for (var y = -1; y <= 1; y += 1) {
+        for (var x = -1; x <= 1; x += 1) {
+            let c = i + vec2<f32>(x as f32, y as f32);
+            let o = vec2<f32>(hash2(c), hash2(c + vec2<f32>(19.1, 7.3)));
+            let d = length(c + o - p);
+            if (d < f1) { f2 = f1; f1 = d; id = c; } else if (d < f2) { f2 = d; }
+        }
+    }
+    return vec4<f32>(f1, f2, id.x, id.y);
+}
+
+// A sparse network of ~1 cm cracks, its mean darkening kept as it shrinks below a pixel.
+fn cracks(p: vec2<f32>, fw: f32) -> f32 {
+    let m = sstep(0.55, 0.75, vnoise2(p * 0.08 + vec2<f32>(3.1, 7.7)));
+    if (m <= 0.0) { return 0.0; }
+    let q = p * 1.4 + vec2<f32>(vnoise2(p * 7.0), vnoise2(p * 7.0 + vec2<f32>(3.0, 9.0))) * 0.35;
+    let c = worley(q);
+    let d = (c.y - c.x) / (2.0 * 1.4);
+    let w = 0.004 + fw * 0.5;
+    return m * (1.0 - sstep(0.0, w, d)) * min(1.0, 0.008 / w);
+}
+
+pub fn vertex(v_in: mesh::Vertex) -> mesh::Vertex {
+    var v = v_in;
+    v.v0 = vec4<f32>(v.pos, 0.0);   // the deck mesh is in world space: its height for the concrete's courses
+    return v;
+}
+
 pub fn fragment(v: mesh::Vertex, s_in: mesh::Surface) -> mesh::Surface {
     var s = s_in;
     let kind = (v.color.x + 0.5) as i32;
@@ -45,12 +99,33 @@ pub fn fragment(v: mesh::Vertex, s_in: mesh::Surface) -> mesh::Surface {
     let u = v.uv.x;
     let sa = v.uv.y;
     let au = abs(u);
-    let fw = abs(dpdx(u)) + abs(dpdy(u)) + abs(dpdx(sa)) + abs(dpdy(sa)) + 0.002;
+    let fwn = abs(dpdx(u)) + abs(dpdy(u)) + abs(dpdx(sa)) + abs(dpdy(sa));
+    let fw = fwn + 0.002;
+    let py = v.v0.y;
+    let fy = abs(dpdx(py)) + abs(dpdy(py)) + 0.002;
+    let near = 1.0 - smoothstep(0.012, 0.05, fwn);
+    let mid = 1.0 - smoothstep(0.05, 0.3, fwn);
     s.metallic = 0.0;
     var c = vec3<f32>(0.46, 0.45, 0.42);
     s.roughness = 0.85;
+    let drift = 0.9 + 0.2 * vnoise2(vec2<f32>(sa * 0.07, u * 0.2 + py * 0.1));
     if (kind == 0) {
         c = vec3<f32>(0.055, 0.056, 0.058);
+        // The street's asphalt: aggregate up close, patch repairs, cracks.
+        if (near > 0.0) {
+            let wc = worley(vec2<f32>(u, sa) * 45.0);
+            let ag = hash2(wc.zw);
+            let binder = 1.0 - sstep(0.08, 0.25 + fwn * 45.0, wc.y - wc.x);
+            c *= 1.0 + near * (0.5 * (ag - 0.5) - 0.35 * (binder - 0.3));
+        }
+        let pc = vec2<f32>(floor(sa / 8.0), floor(au / 3.4));
+        let ph = hash2(pc + vec2<f32>(17.0, 3.0));
+        if (ph > 0.85) {
+            let inside = band(fract(sa / 8.0), 0.15, 0.7, fw / 8.0) * band(fract(au / 3.4), 0.1, 0.9, fw / 3.4);
+            c *= mix(1.0, select(ph > 0.92, 0.7, 1.25), inside);
+        }
+        c *= 1.0 - 0.6 * cracks(vec2<f32>(u, sa), fwn);
+        c *= drift;
         let lane_w = 3.4;
         var paint = band(au, hw - 0.45, hw - 0.3, fw);
         let lanes = floor(hw / lane_w);
@@ -60,13 +135,43 @@ pub fn fragment(v: mesh::Vertex, s_in: mesh::Surface) -> mesh::Surface {
             }
         }
         let yellow = band(au, 0.08, 0.22, fw);
-        c = mix(c, vec3<f32>(0.62, 0.62, 0.60), paint);
-        c = mix(c, vec3<f32>(0.55, 0.40, 0.08), yellow);
+        let wear = sstep(0.5, 0.85, vnoise2(vec2<f32>(u, sa) * 1.3 + vec2<f32>(4.0, 8.0)));
+        c = mix(c, vec3<f32>(0.62, 0.62, 0.60), paint * (1.0 - 0.6 * wear));
+        c = mix(c, vec3<f32>(0.55, 0.40, 0.08), yellow * (1.0 - 0.6 * wear));
         s.roughness = 0.9;
+        // Expansion joints across the deck every 40 m: a steel finger plate.
+        let jk = band(fract(sa / 40.0) * 40.0, 0.0, 0.4, fw);
+        if (jk > 0.0) {
+            let fingers = pulse(u / 0.12, 0.0, 0.5, fw / 0.12) * band(fract(sa / 40.0) * 40.0, 0.15, 0.25, fw);
+            let steel = mix(vec3<f32>(0.22, 0.22, 0.23), vec3<f32>(0.02, 0.02, 0.02), fingers);
+            c = mix(c, steel, jk);
+            s.metallic = 0.6 * jk * (1.0 - fingers);
+            s.roughness = mix(0.9, 0.45, jk);
+        }
     } else if (kind == 1) {
+        // Slabs, each its own pour, weathered and cracked.
+        let slab = floor(vec2<f32>(sa, au) / 1.5);
         c = vec3<f32>(0.30, 0.29, 0.27) * (1.0 - 0.25 * pulse(sa / 1.5, 0.0, 0.02, fw / 1.5));
+        c *= 1.0 + 0.16 * (hash2(slab + vec2<f32>(41.0, 13.0)) - 0.5) * mid;
+        c *= (1.0 - 0.5 * cracks(vec2<f32>(u, sa) + vec2<f32>(31.0, 17.0), fwn)) * drift;
+    } else if (kind == 2) {
+        // Board-formed concrete: the forms' joints every 0.3 m up, tie holes
+        // on a 0.6 m grid, rain streaks run down from the coping, dirt at the foot.
+        c *= 1.0 - 0.12 * pulse(py / 0.3, 0.0, 0.03, fy / 0.3);
+        let board = floor(py / 0.3);
+        c *= 1.0 + 0.08 * (hash2(vec2<f32>(board, floor(sa / 2.4))) - 0.5) * mid;
+        let tq = vec2<f32>(fract(sa / 0.6) - 0.5, fract(py / 0.6) - 0.5) * 0.6;
+        c *= 1.0 - 0.6 * near * (1.0 - smoothstep(0.012, 0.018, length(tq)));
+        let streak = vnoise2(vec2<f32>(sa * 3.0, py * 0.15)) * vnoise2(vec2<f32>(sa * 0.5, 2.0));
+        c *= 1.0 - 0.35 * sstep(0.15, 0.55, streak) * mix(0.6, 1.0, mid);
+        c *= drift;
     } else if (kind == 3) {
-        c = vec3<f32>(0.30, 0.30, 0.29);
+        // Under the deck: damp patches, white efflorescence wept from the joints.
+        c = vec3<f32>(0.30, 0.30, 0.29) * drift;
+        c *= 1.0 - 0.3 * sstep(0.5, 0.8, vnoise2(vec2<f32>(u * 0.4, sa * 0.15)));
+        let jd = fract(sa / 40.0) * 40.0;
+        let eff = (1.0 - sstep(0.0, 1.5, min(jd, 40.0 - jd))) * vnoise2(vec2<f32>(u * 3.0, sa * 1.0));
+        c = mix(c, vec3<f32>(0.62, 0.61, 0.58), 0.6 * sstep(0.35, 0.75, eff));
     }
     s.base_color = c;
 
