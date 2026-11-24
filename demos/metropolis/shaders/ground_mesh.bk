@@ -275,8 +275,17 @@ pub fn fragment(v: mesh::Vertex, s_in: mesh::Surface) -> mesh::Surface {
     }
     let h = v.v1.z;
     let rd = v.v0.w;
-    // The pixel's footprint: floored at 2 cm for the markings, true for the close-up grain.
-    let fwn = max(length(dpdx(v.world_pos.xz)) + length(dpdy(v.world_pos.xz)), 0.0005);
+    // The pixel's footprint. Seen at a grazing angle it is long toward the
+    // horizon and narrow across: a pattern that varies along one direction
+    // is filtered by the footprint along that direction (foot_along), so a
+    // lane line far down a street stays a line, not a smear the pixel's
+    // depth wide. 2D grain fades on the narrow axis, the long one held to
+    // four times it (more would alias: there is no temporal filter).
+    let jx = dpdx(v.world_pos.xz);
+    let jy = dpdy(v.world_pos.xz);
+    let major = max(length(jx), length(jy));
+    let minor = min(length(jx), length(jy));
+    let fwn = max(max(minor, major * 0.25), 0.0005);
     let fw = max(fwn, 0.02);
 
     // Continuous world-space macro biome weights (zero tile-boundary quantization seams)
@@ -369,6 +378,13 @@ pub fn fragment(v: mesh::Vertex, s_in: mesh::Surface) -> mesh::Surface {
         let hwid = b_best.z;
         let walk = b_best.w;
         if (best < walk + 0.5) {
+            // Footprints across the road (u, the curb, the lines) and along it
+            // (the dashes, the slabs' joints, the patches).
+            let acr = vec2<f32>(-dir_best.y, dir_best.x);
+            let fu = max(abs(dot(jx, acr)) + abs(dot(jy, acr)), 0.02);
+            let fs = max(abs(dot(jx, dir_best)) + abs(dot(jy, dir_best)), 0.02);
+            // (Distance from the curb runs along out_best: near the curb, across.)
+            let fb = max(abs(dot(jx, out_best)) + abs(dot(jy, out_best)), 0.02);
             let L = c_best.y;
             let major = c_best.z < 0.5;
             let flags = c_best.w as i32;
@@ -382,7 +398,7 @@ pub fn fragment(v: mesh::Vertex, s_in: mesh::Surface) -> mesh::Surface {
 
             // Sidewalk: concrete slabs, a granite curb at its road edge.
             let slab_v = 1.0 - smoothstep(0.08, 0.25, fw);
-            let joints = max(stripes(sa, 1.5, 0.03, fw), stripes(best, 1.5, 0.03, fw)) * slab_v;
+            let joints = max(stripes(sa, 1.5, 0.03, fs), stripes(best, 1.5, 0.03, fb)) * slab_v;
             // Each slab its own pour (a tone), weathered in drifts, cracked
             // here and there; its edges chamfered into the joints.
             let slab = floor(vec2<f32>(sa, best) / 1.5);
@@ -390,8 +406,8 @@ pub fn fragment(v: mesh::Vertex, s_in: mesh::Surface) -> mesh::Surface {
             let stain = 1.0 - 0.18 * sstep(0.55, 0.85, vnoise2(p * 0.6 + vec2<f32>(9.0, 2.0)));
             var walk_c = vec3<f32>(0.30, 0.29, 0.27) * (1.0 - 0.25 * joints) * var_k * slab_t * stain;
             walk_c *= 1.0 - 0.5 * cracks(p + vec2<f32>(31.0, 17.0), fwn);
-            walk_c = mix(walk_c, vec3<f32>(0.36, 0.36, 0.35), band(best, 0.0, 0.25, fw));
-            let bev_k = (1.0 - smoothstep(0.008, 0.03, fwn)) * band(best, 0.25, walk, fw);
+            walk_c = mix(walk_c, vec3<f32>(0.36, 0.36, 0.35), band(best, 0.0, 0.25, fb));
+            let bev_k = (1.0 - smoothstep(0.008, 0.03, fwn)) * band(best, 0.25, walk, fb);
             walk_t = (dir_best * bevel(sa, 1.5) + out_best * bevel(best, 1.5)) * bev_k;
             // Asphalt, worn lighter along the wheel tracks.
             var road_c = vec3<f32>(0.055, 0.056, 0.058) * var_k;
@@ -406,7 +422,8 @@ pub fn fragment(v: mesh::Vertex, s_in: mesh::Surface) -> mesh::Surface {
             // crossing road's along the box's diagonals. The tracks fade to
             // their mean.)
             let jk = sstep(jr - 2.0, jr + 2.0, sj);
-            let track = mix(0.32, exp(-t0 * t0) + exp(-t1 * t1), jk);
+            // (Their mean, 0.32, once a pixel spans a track across.)
+            let track = mix(0.32, exp(-t0 * t0) + exp(-t1 * t1), jk * (1.0 - smoothstep(0.15, 0.4, fu)));
             road_c *= 1.0 + 0.12 * track;
             // In their place the box is worn every way at once: polished in
             // drifts where the turns sweep, dark where cars wait and drip.
@@ -451,7 +468,7 @@ pub fn fragment(v: mesh::Vertex, s_in: mesh::Surface) -> mesh::Surface {
             if (ph > 0.8 && jk > 0.0) {
                 let x0 = 0.08 + 0.3 * hash2(pc + vec2<f32>(1.7, 0.0));
                 let x1 = min(0.95, x0 + 0.25 + 0.4 * hash2(pc + vec2<f32>(2.9, 0.0)));
-                let inside = band(fract(sa / 8.0), x0, x1, fw / 8.0) * band(fract(au / lane_w), 0.1, 0.9, fw / lane_w);
+                let inside = band(fract(sa / 8.0), x0, x1, fs / 8.0) * band(fract(au / lane_w), 0.1, 0.9, fu / lane_w);
                 road_c *= mix(1.0, ph > 0.9 ? 0.7 : 1.25, inside * jk);
             }
             // Oil down each lane's middle, and cracks.
@@ -464,27 +481,27 @@ pub fn fragment(v: mesh::Vertex, s_in: mesh::Surface) -> mesh::Surface {
             if (!junction) {
                 if (major) {
                     // Double yellow centre, dashed lane lines, solid edge lines.
-                    yellow = band(au, 0.08, 0.22, fw);
+                    yellow = band(au, 0.08, 0.22, fu);
                     let lanes = floor(hwid / lane_w);
                     for (var li = 1.0; li < 4.0; li += 1.0) {
                         if (li < lanes) {
-                            paint = max(paint, band(au, li * lane_w - 0.07, li * lane_w + 0.07, fw) * stripes(sa, 9.0, 0.33, fw));
+                            paint = max(paint, band(au, li * lane_w - 0.07, li * lane_w + 0.07, fu) * stripes(sa, 9.0, 0.33, fs));
                         }
                     }
-                    paint = max(paint, band(au, hwid - 0.45, hwid - 0.3, fw));
+                    paint = max(paint, band(au, hwid - 0.45, hwid - 0.3, fu));
                 } else {
                     // A dashed white centre line on streets.
-                    paint = band(au, -0.06, 0.06, fw) * stripes(sa, 6.0, 0.45, fw);
+                    paint = band(au, -0.06, 0.06, fu) * stripes(sa, 6.0, 0.45, fs);
                 }
             }
             // Crosswalks just outside the junction box, a stop line before them.
             if (sj > jr && sj < jr + 3.2 && au < hwid - 0.2) {
-                paint = max(paint, stripes(au + 0.25, 1.0, 0.5, fw));
+                paint = max(paint, stripes(au + 0.25, 1.0, 0.5, fu));
             }
             if (sj > jr + 3.6 && sj < jr + 4.1 && major) {
                 // stop line on the inbound half only
                 let inbound = ((flags & 1) != 0 && sa < sb) == (u > 0.0);
-                if (inbound && au < hwid - 0.3) { paint = max(paint, band(sj, jr + 3.6, jr + 4.1, fw)); }
+                if (inbound && au < hwid - 0.3) { paint = max(paint, band(sj, jr + 3.6, jr + 4.1, fs)); }
             }
             // Paint wears off in drifts, and the stones show through it.
             let wear = sstep(0.5, 0.85, vnoise2(p * 1.3 + vec2<f32>(4.0, 8.0)));
@@ -498,14 +515,14 @@ pub fn fragment(v: mesh::Vertex, s_in: mesh::Surface) -> mesh::Surface {
                 let lc = 1.7;
                 let r0 = abs(au - (lc - 0.7175));
                 let r1 = abs(au - (lc + 0.7175));
-                let rail = 1.0 - smoothstep(0.035, 0.035 + fw, min(r0, r1));
-                let groove = 1.0 - smoothstep(0.012, 0.012 + fw, min(r0, r1));
+                let rail = 1.0 - smoothstep(0.035, 0.035 + fu, min(r0, r1));
+                let groove = 1.0 - smoothstep(0.012, 0.012 + fu, min(r0, r1));
                 road_c = mix(road_c, vec3<f32>(0.30, 0.30, 0.31), rail * 0.9);
                 road_c = mix(road_c, vec3<f32>(0.02, 0.02, 0.02), groove * 0.8);
             }
             // Coverage of the carriageway against the sidewalk, and of the sidewalk against the block.
-            let on_road = band(best, -100.0, 0.0, fw);
-            let on_walk = band(best, 0.0, walk, fw);
+            let on_road = band(best, -100.0, 0.0, fb);
+            let on_walk = band(best, 0.0, walk, fb);
             base = mix(base, walk_c, on_walk);
             base = mix(base, road_c, on_road);
             road_t *= on_road;
