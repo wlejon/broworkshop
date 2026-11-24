@@ -808,6 +808,7 @@ pub fn fragment(v: mesh::Vertex, s_in: mesh::Surface) -> mesh::Surface {
         let sc = pick4(fract(hue * 13.7 + bay * 0.37), vec3<f32>(0.45, 0.08, 0.06), vec3<f32>(0.06, 0.20, 0.14), vec3<f32>(0.08, 0.10, 0.24), vec3<f32>(0.40, 0.30, 0.10));
         wall = mix(wall, sc, band(fy01, 0.78, 0.95, fy / fh));
     }
+    var door_glass = 0.0;    // a lobby door's glass leaves (glass towers)
     if (is_door) {
         var dw = band(bu, 0.3, 0.7, fu / bw) * band(fy01, 0.0, 0.62, fy / fh);
         var door_c = vec3<f32>(0.12, 0.08, 0.06);
@@ -818,7 +819,9 @@ pub fn fragment(v: mesh::Vertex, s_in: mesh::Surface) -> mesh::Surface {
             let lx = fract((bu - 0.03) / 0.47) * bw * 0.47;
             let ly = fy01 * fh;
             let pane = band(lx, 0.06, bw * 0.47 - 0.06, fu) * band(ly, 0.25, fh * 0.64 - 0.08, fy);
-            door_c = mix(vec3<f32>(0.32, 0.33, 0.34), vec3<f32>(0.02, 0.025, 0.03), pane);
+            // (The leaves' glass shows the lobby behind, dim, as the windows show their rooms.)
+            door_c = mix(vec3<f32>(0.32, 0.33, 0.34), vec3<f32>(0.04, 0.05, 0.056), pane);
+            door_glass = pane * dw;
         }
         wall = mix(wall, door_c, dw);
     }
@@ -873,7 +876,7 @@ pub fn fragment(v: mesh::Vertex, s_in: mesh::Surface) -> mesh::Surface {
     var g = win;
     if (rel_kind > 0) { g = mix(win, select(rel_kind == 1, 1.0, 0.0), rel_k); }
     var glow_k = g;
-    var rough_win = g;
+    var rough_win = max(g, door_glass);
     var wall_c = wall;
     var n_face = vec3<f32>(0.0, 0.0, 1.0);
     let stone = mix(vec3<f32>(0.70, 0.67, 0.60), wallc, 0.25);
