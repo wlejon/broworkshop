@@ -442,7 +442,10 @@ pub fn fragment(v: mesh::Vertex, s_in: mesh::Surface) -> mesh::Surface {
         fl = floor(yf) + 1.0;
         fy01 = fract(yf);
     }
-    let nb = max(1.0, floor(W / L.bay + 0.5));
+    // (Rounded with a margin: W comes interpolated, so a face whose width is
+    // a whole and a half bays (24 m of 3.2 m bays) would round both ways
+    // pixel by pixel. interior.js rounds the same.)
+    let nb = max(1.0, floor(W / L.bay + 0.501));
     let bw = W / nb;
     let ub = u / bw;
     let bay = floor(ub);
