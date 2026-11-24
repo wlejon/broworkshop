@@ -357,9 +357,21 @@ struct Fac {
     style: i32,
     shop: bool,      // a shop front on the ground floor
     door: bool,      // the street door in its middle bay
+    loggia: bool,    // a residential street front: some bays open into loggias
+    id: f32,         // the building's, for which bays
 }
 
-const RELIEF_MAX: f32 = 0.45;   // the deepest a face goes behind its box
+const RELIEF_MAX: f32 = 1.3;    // the deepest a face goes behind its box (a loggia's back)
+const LOGGIA_D: f32 = 1.1;      // a loggia's depth behind the wall
+
+// Whether the bay `bay` of floor `fl` (1 the first above the ground floor)
+// is a loggia: a third of a residential front's middle bays, stacked in
+// columns more often than not (a building's balconies line up).
+fn is_loggia(f: Fac, bay: f32, nb: f32, fl: f32) -> bool {
+    if (!f.loggia || bay < 1.0 || bay > nb - 2.0 || fl < 1.0) { return false; }
+    let col = hash3(bay, 1.0, f.id + 13.0) < 0.4;
+    return select(col, hash3(bay, fl, f.id + 17.0) < 0.85, hash3(bay, fl, f.id + 19.0) < 0.08);
+}
 
 fn masonry_style(st: i32) -> bool {
     return st == STYLE_BRICK || st == STYLE_ROW || st == STYLE_STONE || st == STYLE_STUCCO || st == STYLE_PLASTER;
@@ -419,6 +431,18 @@ fn fac_depth(f: Fac, u0: f32, y: f32) -> f32 {
         return min(d, 0.02);
     }
     if (f.door && ground && bay == floor(nb * 0.5) && bu > 0.3 && bu < 0.7 && fy01 < 0.62) { return wall + 0.28; }
+    // A loggia: the bay open from its floor slab to its head, LOGGIA_D deep,
+    // behind a solid balustrade standing at the box to 1.05 m.
+    if (!ground && !top) {
+        let fl = floor((y - f.ground_h) / f.floor_h) + 1.0;
+        if (is_loggia(f, bay, nb, fl) && bu > 0.06 && bu < 0.94) {
+            let yy = fy01 * fh;
+            if (yy < 0.12 || yy > fh * 0.88) { return d; }      // the slabs' edges, at the wall
+            if (yy > 0.99 && yy < 1.05) { return 0.0; }          // the balustrade's coping, at the box
+            if (yy < 1.05) { return 0.06; }                      // the balustrade, in the wall's material
+            return wall + LOGGIA_D;
+        }
+    }
     let windows = !top && !(corner < 0.6) && !(f.door && ground && bay == floor(nb * 0.5));
     if (windows) {
         let wx0 = L.wx0 * bw;
@@ -614,7 +638,9 @@ pub fn fragment(v: mesh::Vertex, s_in: mesh::Surface) -> mesh::Surface {
     let rel_k = 1.0 - smoothstep(0.02, 0.06, fpx);
     let base_y = y - fy01 * fh;
     let masonry = masonry_style(style);
-    let fac = Fac(W, h, floor_h, ground_h, style, shop, front && (flags & 1) != 0 && !shop && style != STYLE_INDUSTRIAL);
+    let residential = style == STYLE_BRICK || style == STYLE_ROW || style == STYLE_STUCCO || style == STYLE_PLASTER || style == STYLE_SIDING;
+    let fac = Fac(W, h, floor_h, ground_h, style, shop, front && (flags & 1) != 0 && !shop && style != STYLE_INDUSTRIAL,
+                  residential && front && h > 8.0, id);
     var wall_d = 0.05;
     if (style == STYLE_GLASS) { wall_d = 0.0; }
     else if (masonry) { wall_d = 0.10; }
@@ -624,6 +650,7 @@ pub fn fragment(v: mesh::Vertex, s_in: mesh::Surface) -> mesh::Surface {
     var rel_d = 0.0;                         // depth of what the eye meets
     var rel_p = vec2<f32>(u, y);             // where, across the face
     var rel_sun = 1.0;
+    var in_door = false;
     if (rel_k > 0.0 && dr.z > 0.02) {
         // March the eye ray down through the depths (per metre of depth),
         // then halve the step it crossed in.
@@ -631,8 +658,10 @@ pub fn fragment(v: mesh::Vertex, s_in: mesh::Surface) -> mesh::Surface {
         var a = 0.0;
         var b = -1.0;
         if (fac_depth(fac, u, y) <= 0.001) { b = 0.0; }
-        for (var i = 1; i <= 20; i += 1) {
-            let t = f32(i) * (RELIEF_MAX / 20.0);
+        // (Steps finer near the face, where the sills and courses are thin.)
+        for (var i = 1; i <= 24; i += 1) {
+            let q = f32(i) / 24.0;
+            let t = RELIEF_MAX * q * sqrt(q);
             if (b < 0.0) {
                 if (fac_depth(fac, u + rd.x * t, y + rd.y * t) <= t) { b = t; } else { a = t; }
             }
@@ -657,8 +686,11 @@ pub fn fragment(v: mesh::Vertex, s_in: mesh::Surface) -> mesh::Surface {
                 rel_kind = 3;
                 rel_d = db;
                 rel_p = vec2<f32>(u + rd.x * db, y + rd.y * db);
-                let in_door = fac.door && rel_p.y < ground_h && floor(rel_p.x / bw) == floor(nb * 0.5);
-                if (db > wall_d + 0.03 && !in_door) { rel_kind = 1; }
+                in_door = fac.door && rel_p.y < ground_h && floor(rel_p.x / bw) == floor(nb * 0.5);
+                // Glass: deep, and in a window's opening (a loggia's back is wall round its window).
+                let r = win_rect(fac, rel_p.x, rel_p.y);
+                let in_win = rel_p.x > r.x && rel_p.x < r.y && rel_p.y > r.z && rel_p.y < r.w;
+                if (db > wall_d + 0.03 && !in_door && in_win) { rel_kind = 1; }
             }
             // The sun back out from there: blocked where the facade stands
             // nearer than its ray.
@@ -838,7 +870,7 @@ pub fn fragment(v: mesh::Vertex, s_in: mesh::Surface) -> mesh::Surface {
         else if ((style == STYLE_BRICK || style == STYLE_ROW) && rel_d > 0.05) { wall_c = wall * 0.82; }
         else if (masonry) { wall_c = stone; }
         else { wall_c = wall * 1.06; }
-    } else if (rel_kind == 3 && fac.door && rel_d > wall_d + 0.03) {
+    } else if (rel_kind == 3 && in_door && rel_d > wall_d + 0.03) {
         wall_c = vec3<f32>(0.12, 0.08, 0.06);
     }
     if (rel_kind == 1) {
