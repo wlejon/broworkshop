@@ -332,6 +332,124 @@ fn pulse(x: f32, a: f32, b: f32, f: f32) -> f32 {
 }
 
 // ---------------------------------------------------------------------------
+// Relief: a face's depth behind its box, marched near the eye
+// ---------------------------------------------------------------------------
+
+// A wall face, for its relief.
+struct Fac {
+    W: f32,          // the face's width
+    h: f32,          // the mass's height
+    floor_h: f32,
+    ground_h: f32,
+    style: i32,
+    shop: bool,      // a shop front on the ground floor
+    door: bool,      // the street door in its middle bay
+}
+
+const RELIEF_MAX: f32 = 0.45;   // the deepest a face goes behind its box
+
+fn masonry_style(st: i32) -> bool {
+    return st == STYLE_BRICK || st == STYLE_ROW || st == STYLE_STONE || st == STYLE_STUCCO || st == STYLE_PLASTER;
+}
+
+// How far behind the box face the facade is at (u, y), metres (>= 0): the
+// wall a little in, so what stands proud of it (quoins, string courses, the
+// cornice, sills, window surrounds, pilasters, mullions) reaches the box;
+// windows and doors set back from the wall.
+fn fac_depth(f: Fac, u0: f32, y: f32) -> f32 {
+    let st = f.style;
+    let u = clamp(u0, 0.0, f.W);
+    let ground = y < f.ground_h;
+    let L = layout_for(st, ground, f.shop);
+    let nb = max(1.0, floor(f.W / L.bay + 0.501));
+    let bw = f.W / nb;
+    let bay = floor(u / bw);
+    let bu = u / bw - bay;
+    var fh = f.floor_h;
+    var fy01 = 0.0;
+    var base = 0.0;
+    if (ground) { fh = f.ground_h; fy01 = y / f.ground_h; }
+    else { let yf = (y - f.ground_h) / f.floor_h; fy01 = fract(yf); base = f.ground_h + floor(yf) * f.floor_h; }
+    let inwin = bu > L.wx0 && bu < L.wx1 && fy01 > L.wy0 && fy01 < L.wy1;
+    let corner = min(u, f.W - u);
+    let top = y > f.h - 0.9;
+
+    if (st == STYLE_GLASS) {
+        // Curtain wall: the glass 6 cm behind its mullions and spandrels.
+        if (ground && f.shop) { return select(inwin, 0.16, 0.02); }
+        return select(inwin && !top, 0.06, 0.0);
+    }
+    let masonry = masonry_style(st);
+    var wall = 0.05;
+    if (masonry) { wall = 0.10; }
+    else if (st == STYLE_SIDING || st == STYLE_INDUSTRIAL) { wall = 0.03; }
+    var d = wall;
+    // Quoins (masonry) and corner boards stand at the box.
+    if (corner < 0.45 && st != STYLE_INDUSTRIAL) { d = 0.0; }
+    // Office fronts: a pilaster between every two bays.
+    if (st == STYLE_OFFICE && !ground && abs(bu - 0.5) > 0.47) { d = 0.0; }
+    // A string course over the ground floor and at every floor (masonry).
+    if (masonry && abs(y - f.ground_h) < 0.12) { d = min(d, 0.02); }
+    if (masonry && !ground && fy01 * fh < 0.10 && st != STYLE_ROW) { d = min(d, 0.04); }
+    // The cornice, stepped out to the box.
+    if ((masonry || st == STYLE_OFFICE) && y > f.h - 0.7) {
+        let k = (y - (f.h - 0.7)) / 0.7;
+        d = min(d, wall * (1.0 - floor(min(k, 0.999) * 3.0 + 1.0) / 3.0));
+    }
+    // The ground floor's stone in courses (rusticated), on stone fronts.
+    if (st == STYLE_STONE && ground && !f.shop && fract(y / 0.55) < 0.08) { d = d + 0.025; }
+    if (ground && f.shop) {
+        // A shop front: pilasters at the box between the windows, a fascia
+        // standing out over them, the glass set back.
+        if (fy01 > 0.76 && fy01 < 0.97) { return 0.0; }
+        if (inwin) { return wall + 0.14; }
+        return min(d, 0.02);
+    }
+    if (f.door && ground && bay == floor(nb * 0.5) && bu > 0.3 && bu < 0.7 && fy01 < 0.62) { return wall + 0.28; }
+    let windows = !top && !(corner < 0.6) && !(f.door && ground && bay == floor(nb * 0.5));
+    if (windows) {
+        let wx0 = L.wx0 * bw;
+        let wx1 = L.wx1 * bw;
+        let wy0 = L.wy0 * fh;
+        let wy1 = L.wy1 * fh;
+        let x = bu * bw;
+        let yy = fy01 * fh;
+        if (inwin) {
+            var rec = 0.2;
+            if (st == STYLE_OFFICE) { rec = 0.14; }
+            else if (st == STYLE_SIDING) { rec = 0.1; }
+            else if (st == STYLE_INDUSTRIAL) { rec = 0.12; }
+            else if (st == STYLE_STONE) { rec = 0.28; }
+            return wall + rec;
+        }
+        // The sill, at the box, 7 cm deep and 8 cm past the jambs.
+        if (masonry && yy > wy0 - 0.07 && yy <= wy0 && x > wx0 - 0.08 && x < wx1 + 0.08) { return 0.0; }
+        // A surround (stone, stucco, plaster): 12 cm about the opening, half way out.
+        if ((st == STYLE_STONE || st == STYLE_STUCCO || st == STYLE_PLASTER) && x > wx0 - 0.12 && x < wx1 + 0.12 && yy > wy0 && yy < wy1 + 0.12) {
+            return min(d, wall * 0.5);
+        }
+        // A brick front's lintel: a soldier course over the opening, proud by 2 cm.
+        if ((st == STYLE_BRICK || st == STYLE_ROW) && x > wx0 - 0.1 && x < wx1 + 0.1 && yy >= wy1 && yy < wy1 + 0.22) {
+            return min(d, wall - 0.02);
+        }
+    }
+    return d;
+}
+
+// The window opening (u0, u1, y0, y1) of the bay and floor holding (u, y).
+fn win_rect(f: Fac, u: f32, y: f32) -> vec4<f32> {
+    let ground = y < f.ground_h;
+    let L = layout_for(f.style, ground, f.shop);
+    let nb = max(1.0, floor(f.W / L.bay + 0.501));
+    let bw = f.W / nb;
+    let bay = floor(clamp(u, 0.0, f.W) / bw);
+    var fh = f.floor_h;
+    var base = 0.0;
+    if (ground) { fh = f.ground_h; } else { base = f.ground_h + floor((y - f.ground_h) / f.floor_h) * f.floor_h; }
+    return vec4<f32>((bay + L.wx0) * bw, (bay + L.wx1) * bw, base + L.wy0 * fh, base + L.wy1 * fh);
+}
+
+// ---------------------------------------------------------------------------
 // Fragment
 // ---------------------------------------------------------------------------
 
@@ -506,6 +624,85 @@ pub fn fragment(v: mesh::Vertex, s_in: mesh::Surface) -> mesh::Surface {
         wall = mix(wall, wall * 0.75, band(y, h - 0.6, h - 0.35, fy));
     }
 
+    // Relief, near the eye (it fades out by the pixel's footprint): the
+    // windows set back in the wall, so the eye ray meets their glass deeper
+    // in, shifted, or a jamb, head or sill on the way; each lit by its own
+    // normal, the sky it sees and the sun traced back out through the
+    // opening (their shadows move with the sun). A stone sill stands out
+    // under the masonry windows and shades the wall below it.
+    let c = cos(yaw);
+    let sn = sin(yaw);
+    let dw = normalize(v.world_pos);
+    let dl = vec3<f32>(c * dw.x - sn * dw.z, dw.y, sn * dw.x + c * dw.z);
+    let dr = vec3<f32>(dot(dl, tloc), dl.y, -dot(dl, nloc));
+    let sw = s.to_sun;
+    let slc = vec3<f32>(c * sw.x - sn * sw.z, sw.y, sn * sw.x + c * sw.z);
+    let sf = vec3<f32>(dot(slc, tloc), slc.y, dot(slc, nloc));   // the sun in the face's frame, z out of it
+    let rel_k = 1.0 - smoothstep(0.02, 0.06, fpx);
+    let base_y = y - fy01 * fh;
+    let masonry = masonry_style(style);
+    let fac = Fac(W, h, floor_h, ground_h, style, shop, front && (flags & 1) != 0 && !shop && style != STYLE_INDUSTRIAL);
+    var wall_d = 0.05;
+    if (style == STYLE_GLASS) { wall_d = 0.0; }
+    else if (masonry) { wall_d = 0.10; }
+    else if (style == STYLE_SIDING || style == STYLE_INDUSTRIAL) { wall_d = 0.03; }
+    var rel_kind = 0;                        // 0 none, 1 glass, 2 a step's side (a reveal, a sill's face), 3 a flat of the facade
+    var rel_n = vec3<f32>(0.0, 0.0, 1.0);    // face frame: x along u, y up, z out of the wall
+    var rel_d = 0.0;                         // depth of what the eye meets
+    var rel_p = vec2<f32>(u, y);             // where, across the face
+    var rel_sun = 1.0;
+    if (rel_k > 0.0 && dr.z > 0.02) {
+        // March the eye ray down through the depths (per metre of depth),
+        // then halve the step it crossed in.
+        let rd = vec2<f32>(dr.x / dr.z, dr.y / dr.z);
+        var a = 0.0;
+        var b = -1.0;
+        if (fac_depth(fac, u, y) <= 0.001) { b = 0.0; }
+        for (var i = 1; i <= 20; i += 1) {
+            let t = f32(i) * (RELIEF_MAX / 20.0);
+            if (b < 0.0) {
+                if (fac_depth(fac, u + rd.x * t, y + rd.y * t) <= t) { b = t; } else { a = t; }
+            }
+        }
+        if (b > 0.0) {
+            for (var k = 0; k < 5; k += 1) {
+                let m = 0.5 * (a + b);
+                if (fac_depth(fac, u + rd.x * m, y + rd.y * m) <= m) { b = m; } else { a = m; }
+            }
+        }
+        if (b >= 0.0) {
+            let pb = vec2<f32>(u + rd.x * b, y + rd.y * b);
+            let db = fac_depth(fac, pb.x, pb.y);
+            if (b > 0.0 && db < b - 0.004) {
+                // The surface stepped up between a and b: the ray met its side.
+                rel_kind = 2;
+                rel_d = b;
+                rel_p = pb;
+                if (fac_depth(fac, pb.x, y + rd.y * a) < b - 0.004) { rel_n = vec3<f32>(-sign(rd.x), 0.0, 0.0); }
+                else { rel_n = vec3<f32>(0.0, -sign(rd.y), 0.0); }
+            } else {
+                rel_kind = 3;
+                rel_d = db;
+                rel_p = vec2<f32>(u + rd.x * db, y + rd.y * db);
+                let in_door = fac.door && rel_p.y < ground_h && floor(rel_p.x / bw) == floor(nb * 0.5);
+                if (db > wall_d + 0.03 && !in_door) { rel_kind = 1; }
+            }
+            // The sun back out from there: blocked where the facade stands
+            // nearer than its ray.
+            if (sf.z > 0.01 && rel_d > 0.0) {
+                let rs = vec2<f32>(sf.x / sf.z, sf.y / sf.z);
+                let p0 = rel_p + vec2<f32>(rel_n.x, rel_n.y) * 0.004;
+                var occ = 0.0;
+                for (var j = 1; j <= 10; j += 1) {
+                    let t = rel_d * f32(j) / 10.0;
+                    let q = p0 + rs * t;
+                    occ = max(occ, (rel_d - t) - fac_depth(fac, q.x, q.y));
+                }
+                rel_sun = 1.0 - smoothstep(0.0, 0.015, occ);
+            }
+        }
+    }
+
     // The room behind the window.
     let room_w = bw;
     let depth = min(7.0, min(hw, hd) * 1.2 + 1.0);
@@ -521,17 +718,13 @@ pub fn fragment(v: mesh::Vertex, s_in: mesh::Surface) -> mesh::Surface {
     let warm = mix(vec3<f32>(1.0, 0.78, 0.52), vec3<f32>(0.86, 0.92, 1.0), (style == STYLE_GLASS || style == STYLE_OFFICE) ? 0.6 : fract(rh * 4.3) * 0.3);
     let blinds = fract(rh * 11.3) < 0.35;
 
-    // The eye ray in the building's frame, then the room's.
-    let c = cos(yaw);
-    let sn = sin(yaw);
-    let dw = normalize(v.world_pos);
-    let dl = vec3<f32>(c * dw.x - sn * dw.z, dw.y, sn * dw.x + c * dw.z);
-    let dr = vec3<f32>(dot(dl, tloc), dl.y, -dot(dl, nloc));
+    // The eye ray (dr, above) into the room, from where it meets the glass.
     var room = Room(vec3<f32>(0.4, 0.38, 0.35), 0.8);
     let near_k = 1.0 - smoothstep(0.03, 0.12, fpx);   // rooms resolve within ~0.1 m pixels
-    if (near_k > 0.0 && win > 0.0 && dr.z > 0.0) {
-        let wx0 = L.wx0 * room_w;
-        let pr = vec3<f32>(bu * room_w, fy01 * fh, 0.0);
+    if (near_k > 0.0 && (win > 0.0 || rel_kind == 1) && dr.z > 0.0) {
+        let gu = select(rel_kind == 1, fract(rel_p.x / bw), bu);
+        let gy = select(rel_kind == 1, (rel_p.y - base_y) / fh, fy01);
+        let pr = vec3<f32>(clamp(gu, 0.0, 1.0) * room_w, clamp(gy, 0.0, 1.0) * fh, 0.0);
         room = room_hit(pr, dr, room_w, fh, depth, rh);
         if (blinds && fy01 > mix(L.wy0, L.wy1, 0.55)) { room = Room(mix(vec3<f32>(0.72, 0.68, 0.6), vec3<f32>(0.5, 0.52, 0.55), rh), 0.9); }
     }
@@ -552,7 +745,52 @@ pub fn fragment(v: mesh::Vertex, s_in: mesh::Surface) -> mesh::Surface {
     let glow = night_glow + day_glow * (1.0 - night);
 
     let glass = glass_tint(style, hue);
-    s.base_color = mix(wall, glass, win);
+    // Near, what the eye ray met decides glass or wall; far, the pixel's
+    // coverage (rel_k fades one into the other by the footprint).
+    var g = win;
+    if (rel_kind > 0) { g = mix(win, select(rel_kind == 1, 1.0, 0.0), rel_k); }
+    var glow_k = g;
+    var rough_win = g;
+    var wall_c = wall;
+    var n_face = vec3<f32>(0.0, 0.0, 1.0);
+    let stone = mix(vec3<f32>(0.70, 0.67, 0.60), wallc, 0.25);
+    if (rel_kind == 2) {
+        // A step's side: a reveal, the wall's material turned in.
+        wall_c = select(masonry, wallc * 0.9, vec3<f32>(0.32, 0.33, 0.34));
+        if (rel_d < wall_d - 0.005 && masonry) { wall_c = stone * 0.95; }
+        n_face = normalize(mix(n_face, rel_n, rel_k));
+    } else if (rel_kind == 3 && rel_d < wall_d - 0.005) {
+        // A flat proud of the wall: dressed stone on masonry (a brick
+        // front's lintels its own brick, darker), the wall's paint elsewhere.
+        if (shop && rel_p.y < ground_h) { wall_c = wall; }   // the shop's fascia and pilasters keep their paint
+        else if ((style == STYLE_BRICK || style == STYLE_ROW) && rel_d > 0.05) { wall_c = wall * 0.82; }
+        else if (masonry) { wall_c = stone; }
+        else { wall_c = wall * 1.06; }
+    } else if (rel_kind == 3 && fac.door && rel_d > wall_d + 0.03) {
+        wall_c = vec3<f32>(0.12, 0.08, 0.06);
+    }
+    if (rel_kind == 1) {
+        // The glass, framed: a painted frame of L.frame inside its opening.
+        let r = win_rect(fac, rel_p.x, rel_p.y);
+        let fr = L.frame * 0.6;
+        let in_frame = 1.0 - band(rel_p.x, r.x + fr, r.y - fr, fu) * band(rel_p.y, r.z + fr, r.w - fr, fy);
+        let frame_c = select(masonry, vec3<f32>(0.86, 0.85, 0.82), vec3<f32>(0.22, 0.23, 0.24));
+        wall_c = frame_c;
+        g *= 1.0 - in_frame * rel_k;
+        glow_k = g;
+        rough_win = mix(g, 1.0, in_frame * rel_k * 0.4);
+    }
+    s.base_color = mix(mix(wall, wall_c, rel_k), glass, g);
+    if (rel_kind > 0) {
+        // The sky a recess sees falls off with its depth; the sun as traced.
+        s.sky_visibility *= 1.0 - 0.5 * rel_k * smoothstep(0.0, 0.35, rel_d);
+        s.sun_visibility *= mix(1.0, rel_sun, rel_k);
+    }
+    if (rel_k > 0.0 && rel_kind == 2) {
+        // Face frame -> the building's -> the world's.
+        let nl = n_face.x * tloc + vec3<f32>(0.0, n_face.y, 0.0) + n_face.z * nloc;
+        s.normal = normalize(vec3<f32>(c * nl.x + sn * nl.z, nl.y, -sn * nl.x + c * nl.z));
+    }
 
     // The street lamps' light at night: a row of lamps (1600 cd, 30 m apart,
     // 8 m up) 7 m in front of the street front, as a line source:
@@ -567,9 +805,9 @@ pub fn fragment(v: mesh::Vertex, s_in: mesh::Surface) -> mesh::Surface {
         let e = 2.0 * 1600.0 * d / (30.0 * (d * d + dy * dy)) * face_k;
         lamp_lum = s.base_color * vec3<f32>(1.0, 0.82, 0.62) * (e * night / 3.14159265);
     }
-    s.roughness = mix(style == STYLE_GLASS ? 0.4 : 0.82, 0.06, win);
+    s.roughness = mix(style == STYLE_GLASS ? 0.4 : 0.82, 0.06, rough_win);
     s.metallic = 0.0;
-    s.emissive = glow * win + lamp_lum;
+    s.emissive = glow * glow_k + lamp_lum;
 
     // An open building (interior.js builds its rooms): the glass of its
     // windows and its door are cut over the floors built, to see in and go in.
