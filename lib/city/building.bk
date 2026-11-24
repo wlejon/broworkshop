@@ -622,7 +622,8 @@ pub fn fragment(v: mesh::Vertex, s_in: mesh::Surface) -> mesh::Surface {
     if (style != STYLE_GLASS && corner < 0.6) { win = 0.0; }
     let door_bay = floor(nb * 0.5);
     let is_door = front && ground && !shop && bay == door_bay && (flags & 1) != 0 && style != STYLE_INDUSTRIAL;
-    if (is_door) { win = 0.0; }
+    // (A tower's lobby doors fill their bay under a glass transom.)
+    if (is_door) { win = select(style == STYLE_GLASS, win * band(fy01, 0.64, 1.0, fy / fh), 0.0); }
     if (style == STYLE_INDUSTRIAL && ground && front && abs(u - W * 0.5) < 2.6 && y < 4.5) { win = 0.0; }
     let top_floor = y > h - 0.9 && style != STYLE_GLASS;
     if (top_floor) { win = 0.0; }
@@ -692,7 +693,7 @@ pub fn fragment(v: mesh::Vertex, s_in: mesh::Surface) -> mesh::Surface {
                 rel_kind = 3;
                 rel_d = db;
                 rel_p = vec2<f32>(u + rd.x * db, y + rd.y * db);
-                in_door = fac.door && rel_p.y < ground_h && floor(rel_p.x / bw) == floor(nb * 0.5);
+                in_door = fac.door && rel_p.y < ground_h * select(style == STYLE_GLASS, 0.64, 1.0) && floor(rel_p.x / bw) == floor(nb * 0.5);
                 // Glass: deep, and in a window's opening (a loggia's back is wall round its window).
                 let r = win_rect(fac, rel_p.x, rel_p.y);
                 let in_win = rel_p.x > r.x && rel_p.x < r.y && rel_p.y > r.z && rel_p.y < r.w;
@@ -808,8 +809,18 @@ pub fn fragment(v: mesh::Vertex, s_in: mesh::Surface) -> mesh::Surface {
         wall = mix(wall, sc, band(fy01, 0.78, 0.95, fy / fh));
     }
     if (is_door) {
-        let dw = band(bu, 0.3, 0.7, fu / bw) * band(fy01, 0.0, 0.62, fy / fh);
-        wall = mix(wall, vec3<f32>(0.12, 0.08, 0.06), dw);
+        var dw = band(bu, 0.3, 0.7, fu / bw) * band(fy01, 0.0, 0.62, fy / fh);
+        var door_c = vec3<f32>(0.12, 0.08, 0.06);
+        if (style == STYLE_GLASS) {
+            // A tower's lobby doors: a pair of glass leaves in aluminium
+            // frames across the bay, a kick plate at their foot.
+            dw = band(bu, 0.03, 0.97, fu / bw) * band(fy01, 0.0, 0.64, fy / fh);
+            let lx = fract((bu - 0.03) / 0.47) * bw * 0.47;
+            let ly = fy01 * fh;
+            let pane = band(lx, 0.06, bw * 0.47 - 0.06, fu) * band(ly, 0.25, fh * 0.64 - 0.08, fy);
+            door_c = mix(vec3<f32>(0.32, 0.33, 0.34), vec3<f32>(0.02, 0.025, 0.03), pane);
+        }
+        wall = mix(wall, door_c, dw);
     }
     if (top_floor && style != STYLE_SIDING && style != STYLE_PLASTER) {
         wall = mix(wall, wall * 0.75, band(y, h - 0.6, h - 0.35, fy));
@@ -880,7 +891,8 @@ pub fn fragment(v: mesh::Vertex, s_in: mesh::Surface) -> mesh::Surface {
         else if (masonry) { wall_c = stone; }
         else { wall_c = wall * 1.06; }
     } else if (rel_kind == 3 && in_door && rel_d > wall_d + 0.03) {
-        wall_c = vec3<f32>(0.12, 0.08, 0.06);
+        // (A lobby's glass leaves keep their frames, as drawn on the face.)
+        wall_c = select(style == STYLE_GLASS, wall, vec3<f32>(0.12, 0.08, 0.06));
     }
     if (rel_kind == 1) {
         // The glass, framed: a painted frame of L.frame inside its opening.
@@ -905,7 +917,22 @@ pub fn fragment(v: mesh::Vertex, s_in: mesh::Surface) -> mesh::Surface {
         let wt = wall_t * (1.0 - g);   // the wall's share of the pixel, not its glass
         n_face = normalize(vec3<f32>(wt.x, wt.y, 1.0));
     }
-    if ((rel_k > 0.0 && rel_kind == 2) || (on_wall && (wall_t.x != 0.0 || wall_t.y != 0.0))) {
+    // Glass: each pane a little off the plane and bowed (pillowed), so the
+    // reflections break pane to pane; its tint a shade apart too.
+    let on_glass = rel_kind == 1 && rel_k > 0.0;
+    if (on_glass) {
+        let pb = floor(rel_p.x / bw);
+        let pyf = (rel_p.y - ground_h) / floor_h;
+        let pf = floor(pyf);
+        let pu = fract(rel_p.x / bw) - 0.5;
+        let pv = fract(pyf) - 0.6;
+        let h1 = hash3(pb, pf, id + 31.0) - 0.5;
+        let h2 = hash3(pb, pf, id + 37.0) - 0.5;
+        let pt = vec2<f32>(h1 * 0.14 + pu * 0.08, h2 * 0.14 + pv * 0.08) * rel_k;
+        n_face = normalize(vec3<f32>(pt.x, pt.y, 1.0));
+        s.base_color *= 1.0 + 0.16 * h1 * h2 * 4.0 * rel_k * g;
+    }
+    if ((rel_k > 0.0 && rel_kind == 2) || on_glass || (on_wall && (wall_t.x != 0.0 || wall_t.y != 0.0))) {
         // Face frame -> the building's -> the world's.
         let nl = n_face.x * tloc + vec3<f32>(0.0, n_face.y, 0.0) + n_face.z * nloc;
         s.normal = normalize(vec3<f32>(c * nl.x + sn * nl.z, nl.y, -sn * nl.x + c * nl.z));
