@@ -75,6 +75,19 @@ fn terrain_height(x: f32, z: f32) -> f32 {
     return RIVER_BED_Y + (dry_elev - RIVER_BED_Y) * bank_slope;
 }
 
+// A road segment's distance past its sidewalks (x) and its height there (y).
+fn seg_dist(segs: read_store<vec4<f32>, 1>, si: i32, wx: f32, wz: f32) -> vec2<f32> {
+    let a = segs[si * 3];
+    let b = segs[si * 3 + 1];
+    let dx = a.z - a.x;
+    let dz = a.w - a.y;
+    let l2 = max(dx * dx + dz * dz, 1.0e-9);
+    let t = clamp(((wx - a.x) * dx + (wz - a.y) * dz) / l2, 0.0, 1.0);
+    let ex = wx - a.x - dx * t;
+    let ez = wz - a.y - dz * t;
+    return vec2<f32>(sqrt(ex * ex + ez * ez) - (b.z + b.w), b.x + (b.y - b.x) * t);
+}
+
 fn unorm8(x: f32) -> u32 {
     return (clamp(x, 0.0, 1.0) * 255.0 + 0.5) as u32;
 }
@@ -107,30 +120,27 @@ fn k_tile(
 
     var h = terrain_height(wx, wz);
     // The roads' grade (lib/city/ground.js gradedHeight, its JS twin): the
-    // nearest road's height under it and its sidewalks, eased back to the
-    // land over `reach` metres past them.
+    // roads' heights under it and its sidewalks, blended by how much farther
+    // each is than the nearest (two alike halfway between, so no step on
+    // that line), eased back to the land over `reach` metres past them.
     let ci = floor((wx + city_half) / city_cell) as i32;
     let cj = floor((wz + city_half) / city_cell) as i32;
     if (ci >= 0 && cj >= 0 && ci < city_cells && cj < city_cells) {
         let c = cj * city_cells + ci;
         var best = 1.0e9;
-        var by = h;
         for (var k = cell_start[c]; k < cell_start[c + 1]; k += 1) {
-            let si = cell_segs[k];
-            let a = segs[si * 3];
-            let b = segs[si * 3 + 1];
-            let dx = a.z - a.x;
-            let dz = a.w - a.y;
-            let l2 = max(dx * dx + dz * dz, 1.0e-9);
-            let t = clamp(((wx - a.x) * dx + (wz - a.y) * dz) / l2, 0.0, 1.0);
-            let ex = wx - a.x - dx * t;
-            let ez = wz - a.y - dz * t;
-            let d = sqrt(ex * ex + ez * ez) - (b.z + b.w);
-            if (d < best) {
-                best = d;
-                by = b.x + (b.y - b.x) * t;
-            }
+            best = min(best, seg_dist(segs, cell_segs[k], wx, wz).x);
         }
+        // A road 4 m farther than the nearest no longer counts (ground.js GRADE_SPAN).
+        var sw = 0.0;
+        var sy = 0.0;
+        for (var k = cell_start[c]; k < cell_start[c + 1]; k += 1) {
+            let dy = seg_dist(segs, cell_segs[k], wx, wz);
+            let w = 1.0 - sstep(0.0, 4.0, dy.x - best);
+            sw += w;
+            sy += w * dy.y;
+        }
+        let by = sw > 0.0 ? sy / sw : h;
         if (best < reach) {
             let w = best <= 0.0 ? 1.0 : 1.0 - sstep(0.0, 1.0, best / reach);
             h = h + (by - h) * w;
