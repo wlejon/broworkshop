@@ -5,11 +5,10 @@
 // bro.tiles, the river is a ribbon, the sky is lib/kit's daylight.
 
 import { SKY, daylight } from "/lib/kit/sky.js";
-import { loadOrGenerateCity, loadOrPlaceTrees, growInWorker } from "/lib/city/cache.js";
+import { loadOrGenerateCity, growInWorker } from "/lib/city/cache.js";
 import { createBuildingRenderer } from "/lib/city/building_render.js";
 import { createBridges } from "/lib/city/bridges.js";
 import { createTrafficRenderer } from "/lib/city/traffic_render.js";
-import { placeTrees, createTrees, crownRadii } from "/lib/city/trees.js";
 import { createInteriors } from "/lib/city/interior.js";
 import { terrainHeight, riverCenterX, RIVER_BED_Y } from "/app/world/terrain_field.js";
 import { SITE } from "/app/world/site.js";
@@ -53,25 +52,19 @@ const water = createRiverWater(scene);
 const cam = createFlyCamera(canvas, scene);
 
 const statusEl = document.getElementById('status');
-// The city and its trees are grown in a worker into the app's cache (world/
-// grow_worker.js, lib/city/city_worker.js; keyed on lib/city, world/ and the trees' export), so a cold
-// start or a lib/city edit leaves the window live while they grow; the page
-// then reads both back.
-const treeDir = bro.resolvePath('/app/assets/trees');
+// The city is grown in a worker into the app's cache (world/grow_worker.js,
+// lib/city/city_worker.js; keyed on lib/city and world/), so a cold start or
+// a lib/city edit leaves the window live while it grows; the page then reads
+// it back.
 const tg = perf.now();
 if (statusEl) statusEl.textContent = 'growing the city';
-const grown = await growInWorker(new URL('./world/grow_worker.js', import.meta.url), { sources: ['/app/world'], treeDir });
+const grown = await growInWorker(new URL('./world/grow_worker.js', import.meta.url), { sources: ['/app/world'] });
 if (!grown.ok) console.warn(`metropolis: city worker failed (${grown.error}); growing it here`);
 else console.log(`metropolis: city grown in a worker in ${(perf.now() - tg).toFixed(0)} ms (${grown.hit ? 'cached' : 'generated'})`);
 const t0 = perf.now();
-const { city, hit: cityCached, path: cityPath } = loadOrGenerateCity(SITE, { sources: ['/app/world'] });
+const { city, hit: cityCached } = loadOrGenerateCity(SITE, { sources: ['/app/world'] });
 console.log(`metropolis: city in ${(perf.now() - t0).toFixed(0)} ms (${cityCached ? 'cache hit' : 'cache miss'}): ${city.graph.edges.length} roads, ${city.lots.length} lots, ${city.masses.count} masses`,
     JSON.stringify(Object.fromEntries(Object.entries(city.timings).map(([k, v]) => [k, Math.round(v)]))));
-
-const t1 = perf.now();
-const treeRecs = loadOrPlaceTrees(city, cityPath, treeDir, (c) => placeTrees(c, { crownR: crownRadii(treeDir) }));
-const trees = createTrees(scene, treeRecs, treeDir);
-console.log(`metropolis: ${trees.count} trees in ${(perf.now() - t1).toFixed(0)} ms`);
 
 const ground = city.ground;
 const terrain = createTerrainStream(scene, ground);
@@ -100,7 +93,6 @@ function setTimeMode(tm) {
     buildings?.setNight(NIGHT[tm]);
     bridges?.setNight(NIGHT[tm] > 0.5 ? 1 : 0);
     cars?.setNight(NIGHT[tm]);
-    trees.setNight(NIGHT[tm]);
     terrain.setNight(NIGHT[tm] > 0.5 ? 1 : 0);
     for (const b of todButtons) b.classList.toggle('active', b.dataset.tod === tm);
 }
@@ -126,7 +118,7 @@ function showStats(dt, st) {
     const agl = st.pos[1] - terrainHeight(st.pos[0], st.pos[2]);
     statsEl.textContent =
         `${(statMs / statFrames).toFixed(2)} ms/frame  gpu ${(cs.frameGpuMs || 0).toFixed(2)} ms\n` +
-        `${city.masses.buildings.length} buildings · ${trees.count} trees · ${(city.graph.edges.reduce((a, e) => a + e.len, 0) / 1000).toFixed(0)} km of road · ${cars?.drawn ?? 0} of ${cars?.cars ?? 0} cars drawn\n` +
+        `${city.masses.buildings.length} buildings ·${(city.graph.edges.reduce((a, e) => a + e.len, 0) / 1000).toFixed(0)} km of road · ${cars?.drawn ?? 0} of ${cars?.cars ?? 0} cars drawn\n` +
         `x ${st.pos[0].toFixed(0)} z ${st.pos[2].toFixed(0)} · ${agl.toFixed(0)} m up`;
     statFrames = 0; statMs = 0;
 }
@@ -150,7 +142,7 @@ requestAnimationFrame(tick);
 if (bro.app.argv.includes('--bench')) ready.then(() => import('./tests/bench_window.js')).then((b) => b.run(globalThis.__metropolis));
 
 globalThis.__metropolis = {
-    scene, sky, city, ground, terrain, cam, trees, treeRecs, get cars() { return cars; }, get interiors() { return interiors; }, get buildings() { return buildings; },
+    scene, sky, city, ground, terrain, cam, get cars() { return cars; }, get interiors() { return interiors; }, get buildings() { return buildings; },
     whenReady: () => ready,
     setTimeMode,
     setPose: (pos, yaw, pitch) => {

@@ -4,9 +4,6 @@
 //  - LODs keep shape and colour: a building zoomed to the same size from
 //    4, 8 and 25+ times its size away (2 km at least) draws alike, the
 //    farthest allowed the air's haze (a per-channel blend toward its colour);
-//    trees of every species keep their leaf cover (within 12 %; the farthest
-//    level against the finest within a third) and leaf colour across every level
-//    boundary, and the fade band's middle covers as the levels either side;
 //    a car's level swap at its switch distance changes it no more than
 //    moving 1 %; a facade of every style, seen through a narrow and the
 //    normal view from one eye, has the same mean in linear light (its far
@@ -25,7 +22,6 @@ import { frames, waitFor } from "/lib/kit/test.js";
 import { riverCenterX, terrainHeight } from "/app/world/terrain_field.js";
 import { massRecord, floorsOf } from "/lib/city/interior.js";
 import { STYLE } from "/lib/city/buildings.js";
-import { TREE_FLOATS } from "/lib/city/trees.js";
 waitFor(() => Boolean(globalThis.__metropolis), "mounted", 60000);
 const m = globalThis.__metropolis;
 let ready = false; m.whenReady().then(() => { ready = true; });
@@ -118,8 +114,8 @@ function rectOf(pts, W, H, pad = 0) {
   for (const p of pts) { const q = m.scene.projectLocal(p); x0 = Math.min(x0, q.x); x1 = Math.max(x1, q.x); y0 = Math.min(y0, q.y); y1 = Math.max(y1, q.y); }
   return [Math.max(0, Math.round(x0 * sc) - pad), Math.max(0, Math.round(y0 * sc) - pad), Math.min(W, Math.round(x1 * sc) + pad), Math.min(H, Math.round(y1 * sc) + pad)];
 }
-const treeN = m.trees.nodes, carN = m.cars.nodes;
-treeN.forEach((n) => n.visible = false); carN.forEach((n) => n.visible = false);
+const carN = m.cars.nodes;
+carN.forEach((n) => n.visible = false);
 const FOV = 60;   // the fly camera's own
 {
   // A facade's far shading is its near shading averaged. From one eye, a
@@ -250,96 +246,10 @@ const FOV = 60;   // the fly camera's own
     }
   }
 }
-treeN.forEach((n) => n.visible = true);
 m.setTimeMode('day');
 {
-  // Every species across every level boundary, 24 full-width trees each: each level
-  // alone just past the boundary (fades off) must cover as much of what is
-  // behind (pixels differing from the settled empty view) within 12 %
-  // (tree-lab's scattered levels lost 7-22 % a step) in the same leaf colour
-  // (the covered pixels' mean within 5/255), and in the band's middle, with
-  // the city's fades, the two must cover their mean within 10 % (a gap
-  // between them: 0.5-0.86); the steps' product, the farthest level against
-  // the finest, within 12 % too (scattered: elm 0.91, oak 0.65).
-  const SP = ['elm', 'oak', 'beech', 'birch'];
-  const TR = m.treeRecs, NT = TR.length / TREE_FLOATS;
-  const dv = [0.7, 0.35, 0.6], dn = Math.hypot(...dv);
-  const measure = (E, A, r) => {
-    let n = 0, tot = 0; const col = [0, 0, 0];
-    for (let y = r[1]; y < r[3]; y++) for (let x = r[0]; x < r[2]; x++) {
-      const k = (y * E.width + x) * 4; tot++;
-      if (Math.abs(A.data[k] - E.data[k]) + Math.abs(A.data[k + 1] - E.data[k + 1]) + Math.abs(A.data[k + 2] - E.data[k + 2]) > 18) { n++; col[0] += A.data[k]; col[1] += A.data[k + 1]; col[2] += A.data[k + 2]; }
-    }
-    return { n, tot, col };
-  };
-  for (let si = 0; si < 4; si++) {
-    const trees = [];
-    // (From the 13th record: calibration (export_trees.js AREA) used samples
-    // from offsets 0, 7, 23, 41 and 59; this one is held out from every species.)
-    for (let i = 13; i < NT && trees.length < 24; i += 53) {
-      if (TR[i * TREE_FLOATS + 5] !== si || TR[i * TREE_FLOATS + 6] < 0.99) continue;
-      const t = [TR[i * TREE_FLOATS], TR[i * TREE_FLOATS + 1], TR[i * TREE_FLOATS + 2]], up = [t[0], t[1] + 8, t[2]];
-      if (![30, 700].some((d) => blocked([t[0] + 0.7 * d, t[1] + 0.35 * d, t[2] + 0.6 * d], up))) trees.push(t);
-    }
-    const lv = {};
-    for (const n of treeN) { const mm = n.name.match(new RegExp(`city_trees_${SP[si]}_L(\\d+)_(bark|leaves)$`)); if (mm && !n.shadowOnly) (lv[+mm[1]] ??= []).push(n); }
-    const Ls = Object.keys(lv).map(Number).sort((x, y) => x - y);
-    let cum = 1;
-    for (let li = 0; li + 1 < Ls.length; li++) {
-      const near = lv[Ls[li]], far = lv[Ls[li + 1]], b = far[0].fadeInDist;
-      const keep = [...near, ...far].map((n) => [n, n.fadeInDist, n.fadeOutDist]);
-      const acc = { A: { n: 0, tot: 0, col: [0, 0, 0] }, B: { n: 0, tot: 0, col: [0, 0, 0] }, Mn: { n: 0, tot: 0, col: [0, 0, 0] }, Mid: { n: 0, tot: 0, col: [0, 0, 0] }, Mf: { n: 0, tot: 0, col: [0, 0, 0] } };
-      const add = (k, r) => { acc[k].n += r.n; acc[k].tot += r.tot; for (let c = 0; c < 3; c++) acc[k].col[c] += r.col[c]; };
-      for (const tree of trees) {
-        const aim = [tree[0], tree[1] + 6, tree[2]];
-        const eyeAt = (d) => [aim[0] + dv[0] / dn * d, aim[1] + dv[1] / dn * d, aim[2] + dv[2] / dn * d];
-        const show = (nodes) => { treeN.forEach((n) => { n.visible = false; }); nodes.forEach((n) => { n.visible = true; }); };
-        const at = (d, settle) => { for (let i = 0; i < settle; i++) { look(eyeAt(d), aim); frames(1); } return shot(); };
-        // Levels alone, just past the boundary (fades off).
-        for (const n of [...near, ...far]) { n.fadeInDist = 0; n.fadeOutDist = 0; }
-        const d0 = b * 1.02;
-        show([]); const E = at(d0, 30);
-        show(near); const A = at(d0, 4);
-        show(far); const B = at(d0, 4);
-        look(eyeAt(d0), aim);
-        const r = rectOf([[tree[0] - 6, tree[1], tree[2] - 6], [tree[0] + 6, tree[1] + 15, tree[2] + 6], [tree[0] - 6, tree[1] + 15, tree[2] + 6], [tree[0] + 6, tree[1], tree[2] - 6]], A.width, A.height, 2);
-        add('A', measure(E, A, r)); add('B', measure(E, B, r));
-        // The band's middle, fades as the city sets them (GAP: farther's fade-in moved to the band's end).
-        for (const [n, fi, fo] of keep) { n.fadeInDist = fi; n.fadeOutDist = fo; }
-        const dm = b * 1.175;
-        show([]); const Em = at(dm, 30);
-        for (const n of [...near, ...far]) { n.fadeInDist = 0; n.fadeOutDist = 0; }
-        show(near); const An = at(dm, 4);
-        show(far); const Bf = at(dm, 4);
-        for (const [n, fi, fo] of keep) { n.fadeInDist = fi; n.fadeOutDist = fo; }
-        show([...near, ...far]); const Mi = at(dm, 4);
-        look(eyeAt(dm), aim);
-        const rm = rectOf([[tree[0] - 6, tree[1], tree[2] - 6], [tree[0] + 6, tree[1] + 15, tree[2] + 6], [tree[0] - 6, tree[1] + 15, tree[2] + 6], [tree[0] + 6, tree[1], tree[2] - 6]], A.width, A.height, 2);
-        add('Mn', measure(Em, An, rm)); add('Mf', measure(Em, Bf, rm)); add('Mid', measure(Em, Mi, rm));
-      }
-      for (const [n, fi, fo] of keep) { n.fadeInDist = fi; n.fadeOutDist = fo; }
-      const cov = (k) => acc[k].n / acc[k].tot, colr = (k) => acc[k].col.map((c) => c / Math.max(1, acc[k].n));
-      const cA = colr('A'), cB = colr('B');
-      const dcol = Math.hypot(cA[0] - cB[0], cA[1] - cB[1], cA[2] - cB[2]);
-      const midRatio = cov('Mid') / ((cov('Mn') + cov('Mf')) / 2);
-      const cr = cov('B') / cov('A');
-      cum *= cr;
-      check(trees.length === 24 && cr > 0.88 && cr < 1.12 && dcol < 5 && midRatio > 0.9 && midRatio < 1.12,
-        `${SP[si]} across the ${b} m level boundary (L${Ls[li]} -> L${Ls[li + 1]}): cover ${(cov('A') * 100).toFixed(1)} -> ${(cov('B') * 100).toFixed(1)} % (x${cr.toFixed(2)}), leaf colour shift ${dcol.toFixed(1)}/255, the band's middle x${midRatio.toFixed(2)} of the levels' mean cover (${trees.length} trees)`);
-    }
-    // (The product drifts with the trees sampled: one leaf area a level and
-    // species, calibrated over 48 other trees, leaves 24-tree samples at
-    // 0.82 to 1.31; tree-lab's scattered levels reach 1.71.)
-    check(cum > 0.75 && cum < 1.33, `${SP[si]}: the farthest level covers as the finest does, step by step (x${cum.toFixed(2)})`);
-  }
-  treeN.forEach((n) => { n.visible = true; });
-}
-{
-  // (Trees hidden: one's shade or leaves over a 15 px car read as the car.)
-  treeN.forEach((n) => { n.visible = false; });
   const byType = {};
   for (const n of carN) { const mm = n.name.match(/city_cars_(.+)_lod(\d)/); if (mm) (byType[mm[1]] ??= [])[+mm[2]] = n; }
-  treeN.forEach((n) => n.visible = false);
   const [px, pz] = along(best * 0.5), [qx, qz] = along(best * 0.5 + 1), py = g(px, pz);
   const yawC = Math.atan2(qx - px, qz - pz), cy = Math.cos(yawC), sy = Math.sin(yawC);
   const row = new Float32Array([cy, 0, -sy, px, 0, 1, 0, py, sy, 0, cy, pz, 0.55, 0.08, 0.06, 1]);
@@ -391,7 +301,6 @@ m.setTimeMode('day');
       check(ok, `${tm} ${name}: a car's level swap changes it no more than moving 1 % does (${res.join(', ')})`);
     }
   }
-  treeN.forEach((n) => n.visible = true);
 }
 
 // The dolly.
@@ -434,7 +343,7 @@ m.setTimeMode('day'); frames(5);
   // The ground's tiles swap level by the eye's distance: at each step out
   // the same pose drawn with its own tiles and with the next step's (the
   // tiles chosen from an eye 5 % farther, terrain.update's eye wrapped), the
-  // ground alone (buildings, trees and cars hidden). What differs is what a
+  // ground alone (buildings and cars hidden). What differs is what a
   // swap at that step shows, without the step's own motion. Measured at 1/8
   // scale in luminance: the mean change and the largest 8x8-block change.
   // Measured: worst block 15.1/255 at 467 m (a corner's narrow ridge in the
@@ -444,7 +353,7 @@ m.setTimeMode('day'); frames(5);
   // jumps the river's bank at 1.3 km, block 21.8; tiles chosen from 4x as
   // far, block 49.5, mean 0.41.
   const TILE_MEAN = 0.1, TILE_BLOCK = 16;
-  const hide = [...m.buildings.nodes, ...treeN, ...carN];
+  const hide = [...m.buildings.nodes, ...carN];
   hide.forEach((n) => { n.visible = false; });
   // Exposed as the eye meters the scene: auto exposure adapts on the paused
   // clock, so it would hold whatever EV a section before left it at (the
@@ -475,13 +384,11 @@ m.setTimeMode('day'); frames(5);
   check(worstMean < TILE_MEAN && worstBlock < TILE_BLOCK, `the ground's tiles swap level unseen: the same view with the next step's tiles (mean change ${worstMean.toFixed(2)}/255 at ${atM.toFixed(0)} m, largest 8x8 block ${worstBlock.toFixed(1)}/255 at ${atB.toFixed(0)} m)`);
 }
 
-// Shadow swim: ground points (not behind a building, trees drawn as shadows
-// only, cars hidden) followed while the eye moves; each path with the sun's
+// Shadow swim: ground points (not behind a building, cars hidden) followed while the eye moves; each path with the sun's
 // shadows and without them. Without shadows what changes is occluders
 // (posts, rails), so shadows must add nothing: their p95 no worse than
 // without plus 3/255, and their jumps (over 20/255) no more.
 for (const n of carN) n.visible = false;
-for (const n of treeN) if (!n.shadowOnly) n.visible = false;
 m.setTimeMode('day');
 function groundHit(o, d) {
   let t = 0;
@@ -552,7 +459,6 @@ function track(poses, every) {
   }
 }
 for (const n of carN) n.visible = true;
-for (const n of treeN) n.visible = true;
 {
   // Inside by day the outdoors' light stops at the walls: from a corner of a
   // shop's and an office's floor, the lower half of the frame (floor, shelves,

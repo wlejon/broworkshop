@@ -1,6 +1,6 @@
 // Deterministic natural terrain & river-first hydrology field for Metropolis.
 // All math matches shaders/terrain_produce.bk bit-for-bit so streamed GPU tiles,
-// roads, bridges, building plinths, and trees align within millimetres.
+// roads, bridges and building plinths align within millimetres.
 
 export const WORLD_HALF = 5632; // 11,264 m x 11,264 m = 126.9 km^2
 export const ROOT_SIZE = 2816;  // 4 x 4 roots of 2816 m = 11,264 m
