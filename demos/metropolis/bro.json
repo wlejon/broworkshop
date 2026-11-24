@@ -6,5 +6,6 @@
     "height": 960,
     "vsync": false,
     "maxFps": 0,
-    "lib": "../../lib",    "permissions": []
+    "lib": "../../lib",
+    "permissions": []
 }

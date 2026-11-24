@@ -159,7 +159,8 @@ requestAnimationFrame(tick);
 if (bro.app.argv.includes('--bench')) ready.then(() => import('./tests/bench_window.js')).then((b) => b.run(globalThis.__metropolis));
 
 globalThis.__metropolis = {
-    scene, sky, city, ground, terrain, cam, get cars() { return cars; }, get interiors() { return interiors; }, get buildings() { return buildings; },    whenReady: () => ready,
+    scene, sky, city, ground, terrain, cam, get cars() { return cars; }, get interiors() { return interiors; }, get buildings() { return buildings; },
+    whenReady: () => ready,
     setTimeMode,
     setPose: (pos, yaw, pitch) => {
         cam.setPose(pos, yaw, pitch);
