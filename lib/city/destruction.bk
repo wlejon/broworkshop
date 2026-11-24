@@ -18,7 +18,7 @@ struct Params {
     night: f32,
     room_day: f32,
     room_night: f32,
-    debug: f32,   // 1: the shading branch's colour (outside red, break green, inside blue)
+    debug: f32,   // 1: the shading branch's colour (outside red, break green, inside blue); 2: all grey
 }
 
 @binding(4, 0) var params: uniform<Params>;
@@ -281,7 +281,11 @@ pub fn fragment(v: mesh::Vertex, s_in: mesh::Surface) -> mesh::Surface {
         s.metallic *= 1.0 - k;
         s.emissive = vec3<f32>(0.0, 0.0, 0.0);
     }
-    if (params.debug > 0.5) {
+    if (params.debug > 1.5) {
+        s.base_color = vec3<f32>(0.5, 0.5, 0.5);
+        s.metallic = 0.0;
+        s.emissive = vec3<f32>(0.0, 0.0, 0.0);
+    } else if (params.debug > 0.5) {
         s.base_color = select(outer, vec3<f32>(0.8, 0.1, 0.1), select(broken, vec3<f32>(0.1, 0.8, 0.1), vec3<f32>(0.1, 0.1, 0.8)));
         s.metallic = 0.0;
         s.emissive = vec3<f32>(0.0, 0.0, 0.0);
