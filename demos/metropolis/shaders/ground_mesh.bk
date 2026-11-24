@@ -412,10 +412,29 @@ pub fn fragment(v: mesh::Vertex, s_in: mesh::Surface) -> mesh::Surface {
             // drifts where the turns sweep, dark where cars wait and drip.
             let jw = vnoise2(p * 0.22 + vec2<f32>(5.0, 1.0));
             road_c *= 1.0 + (1.0 - jk) * (0.16 * (jw - 0.5) - 0.12 * sstep(0.6, 0.9, vnoise2(p * 0.5 + vec2<f32>(13.0, 7.0))));
+            // Between the stones and the lanes, what the eye reads down a
+            // street: the mix laid unevenly (a blotch a metre or so, a finer
+            // one a hand wide), each scale kept until a pixel spans it.
+            let mid1 = 1.0 - smoothstep(0.25, 1.0, fw);
+            let mid2 = 1.0 - smoothstep(0.06, 0.25, fwn);
+            road_c *= 1.0 + 0.22 * mid1 * (vnoise2(p * 0.9 + vec2<f32>(2.0, 6.0)) - 0.5)
+                          + 0.16 * mid2 * (vnoise2(p * 5.0 + vec2<f32>(8.0, 3.0)) - 0.5);
             // Up close its aggregate: stones of ~2 cm, a few pale ones, each
             // tilting the surface its own way.
             let ag_k = 1.0 - smoothstep(0.012, 0.05, fwn);
             var ag = 0.5;
+            // Under them the coarse texture a road is laid with: the stones
+            // clumped and ravelled in pieces of ~11 cm, each its own tone and
+            // tilt, kept four times as far as the stones (the road was flat
+            // grey from a few metres out).
+            let mt_k = 1.0 - smoothstep(0.05, 0.2, fwn);
+            if (mt_k > 0.0) {
+                let wm = worley(p * 9.0 + vec2<f32>(17.0, 3.0));
+                let mc = wm.zw + vec2<f32>(51.0, 23.0);
+                let gap = 1.0 - sstep(0.05, 0.2 + fwn * 9.0, wm.y - wm.x);
+                road_c *= 1.0 + mt_k * (0.28 * (hash2(mc) - 0.5) - 0.22 * (gap - 0.25));
+                road_t += mt_k * 0.13 * (1.0 - gap) * vec2<f32>(hash2(mc + vec2<f32>(3.3, 1.1)) - 0.5, hash2(mc + vec2<f32>(9.1, 5.7)) - 0.5);
+            }
             if (ag_k > 0.0) {
                 // Rounded stones in a dark binder (their mean is the asphalt's tone).
                 let wc = worley(p * 45.0);
@@ -424,7 +443,7 @@ pub fn fragment(v: mesh::Vertex, s_in: mesh::Surface) -> mesh::Surface {
                 let binder = 1.0 - sstep(0.08, 0.25 + fwn * 45.0, wc.y - wc.x);
                 road_c *= 1.0 + ag_k * (0.5 * (ag - 0.5) - 0.35 * (binder - 0.3));
                 road_c = mix(road_c, vec3<f32>(0.17, 0.165, 0.155) * var_k, ag_k * sstep(0.88, 0.96, ag) * (1.0 - binder) * 0.7);
-                road_t = ag_k * 0.22 * (1.0 - binder) * vec2<f32>(hash2(agc + vec2<f32>(3.3, 1.1)) - 0.5, hash2(agc + vec2<f32>(9.1, 5.7)) - 0.5);
+                road_t += ag_k * 0.22 * (1.0 - binder) * vec2<f32>(hash2(agc + vec2<f32>(3.3, 1.1)) - 0.5, hash2(agc + vec2<f32>(9.1, 5.7)) - 0.5);
             }
             // Patch repairs across a lane, newer (darker) or older (paler).
             let pc = vec2<f32>(floor(sa / 8.0), floor(au / lane_w));
@@ -496,7 +515,10 @@ pub fn fragment(v: mesh::Vertex, s_in: mesh::Surface) -> mesh::Surface {
                 lamp_e = lux * params.night;
             }
             rough = mix(rough, 0.75, on_walk);
-            rough = mix(rough, mix(0.7, 0.5, paint), on_road);
+            // (The stones' tilts, unresolved past a few metres, widen the
+            // lobe instead: a flat-shaded road there was a smooth grey sheen.)
+            let road_rough = mix(0.86, 0.7, 1.0 - smoothstep(0.05, 0.2, fwn));
+            rough = mix(rough, mix(road_rough, 0.5, paint), on_road);
         }
     }
 
