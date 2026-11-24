@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Neural GPU Swarm — Zero-Copy Table, Tensor, Kernel &amp; 3D Scene</title>
+  <link rel="stylesheet" href="/lib/kit/kit.css">
+  <link rel="stylesheet" href="/lib/sci-atlas/sci.css">
+  <link rel="stylesheet" href="/app/style.css">
+</head>
+<body class="k-app">
+  <header class="k-header">
+    <h1>Neural GPU Swarm</h1>
+    <span class="k-sub">65,536 Agents · Zero-Copy bro.table → Neural Tensor Steering → Custom GPU Kernel → Single-Path 3D Instancing</span>
+    <span class="k-spacer"></span>
+    <span id="device-badge" class="k-badge ok">GPU FABRIC</span>
+    <span id="status" class="dim">initializing…</span>
+  </header>
+
+  <div class="k-toolbar">
+    <button id="btn-pulse" class="primary small">Energy Pulse</button>
+    <button id="btn-sync-chunks" class="small">Sync 2 Chunks → Table</button>
+    <button id="btn-save-bundle" class="small">Save &amp; mmap Bundle</button>
+    <button id="btn-export-parquet" class="small">Export Parquet (LZ4)</button>
+    <span class="k-sep"></span>
+    <button id="btn-pause" class="small">Pause</button>
+    <button id="btn-autorotate" class="small">Auto-Orbit: On</button>
+    <button id="btn-reframe" class="small">Reframe</button>
+  </div>
+
+  <div class="k-body">
+    <aside class="k-side">
+      <div class="k-panel">
+        <h2>What You're Seeing</h2>
+        <div class="k-note">
+          Every glowing flyer is one of <b>65,536 rows</b> stored in <code>bro.table</code>.
+          Each frame a neural controller (<code>bro.tensor</code>) predicts 3D steering impulses and a custom
+          GPU compute kernel (<code>dispatchTensors</code>) updates positions straight inside GPU memory, feeding a
+          single <code>InstancedMeshNode</code> vertex hook with per-instance GPU sphere culling.
+        </div>
+      </div>
+
+      <div class="k-panel">
+        <h2>Swarm Controls</h2>
+        <label class="k-field"><span>Swirl Flow</span>
+          <input type="range" id="opt-swirl" min="0.0" max="2.5" step="0.05" value="1.15">
+          <output class="k-val" id="opt-swirl-val">1.15</output>
+        </label>
+        <label class="k-field"><span>Cohesion Gain</span>
+          <input type="range" id="opt-cohesion" min="0.2" max="2.5" step="0.05" value="1.00">
+          <output class="k-val" id="opt-cohesion-val">1.00</output>
+        </label>
+        <label class="k-field"><span>Energy Filter ≥</span>
+          <input type="range" id="opt-energy-min" min="0.0" max="0.9" step="0.05" value="0.05">
+          <output class="k-val" id="opt-energy-min-val">0.05</output>
+        </label>
+      </div>
+
+      <div class="k-panel">
+        <h2>GPU Fabric &amp; Incremental Table</h2>
+        <div class="swarm-kv" id="fabric-vitals"></div>
+      </div>
+
+      <div class="k-panel">
+        <h2>Persistence (.brobundle &amp; Parquet)</h2>
+        <div class="swarm-kv" id="io-stats">
+          <div><span>Bundle (.brobundle)</span><b>click Save &amp; mmap Bundle</b></div>
+          <div><span>Parquet (LZ4)</span><b>click Export Parquet</b></div>
+        </div>
+      </div>
+
+      <div class="k-panel">
+        <h2>Spatial Click Probe (3D Index)</h2>
+        <div id="probe-box" class="sci-probe-box">Left-click inside the 3D swarm to inspect nearest agents via SpatialIndex('pos3d').</div>
+      </div>
+    </aside>
+
+    <main class="k-main">
+      <div class="sci-viewport-wrap" id="viewport-wrap">
+        <canvas id="gpu-canvas" class="sci-gpu"></canvas>
+        <div class="sci-hud-top">
+          <div class="sci-pill" id="hud-guide">
+            <b>Single Canonical GPU Scene Path</b> · Vertex hook reads GPU-packed <code>poses</code> &amp; <code>tints</code> buffers with GPU frustum culling.
+          </div>
+          <div class="sci-pill sci-pill-perf" id="hud-metrics">
+            <b>Step</b> <span id="hud-step">0</span> · <b>GPU Device</b> <span id="hud-dev">—</span> · <b>Reactive Reuse</b> <span id="hud-reuse">—</span>
+          </div>
+        </div>
+        <div class="sci-legend-bar" id="species-legend"></div>
+        <div class="sci-hint-bar">Left-click: probe swarm · Right-drag: orbit · Middle-drag: pan · Scroll: zoom · Space: pause · R: reframe</div>
+      </div>
+
+      <div class="sci-chart-strip">
+        <div class="sci-chart-box">
+          <canvas id="chart-census"></canvas>
+          <div class="sci-chart-title">Species Census &amp; Mean Energy (ReactiveQuery groupBy species_id)</div>
+        </div>
+        <div class="sci-chart-box">
+          <canvas id="chart-chunks"></canvas>
+          <div class="sci-chart-title">16 Data Chunks — Dirty Recompute vs Zero-Work Reuse</div>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <footer class="k-statusbar k-stats" id="statusbar">
+    <span>fps <b id="st-fps">0</b></span>
+    <span>agents <b id="st-agents">65,536</b></span>
+    <span>tensor <b id="st-device">—</b></span>
+    <span>kernel+tensor <b id="st-sim-ms">—</b></span>
+    <span>reactive <b id="st-reactive">—</b></span>
+    <span>culled/drawn <b id="st-draws">—</b></span>
+  </footer>
+
+  <script type="module" src="/app/main.js"></script>
+</body>
+</html>

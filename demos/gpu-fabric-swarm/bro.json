@@ -1,0 +1,8 @@
+{
+  "app": ".",
+  "title": "Neural GPU Swarm — Zero-Copy Table, CUDA Tensor, PTX Kernel & 3D Scene",
+  "width": 1440,
+  "height": 900,
+  "lib": "../../lib",
+  "permissions": ["files"]
+}

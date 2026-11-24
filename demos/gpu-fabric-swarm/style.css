@@ -1,0 +1,32 @@
+.k-side {
+  width: 316px;
+}
+
+.swarm-kv {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 11px;
+}
+
+.swarm-kv > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  color: var(--k-muted);
+}
+
+.swarm-kv b {
+  color: var(--k-value);
+  font-weight: 600;
+}
+
+.sci-chart-strip {
+  height: 150px;
+}
+
+.sci-chart-box canvas {
+  width: 100%;
+  height: 100%;
+  display: block;
+}

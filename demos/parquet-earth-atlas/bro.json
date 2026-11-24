@@ -1,0 +1,8 @@
+{
+  "app": ".",
+  "title": "Parquet Earth Atlas — Multi-Table CSV, Parquet (LZ4/Snappy) & Bundle Globe Observatory",
+  "width": 1440,
+  "height": 900,
+  "lib": "../../lib",
+  "permissions": ["files"]
+}

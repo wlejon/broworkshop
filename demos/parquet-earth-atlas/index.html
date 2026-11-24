@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Parquet Earth Atlas — CSV, Parquet (LZ4/Snappy), Bundles &amp; Reactive Joins</title>
+  <link rel="stylesheet" href="/lib/kit/kit.css">
+  <link rel="stylesheet" href="/lib/sci-atlas/sci.css">
+  <link rel="stylesheet" href="/app/style.css">
+</head>
+<body class="k-app">
+  <header class="k-header">
+    <h1>Parquet Earth Atlas</h1>
+    <span class="k-sub">Global Tectonic &amp; Station Observatory · CSV + Parquet (LZ4 &amp; Snappy) + mmap Bundles + Reactive Joins &amp; GroupBy</span>
+    <span class="k-spacer"></span>
+    <span id="atlas-badge" class="k-badge ok">49,152 EVENTS</span>
+    <span id="status" class="dim">initializing…</span>
+  </header>
+
+  <div class="k-toolbar">
+    <button id="btn-aftershock" class="primary small">Aftershock Burst (+128)</button>
+    <button id="btn-outage" class="small">Station Outage (Null Link)</button>
+    <button id="btn-compact" class="small">Compact &amp; Rebuild</button>
+    <span class="k-sep"></span>
+    <button id="btn-pq-lz4" class="small">Parquet LZ4 Round-Trip</button>
+    <button id="btn-pq-snappy" class="small">Parquet Snappy Round-Trip</button>
+    <button id="btn-bundle" class="small">Save &amp; mmap Bundle</button>
+    <span class="k-sep"></span>
+    <button id="btn-autorotate" class="small">Auto-Orbit: On</button>
+  </div>
+
+  <div class="k-body">
+    <aside class="k-side">
+      <div class="k-panel">
+        <h2>What You're Seeing</h2>
+        <div class="k-note">
+          Earth monitoring stations and tectonic belts are ingested from <b>CSV</b> (<code>fromCSVFile</code>),
+          archived as <b>Apache Parquet</b> (both <b>LZ4</b> and <b>Snappy</b>) and 4096-byte aligned
+          <code>.brobundle</code> memory maps. Live edits incrementally update joined tables and regional charts
+          without re-scanning untouched chunks.
+        </div>
+      </div>
+
+      <div class="k-panel">
+        <h2>Magnitude Filter</h2>
+        <label class="k-field"><span>Min Magnitude</span>
+          <input type="range" id="opt-min-mag" min="1.5" max="6.5" step="0.25" value="2.0">
+          <output class="k-val" id="opt-min-mag-val">2.00</output>
+        </label>
+        <div class="atlas-kv" id="join-vitals"></div>
+      </div>
+
+      <div class="k-panel">
+        <h2>On-Disk File Formats &amp; Ratios</h2>
+        <div class="atlas-kv" id="format-stats"></div>
+      </div>
+
+      <div class="k-panel">
+        <h2>Top Strongest Quakes (RangeIndex)</h2>
+        <div id="top-quakes" class="atlas-top-list"></div>
+      </div>
+
+      <div class="k-panel">
+        <h2>Globe Probe (SpatialIndex + HashIndex)</h2>
+        <div id="probe-box" class="sci-probe-box">Click anywhere on the 3D Earth to inspect nearby quakes, fault zone, and linked sensor station.</div>
+      </div>
+    </aside>
+
+    <main class="k-main">
+      <div class="sci-viewport-wrap" id="viewport-wrap">
+        <canvas id="gpu-canvas" class="sci-gpu"></canvas>
+        <div class="sci-hud-top">
+          <div class="sci-pill" id="hud-guide">
+            <b>Global Seismic Arcs</b> · Color encodes hypocenter depth (cyan shallow → amber mid → magenta deep trench).
+          </div>
+          <div class="sci-pill sci-pill-perf" id="hud-perf">
+            <b>Events</b> <span id="hud-count">—</span> · <b>Unmonitored (Null Station)</b> <span id="hud-nulls">—</span> · <b>Reactive</b> <span id="hud-reuse">—</span>
+          </div>
+        </div>
+        <div class="sci-legend-bar" id="depth-legend"></div>
+        <div class="sci-hint-bar">Left-click globe: inspect region &amp; station · Right-drag: orbit · Wheel: zoom</div>
+      </div>
+
+      <div class="sci-chart-strip">
+        <div class="sci-chart-box">
+          <canvas id="chart-regions"></canvas>
+          <div class="sci-chart-title">Regional Activity &amp; Mean Magnitude (Incremental groupBy region_id)</div>
+        </div>
+        <div class="sci-chart-box">
+          <canvas id="chart-mag"></canvas>
+          <div class="sci-chart-title">Magnitude Distribution (2.0 → 8.0 Mw)</div>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <footer class="k-statusbar k-stats" id="statusbar">
+    <span>fps <b id="st-fps">0</b></span>
+    <span>events <b id="st-events">—</b></span>
+    <span>stations <b id="st-stations">—</b></span>
+    <span>parquet <b id="st-parquet">—</b></span>
+    <span>bundle <b id="st-bundle">—</b></span>
+    <span>reactive <b id="st-reactive">—</b></span>
+  </footer>
+
+  <script type="module" src="/app/main.js"></script>
+</body>
+</html>
