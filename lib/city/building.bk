@@ -704,6 +704,8 @@ pub fn fragment(v: mesh::Vertex, s_in: mesh::Surface) -> mesh::Surface {
                     occ = max(occ, (rel_d - t) - fac_depth(fac, q.x, q.y));
                 }
                 rel_sun = 1.0 - smoothstep(0.0, 0.015, occ);
+            } else if (rel_d > 0.002) {
+                rel_sun = 0.0;   // the sun behind the face: the wall stands between
             }
         }
     }
@@ -860,7 +862,8 @@ pub fn fragment(v: mesh::Vertex, s_in: mesh::Surface) -> mesh::Surface {
     let stone = mix(vec3<f32>(0.70, 0.67, 0.60), wallc, 0.25);
     if (rel_kind == 2) {
         // A step's side: a reveal, the wall's material turned in.
-        wall_c = select(masonry, wallc * 0.9, vec3<f32>(0.32, 0.33, 0.34));
+        // (A curtain wall's are its aluminium mullions.)
+        wall_c = select(style == STYLE_GLASS, vec3<f32>(0.32, 0.33, 0.34), wallc * 0.9);
         if (rel_d < wall_d - 0.005 && masonry) { wall_c = stone * 0.95; }
         n_face = normalize(mix(n_face, rel_n, rel_k));
     } else if (rel_kind == 3 && rel_d < wall_d - 0.005) {
