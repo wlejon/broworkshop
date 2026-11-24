@@ -16,7 +16,6 @@ import { SITE } from "/app/world/site.js";
 import { createTerrainStream } from "/app/world/terrain_stream.js";
 import { createRiverWater } from "/app/world/river_water.js";
 import { createFlyCamera } from "/app/player/fly.js";
-import { createTatsLineup } from "/app/world/tats_units.js";
 
 const fs = require('fs');
 const readLib = (p) => fs.readFileSync(bro.resolvePath('/lib/' + p), 'utf8');
@@ -118,43 +117,7 @@ window.addEventListener('keydown', (e) => {
     else if (e.key === '2') setTimeMode('dusk');
     else if (e.key === '3') setTimeMode('night');
     else if (e.key.toLowerCase() === 'h') { const h = document.getElementById('hud'); h.hidden = !h.hidden; }
-    else if (e.key.toLowerCase() === 'u') toggleTats();
 });
-
-// tats's units (world/tats_units.js), lined up down the longest straight-ish
-// arterial near the main core at their own scale: U shows them and brings the
-// camera to the street before them; U again hides or shows them.
-let tats = null, tatsShown = false, tatsLoading = null;
-function tatsRoad() {
-    const c = SITE.centers[0];
-    let best = null, bd = Infinity;
-    for (const e of city.graph.edges) {
-        if (e.kind !== 'arterial' || e.len < 260) continue;
-        const p = e.pts, n = p.length / 2;
-        const straight = Math.hypot(p[p.length - 2] - p[0], p[p.length - 1] - p[1]) / e.len;
-        if (straight < 0.95) continue;
-        const d = Math.hypot(p[2 * (n >> 1)] - c.x, p[2 * (n >> 1) + 1] - c.z);
-        if (d < bd) { bd = d; best = e; }
-    }
-    return best;
-}
-function toggleTats() {
-    if (tatsLoading) return tatsLoading;
-    if (tats) { tatsShown = !tatsShown; tats.setVisible(tatsShown); return Promise.resolve(tats); }
-    const road = tatsRoad();
-    if (!road) return Promise.resolve(null);
-    tatsLoading = createTatsLineup(scene, { path: road.pts, groundAt: city.graded }).then((t) => {
-        tats = t; tatsShown = !!t; tatsLoading = null;
-        if (t) {
-            // At eye height on the road, behind the column, looking down it.
-            const p = road.pts, dx = p[2] - p[0], dz = p[3] - p[1], l = Math.hypot(dx, dz);
-            const ex = p[0] - dx / l * 30, ez = p[1] - dz / l * 30;
-            cam.setPose([ex, city.graded(ex, ez) + 2, ez], Math.atan2(-dx, -dz), 0.12);
-        }
-        return t;
-    });
-    return tatsLoading;
-}
 
 const statsEl = document.getElementById('perfStats');
 let statFrames = 0, statMs = 0, statAt = 0;
@@ -189,7 +152,6 @@ function tick() {
     sky.update(dt);
     cars?.update(dt, st.pos, st.fwd);
     interiors?.update(st.pos, NIGHT[timeMode], dt);
-    if (tatsShown) tats.update(dt);
     showStats(dt, st);
     requestAnimationFrame(tick);
 }
@@ -197,9 +159,7 @@ requestAnimationFrame(tick);
 if (bro.app.argv.includes('--bench')) ready.then(() => import('./tests/bench_window.js')).then((b) => b.run(globalThis.__metropolis));
 
 globalThis.__metropolis = {
-    scene, sky, city, ground, terrain, cam, get cars() { return cars; }, get interiors() { return interiors; }, get buildings() { return buildings; },
-    get tats() { return tats; }, toggleTats, tatsRoad,
-    whenReady: () => ready,
+    scene, sky, city, ground, terrain, cam, get cars() { return cars; }, get interiors() { return interiors; }, get buildings() { return buildings; },    whenReady: () => ready,
     setTimeMode,
     setPose: (pos, yaw, pitch) => {
         cam.setPose(pos, yaw, pitch);

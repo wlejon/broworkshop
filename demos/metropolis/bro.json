@@ -6,7 +6,5 @@
     "height": 960,
     "vsync": false,
     "maxFps": 0,
-    "lib": "../../lib",
-    "mounts": { "tats": "../../../tats" },
-    "permissions": []
+    "lib": "../../lib",    "permissions": []
 }
