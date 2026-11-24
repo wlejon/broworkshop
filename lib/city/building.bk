@@ -420,6 +420,12 @@ fn fac_depth(f: Fac, u0: f32, y: f32) -> f32 {
     if ((masonry || st == STYLE_OFFICE) && y > f.h - 0.7) {
         let k = (y - (f.h - 0.7)) / 0.7;
         d = min(d, wall * (1.0 - floor(min(k, 0.999) * 3.0 + 1.0) / 3.0));
+        // Under its top step, brackets (modillions) on stone, every 0.9 m.
+        if (st == STYLE_STONE && k > 0.34 && k < 0.66 && fract(u / 0.9) < 0.17) { d = 0.0; }
+    }
+    // Below it, a course of dentils on masonry: blocks proud of a shadowed frieze.
+    if (masonry && y > f.h - 0.86 && y < f.h - 0.72 && corner >= 0.45) {
+        d = select(fract(u / 0.2) < 0.5, wall * 0.35, wall + 0.03);
     }
     // The ground floor's stone in courses (rusticated), on stone fronts.
     if (st == STYLE_STONE && ground && !f.shop && fract(y / 0.55) < 0.08) { d = d + 0.025; }
