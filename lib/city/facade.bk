@@ -1,0 +1,940 @@
+// lib/city/facade.bk — a mass's surface at a point of it: its facade (floors,
+// bays, windows, a shop front, and behind every window a room: interior
+// mapping, the eye ray meeting the room's walls, floor and ceiling and a
+// piece of furniture, lit or dark at night by a hash of the building, floor
+// and bay), its roof and its foundation. Everything is a function of the
+// point in the mass's own frame, so the building draws it on its box
+// (building.bk) and a piece broken off it (destruction.bk) on what is left
+// of its face, wherever the piece has flown. Detail fades by the pixel's
+// footprint into its own average (wall and glass by their share, the rooms by
+// their expected light), so a far building is the near one, blurred: no
+// switch of model or colour with distance.
+module facade;
+import scene;
+import mesh;
+
+pub const STYLE_GLASS: i32 = 0;
+pub const STYLE_OFFICE: i32 = 1;
+pub const STYLE_BRICK: i32 = 2;
+pub const STYLE_STONE: i32 = 3;
+pub const STYLE_STUCCO: i32 = 4;
+pub const STYLE_ROW: i32 = 5;
+pub const STYLE_SIDING: i32 = 6;
+pub const STYLE_PLASTER: i32 = 7;
+pub const STYLE_INDUSTRIAL: i32 = 8;
+pub const STYLE_PLANT: i32 = 9;      // rooftop plant, stair rooms, stacks, silos: no windows
+
+// Integer hashes of whole-number inputs (floors, bays, a building's id).
+pub fn hash3(a: f32, b: f32, c: f32) -> f32 {
+    let ia = bitcast<u32>(a) * 0x9e3779b1u;
+    let ib = bitcast<u32>(b);
+    return scene::hash2(ia ^ (bitcast<u32>(c) * 0x85ebca77u), ib);
+}
+
+// Value noise over (x, y), whole-number lattice, `seed` a whole number.
+pub fn vnoise(x: f32, y: f32, seed: f32) -> f32 {
+    let ix = floor(x);
+    let iy = floor(y);
+    let fx = x - ix;
+    let fy = y - iy;
+    let sx = fx * fx * (3.0 - 2.0 * fx);
+    let sy = fy * fy * (3.0 - 2.0 * fy);
+    let s = floor(seed);
+    return mix(mix(hash3(ix, iy, s), hash3(ix + 1.0, iy, s), sx),
+               mix(hash3(ix, iy + 1.0, s), hash3(ix + 1.0, iy + 1.0, s), sx), sy);
+}
+
+// ---------------------------------------------------------------------------
+// Palettes (linear)
+// ---------------------------------------------------------------------------
+
+fn pick4(t: f32, a: vec3<f32>, b: vec3<f32>, c: vec3<f32>, d: vec3<f32>) -> vec3<f32> {
+    if (t < 0.25) { return a; }
+    if (t < 0.5) { return b; }
+    if (t < 0.75) { return c; }
+    return d;
+}
+
+pub fn wall_color(style: i32, hue: f32) -> vec3<f32> {
+    if (style == STYLE_GLASS) { return pick4(hue, vec3<f32>(0.20, 0.22, 0.24), vec3<f32>(0.33, 0.33, 0.32), vec3<f32>(0.12, 0.13, 0.15), vec3<f32>(0.42, 0.40, 0.36)); }
+    if (style == STYLE_OFFICE) { return pick4(hue, vec3<f32>(0.42, 0.41, 0.38), vec3<f32>(0.50, 0.48, 0.44), vec3<f32>(0.30, 0.30, 0.30), vec3<f32>(0.46, 0.42, 0.36)); }
+    if (style == STYLE_BRICK || style == STYLE_ROW) { return pick4(hue, vec3<f32>(0.34, 0.12, 0.07), vec3<f32>(0.42, 0.20, 0.11), vec3<f32>(0.26, 0.14, 0.10), vec3<f32>(0.50, 0.36, 0.24)); }
+    if (style == STYLE_STONE) { return pick4(hue, vec3<f32>(0.58, 0.52, 0.42), vec3<f32>(0.50, 0.47, 0.42), vec3<f32>(0.62, 0.58, 0.50), vec3<f32>(0.44, 0.40, 0.34)); }
+    if (style == STYLE_STUCCO) { return pick4(hue, vec3<f32>(0.66, 0.58, 0.44), vec3<f32>(0.62, 0.40, 0.28), vec3<f32>(0.52, 0.56, 0.54), vec3<f32>(0.70, 0.66, 0.58)); }
+    if (style == STYLE_SIDING) { return pick4(hue, vec3<f32>(0.72, 0.72, 0.68), vec3<f32>(0.40, 0.46, 0.52), vec3<f32>(0.62, 0.58, 0.40), vec3<f32>(0.42, 0.48, 0.40)); }
+    if (style == STYLE_PLASTER) { return pick4(hue, vec3<f32>(0.74, 0.68, 0.56), vec3<f32>(0.66, 0.46, 0.34), vec3<f32>(0.76, 0.74, 0.70), vec3<f32>(0.60, 0.56, 0.50)); }
+    // Plant: brick (chimneys, stacks), concrete, rendered, light metal (silos).
+    if (style == STYLE_PLANT) { return pick4(hue, vec3<f32>(0.30, 0.13, 0.08), vec3<f32>(0.40, 0.39, 0.37), vec3<f32>(0.55, 0.54, 0.51), vec3<f32>(0.62, 0.63, 0.63)); }
+    return pick4(hue, vec3<f32>(0.36, 0.38, 0.40), vec3<f32>(0.24, 0.30, 0.38), vec3<f32>(0.44, 0.42, 0.38), vec3<f32>(0.30, 0.22, 0.18));
+}
+
+fn roof_color(style: i32, hue: f32, pitched: bool) -> vec3<f32> {
+    if (pitched && style == STYLE_PLANT) {
+        // Spires, pyramids, silo caps: weathered copper, zinc, dark metal.
+        return pick4(fract(hue * 5.9), vec3<f32>(0.22, 0.40, 0.34), vec3<f32>(0.46, 0.47, 0.48), vec3<f32>(0.14, 0.15, 0.16), vec3<f32>(0.55, 0.56, 0.57));
+    }
+    if (pitched) {
+        return pick4(fract(hue * 7.31), vec3<f32>(0.30, 0.11, 0.06), vec3<f32>(0.10, 0.11, 0.13), vec3<f32>(0.17, 0.16, 0.15), vec3<f32>(0.24, 0.15, 0.11));
+    }
+    return pick4(fract(hue * 3.7), vec3<f32>(0.24, 0.24, 0.23), vec3<f32>(0.42, 0.42, 0.40), vec3<f32>(0.18, 0.18, 0.19), vec3<f32>(0.30, 0.29, 0.27));
+}
+
+fn glass_tint(style: i32, hue: f32) -> vec3<f32> {
+    if (style == STYLE_GLASS) {
+        return pick4(fract(hue * 5.3), vec3<f32>(0.05, 0.08, 0.10), vec3<f32>(0.04, 0.07, 0.06), vec3<f32>(0.08, 0.07, 0.06), vec3<f32>(0.06, 0.07, 0.08));
+    }
+    return vec3<f32>(0.035, 0.04, 0.045);
+}
+
+// ---------------------------------------------------------------------------
+// The facade's layout: bays, windows, floors
+// ---------------------------------------------------------------------------
+
+struct Layout {
+    bay: f32,        // bay width (m)
+    wx0: f32,        // window across the bay, 0..1
+    wx1: f32,
+    wy0: f32,        // window up the floor, 0..1
+    wy1: f32,
+    frame: f32,      // frame width (m)
+}
+
+fn layout_for(style: i32, ground: bool, shop: bool) -> Layout {
+    if (ground && shop) { return Layout(4.2, 0.06, 0.94, 0.05, 0.72, 0.10); }
+    if (style == STYLE_GLASS) { return Layout(1.55, 0.03, 0.97, 0.22, 0.98, 0.05); }
+    if (style == STYLE_OFFICE) { return Layout(3.0, 0.14, 0.86, 0.30, 0.86, 0.08); }
+    if (style == STYLE_BRICK) { return Layout(3.2, 0.26, 0.74, 0.28, 0.80, 0.07); }
+    if (style == STYLE_STONE) { return Layout(3.6, 0.28, 0.72, 0.22, 0.84, 0.08); }
+    if (style == STYLE_STUCCO) { return Layout(3.4, 0.22, 0.78, 0.26, 0.82, 0.07); }
+    if (style == STYLE_ROW) { return Layout(2.4, 0.24, 0.76, 0.28, 0.82, 0.07); }
+    if (style == STYLE_SIDING) { return Layout(2.9, 0.28, 0.72, 0.30, 0.78, 0.07); }
+    if (style == STYLE_PLASTER) { return Layout(3.0, 0.27, 0.73, 0.30, 0.80, 0.07); }
+    return Layout(6.0, 0.05, 0.95, 0.70, 0.92, 0.10);
+}
+
+// ---------------------------------------------------------------------------
+// Interior mapping: the room behind a window
+// ---------------------------------------------------------------------------
+
+struct Room {
+    albedo: vec3<f32>,
+    lamp: f32,       // how much of the room's light this point gets (ceiling fixture brighter)
+}
+
+// p: the point on the window in the room's frame (x across 0..w, y up 0..h, z = 0);
+// d: the eye ray in that frame, z pointing into the room (d.z > 0).
+fn room_hit(p: vec3<f32>, d: vec3<f32>, w: f32, h: f32, depth: f32, rh: f32) -> Room {
+    let tx = d.x > 0.0 ? (w - p.x) / d.x : (0.0 - p.x) / min(d.x, -0.0001);
+    let ty = d.y > 0.0 ? (h - p.y) / d.y : (0.0 - p.y) / min(d.y, -0.0001);
+    let tz = depth / max(d.z, 0.0001);
+    let wallc = mix(vec3<f32>(0.62, 0.58, 0.50), vec3<f32>(0.48, 0.52, 0.56), rh);
+    let floorc = mix(vec3<f32>(0.30, 0.20, 0.12), vec3<f32>(0.32, 0.32, 0.34), fract(rh * 3.1));
+    var t = tz;
+    var col = wallc * 0.92;
+    var lamp = 0.9;
+    if (tx < t) { t = tx; col = wallc; lamp = 0.8; }
+    if (ty < t) {
+        t = ty;
+        if (d.y > 0.0) {
+            // Ceiling with a fixture at the bay's middle.
+            let hp = p + d * t;
+            let fx = abs(hp.x - w * 0.5) / w;
+            let fz = abs(hp.z - depth * 0.45) / depth;
+            col = vec3<f32>(0.80, 0.79, 0.76);
+            lamp = 1.0 + 2.0 * (1.0 - smoothstep(0.06, 0.12, max(fx, fz)));
+        } else {
+            col = floorc;
+            lamp = 0.7;
+        }
+    }
+    // A piece of furniture: a block in the back half of the room.
+    let bx0 = w * (0.18 + 0.2 * rh);
+    let bx1 = w * (0.62 + 0.2 * rh);
+    let by1 = h * (0.24 + 0.12 * fract(rh * 5.7));
+    let bz0 = depth * 0.45;
+    let bz1 = depth * 0.8;
+    let inv = vec3<f32>(1.0 / (abs(d.x) > 0.0001 ? d.x : 0.0001), 1.0 / (abs(d.y) > 0.0001 ? d.y : -0.0001), 1.0 / max(d.z, 0.0001));
+    let t0 = (vec3<f32>(bx0, 0.0, bz0) - p) * inv;
+    let t1 = (vec3<f32>(bx1, by1, bz1) - p) * inv;
+    let tmin = max(max(min(t0.x, t1.x), min(t0.y, t1.y)), min(t0.z, t1.z));
+    let tmax = min(min(max(t0.x, t1.x), max(t0.y, t1.y)), max(t0.z, t1.z));
+    if (tmax > max(tmin, 0.0) && tmin < t) {
+        col = mix(vec3<f32>(0.20, 0.14, 0.10), vec3<f32>(0.25, 0.28, 0.33), fract(rh * 9.3));
+        lamp = 0.75;
+    }
+    return Room(col, lamp);
+}
+
+// A window's room as the eye ray sees it, averaged over the window: what a
+// far pixel's box filter of room_hit converges to, from whatever angle, in
+// closed form so it is continuous in the angle (sampled points flip a whole
+// row at once: bands up a tower). Across the window the depth at which a
+// ray meets a side wall is uniform, as is the depth it meets the ceiling or
+// floor, independently: the share meeting each first is an integral of a
+// clamped ramp (first_share). The furniture block: the rays above the floor
+// at its front and below its top within its depth, an interval of the
+// window's height linear in the slope, over its share of the width. The
+// ceiling fixture by its share of the ceiling; blinds over the window's top
+// 45 % (the part that would see the ceiling from below).
+// (Off-line against a 30x30 box filter of room_hit, glass and office rooms,
+// views 0.4 rad up to 0.4 down, 0.5 rad aside: within 4 %, 12 % at the
+// steepest. test_visual checks it rendered.)
+fn ramp_int(u: f32, va: f32, vb: f32) -> f32 {
+    // The integral of clamp((vb - t) / (vb - va), 0, 1) from va to u.
+    let l = max(vb - va, 0.000001);
+    if (u < va) { return u - va; }
+    if (u < vb) { let s = u - va; return s - s * s / (2.0 * l); }
+    return 0.5 * l;
+}
+fn first_share(ua: f32, ub: f32, va: f32, vb: f32, d: f32) -> f32 {
+    // P(U < V and U < d) for U, V uniform on [ua, ub], [va, vb].
+    let up = min(max(d, ua), ub);
+    return (ramp_int(up, va, vb) - ramp_int(ua, va, vb)) / max(ub - ua, 0.000001);
+}
+fn hit_depths(dd: f32, dz: f32, a: f32, b: f32, size: f32) -> vec2<f32> {
+    // The depths at which rays from [a, b] meet the wall they head for.
+    let k = dz / max(abs(dd), 0.00001);
+    return dd > 0.0 ? vec2<f32>((size - b) * k, (size - a) * k) : vec2<f32>(a * k, b * k);
+}
+fn room_mean(dr: vec3<f32>, wx0: f32, wx1: f32, wy0: f32, wy1: f32, w: f32, h: f32, depth: f32, rh: f32, blinds: bool) -> vec3<f32> {
+    let dz = max(dr.z, 0.0001);
+    let ya = wy0 * h;
+    let yb = max(mix(wy0, wy1, blinds ? 0.55 : 1.0) * h, ya + 0.001);
+    let xa = wx0 * w;
+    let xb = max(wx1 * w, xa + 0.001);
+    let U = hit_depths(dr.x, dz, xa, xb, w);
+    let V = hit_depths(dr.y, dz, ya, yb, h);
+    let ps = first_share(U.x, U.y, V.x, V.y, depth);
+    let pv = first_share(V.x, V.y, U.x, U.y, depth);
+    let pb = max(0.0, 1.0 - ps - pv);
+    let wallc = mix(vec3<f32>(0.62, 0.58, 0.50), vec3<f32>(0.48, 0.52, 0.56), rh);
+    let floorc = mix(vec3<f32>(0.30, 0.20, 0.12), vec3<f32>(0.32, 0.32, 0.34), fract(rh * 3.1));
+    let furn = mix(vec3<f32>(0.20, 0.14, 0.10), vec3<f32>(0.25, 0.28, 0.33), fract(rh * 9.3));
+    let cf = dr.y > 0.0 ? vec3<f32>(0.80, 0.79, 0.76) * 1.07 : floorc * 0.7;
+    let rest = (cf * pv + wallc * (0.92 * 0.9) * pb) / max(pv + pb, 0.000001);
+    let sl = dr.y / dz;
+    let by1 = h * (0.24 + 0.12 * fract(rh * 5.7));
+    let lo = -sl * depth * 0.45;
+    let hi = by1 - sl * depth * (sl < 0.0 ? 0.8 : 0.45);
+    // (Its 0.44 of the room's width as a share of the window's, behind the
+    // side wall's hits for rays that meet that before its middle depth.)
+    let zc = depth * 0.625;
+    let behind = clamp((U.x + U.y - 2.0 * zc) / max(U.y - U.x, 0.000001) * 0.5 + 0.5, 0.0, 1.0);
+    let pf = min(1.0, 0.44 * w / (xb - xa)) * max(0.0, min(hi, yb) - max(lo, ya)) / (yb - ya) * behind;
+    var room = mix(mix(rest, wallc * 0.8, ps), furn * 0.75, pf);
+    if (blinds) { room = mix(room, mix(vec3<f32>(0.72, 0.68, 0.6), vec3<f32>(0.5, 0.52, 0.55), rh) * 0.9, 0.45); }
+    return room;
+}
+
+pub fn fw1(x: f32) -> f32 {
+    return abs(dpdx(x)) + abs(dpdy(x));
+}
+
+// Coverage of [a, b] by a pixel at x of footprint f (box-filtered step).
+pub fn band(x: f32, a: f32, b: f32, f: f32) -> f32 {
+    let lo = clamp((x - a) / f + 0.5, 0.0, 1.0);
+    let hi = clamp((x - b) / f + 0.5, 0.0, 1.0);
+    return lo - hi;
+}
+
+// The integral of a unit-period pulse that is 1 on [a, b) of each period.
+fn pulse_int(t: f32, a: f32, b: f32) -> f32 {
+    return floor(t) * (b - a) + clamp(fract(t), a, b) - a;
+}
+
+// Coverage of the periodic pulse [a, b) (unit period) by a pixel at x of
+// footprint f, x and f in periods: exact for any footprint, so a pattern
+// far away settles at its share (b - a) instead of fading out.
+pub fn pulse(x: f32, a: f32, b: f32, f: f32) -> f32 {
+    let h = max(f, 1.0e-4) * 0.5;
+    return (pulse_int(x + h, a, b) - pulse_int(x - h, a, b)) / (2.0 * h);
+}
+
+// ---------------------------------------------------------------------------
+// Relief: a face's depth behind its box, marched near the eye
+// ---------------------------------------------------------------------------
+
+// A wall face, for its relief.
+struct Fac {
+    W: f32,          // the face's width
+    h: f32,          // the mass's height
+    floor_h: f32,
+    ground_h: f32,
+    style: i32,
+    shop: bool,      // a shop front on the ground floor
+    door: bool,      // the street door in its middle bay
+    loggia: bool,    // a residential street front: some bays open into loggias
+    id: f32,         // the building's, for which bays
+}
+
+const RELIEF_MAX: f32 = 1.3;    // the deepest a face goes behind its box (a loggia's back)
+const LOGGIA_D: f32 = 1.1;      // a loggia's depth behind the wall
+
+// Whether the bay `bay` of floor `fl` (1 the first above the ground floor)
+// is a loggia: a third of a residential front's middle bays, stacked in
+// columns more often than not (a building's balconies line up).
+fn is_loggia(f: Fac, bay: f32, nb: f32, fl: f32) -> bool {
+    if (!f.loggia || bay < 1.0 || bay > nb - 2.0 || fl < 1.0) { return false; }
+    let col = hash3(bay, 1.0, f.id + 13.0) < 0.4;
+    return select(col, hash3(bay, fl, f.id + 17.0) < 0.85, hash3(bay, fl, f.id + 19.0) < 0.08);
+}
+
+fn masonry_style(st: i32) -> bool {
+    return st == STYLE_BRICK || st == STYLE_ROW || st == STYLE_STONE || st == STYLE_STUCCO || st == STYLE_PLASTER;
+}
+
+// How far behind the box face the facade is at (u, y), metres (>= 0): the
+// wall a little in, so what stands proud of it (quoins, string courses, the
+// cornice, sills, window surrounds, pilasters, mullions) reaches the box;
+// windows and doors set back from the wall.
+fn fac_depth(f: Fac, u0: f32, y: f32) -> f32 {
+    let st = f.style;
+    let u = clamp(u0, 0.0, f.W);
+    let ground = y < f.ground_h;
+    let L = layout_for(st, ground, f.shop);
+    let nb = max(1.0, floor(f.W / L.bay + 0.501));
+    let bw = f.W / nb;
+    let bay = floor(u / bw);
+    let bu = u / bw - bay;
+    var fh = f.floor_h;
+    var fy01 = 0.0;
+    var base = 0.0;
+    if (ground) { fh = f.ground_h; fy01 = y / f.ground_h; }
+    else { let yf = (y - f.ground_h) / f.floor_h; fy01 = fract(yf); base = f.ground_h + floor(yf) * f.floor_h; }
+    let inwin = bu > L.wx0 && bu < L.wx1 && fy01 > L.wy0 && fy01 < L.wy1;
+    let corner = min(u, f.W - u);
+    let top = y > f.h - 0.9;
+
+    if (st == STYLE_GLASS) {
+        // Curtain wall: the glass 6 cm behind its mullions and spandrels.
+        if (ground && f.shop) { return select(inwin, 0.16, 0.02); }
+        return select(inwin && !top, 0.06, 0.0);
+    }
+    let masonry = masonry_style(st);
+    var wall = 0.05;
+    if (masonry) { wall = 0.10; }
+    else if (st == STYLE_SIDING || st == STYLE_INDUSTRIAL) { wall = 0.03; }
+    var d = wall;
+    // Quoins (masonry) and corner boards stand at the box.
+    if (corner < 0.45 && st != STYLE_INDUSTRIAL) { d = 0.0; }
+    // Office fronts: a pilaster between every two bays.
+    if (st == STYLE_OFFICE && !ground && abs(bu - 0.5) > 0.47) { d = 0.0; }
+    // A string course over the ground floor and at every floor (masonry).
+    if (masonry && abs(y - f.ground_h) < 0.12) { d = min(d, 0.02); }
+    if (masonry && !ground && fy01 * fh < 0.10 && st != STYLE_ROW) { d = min(d, 0.04); }
+    // The cornice, stepped out to the box.
+    if ((masonry || st == STYLE_OFFICE) && y > f.h - 0.7) {
+        let k = (y - (f.h - 0.7)) / 0.7;
+        d = min(d, wall * (1.0 - floor(min(k, 0.999) * 3.0 + 1.0) / 3.0));
+        // Under its top step, brackets (modillions) on stone, every 0.9 m.
+        if (st == STYLE_STONE && k > 0.34 && k < 0.66 && fract(u / 0.9) < 0.17) { d = 0.0; }
+    }
+    // Below it, a course of dentils on masonry: blocks proud of a shadowed frieze.
+    if (masonry && y > f.h - 0.86 && y < f.h - 0.72 && corner >= 0.45) {
+        d = select(fract(u / 0.2) < 0.5, wall * 0.35, wall + 0.03);
+    }
+    // The ground floor's stone in courses (rusticated), on stone fronts.
+    if (st == STYLE_STONE && ground && !f.shop && fract(y / 0.55) < 0.08) { d = d + 0.025; }
+    if (ground && f.shop) {
+        // A shop front: pilasters at the box between the windows, a fascia
+        // standing out over them, the glass set back.
+        if (fy01 > 0.76 && fy01 < 0.97) { return 0.0; }
+        if (inwin) { return wall + 0.14; }
+        return min(d, 0.02);
+    }
+    if (f.door && ground && bay == floor(nb * 0.5) && bu > 0.3 && bu < 0.7 && fy01 < 0.62) { return wall + 0.28; }
+    // A loggia: the bay open from its floor slab to its head, LOGGIA_D deep,
+    // behind a solid balustrade standing at the box to 1.05 m.
+    if (!ground && !top) {
+        let fl = floor((y - f.ground_h) / f.floor_h) + 1.0;
+        if (is_loggia(f, bay, nb, fl) && bu > 0.06 && bu < 0.94) {
+            let yy = fy01 * fh;
+            if (yy < 0.12 || yy > fh * 0.88) { return d; }      // the slabs' edges, at the wall
+            if (yy > 0.99 && yy < 1.05) { return 0.0; }          // the balustrade's coping, at the box
+            if (yy < 1.05) { return 0.06; }                      // the balustrade, in the wall's material
+            return wall + LOGGIA_D;
+        }
+    }
+    let windows = !top && !(corner < 0.6) && !(f.door && ground && bay == floor(nb * 0.5));
+    if (windows) {
+        let wx0 = L.wx0 * bw;
+        let wx1 = L.wx1 * bw;
+        let wy0 = L.wy0 * fh;
+        let wy1 = L.wy1 * fh;
+        let x = bu * bw;
+        let yy = fy01 * fh;
+        if (inwin) {
+            var rec = 0.2;
+            if (st == STYLE_OFFICE) { rec = 0.14; }
+            else if (st == STYLE_SIDING) { rec = 0.1; }
+            else if (st == STYLE_INDUSTRIAL) { rec = 0.12; }
+            else if (st == STYLE_STONE) { rec = 0.28; }
+            return wall + rec;
+        }
+        // The sill, at the box, 7 cm deep and 8 cm past the jambs.
+        if (masonry && yy > wy0 - 0.07 && yy <= wy0 && x > wx0 - 0.08 && x < wx1 + 0.08) { return 0.0; }
+        // A surround (stone, stucco, plaster): 12 cm about the opening, half way out.
+        if ((st == STYLE_STONE || st == STYLE_STUCCO || st == STYLE_PLASTER) && x > wx0 - 0.12 && x < wx1 + 0.12 && yy > wy0 && yy < wy1 + 0.12) {
+            return min(d, wall * 0.5);
+        }
+        // A brick front's lintel: a soldier course over the opening, proud by 2 cm.
+        if ((st == STYLE_BRICK || st == STYLE_ROW) && x > wx0 - 0.1 && x < wx1 + 0.1 && yy >= wy1 && yy < wy1 + 0.22) {
+            return min(d, wall - 0.02);
+        }
+    }
+    return d;
+}
+
+// The window opening (u0, u1, y0, y1) of the bay and floor holding (u, y).
+fn win_rect(f: Fac, u: f32, y: f32) -> vec4<f32> {
+    let ground = y < f.ground_h;
+    let L = layout_for(f.style, ground, f.shop);
+    let nb = max(1.0, floor(f.W / L.bay + 0.501));
+    let bw = f.W / nb;
+    let bay = floor(clamp(u, 0.0, f.W) / bw);
+    var fh = f.floor_h;
+    var base = 0.0;
+    if (ground) { fh = f.ground_h; } else { base = f.ground_h + floor((y - f.ground_h) / f.floor_h) * f.floor_h; }
+    return vec4<f32>((bay + L.wx0) * bw, (bay + L.wx1) * bw, base + L.wy0 * fh, base + L.wy1 * fh);
+}
+
+// ---------------------------------------------------------------------------
+// The surface
+// ---------------------------------------------------------------------------
+
+// A mass as its surface needs it (buildings.js's record, rows 1 to 3, and its id).
+pub struct Mass {
+    hw: f32,
+    h: f32,
+    hd: f32,
+    floor_h: f32,
+    ground_h: f32,
+    style: i32,
+    roof: f32,
+    flags: i32,
+    hue: f32,
+    id: f32,        // floor(seed * 2^20), made exact where the record is read
+}
+
+pub fn mass_of(r1: vec4<f32>, r2: vec4<f32>, r3: vec4<f32>, id: f32) -> Mass {
+    return Mass(r1.x, r1.y, r1.z, r1.w, r2.x, (r2.w + 0.5) as i32, r3.x, (r3.z + 0.5) as i32, r3.w, id);
+}
+
+pub struct Shade {
+    s: mesh::Surface,
+    hole: f32,      // the window or door glass's coverage, where an open building cuts it
+}
+
+// The surface of mass `m` at `lp` (its own frame: x across, y up from its
+// foot, z out of its street front) on a face of normal `ln` (that frame);
+// `roof_part` for the pitched roof's prism. `ax`, `ay`, `az` are the frame's
+// axes in the world, `eye` the unit direction from the eye to the point.
+pub fn shade(m: Mass, lp: vec3<f32>, ln: vec3<f32>, roof_part: bool,
+             ax: vec3<f32>, ay: vec3<f32>, az: vec3<f32>, eye: vec3<f32>,
+             s_in: mesh::Surface, night: f32, room_day: f32, room_night: f32) -> Shade {
+    var s = s_in;
+    let hw = m.hw;
+    let h = m.h;
+    let hd = m.hd;
+    let floor_h = m.floor_h;
+    let ground_h = m.ground_h;
+    let style = m.style;
+    let roof = m.roof;
+    let flags = m.flags;
+    let hue = m.hue;
+    let id = m.id;
+
+    s.metallic = 0.0;
+    s.emissive = vec3<f32>(0.0, 0.0, 0.0);
+
+    // Roofs: the prism's slopes, or the box's flat top.
+    if (roof_part) {
+        if (abs(ln.y) < 0.2) {
+            s.base_color = wall_color(style, hue);   // gable ends are wall
+        } else {
+            let rc = roof_color(style, hue, true);
+            let f = fw1(lp.y) + 0.01;
+            let course = 1.0 - 0.25 * pulse(lp.y * 3.2, 0.0, 0.12, f * 3.2);
+            s.base_color = rc * course;
+        }
+        s.roughness = 0.78;
+        return Shade(s, 0.0);
+    }
+    if (ln.y > 0.5) {
+        let pitched = roof > 0.5;
+        var rc = roof_color(style, hue, pitched);
+        // Parapet edge, and rooftop plant as darker patches.
+        let edge = min(hw - abs(lp.x), hd - abs(lp.z));
+        let f = fw1(lp.x) + fw1(lp.z) + 0.01;
+        rc *= 1.0 - 0.35 * band(edge, -1.0, 0.45, f);
+        let cell = floor(lp.xz / 3.0);
+        let unit = hash3(cell.x, cell.y, id);
+        if (unit > 0.86 && edge > 2.0 && f < 1.5) { rc *= 0.7; }
+        s.base_color = rc;
+        s.roughness = 0.85;
+        return Shade(s, 0.0);
+    }
+
+    // Walls. The face: its across axis u (0..W) and its normal, in the building's frame.
+    var u = 0.0;
+    var W = 0.0;
+    var nloc = vec3<f32>(0.0, 0.0, 1.0);
+    var tloc = vec3<f32>(1.0, 0.0, 0.0);
+    if (abs(ln.z) > abs(ln.x)) {
+        let sg = sign(ln.z);
+        u = lp.x * sg + hw;
+        W = 2.0 * hw;
+        nloc = vec3<f32>(0.0, 0.0, sg);
+        tloc = vec3<f32>(sg, 0.0, 0.0);
+    } else {
+        let sg = sign(ln.x);
+        u = -lp.z * sg + hd;
+        W = 2.0 * hd;
+        nloc = vec3<f32>(sg, 0.0, 0.0);
+        tloc = vec3<f32>(0.0, 0.0, -sg);
+    }
+    let front = nloc.z > 0.5;
+    let y = lp.y;
+    let wallc = wall_color(style, hue);
+    let fu = fw1(u) + 0.002;
+    let fy = fw1(y) + 0.002;
+    let fpx = max(fu, fy);
+
+    // Foundation below the ground floor.
+    if (y < 0.0) {
+        s.base_color = wallc * 0.55 + vec3<f32>(0.08, 0.08, 0.08);
+        s.roughness = 0.9;
+        return Shade(s, 0.0);
+    }
+
+    // Plant: no windows and no rooms. A plant room's upper part louvred, a
+    // coping band at its top; stacks and silos plain.
+    if (style == STYLE_PLANT) {
+        var pw = wallc;
+        if (h > 2.0 && h < 12.0) {
+            let louv = pulse(y / 0.16, 0.0, 0.45, fy / 0.16);
+            pw *= 1.0 - 0.35 * louv * band(y, h * 0.4, h - 0.35, fy);
+        }
+        pw *= 1.0 - 0.25 * band(y, h - 0.3, h + 1.0, fy);
+        s.base_color = pw;
+        s.roughness = 0.85;
+        return Shade(s, 0.0);
+    }
+
+    let shop = (flags & 2) != 0;
+    let ground = y < ground_h;
+    let L = layout_for(style, ground, shop);
+    var fl = 0.0;
+    var fy01 = 0.0;
+    var fh = floor_h;
+    // Continuous floor coordinate (floors above the ground floor), for the filters.
+    let yf = (y - ground_h) / floor_h;
+    if (ground) {
+        fh = ground_h;
+        fy01 = y / ground_h;
+    } else {
+        fl = floor(yf) + 1.0;
+        fy01 = fract(yf);
+    }
+    // (Rounded with a margin: W comes interpolated, so a face whose width is
+    // a whole and a half bays (24 m of 3.2 m bays) would round both ways
+    // pixel by pixel. interior.js rounds the same.)
+    let nb = max(1.0, floor(W / L.bay + 0.501));
+    let bw = W / nb;
+    let ub = u / bw;
+    let bay = floor(ub);
+    let bu = fract(ub);
+
+    // Window coverage, box-filtered by the pixel (so it averages, not aliases, far away).
+    let win_v = ground ? band(fy01, L.wy0, L.wy1, fy / fh) : pulse(yf, L.wy0, L.wy1, fy / floor_h);
+    var win = pulse(ub, L.wx0, L.wx1, fu / bw) * win_v;
+    // Keep the corners solid on masonry; a door on the street front's middle bay.
+    let corner = min(u, W - u);
+    if (style != STYLE_GLASS && corner < 0.6) { win = 0.0; }
+    let door_bay = floor(nb * 0.5);
+    let is_door = front && ground && !shop && bay == door_bay && (flags & 1) != 0 && style != STYLE_INDUSTRIAL;
+    // (A tower's lobby doors fill their bay under a glass transom.)
+    if (is_door) { win = select(style == STYLE_GLASS, win * band(fy01, 0.64, 1.0, fy / fh), 0.0); }
+    if (style == STYLE_INDUSTRIAL && ground && front && abs(u - W * 0.5) < 2.6 && y < 4.5) { win = 0.0; }
+    let top_floor = y > h - 0.9 && style != STYLE_GLASS;
+    if (top_floor) { win = 0.0; }
+
+    // Relief, near the eye (it fades out by the pixel's footprint): the
+    // windows set back in the wall, so the eye ray meets their glass deeper
+    // in, shifted, or a jamb, head or sill on the way; each lit by its own
+    // normal, the sky it sees and the sun traced back out through the
+    // opening (their shadows move with the sun). A stone sill stands out
+    // under the masonry windows and shades the wall below it.
+    let dw = eye;
+    let dl = vec3<f32>(dot(dw, ax), dot(dw, ay), dot(dw, az));
+    let dr = vec3<f32>(dot(dl, tloc), dl.y, -dot(dl, nloc));
+    let sw = s.to_sun;
+    let slc = vec3<f32>(dot(sw, ax), dot(sw, ay), dot(sw, az));
+    let sf = vec3<f32>(dot(slc, tloc), slc.y, dot(slc, nloc));   // the sun in the face's frame, z out of it
+    let rel_k = 1.0 - smoothstep(0.02, 0.06, fpx);
+    let base_y = y - fy01 * fh;
+    let masonry = masonry_style(style);
+    let residential = style == STYLE_BRICK || style == STYLE_ROW || style == STYLE_STUCCO || style == STYLE_PLASTER || style == STYLE_SIDING;
+    let fac = Fac(W, h, floor_h, ground_h, style, shop, front && (flags & 1) != 0 && !shop && style != STYLE_INDUSTRIAL,
+                  residential && front && h > 8.0, id);
+    var wall_d = 0.05;
+    if (style == STYLE_GLASS) { wall_d = 0.0; }
+    else if (masonry) { wall_d = 0.10; }
+    else if (style == STYLE_SIDING || style == STYLE_INDUSTRIAL) { wall_d = 0.03; }
+    var rel_kind = 0;                        // 0 none, 1 glass, 2 a step's side (a reveal, a sill's face), 3 a flat of the facade
+    var rel_n = vec3<f32>(0.0, 0.0, 1.0);    // face frame: x along u, y up, z out of the wall
+    var rel_d = 0.0;                         // depth of what the eye meets
+    var rel_p = vec2<f32>(u, y);             // where, across the face
+    var rel_sun = 1.0;
+    var in_door = false;
+    if (rel_k > 0.0 && dr.z > 0.02) {
+        // March the eye ray down through the depths (per metre of depth),
+        // then halve the step it crossed in.
+        let rd = vec2<f32>(dr.x / dr.z, dr.y / dr.z);
+        var a = 0.0;
+        var b = -1.0;
+        if (fac_depth(fac, u, y) <= 0.001) { b = 0.0; }
+        // (Steps finer near the face, where the sills and courses are thin.)
+        for (var i = 1; i <= 24; i += 1) {
+            let q = f32(i) / 24.0;
+            let t = RELIEF_MAX * q * sqrt(q);
+            if (b < 0.0) {
+                if (fac_depth(fac, u + rd.x * t, y + rd.y * t) <= t) { b = t; } else { a = t; }
+            }
+        }
+        if (b > 0.0) {
+            for (var k = 0; k < 5; k += 1) {
+                let m = 0.5 * (a + b);
+                if (fac_depth(fac, u + rd.x * m, y + rd.y * m) <= m) { b = m; } else { a = m; }
+            }
+        }
+        if (b >= 0.0) {
+            let pb = vec2<f32>(u + rd.x * b, y + rd.y * b);
+            let db = fac_depth(fac, pb.x, pb.y);
+            if (b > 0.0 && db < b - 0.004) {
+                // The surface stepped up between a and b: the ray met its side.
+                rel_kind = 2;
+                rel_d = b;
+                rel_p = pb;
+                if (fac_depth(fac, pb.x, y + rd.y * a) < b - 0.004) { rel_n = vec3<f32>(-sign(rd.x), 0.0, 0.0); }
+                else { rel_n = vec3<f32>(0.0, -sign(rd.y), 0.0); }
+            } else {
+                rel_kind = 3;
+                rel_d = db;
+                rel_p = vec2<f32>(u + rd.x * db, y + rd.y * db);
+                in_door = fac.door && rel_p.y < ground_h * select(style == STYLE_GLASS, 0.64, 1.0) && floor(rel_p.x / bw) == floor(nb * 0.5);
+                // Glass: deep, and in a window's opening (a loggia's back is wall round its window).
+                let r = win_rect(fac, rel_p.x, rel_p.y);
+                let in_win = rel_p.x > r.x && rel_p.x < r.y && rel_p.y > r.z && rel_p.y < r.w;
+                if (db > wall_d + 0.03 && !in_door && in_win) { rel_kind = 1; }
+            }
+            // The sun back out from there: blocked where the facade stands
+            // nearer than its ray.
+            if (sf.z > 0.01 && rel_d > 0.0) {
+                let rs = vec2<f32>(sf.x / sf.z, sf.y / sf.z);
+                let p0 = rel_p + vec2<f32>(rel_n.x, rel_n.y) * 0.004;
+                var occ = 0.0;
+                for (var j = 1; j <= 10; j += 1) {
+                    let t = rel_d * f32(j) / 10.0;
+                    let q = p0 + rs * t;
+                    occ = max(occ, (rel_d - t) - fac_depth(fac, q.x, q.y));
+                }
+                rel_sun = 1.0 - smoothstep(0.0, 0.015, occ);
+            } else if (rel_d > 0.002) {
+                rel_sun = 0.0;   // the sun behind the face: the wall stands between
+            }
+        }
+    }
+
+    // Wall surface, where the eye ray met it (so its grain sits on the
+    // relief): each material's grain near, its mean far (vis fades it by
+    // the pixel), its own small relief as a normal tilt; then weathering,
+    // which is large and shows at every distance.
+    let mu = select(rel_kind == 3, rel_p.x, u);
+    let my = select(rel_kind == 3, rel_p.y, y);
+    var wall = wallc;
+    var wall_t = vec2<f32>(0.0, 0.0);   // face frame: x along u, y up
+    let vis = 1.0 - smoothstep(0.02, 0.05, fpx);
+    let vis_n = 1.0 - smoothstep(0.004, 0.012, fpx);   // millimetre relief
+    let vis_s = 1.0 - smoothstep(0.05, 0.3, fpx);      // decimetre mottling
+    if (style == STYLE_BRICK || style == STYLE_ROW) {
+        let row = floor(my / 0.075);
+        let xu = mu / 0.23 + 0.5 * (row - 2.0 * floor(row * 0.5));
+        let mortar = max(pulse(my / 0.075, 0.0, 0.14, fy / 0.075), pulse(xu, 0.0, 0.05, fu / 0.23));
+        // Far away each term is its mean: the mortar's share of the wall
+        // (courses 0.14, joints 0.05: 1 - 0.86 * 0.95 = 0.183, at 0.8) and
+        // the bricks' mean tone (0.5 of the hash).
+        wall = mix(wall, vec3<f32>(0.42, 0.40, 0.36), (mortar * vis + 0.183 * (1.0 - vis)) * 0.8);
+        let bx = floor(xu);
+        wall *= 0.9 + 0.2 * mix(0.5, hash3(bx, row, id), vis);
+        // A few bricks fired darker (clinkers) or paler.
+        let bh = hash3(bx, row, id + 3.0);
+        wall *= mix(1.0, select(bh > 0.93, 0.68, select(bh < 0.05, 1.22, 1.0)), vis);
+        // The bricks' arrises round into raked-back mortar.
+        let yc = fract(my / 0.075) * 0.075 - 0.04275;
+        let xc = fract(xu) * 0.23 - 0.12075;
+        wall_t = vec2<f32>(sign(xc) * (1.0 - smoothstep(0.0, 0.006, 0.10925 - abs(xc))),
+                           sign(yc) * (1.0 - smoothstep(0.0, 0.006, 0.03225 - abs(yc)))) * 0.45 * vis_n;
+    } else if (style == STYLE_STONE) {
+        // Ashlar: courses of 0.55 m, each its own block length and bond,
+        // each block its own tone, fine joints.
+        let row = floor(my / 0.55);
+        let len = 0.9 + 0.6 * hash3(row, 1.0, id);
+        let xs = (mu + hash3(row, 2.0, id) * len) / len;
+        let joint = max(pulse(my / 0.55, 0.0, 0.02, fy / 0.55), pulse(xs, 0.0, 0.012, fu / len));
+        wall *= 0.92 + 0.16 * mix(0.5, hash3(floor(xs), row, id + 5.0), vis_s);
+        wall = mix(wall, wall * 0.55, joint * 0.8);
+        wall *= 1.0 + 0.1 * (vnoise(mu * 6.0, my * 6.0, id) - 0.5) * vis_s;
+    } else if (style == STYLE_STUCCO || style == STYLE_PLASTER) {
+        // Trowelled render: a mottle at two scales, and its ripple as a tilt.
+        let m = vnoise(mu * 2.3, my * 2.3, id) * 0.6 + vnoise(mu * 11.0, my * 11.0, id + 1.0) * 0.4;
+        wall *= 1.0 + 0.14 * (m - 0.5) * vis_s;
+        let e = 0.03;
+        let n0 = vnoise(mu * 11.0, my * 11.0, id + 1.0);
+        wall_t = vec2<f32>(vnoise((mu + e) * 11.0, my * 11.0, id + 1.0) - n0, vnoise(mu * 11.0, (my + e) * 11.0, id + 1.0) - n0) * (-0.12 / e / 11.0) * vis;
+    } else if (style == STYLE_OFFICE) {
+        // Precast panels: each bay and floor its own cast, a fine speckle.
+        wall *= 0.95 + 0.1 * hash3(floor(mu / bw), fl, id + 7.0);
+        wall *= 1.0 + 0.08 * (vnoise(mu * 25.0, my * 25.0, id) - 0.5) * vis;
+    } else if (style == STYLE_SIDING) {
+        // Lap boards: each leans out at its foot, a shadow line under it.
+        wall *= 1.0 - 0.18 * pulse(my / 0.2, 0.0, 0.18, fy / 0.2);
+        wall *= 0.96 + 0.08 * mix(0.5, hash3(floor(my / 0.2), floor(mu / 4.8), id), vis_s);
+        wall_t = vec2<f32>(0.0, -0.18);
+    } else if (style == STYLE_INDUSTRIAL) {
+        let rib = 0.5 + 0.5 * sin(mu * 6.2831 / 0.3);
+        // (Far away the ribs' mean, 0.5: the cladding's tone holds.)
+        wall *= 0.88 + 0.14 * mix(0.5, rib, 1.0 - smoothstep(0.05, 0.15, fu));
+        wall_t = vec2<f32>(cos(mu * 6.2831 / 0.3) * 0.35 * (1.0 - smoothstep(0.03, 0.1, fu)), 0.0);
+    }
+    // A slab line between floors and a cornice at the top.
+    if (!ground && style != STYLE_GLASS) {
+        wall = mix(wall, wall * 0.82 + vec3<f32>(0.05, 0.05, 0.05), pulse(yf, 0.0, 0.05, fy / floor_h) * 0.8);
+    }
+    if (style == STYLE_GLASS) {
+        // Spandrels between the glass, mullions between the panes.
+        wall = mix(glass_tint(style, hue) * 1.8, wallc, 0.55);
+    }
+    // Weathering: a drift of tone across the wall, grime splashed up from
+    // the pavement, and dirt washed down under each sill in streaks.
+    if (style != STYLE_GLASS) {
+        wall *= 0.9 + 0.2 * vnoise(mu * 0.12, my * 0.08, id + 9.0);
+        wall *= 1.0 - 0.22 * (1.0 - smoothstep(0.0, 1.4, my));
+        if (!(ground && shop) && style != STYLE_SIDING && fy01 < L.wy0 && corner >= 0.6 && !top_floor) {
+            let sill_y = base_y + L.wy0 * fh;
+            let below = sill_y - my;
+            let reach = 0.5 + 1.0 * hash3(bay, fl, id + 11.0);
+            let streak = mix(0.6, 0.3 + 0.7 * vnoise(mu * 9.0, 0.5, id + bay), vis_s);
+            let k = band(mu, (bay + L.wx0) * bw + 0.04, (bay + L.wx1) * bw - 0.04, fu) * (1.0 - smoothstep(0.0, reach, below)) * streak;
+            wall *= 1.0 - 0.25 * k;
+        }
+        // Under the cornice, washed down the top of the wall.
+        let topk = (1.0 - smoothstep(0.0, 2.5, (h - 0.7) - my)) * step(my, h - 0.7);
+        wall *= 1.0 - 0.15 * topk * mix(0.6, 0.3 + 0.7 * vnoise(mu * 7.0, 1.5, id), vis_s);
+    }
+    if (ground && shop) {
+        // A fascia above the shop window, in the shop's colour.
+        let sc = pick4(fract(hue * 13.7 + bay * 0.37), vec3<f32>(0.45, 0.08, 0.06), vec3<f32>(0.06, 0.20, 0.14), vec3<f32>(0.08, 0.10, 0.24), vec3<f32>(0.40, 0.30, 0.10));
+        wall = mix(wall, sc, band(fy01, 0.78, 0.95, fy / fh));
+    }
+    var door_glass = 0.0;    // a lobby door's glass leaves (glass towers)
+    if (is_door) {
+        var dw = band(bu, 0.3, 0.7, fu / bw) * band(fy01, 0.0, 0.62, fy / fh);
+        var door_c = vec3<f32>(0.12, 0.08, 0.06);
+        if (style == STYLE_GLASS) {
+            // A tower's lobby doors: a pair of glass leaves in aluminium
+            // frames across the bay, a kick plate at their foot.
+            dw = band(bu, 0.03, 0.97, fu / bw) * band(fy01, 0.0, 0.64, fy / fh);
+            let lx = fract((bu - 0.03) / 0.47) * bw * 0.47;
+            let ly = fy01 * fh;
+            let pane = band(lx, 0.06, bw * 0.47 - 0.06, fu) * band(ly, 0.25, fh * 0.64 - 0.08, fy);
+            // (The leaves' glass shows the lobby behind, dim, as the windows show their rooms.)
+            door_c = mix(vec3<f32>(0.32, 0.33, 0.34), vec3<f32>(0.04, 0.05, 0.056), pane);
+            door_glass = pane * dw;
+        }
+        wall = mix(wall, door_c, dw);
+    }
+    if (top_floor && style != STYLE_SIDING && style != STYLE_PLASTER) {
+        wall = mix(wall, wall * 0.75, band(y, h - 0.6, h - 0.35, fy));
+    }
+
+    // The room behind the window.
+    let room_w = bw;
+    let depth = min(7.0, min(hw, hd) * 1.2 + 1.0);
+    let rh = hash3(bay, fl, id);
+    // Office floors light together; homes room by room.
+    // The share of rooms lit at night: each building its own (some nearly dark),
+    // offices by floor (cleaners, late teams), shops nearly all.
+    let bshare = 0.25 + 1.5 * hash3(id, 7.0, 1.0) * hash3(id, 11.0, 2.0);
+    var lit_p = 0.3 * bshare;
+    if (style == STYLE_GLASS || style == STYLE_OFFICE) { lit_p = (hash3(fl, 3.0, id) < 0.3 ? 0.7 : 0.06) * bshare; }
+    if (ground && shop) { lit_p = 0.85; }
+    let lit = hash3(bay * 1.7, fl * 2.3, id + 5.0) < lit_p;
+    let warm = mix(vec3<f32>(1.0, 0.78, 0.52), vec3<f32>(0.86, 0.92, 1.0), (style == STYLE_GLASS || style == STYLE_OFFICE) ? 0.6 : fract(rh * 4.3) * 0.3);
+    let blinds = fract(rh * 11.3) < 0.35;
+
+    // The eye ray (dr, above) into the room, from where it meets the glass.
+    var room = Room(vec3<f32>(0.4, 0.38, 0.35), 0.8);
+    let near_k = 1.0 - smoothstep(0.03, 0.12, fpx);   // rooms resolve within ~0.1 m pixels
+    if (near_k > 0.0 && (win > 0.0 || rel_kind == 1) && dr.z > 0.0) {
+        let gu = select(rel_kind == 1, fract(rel_p.x / bw), bu);
+        let gy = select(rel_kind == 1, (rel_p.y - base_y) / fh, fy01);
+        let pr = vec3<f32>(clamp(gu, 0.0, 1.0) * room_w, clamp(gy, 0.0, 1.0) * fh, 0.0);
+        room = room_hit(pr, dr, room_w, fh, depth, rh);
+        if (blinds && fy01 > mix(L.wy0, L.wy1, 0.55)) { room = Room(mix(vec3<f32>(0.72, 0.68, 0.6), vec3<f32>(0.5, 0.52, 0.55), rh), 0.9); }
+    }
+    // Far away a room is its average over the window, seen along the eye ray.
+    var rfar = vec3<f32>(0.0, 0.0, 0.0);
+    if (near_k < 1.0 && win > 0.0 && dr.z > 0.0) {
+        rfar = room_mean(dr, L.wx0, L.wx1, L.wy0, L.wy1, room_w, fh, depth, rh, blinds);
+    }
+    let rlit = mix(rfar, room.albedo * room.lamp, near_k);
+
+    // Light: by day a dim room behind the glass; at night the lit ones glow,
+    // and far away every window glows by the expected share lit.
+    let win_k = 1.0 - smoothstep(0.3, 0.7, max(fu / bw, fy / fh));
+    let lit_f = mix(lit_p, lit ? 1.0 : 0.0, win_k);
+    let night_glow = rlit * warm * room_night * night * lit_f;
+    // Shops are lit by day too, several times an office's light.
+    let day_glow = rlit * room_day * (ground && shop ? 8.0 : 0.55 + 0.45 * lit_f);
+    let glow = night_glow + day_glow * (1.0 - night);
+
+    let glass = glass_tint(style, hue);
+    // Near, what the eye ray met decides glass or wall; far, the pixel's
+    // coverage (rel_k fades one into the other by the footprint).
+    var g = win;
+    if (rel_kind > 0) { g = mix(win, select(rel_kind == 1, 1.0, 0.0), rel_k); }
+    var glow_k = g;
+    var rough_win = max(g, door_glass);
+    var wall_c = wall;
+    var n_face = vec3<f32>(0.0, 0.0, 1.0);
+    let stone = mix(vec3<f32>(0.70, 0.67, 0.60), wallc, 0.25);
+    if (rel_kind == 2) {
+        // A step's side: a reveal, the wall's material turned in.
+        // (A curtain wall's are its aluminium mullions.)
+        wall_c = select(style == STYLE_GLASS, vec3<f32>(0.32, 0.33, 0.34), wallc * 0.9);
+        if (rel_d < wall_d - 0.005 && masonry) { wall_c = stone * 0.95; }
+        n_face = normalize(mix(n_face, rel_n, rel_k));
+    } else if (rel_kind == 3 && rel_d < wall_d - 0.005) {
+        // A flat proud of the wall: dressed stone on masonry (a brick
+        // front's lintels its own brick, darker), the wall's paint elsewhere.
+        if (shop && rel_p.y < ground_h) { wall_c = wall; }   // the shop's fascia and pilasters keep their paint
+        else if ((style == STYLE_BRICK || style == STYLE_ROW) && rel_d > 0.05) { wall_c = wall * 0.82; }
+        else if (masonry) { wall_c = stone; }
+        else { wall_c = wall * 1.06; }
+    } else if (rel_kind == 3 && in_door && rel_d > wall_d + 0.03) {
+        // (A lobby's glass leaves keep their frames, as drawn on the face.)
+        wall_c = select(style == STYLE_GLASS, wall, vec3<f32>(0.12, 0.08, 0.06));
+    }
+    if (rel_kind == 1) {
+        // The glass, framed: a painted frame of L.frame inside its opening.
+        let r = win_rect(fac, rel_p.x, rel_p.y);
+        let fr = L.frame * 0.6;
+        let in_frame = 1.0 - band(rel_p.x, r.x + fr, r.y - fr, fu) * band(rel_p.y, r.z + fr, r.w - fr, fy);
+        let frame_c = select(masonry, vec3<f32>(0.86, 0.85, 0.82), vec3<f32>(0.22, 0.23, 0.24));
+        wall_c = frame_c;
+        g *= 1.0 - in_frame * rel_k;
+        glow_k = g;
+        rough_win = mix(g, 1.0, in_frame * rel_k * 0.4);
+    }
+    // Far (the march faded out), masonry's dressed stone the near draws
+    // (fac_depth's quoins, sills, surrounds, courses, cornice and dentils)
+    // and a brick front's darker lintels, as their share of the pixel.
+    var wall_far = wall;
+    if (masonry && rel_k < 1.0) {
+        var st_cov = band(y, h - 0.7, h, fy) + 0.5 * band(y, h - 0.86, h - 0.72, fy);
+        st_cov += band(y, ground_h - 0.12, ground_h + 0.12, fy);
+        if (style != STYLE_INDUSTRIAL) { st_cov += band(u, 0.0, 0.45, fu) + band(u, W - 0.45, W, fu); }
+        var lin_cov = 0.0;
+        if (!ground && !(y > h - 0.9) && corner >= 0.6) {
+            let x = bu * bw;
+            let yy = fy01 * fh;
+            let wx0 = L.wx0 * bw;
+            let wx1 = L.wx1 * bw;
+            let wy0 = L.wy0 * fh;
+            let wy1 = L.wy1 * fh;
+            if (style != STYLE_ROW) { st_cov += band(yy, 0.0, 0.10, fy); }
+            st_cov += band(yy, wy0 - 0.07, wy0, fy) * band(x, wx0 - 0.08, wx1 + 0.08, fu);
+            if (style == STYLE_STONE || style == STYLE_STUCCO || style == STYLE_PLASTER) {
+                let outer = band(x, wx0 - 0.12, wx1 + 0.12, fu) * band(yy, wy0, wy1 + 0.12, fy);
+                let inner = band(x, wx0, wx1, fu) * band(yy, wy0, wy1, fy);
+                st_cov += max(outer - inner, 0.0);
+            }
+            if (style == STYLE_BRICK || style == STYLE_ROW) {
+                lin_cov = band(x, wx0 - 0.1, wx1 + 0.1, fu) * band(yy, wy1, wy1 + 0.22, fy);
+            }
+        }
+        wall_far = mix(wall, stone, clamp(st_cov, 0.0, 1.0)) * (1.0 - 0.18 * lin_cov);
+    }
+    s.base_color = mix(mix(wall_far, wall_c, rel_k), glass, g);
+    if (rel_kind > 0) {
+        // The sky a recess sees falls off with its depth; the sun as traced.
+        s.sky_visibility *= 1.0 - 0.5 * rel_k * smoothstep(0.0, 0.35, rel_d);
+        s.sun_visibility *= mix(1.0, rel_sun, rel_k);
+    }
+    // Far (the march faded out), a loggia's opening keeps its recess's shade
+    // on the box face: the sky half seen, the sun mostly cut, the lamps too.
+    let loggia_far = (1.0 - rel_k) * select(!ground && y < h - 0.9 && is_loggia(fac, bay, nb, fl), 1.0, 0.0) *
+                     band(bu, 0.06, 0.94, fu / bw) * band(fy01 * fh, 1.05, fh * 0.88, fy);
+    s.sky_visibility *= 1.0 - 0.5 * loggia_far;
+    s.sun_visibility *= 1.0 - 0.7 * loggia_far;
+    // The wall's own grain tilts it where the ray met the wall (not trim, glass, a side).
+    let on_wall = rel_kind == 0 || (rel_kind == 3 && abs(rel_d - wall_d) < 0.005);
+    if (on_wall && (wall_t.x != 0.0 || wall_t.y != 0.0)) {
+        let wt = wall_t * (1.0 - g);   // the wall's share of the pixel, not its glass
+        n_face = normalize(vec3<f32>(wt.x, wt.y, 1.0));
+    }
+    // Glass: each pane a little off the plane and bowed (pillowed), so the
+    // reflections break pane to pane; its tint a shade apart too.
+    let on_glass = rel_kind == 1 && rel_k > 0.0;
+    if (on_glass) {
+        let pb = floor(rel_p.x / bw);
+        let pyf = (rel_p.y - ground_h) / floor_h;
+        let pf = floor(pyf);
+        let pu = fract(rel_p.x / bw) - 0.5;
+        let pv = fract(pyf) - 0.6;
+        let h1 = hash3(pb, pf, id + 31.0) - 0.5;
+        let h2 = hash3(pb, pf, id + 37.0) - 0.5;
+        let pt = vec2<f32>(h1 * 0.14 + pu * 0.08, h2 * 0.14 + pv * 0.08) * rel_k;
+        n_face = normalize(vec3<f32>(pt.x, pt.y, 1.0));
+        s.base_color *= 1.0 + 0.16 * h1 * h2 * 4.0 * rel_k * g;
+    }
+    if ((rel_k > 0.0 && rel_kind == 2) || on_glass || (on_wall && (wall_t.x != 0.0 || wall_t.y != 0.0))) {
+        // Face frame -> the building's -> the world's.
+        let nl = n_face.x * tloc + vec3<f32>(0.0, n_face.y, 0.0) + n_face.z * nloc;
+        s.normal = normalize(ax * nl.x + ay * nl.y + az * nl.z);
+    }
+
+    // The street lamps' light at night: a row of lamps (1600 cd, 30 m apart,
+    // 8 m up) 7 m in front of the street front, as a line source:
+    // E = 2 I d / (sp (d^2 + dy^2)) lux. The sides take it at a slant (a
+    // third), the back none; a mass set back from the street (a wing, a
+    // porch) half as much, so a house is not lit on one face alone.
+    var lamp_lum = vec3<f32>(0.0, 0.0, 0.0);
+    if (night > 0.0 && nloc.z > -0.5) {
+        let dy = y - 8.0;
+        let d = 7.0;
+        let face_k = select(front, 1.0, 0.35) * select((flags & 1) != 0, 1.0, 0.5);
+        var e = 2.0 * 1600.0 * d / (30.0 * (d * d + dy * dy)) * face_k;
+        if (rel_kind > 0) {
+            // In the relief: a side takes the lamps by how it faces them
+            // (a soffit catches them from below, a sill's top not), and a
+            // recess loses them with its depth behind the balustrade or reveal.
+            let ld = normalize(vec3<f32>(0.0, -dy, d));
+            // (The lamps are a row along the street: a side facing along it sees those beside.)
+            let facing = select(rel_kind == 2, max(dot(rel_n, ld), 0.0) / ld.z + 0.4 * abs(rel_n.x), 1.0);
+            let deep = 1.0 - 0.65 * smoothstep(0.05, 1.0, rel_d);
+            e *= mix(1.0, facing * deep, rel_k);
+        }
+        e *= 1.0 - 0.65 * loggia_far;
+        lamp_lum = s.base_color * vec3<f32>(1.0, 0.82, 0.62) * (e * night / 3.14159265);
+    }
+    s.roughness = mix(style == STYLE_GLASS ? 0.4 : 0.82, 0.06, rough_win);
+    s.metallic = 0.0;
+    s.emissive = glow * glow_k + lamp_lum;
+
+    // What an open building cuts (building.bk): the windows' glass, or the door.
+    var hole = win;
+    if (is_door) { hole = band(bu, 0.3, 0.7, fu / bw) * band(fy01, 0.0, 0.62, fy / fh); }
+    return Shade(s, hole);
+}
