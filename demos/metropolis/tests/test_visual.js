@@ -124,8 +124,11 @@ carN.forEach((n) => n.visible = false);
 const FOV = 60;   // the fly camera's own
 // `only=facades,lods,...` runs those sections alone (facades, lods, cars,
 // dolly, tiles, swim, rooms); none given runs them all.
+// (Run with --grant files for save=.)
 const ONLY = bro.app.argv.find((a) => a.startsWith('only='))?.slice(5).split(',');
 const want = (k) => !ONLY || ONLY.includes(k);
+// `save=<dir>` writes the frames the level-of-detail checks compare there.
+const SAVE = bro.app.argv.find((a) => a.startsWith('save='))?.slice(5);
 if (want('facades')) {
   // A facade's far shading is its near shading averaged. From one eye, a
   // 12 m patch of a front through a narrow view (~1.5 cm pixels, every
@@ -215,7 +218,12 @@ if (want('lods')) {
     const fx = Math.sin(M.yaw), fz = Math.cos(M.yaw);
     for (const [a, el] of [[0.34, 0.2], [-0.34, 0.2], [0.34, 0.4], [-0.34, 0.4], [0.8, 0.3], [-0.8, 0.3]]) {
       const h = Math.cos(el), dir = [(fx * Math.cos(a) + fz * Math.sin(a)) * h, Math.sin(el), (fz * Math.cos(a) - fx * Math.sin(a)) * h];
+      // (Its axis and its four edges low and high: a building in front
+      // that hides a lower corner at one distance and not another reads as
+      // a change of form.)
+      const c = Math.cos(M.yaw), sn = Math.sin(M.yaw);
       const tops = [0.2, 0.5, 1].map((t) => [M.cx, M.y0 + M.h * t, M.cz]);
+      for (const lx of [-M.hw, M.hw]) for (const lz of [-M.hd, M.hd]) for (const t of [0.15, 1]) tops.push([M.cx + c * lx + sn * lz, M.y0 + M.h * t, M.cz - sn * lx + c * lz]);
       if ([100, 300, 2000, 6000].every((d) => tops.every((t) => { const e = [t[0] + dir[0] * d, t[1] + dir[1] * d, t[2] + dir[2] * d]; return !blocked(e, t, M, true); }))) return dir;
     }
     return null;
@@ -244,6 +252,7 @@ if (want('lods')) {
         m.cam.setFov(2 * Math.atan(view / 2 / d) * 180 / Math.PI);
         for (let i = 0; i < 20; i++) { m.lookAt(eye, mid); frames(1); }
         const im = shot();
+        if (SAVE) screenshot(`${SAVE}/lod_${tm}_${name}_${d.toFixed(0)}.png`);
         if (!r) { r = rectOf(corners, im.width, im.height); const w = r[2] - r[0], h = r[3] - r[1]; r = [r[0] + Math.round(w * 0.1), r[1] + Math.round(h * 0.1), r[2] - Math.round(w * 0.1), r[3] - Math.round(h * 0.1)]; }
         cs.push(crop(im, r));
       }
