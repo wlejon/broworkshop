@@ -1,0 +1,167 @@
+// lib/destruct/dust.bk — the dust of things breaking, as a medium (scene
+// volume): puffs (dust.js: centre, radius, density) each a lumpy ball of
+// fine dust, marched along the pixel's ray where it crosses any. Each step
+// is lit by the sun, dimmed by the dust between it and the sun (a short
+// march toward it through the same puffs) and spread forward (a dust's
+// phase), and by the sky from above; thick dust's light scattered many
+// times over is let back in as a share of the sun's, so a cloud's sunlit
+// side glows and its underside stays dark.
+module hook;
+import scene;
+import volume;
+import lighting;
+from scene import camera;
+
+struct Params {
+    count: f32,     // puffs in the buffer
+    time: f32,      // seconds, for the billowing
+    sigma: f32,     // extinction (1/m) at density 1
+    pad: f32,
+    albedo: vec4<f32>,
+}
+
+@binding(4, 0) var params: uniform<Params>;
+// Per puff, 2 x vec4: (centre (world), radius), (density, seed, ground y, 0).
+@binding(4, 14) var puffs: read_buffer<vec4<f32>>;
+
+const MAX: i32 = 128;
+const STEPS: i32 = 28;
+const SUN_STEPS: i32 = 3;
+
+fn lattice(x: f32, y: f32, z: f32) -> f32 {
+    let ix = bitcast<u32>(x as i32);
+    let iy = bitcast<u32>(y as i32);
+    let iz = bitcast<u32>(z as i32);
+    return scene::hash2((ix * 73856093u) ^ (iy * 19349663u), iz);
+}
+
+fn vn3(p: vec3<f32>) -> f32 {
+    let i = floor(p);
+    let f = p - i;
+    let s = f * f * (vec3<f32>(3.0, 3.0, 3.0) - 2.0 * f);
+    let a = mix(lattice(i.x, i.y, i.z), lattice(i.x + 1.0, i.y, i.z), s.x);
+    let b = mix(lattice(i.x, i.y + 1.0, i.z), lattice(i.x + 1.0, i.y + 1.0, i.z), s.x);
+    let c = mix(lattice(i.x, i.y, i.z + 1.0), lattice(i.x + 1.0, i.y, i.z + 1.0), s.x);
+    let d = mix(lattice(i.x, i.y + 1.0, i.z + 1.0), lattice(i.x + 1.0, i.y + 1.0, i.z + 1.0), s.x);
+    return mix(mix(a, b, s.y), mix(c, d, s.y), s.z);
+}
+
+// Billows: three octaves, turning over slowly.
+fn billow(p: vec3<f32>, t: f32) -> f32 {
+    let q = p + vec3<f32>(0.0, -0.4 * t, 0.0);
+    return 0.45 * vn3(q * 0.2) + 0.3 * vn3(q * 0.47 + vec3<f32>(5.2, 1.3, 7.7)) + 0.17 * vn3(q * 1.1 + vec3<f32>(1.7, 9.2, 3.4))
+         + 0.08 * vn3(q * 2.6 + vec3<f32>(8.1, 4.4, 2.9));
+}
+
+// The dust's density at world point p over the puffs in mask (4 x 32 bits).
+fn density(p: vec3<f32>, m0: u32, m1: u32, m2: u32, m3: u32, n: i32) -> f32 {
+    var d = 0.0;
+    // The billows move each puff's boundary in and out, by a share of its
+    // radius: a lumpy outline, not a sphere's.
+    let bl = billow(p, params.time);
+    let lump = 1.0 + 1.6 * (bl - 0.5);
+    for (var i = 0; i < n; i += 1) {
+        let w = i / 32;
+        let bit = (i - w * 32) as u32;
+        var mw = m0;
+        if (w == 1) { mw = m1; } else if (w == 2) { mw = m2; } else if (w == 3) { mw = m3; }
+        if (((mw >> bit) & 1u) == 0u) { continue; }
+        let a = puffs[i * 2];
+        let b = puffs[i * 2 + 1];
+        let q = (p - a.xyz) / a.w;
+        let r2 = dot(q, q) * lump;
+        if (r2 >= 1.0) { continue; }
+        // Below the ground it stood on, nothing.
+        if (p.y < b.z) { continue; }
+        let k = 1.0 - r2;
+        d += b.x * k * k;
+    }
+    if (d <= 0.0) { return 0.0; }
+    // And thin it within: denser lumps, thinner gaps.
+    let c = clamp((bl - 0.3) * 2.5, 0.0, 1.0);
+    return d * (0.1 + 1.8 * c * c);
+}
+
+// Henyey-Greenstein, normalised over the sphere.
+fn hg(c: f32, g: f32) -> f32 {
+    let g2 = g * g;
+    return (1.0 - g2) / (12.566371 * pow(max(1.0 + g2 - 2.0 * g * c, 0.0001), 1.5));
+}
+
+pub fn volume(ray: volume::Ray) -> volume::Light {
+    let n = min(params.count as i32, MAX);
+    if (n <= 0) { return volume::light(vec3<f32>(0.0, 0.0, 0.0), 1.0, 0.0); }
+    let eye = camera.eye_world.xyz;
+    let dir = ray.dir;
+    // The puffs the ray crosses, and the stretch it crosses them over.
+    var m0 = 0u;
+    var m1 = 0u;
+    var m2 = 0u;
+    var m3 = 0u;
+    var t0 = 1e30;
+    var t1 = 0.0;
+    var rsum = 0.0;
+    var hits = 0.0;
+    for (var i = 0; i < n; i += 1) {
+        let a = puffs[i * 2];
+        let oc = eye - a.xyz;
+        let bq = dot(oc, dir);
+        let cq = dot(oc, oc) - a.w * a.w;
+        let disc = bq * bq - cq;
+        if (disc <= 0.0) { continue; }
+        let s = sqrt(disc);
+        let e0 = max(-bq - s, 0.0);
+        let e1 = -bq + s;
+        if (e1 <= 0.0 || e0 >= ray.scene_dist) { continue; }
+        t0 = min(t0, e0);
+        t1 = max(t1, e1);
+        rsum += a.w;
+        hits += 1.0;
+        let w = i / 32;
+        let bit = 1u << ((i - w * 32) as u32);
+        if (w == 0) { m0 |= bit; } else if (w == 1) { m1 |= bit; } else if (w == 2) { m2 |= bit; } else { m3 |= bit; }
+    }
+    if (hits == 0.0) { return volume::light(vec3<f32>(0.0, 0.0, 0.0), 1.0, 0.0); }
+    t1 = min(t1, ray.scene_dist);
+    if (t1 <= t0) { return volume::light(vec3<f32>(0.0, 0.0, 0.0), 1.0, 0.0); }
+
+    let to_sun = lighting::to_sun();
+    let cos_sun = dot(dir, to_sun);
+    // Forward and back lobes: dust glows against the sun, and a little toward it.
+    let phase = mix(hg(cos_sun, 0.55), hg(cos_sun, -0.2), 0.3);
+    let sun_step = rsum / hits * 0.3;
+    let dt = (t1 - t0) / (STEPS as f32);
+    let jit = fract(scene::hash2(bitcast<u32>(ray.pixel.x) ^ (bitcast<u32>(ray.pixel.y) * 1973u), volume::march_index() as u32) + 0.5);
+    let albedo = params.albedo.xyz;
+    var T = 1.0;
+    var rad = vec3<f32>(0.0, 0.0, 0.0);
+    var depth = 0.0;
+    var wsum = 0.0;
+    for (var k = 0; k < STEPS; k += 1) {
+        let t = t0 + ((k as f32) + jit) * dt;
+        let p = eye + dir * t;
+        let d = density(p, m0, m1, m2, m3, n);
+        if (d <= 0.001) { continue; }
+        // The sun through the dust toward it.
+        var od = 0.0;
+        for (var j = 1; j <= SUN_STEPS; j += 1) {
+            od += density(p + to_sun * (sun_step * (j as f32)), m0, m1, m2, m3, n);
+        }
+        let Ts = exp(-params.sigma * od * sun_step);
+        let rel = p - eye;
+        let sun = volume::sun_light(rel);
+        // Single scattering, plus what thick dust scatters on (a softer, wider share).
+        let lit_sun = sun * (phase * Ts + 0.06 * pow(Ts, 0.25));
+        let sky = volume::sky_light(rel, vec3<f32>(0.0, 1.0, 0.0)) * (0.35 + 0.65 * exp(-params.sigma * d * 3.0));
+        let S = albedo * (lit_sun + sky);
+        let sg = params.sigma * d;
+        let a = exp(-sg * dt);
+        rad += T * S * (1.0 - a);
+        let w = T * (1.0 - a);
+        depth += w * t;
+        wsum += w;
+        T *= a;
+        if (T < 0.01) { break; }
+    }
+    return volume::light(rad, T, select(wsum > 0.0, depth / max(wsum, 0.0001), t0));
+}
