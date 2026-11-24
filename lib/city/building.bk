@@ -115,6 +115,11 @@ pub fn vertex(v_in: mesh::Vertex) -> mesh::Vertex {
     v.v3 = r3;
     v.v4 = vec4<f32>(ln, yaw);
     v.v5 = vec4<f32>(r0.xyz, i as f32);
+    // The mass's id for its hashes, made here from the record (exact) and
+    // passed flat: the seed interpolated arrives an ulp off, and where
+    // seed * 2^20 is whole its floor then flips pixel by pixel (a window lit
+    // or dark, a brick's tone, from one pixel to the next).
+    v.vi = vec4<i32>(floor(r2.z * 1048576.0) as i32, 0, 0, 0);
     return v;
 }
 
@@ -338,12 +343,11 @@ pub fn fragment(v: mesh::Vertex, s_in: mesh::Surface) -> mesh::Surface {
     let hd = v.v1.z;
     let floor_h = v.v1.w;
     let ground_h = v.v2.x;
-    let seed = v.v2.z;
     let style = (v.v2.w + 0.5) as i32;
     let roof = v.v3.x;
     let flags = (v.v3.z + 0.5) as i32;
     let hue = v.v3.w;
-    let id = floor(seed * 1048576.0);
+    let id = v.vi.x as f32;
     let night = params.night;
 
     s.metallic = 0.0;
