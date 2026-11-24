@@ -87,15 +87,15 @@ for (const tm of ['day', 'night']) {
 
 // (helpers below need the masses)
 const allM = []; for (let i = 0; i < nM; i++) allM.push(massRecord(MD, i));
-// The building each mass belongs to: a mass's own building (its crown, its
-// wings) does not count as standing in the way of it, being the same at
-// every distance it is seen from.
+// The building each mass belongs to: with `owner`, none of the skipped
+// mass's own building counts as in the way (its crown and podium are the
+// same at every distance it is seen from).
 const ownerOf = new Int32Array(nM);
 m.city.masses.buildings.forEach((b, bi) => { for (let k = 0; k < b.count; k++) ownerOf[b.first + k] = bi; });
-function blocked(a, b, skip = null) {
+function blocked(a, b, skip = null, owner = false) {
   const dx = b[0] - a[0], dy = b[1] - a[1], dz = b[2] - a[2];
   for (const M of allM) {
-    if (skip && ownerOf[M.i] === ownerOf[skip.i]) continue;
+    if (M === skip || (owner && skip && ownerOf[M.i] === ownerOf[skip.i])) continue;
     if (Math.hypot(M.cx - a[0], M.cz - a[2]) > Math.hypot(dx, dz) + 300 && Math.hypot(M.cx - b[0], M.cz - b[2]) > 300) continue;
     const c = Math.cos(M.yaw), s = Math.sin(M.yaw);
     const ox = a[0] - M.cx, oz = a[2] - M.cz;
@@ -202,7 +202,7 @@ const FOV = 60;   // the fly camera's own
     for (const [a, el] of [[0.34, 0.2], [-0.34, 0.2], [0.34, 0.4], [-0.34, 0.4], [0.8, 0.3], [-0.8, 0.3]]) {
       const h = Math.cos(el), dir = [(fx * Math.cos(a) + fz * Math.sin(a)) * h, Math.sin(el), (fz * Math.cos(a) - fx * Math.sin(a)) * h];
       const tops = [0.2, 0.5, 1].map((t) => [M.cx, M.y0 + M.h * t, M.cz]);
-      if ([100, 300, 2000, 6000].every((d) => tops.every((t) => { const e = [t[0] + dir[0] * d, t[1] + dir[1] * d, t[2] + dir[2] * d]; return !blocked(e, t, M); }))) return dir;
+      if ([100, 300, 2000, 6000].every((d) => tops.every((t) => { const e = [t[0] + dir[0] * d, t[1] + dir[1] * d, t[2] + dir[2] * d]; return !blocked(e, t, M, true); }))) return dir;
     }
     return null;
   };
@@ -421,9 +421,11 @@ function track(poses, every) {
   for (let s0 = 0; s0 < poses.length - 1; s0 += every) {
     look(...poses[s0]); frames(10);
     const img0 = shot(), sc = img0.width / cssW, pts = [];
-    for (let j = 0; j < 28; j++) for (let i = 0; i < 48; i++) {
-      const r = m.scene.unprojectLocal((i + 0.5) / 48 * cssW, (j + 0.5) / 28 * (img0.height / sc));
-      const p = r && groundHit(r.origin, r.dir);
+    // (Land only: the water's surface moves with or without shadows.)
+    for (let j = 0; j < 56; j++) for (let i = 0; i < 96; i++) {
+      const r = m.scene.unprojectLocal((i + 0.5) / 96 * cssW, (j + 0.5) / 56 * (img0.height / sc));
+      let p = r && groundHit(r.origin, r.dir);
+      if (p && m.city.field.site.water(p[0], p[2]) < 2) p = null;
       if (p) pts.push(p);
     }
     const L0 = [], dev = new Float64Array(pts.length), valid = new Uint8Array(pts.length).fill(1);

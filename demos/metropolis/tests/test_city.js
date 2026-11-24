@@ -1,5 +1,7 @@
 // The generated city against the metropolis acceptance list: no road runs
 // into the river except over a bridge, every bridge lands on both banks,
+// none leads to the water and stops or runs along the bank, the town backs
+// onto the river,
 // no building stands in the water or on a carriageway, and the city keeps
 // its scale. Generation only (no rendering).
 //
@@ -51,6 +53,30 @@ for (const e of bridges) if (!landed.includes(e)) {
 }
 check(bridges.length >= 4, `bridges over the river (${bridges.length})`);
 check(landed.length === bridges.length, `every bridge lands on both banks and crosses water (${landed.length}/${bridges.length})`);
+
+// The river's edge: no road leads to it and stops (only over a bridge), none
+// runs along the bank (save where it comes to a bridge), and the town backs
+// onto it: lots on the water side of the roads nearest it.
+{
+    const deg = new Int32Array(graph.nodes.length);
+    for (const e of graph.edges) { deg[e.a]++; deg[e.b]++; }
+    const ends = graph.nodes.filter((nd, i) => deg[i] === 1 && water(nd.x, nd.z) < 140).length;
+    check(ends === 0, `no road ends at the water without crossing it (${ends} dead ends within 140 m of it)`);
+    const bridgeEnds = [];
+    for (const e of bridges) { const p = e.pts; bridgeEnds.push([p[0], p[1]], [p[p.length - 2], p[p.length - 1]]); }
+    let along = 0;
+    for (const e of graph.edges) {
+        if (e.kind === 'bridge') continue;
+        const p = e.pts;
+        for (let k = 2; k < p.length; k += 2) {
+            const x = (p[k] + p[k - 2]) / 2, z = (p[k + 1] + p[k - 1]) / 2;
+            if (water(x, z) < 60 && !bridgeEnds.some(([bx, bz]) => Math.hypot(bx - x, bz - z) < 150)) along += Math.hypot(p[k] - p[k - 2], p[k + 1] - p[k - 1]);
+        }
+    }
+    check(along < 500, `no road along the bank (${along.toFixed(0)} m of road within 60 m of the water, away from the bridges)`);
+    const backing = lots.filter((l) => l.face === -1).length;
+    check(backing > 200, `the town backs onto the river (${backing} lots on the water side of the roads nearest it)`);
+}
 
 // Buildings: no mass centre in the water, none on a carriageway.
 const D = masses.data;

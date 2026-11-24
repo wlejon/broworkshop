@@ -35,32 +35,10 @@ export const SITE = {
     ],
 };
 
-/** Riverfront boulevards along both banks, where the town reaches the river. */
-SITE.shoreRoads = (field) => {
-    const roads = [];
-    const OFF = 34;
-    for (const side of [-1, 1]) {
-        let run = [];
-        const flush = () => { if (run.length >= 40) roads.push({ pts: run, level: 0, kind: 'boulevard' }); run = []; };
-        for (let z = -WORLD_HALF + 220; z <= WORLD_HALF - 220; z += 12) {
-            const cx = riverCenterX(z);
-            // Walk out from the centre to the bank, then OFF beyond it.
-            let x = cx;
-            while (riverSignedDist(x, z) < 0) x += side * 2;
-            x += side * OFF;
-            if (field.density(x, z) > 0.06) run.push(x, z); else flush();
-        }
-        flush();
-    }
-    return roads;
-};
-
 import { hash2, noise2 } from "/lib/city/field.js";
 
-/** Parks: a riverside strip downtown, a scatter of green blocks, more of them outside the core. */
+/** Parks: a scatter of green blocks, more of them outside the core. */
 SITE.isPark = (x, z, face, dens) => {
-    const w = riverSignedDist(x, z);
-    if (w < 140 && dens > 0.25 && Math.abs(z) < 2600) return true;
     const h = hash2(Math.round(x / 37), Math.round(z / 37), 4242);
     return h < (dens > 0.6 ? 0.04 : 0.07);
 };
