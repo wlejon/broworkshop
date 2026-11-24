@@ -51,6 +51,10 @@ sky.setScale(16);
 // Contact shading at a room's scale (corners, under shelves and desks); from
 // a street or the air it is under a pixel and costs the same.
 scene.setSSAO({ enabled: true, radius: 0.6, intensity: 1, bias: 0.02 });
+// Reflections of what is on screen, the rays long enough to cross the river:
+// at night the sky the water otherwise mirrors is black, and the lit city
+// across it is what it shows (~0.15 ms; the shop glass picks it up too).
+scene.setSSR({ enabled: true, maxDistance: 600, steps: 96, thickness: 8 });
 
 const water = createRiverWater(scene);
 const cam = createFlyCamera(canvas, scene);
