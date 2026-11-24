@@ -915,7 +915,17 @@ pub fn fragment(v: mesh::Vertex, s_in: mesh::Surface) -> mesh::Surface {
         let dy = y - 8.0;
         let d = 7.0;
         let face_k = select(front, 1.0, 0.35) * select((flags & 1) != 0, 1.0, 0.5);
-        let e = 2.0 * 1600.0 * d / (30.0 * (d * d + dy * dy)) * face_k;
+        var e = 2.0 * 1600.0 * d / (30.0 * (d * d + dy * dy)) * face_k;
+        if (rel_kind > 0) {
+            // In the relief: a side takes the lamps by how it faces them
+            // (a soffit catches them from below, a sill's top not), and a
+            // recess loses them with its depth behind the balustrade or reveal.
+            let ld = normalize(vec3<f32>(0.0, -dy, d));
+            // (The lamps are a row along the street: a side facing along it sees those beside.)
+            let facing = select(rel_kind == 2, max(dot(rel_n, ld), 0.0) / ld.z + 0.4 * abs(rel_n.x), 1.0);
+            let deep = 1.0 - 0.65 * smoothstep(0.05, 1.0, rel_d);
+            e *= mix(1.0, facing * deep, rel_k);
+        }
         lamp_lum = s.base_color * vec3<f32>(1.0, 0.82, 0.62) * (e * night / 3.14159265);
     }
     s.roughness = mix(style == STYLE_GLASS ? 0.4 : 0.82, 0.06, rough_win);
