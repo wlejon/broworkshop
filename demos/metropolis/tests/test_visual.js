@@ -134,7 +134,8 @@ const FOV = 60;   // the fly camera's own
   // Old far means failed this: brick and rowhouse terms (x0.81-0.86), a
   // fixed room average (night glass x0.84-0.89, office from below x0.93),
   // four room samples (night office x1.08); the spread now is 0.96-1.06
-  // (noise floor ~1 %). Old industrial ribs fail only by night (x0.934; by
+  // (noise floor ~1 %). The EV is then lowered by half stops while more than
+// 0.5 % of the narrow view clips (night glass: its lit windows). Old industrial ribs fail only by night (x0.934; by
   // day x0.940 passes): the bound is 6 % for night offices' x1.05.
   const lin = (q) => { q /= 255; return q <= 0.04045 ? q / 12.92 : ((q + 0.055) / 1.055) ** 2.4; };
   const meanLin = (im) => { const a = [0, 0, 0]; let clip = 0; for (let k = 0; k < im.data.length; k += 4) { for (let ch = 0; ch < 3; ch++) a[ch] += lin(im.data[k + ch]); if (im.data[k] > 252 || im.data[k + 1] > 252 || im.data[k + 2] > 252) clip++; } const n = im.data.length / 4; return { c: a.map((v) => v / n), clip: clip / n }; };
@@ -184,6 +185,15 @@ const FOV = 60;   // the fly camera's own
         m.scene.setExposure({ mode: 'fixed', ev });
         const n = take(narrow);
         ev += Math.log2(Math.max(1e-4, (n.c[0] + n.c[1] + n.c[2]) / 3) / 0.12);
+      }
+      // A facade whose light is a few bright windows (a glass tower by night,
+      // a tenth of it lit) has them past white at that mean, and a clipped
+      // pixel's light is lost to both means: half stops down until next to
+      // none clip.
+      for (let it = 0; it < 6; it++) {
+        m.scene.setExposure({ mode: 'fixed', ev });
+        if (take(narrow).clip < 0.005) break;
+        ev += 0.5;
       }
       m.scene.setExposure({ mode: 'fixed', ev });
       const a = take(narrow), b = take(FOV);
