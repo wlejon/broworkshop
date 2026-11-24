@@ -171,7 +171,8 @@ check(onRoad === 0, `no building on a carriageway (${onRoad})`);
 // Scale.
 let km = 0; for (const e of graph.edges) km += e.len / 1000;
 check(masses.buildings.length > 50000, `a city's worth of buildings (${masses.buildings.length})`);
-check(km > 1000, `road network (${km.toFixed(0)} km)`);
+// (~1000 km; stubs and roads doubling others are pruned, not counted.)
+check(km > 950, `road network (${km.toFixed(0)} km)`);
 const zones = new Set(lots.map((l) => l.zone));
 check(zones.size >= 6, `every zone present (${[...zones].join(', ')})`);
 
