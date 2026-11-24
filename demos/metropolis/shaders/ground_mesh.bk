@@ -154,6 +154,46 @@ fn vnoise2(p: vec2<f32>) -> f32 {
     return mix(mix(a, b, u.x), mix(c, d, u.x), u.y);
 }
 
+// A sparse crack network in a pavement: 1 on a crack about a centimetre
+// wide, its coverage kept as a pixel widens (so far away it is the mean
+// darkening, not a line that shimmers). Cracked areas come in patches.
+fn cracks(p: vec2<f32>, fw: f32) -> f32 {
+    let m = sstep(0.55, 0.75, vnoise2(p * 0.08 + vec2<f32>(3.1, 7.7)));
+    if (m <= 0.0) { return 0.0; }
+    // The cells' borders (alligator cracking, ~0.7 m pieces), wobbled.
+    let q = p * 1.4 + vec2<f32>(vnoise2(p * 7.0), vnoise2(p * 7.0 + vec2<f32>(3.0, 9.0))) * 0.35;
+    let c = worley(q);
+    let d = (c.y - c.x) / (2.0 * 1.4);   // ~metres from a border
+    let w = 0.004 + fw * 0.5;
+    return m * (1.0 - sstep(0.0, w, d)) * min(1.0, 0.008 / w);
+}
+
+// Cellular noise: (distance to the nearest jittered point, to the second
+// nearest, the nearest's cell).
+fn worley(p: vec2<f32>) -> vec4<f32> {
+    let i = floor(p);
+    var f1 = 9.0;
+    var f2 = 9.0;
+    var id = vec2<f32>(0.0);
+    for (var y = -1; y <= 1; y += 1) {
+        for (var x = -1; x <= 1; x += 1) {
+            let c = i + vec2<f32>(x as f32, y as f32);
+            let o = vec2<f32>(hash2(c), hash2(c + vec2<f32>(19.1, 7.3)));
+            let d = length(c + o - p);
+            if (d < f1) { f2 = f1; f1 = d; id = c; } else if (d < f2) { f2 = d; }
+        }
+    }
+    return vec4<f32>(f1, f2, id.x, id.y);
+}
+
+// A slab's edge bevel: the normal's tilt (toward the joint) at `e` metres
+// signed from the nearest joint along an axis (1.5 cm of chamfer).
+fn bevel(x: f32, period: f32) -> f32 {
+    let f = fract(x / period) * period;
+    let e = f < period * 0.5 ? f : f - period;
+    return -sign(e) * 0.35 * (1.0 - sstep(0.0, 0.015, abs(e)));
+}
+
 // Street lamps every `sp` metres along a road, staggered on its two sides at
 // `side` from the centre line, LAMP_H up: the illuminance (lux) they give a
 // point at (s along, u across), the inverse square times the cosine, from
@@ -235,7 +275,9 @@ pub fn fragment(v: mesh::Vertex, s_in: mesh::Surface) -> mesh::Surface {
     }
     let h = v.v1.z;
     let rd = v.v0.w;
-    let fw = max(length(dpdx(v.world_pos.xz)) + length(dpdy(v.world_pos.xz)), 0.02);
+    // The pixel's footprint: floored at 2 cm for the markings, true for the close-up grain.
+    let fwn = max(length(dpdx(v.world_pos.xz)) + length(dpdy(v.world_pos.xz)), 0.0005);
+    let fw = max(fwn, 0.02);
 
     // Continuous world-space macro biome weights (zero tile-boundary quantization seams)
     let r = length(p);
@@ -284,6 +326,8 @@ pub fn fragment(v: mesh::Vertex, s_in: mesh::Surface) -> mesh::Surface {
         rough = bs.w;
     }
     var lamp_e = 0.0;
+    var road_t = vec2<f32>(0.0);   // the surface's tilt (world xz) up close
+    var walk_t = vec2<f32>(0.0);
     let ci = floor((p.x + params.city.x) / params.city.y) as i32;
     let cj = floor((p.y + params.city.x) / params.city.y) as i32;
     let cells = params.city.z as i32;
@@ -296,6 +340,8 @@ pub fn fragment(v: mesh::Vertex, s_in: mesh::Surface) -> mesh::Surface {
         var a_best = vec4<f32>(0.0);
         var b_best = vec4<f32>(0.0);
         var c_best = vec4<f32>(0.0);
+        var dir_best = vec2<f32>(1.0, 0.0);   // along the road
+        var out_best = vec2<f32>(0.0, 1.0);   // away from its centre line
         for (var k = cell_start[c]; k < cell_start[c + 1]; k += 1) {
             let si = cell_segs[k];
             let a = segs[si * 3];
@@ -316,6 +362,8 @@ pub fn fragment(v: mesh::Vertex, s_in: mesh::Surface) -> mesh::Surface {
                 a_best = a;
                 b_best = b;
                 c_best = cc;
+                dir_best = vec2<f32>(dx, dz) / l;
+                out_best = vec2<f32>(ex, ez) / max(sqrt(ex * ex + ez * ez), 1.0e-4);
             }
         }
         let hwid = b_best.z;
@@ -335,14 +383,53 @@ pub fn fragment(v: mesh::Vertex, s_in: mesh::Surface) -> mesh::Surface {
             // Sidewalk: concrete slabs, a granite curb at its road edge.
             let slab_v = 1.0 - smoothstep(0.08, 0.25, fw);
             let joints = max(stripes(sa, 1.5, 0.03, fw), stripes(best, 1.5, 0.03, fw)) * slab_v;
-            var walk_c = vec3<f32>(0.30, 0.29, 0.27) * (1.0 - 0.25 * joints) * var_k;
+            // Each slab its own pour (a tone), weathered in drifts, cracked
+            // here and there; its edges chamfered into the joints.
+            let slab = floor(vec2<f32>(sa, best) / 1.5);
+            let slab_t = 1.0 + 0.16 * (hash2(slab + vec2<f32>(41.0, 13.0)) - 0.5) * slab_v;
+            let stain = 1.0 - 0.18 * sstep(0.55, 0.85, vnoise2(p * 0.6 + vec2<f32>(9.0, 2.0)));
+            var walk_c = vec3<f32>(0.30, 0.29, 0.27) * (1.0 - 0.25 * joints) * var_k * slab_t * stain;
+            walk_c *= 1.0 - 0.5 * cracks(p + vec2<f32>(31.0, 17.0), fwn);
             walk_c = mix(walk_c, vec3<f32>(0.36, 0.36, 0.35), band(best, 0.0, 0.25, fw));
+            let bev_k = (1.0 - smoothstep(0.008, 0.03, fwn)) * band(best, 0.25, walk, fw);
+            walk_t = (dir_best * bevel(sa, 1.5) + out_best * bevel(best, 1.5)) * bev_k;
             // Asphalt, worn lighter along the wheel tracks.
             var road_c = vec3<f32>(0.055, 0.056, 0.058) * var_k;
             let lane_w = 3.4;
             let au = abs(u);
-            let track = band(fract(au / lane_w), 0.18, 0.38, fw / lane_w) + band(fract(au / lane_w), 0.62, 0.82, fw / lane_w);
-            road_c *= 1.0 + 0.18 * track;
+            // (Soft across: two wheel paths a lane, polished by the tyres.)
+            let lu = fract(au / lane_w);
+            let t0 = (lu - 0.27) / 0.09;
+            let t1 = (lu - 0.73) / 0.09;
+            let track = exp(-t0 * t0) + exp(-t1 * t1);
+            road_c *= 1.0 + 0.12 * track;
+            // Up close its aggregate: stones of ~2 cm, a few pale ones, each
+            // tilting the surface its own way.
+            let ag_k = 1.0 - smoothstep(0.012, 0.05, fwn);
+            var ag = 0.5;
+            if (ag_k > 0.0) {
+                // Rounded stones in a dark binder (their mean is the asphalt's tone).
+                let wc = worley(p * 45.0);
+                let agc = wc.zw;
+                ag = hash2(agc);
+                let binder = 1.0 - sstep(0.08, 0.25 + fwn * 45.0, wc.y - wc.x);
+                road_c *= 1.0 + ag_k * (0.5 * (ag - 0.5) - 0.35 * (binder - 0.3));
+                road_c = mix(road_c, vec3<f32>(0.17, 0.165, 0.155) * var_k, ag_k * sstep(0.88, 0.96, ag) * (1.0 - binder) * 0.7);
+                road_t = ag_k * 0.22 * (1.0 - binder) * vec2<f32>(hash2(agc + vec2<f32>(3.3, 1.1)) - 0.5, hash2(agc + vec2<f32>(9.1, 5.7)) - 0.5);
+            }
+            // Patch repairs across a lane, newer (darker) or older (paler).
+            let pc = vec2<f32>(floor(sa / 8.0), floor(au / lane_w));
+            let ph = hash2(pc + vec2<f32>(17.0, 3.0));
+            if (ph > 0.8) {
+                let x0 = 0.08 + 0.3 * hash2(pc + vec2<f32>(1.7, 0.0));
+                let x1 = min(0.95, x0 + 0.25 + 0.4 * hash2(pc + vec2<f32>(2.9, 0.0)));
+                let inside = band(fract(sa / 8.0), x0, x1, fw / 8.0) * band(fract(au / lane_w), 0.1, 0.9, fw / lane_w);
+                road_c *= mix(1.0, ph > 0.9 ? 0.7 : 1.25, inside);
+            }
+            // Oil down each lane's middle, and cracks.
+            let tm = (lu - 0.5) / 0.07;
+            road_c *= 1.0 - 0.3 * exp(-tm * tm) * vnoise2(vec2<f32>(sa * 0.25, au * 1.5));
+            road_c *= 1.0 - 0.6 * cracks(p, fwn);
             // Markings (linear paint albedo): none inside a junction.
             var paint = 0.0;
             var yellow = 0.0;
@@ -371,6 +458,10 @@ pub fn fragment(v: mesh::Vertex, s_in: mesh::Surface) -> mesh::Surface {
                 let inbound = ((flags & 1) != 0 && sa < sb) == (u > 0.0);
                 if (inbound && au < hwid - 0.3) { paint = max(paint, band(sj, jr + 3.6, jr + 4.1, fw)); }
             }
+            // Paint wears off in drifts, and the stones show through it.
+            let wear = sstep(0.5, 0.85, vnoise2(p * 1.3 + vec2<f32>(4.0, 8.0)));
+            paint *= 1.0 - 0.6 * wear - 0.35 * ag_k * (ag < 0.3 ? 1.0 : 0.0);
+            yellow *= 1.0 - 0.6 * wear;
             road_c = mix(road_c, vec3<f32>(0.62, 0.62, 0.60), paint * 0.9);
             road_c = mix(road_c, vec3<f32>(0.62, 0.45, 0.10), yellow * 0.9);
             // Tram rails: a grooved pair (1.435 m gauge) in each inner lane,
@@ -389,6 +480,8 @@ pub fn fragment(v: mesh::Vertex, s_in: mesh::Surface) -> mesh::Surface {
             let on_walk = band(best, 0.0, walk, fw);
             base = mix(base, walk_c, on_walk);
             base = mix(base, road_c, on_road);
+            road_t *= on_road;
+            walk_t *= on_walk;
             if (params.night > 0.0) {
                 let lux = lamp_lux(sa, u, major ? 26.0 : 32.0, hwid + 0.6);
                 lamp_e = lux * params.night;
@@ -400,6 +493,8 @@ pub fn fragment(v: mesh::Vertex, s_in: mesh::Surface) -> mesh::Surface {
 
     s.base_color = base;
     s.roughness = rough;
+    let tilt = road_t + walk_t;
+    s.normal = normalize(s.normal + vec3<f32>(tilt.x, 0.0, tilt.y));
     s.metallic = 0.0;
     // Lamp light, as the luminance a diffuse surface sends back (sodium-warm LED).
     s.emissive = base * vec3<f32>(1.0, 0.82, 0.62) * (lamp_e / PI_F);
