@@ -11,6 +11,7 @@ import { createBuildingRenderer } from "/lib/city/building_render.js";
 import { createBridges } from "/lib/city/bridges.js";
 import { createTrafficRenderer } from "/lib/city/traffic_render.js";
 import { createInteriors } from "/lib/city/interior.js";
+import { createCityDestruction } from "/lib/city/destruction.js";
 import { terrainHeight, riverCenterX, RIVER_BED_Y } from "/app/world/terrain_field.js";
 import { SITE } from "/app/world/site.js";
 import { createTerrainStream } from "/app/world/terrain_stream.js";
@@ -82,6 +83,7 @@ let buildings = null;
 let bridges = null;
 let cars = null;
 let interiors = null;
+let destruction = null;
 
 const ready = Promise.all([
     // The bridges: decks along the graph's bridge edges, on piers in the river.
@@ -91,6 +93,8 @@ const ready = Promise.all([
         buildings = b;
         terrain.node.setShaderBuffer('masses', b.masses);
         interiors = createInteriors(scene, city.masses, b.walls, [terrain.node]);
+        // Every building breakable: woken into its structure by what strikes it.
+        return createCityDestruction(scene, city, b, { interiors }).then((d) => { destruction = d; });
     }),
     // Traffic on the road graph, simulated in a worker: lanes both ways, lights at the junctions.
     createTrafficRenderer(scene, city.graph, city.field.density, readLib('city/car.bk'), { count: 12000, lines: city.transit }).then((c) => { cars = c; }),
@@ -105,6 +109,7 @@ function setTimeMode(tm) {
     buildings?.setNight(NIGHT[tm]);
     bridges?.setNight(NIGHT[tm] > 0.5 ? 1 : 0);
     cars?.setNight(NIGHT[tm]);
+    destruction?.setNight(NIGHT[tm]);
     terrain.setNight(NIGHT[tm] > 0.5 ? 1 : 0);
     for (const b of todButtons) b.classList.toggle('active', b.dataset.tod === tm);
 }
@@ -117,7 +122,18 @@ window.addEventListener('keydown', (e) => {
     else if (e.key === '2') setTimeMode('dusk');
     else if (e.key === '3') setTimeMode('night');
     else if (e.key.toLowerCase() === 'h') { const h = document.getElementById('hud'); h.hidden = !h.hidden; }
+    else if (e.key.toLowerCase() === 'f') fireFromEye(2000, 0.6, 150);
+    else if (e.key.toLowerCase() === 'g') fireFromEye(400000, 2.5, 90);
 });
+
+// A ball of `mass` kg and `radius` m from just ahead of the eye, along its
+// view at `speed` m/s.
+function fireFromEye(mass, radius, speed) {
+    if (!destruction) return null;
+    const st = cam.state();
+    const f = st.fwd, p = [st.pos[0] + f[0] * (radius + 2), st.pos[1] + f[1] * (radius + 2), st.pos[2] + f[2] * (radius + 2)];
+    return destruction.fire({ shape: 'sphere', radius, mass, position: p, velocity: [f[0] * speed, f[1] * speed, f[2] * speed] });
+}
 
 const statsEl = document.getElementById('perfStats');
 let statFrames = 0, statMs = 0, statAt = 0;
@@ -152,6 +168,7 @@ function tick() {
     sky.update(dt);
     cars?.update(dt, st.pos, st.fwd);
     interiors?.update(st.pos, NIGHT[timeMode], dt);
+    destruction?.update(dt);
     showStats(dt, st);
     requestAnimationFrame(tick);
 }
@@ -160,6 +177,7 @@ if (bro.app.argv.includes('--bench')) ready.then(() => import('./tests/bench_win
 
 globalThis.__metropolis = {
     scene, sky, city, ground, terrain, cam, get cars() { return cars; }, get interiors() { return interiors; }, get buildings() { return buildings; },
+    get destruction() { return destruction; }, fireFromEye,
     whenReady: () => ready,
     setTimeMode,
     setPose: (pos, yaw, pitch) => {

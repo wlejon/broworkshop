@@ -1,0 +1,282 @@
+// lib/city/destruction.bk — a building's members (lib/destruct), standing or
+// broken off and flying: one instanced box a member, placed from its record
+// (its box in its mass's frame) and its body's pose, drawn as what it was.
+// A face that was the building's outside draws the facade (facade.bk) where
+// it was on the building, so a panel flying off keeps its windows; a face
+// inside draws the floor, ceiling or wall of the rooms; a broken face (where
+// a joint gave or the member was split) is jagged and raw: concrete with its
+// aggregate and rebar, brick and mortar, the curtain wall's metal, timber.
+// The jagged faces are a displacement field of the mass's frame, so the two
+// sides of a break are the same surface.
+module hook;
+import scene;
+import mesh;
+import custom;
+import facade;
+
+struct Params {
+    night: f32,
+    room_day: f32,
+    room_night: f32,
+    pad: f32,
+}
+
+@binding(4, 0) var params: uniform<Params>;
+@binding(4, 14) var masses: read_buffer<vec4<f32>>;
+// Per member, 3 x vec4: (centre in its mass's frame, mass), (half extents
+// (0: gone), body + 1 (0: standing)), (kind, material, broken faces (bit
+// 2 * axis + 1 for the + face), seed).
+@binding(4, 15) var pieces: read_buffer<vec4<f32>>;
+// Per body, 3 x vec4: (pivot at rest, 0), (pivot now, 0), rotation (quaternion).
+@binding(4, 16) var bodies: read_buffer<vec4<f32>>;
+
+const KIND_FOUNDATION: i32 = 0;
+const KIND_SLAB: i32 = 1;
+const KIND_COLUMN: i32 = 2;
+const KIND_WALL: i32 = 3;
+const MAT_CONCRETE: i32 = 0;
+const MAT_MASONRY: i32 = 1;
+const MAT_GLASS: i32 = 2;
+const MAT_STEEL: i32 = 3;
+const MAT_TIMBER: i32 = 4;
+
+fn qrot(q: vec4<f32>, v: vec3<f32>) -> vec3<f32> {
+    let t = 2.0 * cross(q.xyz, v);
+    return v + q.w * t + cross(q.xyz, t);
+}
+
+fn lattice(x: f32, y: f32, z: f32, k: u32) -> f32 {
+    let ix = bitcast<u32>(x as i32);
+    let iy = bitcast<u32>(y as i32);
+    let iz = bitcast<u32>(z as i32);
+    return scene::hash2((ix * 73856093u) ^ (iy * 19349663u) ^ (k * 83492791u), iz);
+}
+
+// Value noise over 3D, unit lattice.
+fn vn3(p: vec3<f32>, k: u32) -> f32 {
+    let i = floor(p);
+    let f = p - i;
+    let s = f * f * (vec3<f32>(3.0, 3.0, 3.0) - 2.0 * f);
+    let a = mix(lattice(i.x, i.y, i.z, k), lattice(i.x + 1.0, i.y, i.z, k), s.x);
+    let b = mix(lattice(i.x, i.y + 1.0, i.z, k), lattice(i.x + 1.0, i.y + 1.0, i.z, k), s.x);
+    let c = mix(lattice(i.x, i.y, i.z + 1.0, k), lattice(i.x + 1.0, i.y, i.z + 1.0, k), s.x);
+    let d = mix(lattice(i.x, i.y + 1.0, i.z + 1.0, k), lattice(i.x + 1.0, i.y + 1.0, i.z + 1.0, k), s.x);
+    return mix(mix(a, b, s.y), mix(c, d, s.y), s.z);
+}
+
+// How far a broken face along axis k stands off its plane at p, in -1..1:
+// coarse lumps and a finer tearing.
+fn jag(p: vec3<f32>, k: u32) -> f32 {
+    return (vn3(p * 1.3, k) - 0.5) * 1.4 + (vn3(p * 4.1, k + 7u) - 0.5) * 0.6;
+}
+
+fn has_bit(m: i32, b: i32) -> bool {
+    return ((m >> b) & 1) != 0;
+}
+
+fn is_broken(rough: i32, n: vec3<f32>) -> bool {
+    var bit = 0;
+    if (abs(n.x) > 0.5) { bit = select(n.x > 0.0, 1, 0); }
+    else if (abs(n.y) > 0.5) { bit = 2 + select(n.y > 0.0, 1, 0); }
+    else { bit = 4 + select(n.z > 0.0, 1, 0); }
+    return has_bit(rough, bit);
+}
+
+pub fn vertex(v_in: mesh::Vertex) -> mesh::Vertex {
+    var v = v_in;
+    let k = v.instance_index;
+    let p0 = pieces[k * 3];
+    let p1 = pieces[k * 3 + 1];
+    let p2 = pieces[k * 3 + 2];
+    if (p1.x <= 0.0) {
+        v.pos = vec3<f32>(0.0, -100000.0, 0.0);
+        return v;
+    }
+    let mi = (p0.w + 0.5) as i32;
+    let r0 = masses[mi * 4];
+    let r1 = masses[mi * 4 + 1];
+    let r2 = masses[mi * 4 + 2];
+    let r3 = masses[mi * 4 + 3];
+    let u = v.pos;
+    let n = v.normal;
+    let rough = (p2.z + 0.5) as i32;
+    var lp = p0.xyz + u * 2.0 * p1.xyz;
+    // Broken faces jagged: each axis's displacement where the point lies on a
+    // broken face across that axis (so an edge's two copies move alike).
+    let rest = lp;
+    if (abs(u.x) > 0.499 && has_bit(rough, select(u.x > 0.0, 1, 0))) { lp.x += jag(rest, 0u) * min(0.45, 0.7 * p1.x); }
+    if (abs(u.y) > 0.499 && has_bit(rough, select(u.y > 0.0, 3, 2))) { lp.y += jag(rest, 1u) * min(0.45, 0.7 * p1.y); }
+    if (abs(u.z) > 0.499 && has_bit(rough, select(u.z > 0.0, 5, 4))) { lp.z += jag(rest, 2u) * min(0.45, 0.7 * p1.z); }
+
+    let yaw = r0.w;
+    let c = cos(yaw);
+    let s = sin(yaw);
+    let rw = vec3<f32>(r0.x + c * lp.x + s * lp.z, r0.y + lp.y, r0.z - s * lp.x + c * lp.z);
+    let nw0 = vec3<f32>(c * n.x + s * n.z, n.y, -s * n.x + c * n.z);
+    let bi = (p1.w + 0.5) as i32 - 1;
+    var q = vec4<f32>(0.0, 0.0, 0.0, 1.0);
+    var w = rw;
+    if (bi >= 0) {
+        let b0 = bodies[bi * 3];
+        let b1 = bodies[bi * 3 + 1];
+        q = bodies[bi * 3 + 2];
+        w = qrot(q, rw - b0.xyz) + b1.xyz;
+    }
+    v.pos = w;
+    v.normal = qrot(q, nw0);
+    v.v0 = vec4<f32>(lp, p2.x);
+    v.v1 = r1;
+    v.v2 = r2;
+    v.v3 = r3;
+    v.v4 = vec4<f32>(n, p2.y);
+    v.v5 = q;
+    v.vi = vec4<i32>(floor(r2.z * 1048576.0) as i32, rough, mi, select(bi >= 0, 1, 0));
+    return v;
+}
+
+// The rebar of a concrete member's broken face: rods 0.2 m apart on a grid of
+// the face's two other axes, a few left standing out rusted.
+fn rebar(a: f32, b: f32, fpx: f32) -> f32 {
+    let ga = fract(a / 0.2 + 0.5) - 0.5;
+    let gb = fract(b / 0.2 + 0.5) - 0.5;
+    let d = length(vec2<f32>(ga, gb)) * 0.2;
+    return 1.0 - smoothstep(0.012, 0.012 + fpx, d);
+}
+
+pub fn fragment(v: mesh::Vertex, s_in: mesh::Surface) -> mesh::Surface {
+    var s = s_in;
+    let lp = v.v0.xyz;
+    let kind = (v.v0.w + 0.5) as i32;
+    let n = v.v4.xyz;
+    let mat = (v.v4.w + 0.5) as i32;
+    let q = v.v5;
+    let mi = v.vi.z;
+    let rough = v.vi.y;
+    let moved = v.vi.w > 0;
+    let yaw = masses[mi * 4].w;
+    let hw = v.v1.x;
+    let h = v.v1.y;
+    let hd = v.v1.z;
+    let plinth = v.v2.y;
+    let style = (v.v2.w + 0.5) as i32;
+    let hue = v.v3.w;
+    let id = v.vi.x as f32;
+    let c = cos(yaw);
+    let sn = sin(yaw);
+    let X = qrot(q, vec3<f32>(c, 0.0, -sn));
+    let Y = qrot(q, vec3<f32>(0.0, 1.0, 0.0));
+    let Z = qrot(q, vec3<f32>(sn, 0.0, c));
+    let eye = normalize(v.world_pos);
+    let broken = is_broken(rough, n);
+    let fpx = facade::fw1(lp.x) + facade::fw1(lp.y) + facade::fw1(lp.z) + 0.001;
+
+    s.metallic = 0.0;
+    s.emissive = vec3<f32>(0.0, 0.0, 0.0);
+    let e = 0.03;
+    let outer = !broken && ((n.z > 0.5 && lp.z > hd - e) || (n.z < -0.5 && lp.z < -hd + e) ||
+                            (n.x > 0.5 && lp.x > hw - e) || (n.x < -0.5 && lp.x < -hw + e) ||
+                            (n.y > 0.5 && lp.y > h - e) || (n.y < -0.5 && lp.y < -plinth + e));
+    if (outer) {
+        // The building's outside, as it drew it.
+        let m = facade::mass_of(v.v1, v.v2, v.v3, id);
+        s = facade::shade(m, lp, n, false, X, Y, Z, eye, s_in, params.night, params.room_day, params.room_night).s;
+    } else if (broken) {
+        // A break: the jagged surface's own normal, the material raw.
+        let wp = v.world_pos;
+        var nn = normalize(cross(dpdx(wp), dpdy(wp)));
+        if (dot(nn, eye) > 0.0) { nn = -nn; }
+        s.normal = nn;
+        // The face's two other axes, for patterns across it.
+        var a = lp.y;
+        var b = lp.z;
+        if (abs(n.y) > 0.5) { a = lp.x; b = lp.z; } else if (abs(n.z) > 0.5) { a = lp.x; b = lp.y; }
+        let grain = vn3(lp * 9.0, 11u);
+        let speck = lattice(floor(lp.x * 40.0), floor(lp.y * 40.0), floor(lp.z * 40.0), 13u);
+        if (mat == MAT_MASONRY) {
+            // Brick and mortar in section, courses of 75 mm, the wall's own colour.
+            let row = floor(b / 0.075);
+            let mortar = max(facade::pulse(b / 0.075, 0.0, 0.16, fpx / 0.075), facade::pulse(a / 0.23 + 0.5 * row, 0.0, 0.06, fpx / 0.23));
+            let brick = facade::wall_color(style, hue) * (0.85 + 0.3 * speck);
+            s.base_color = mix(brick, vec3<f32>(0.46, 0.44, 0.40), mortar * 0.85);
+            s.roughness = 0.95;
+        } else if (mat == MAT_GLASS || mat == MAT_STEEL) {
+            // The frame's metal, torn.
+            s.base_color = vec3<f32>(0.42, 0.43, 0.44) * (0.8 + 0.4 * grain);
+            s.metallic = 0.7;
+            s.roughness = 0.45;
+        } else if (mat == MAT_TIMBER) {
+            s.base_color = vec3<f32>(0.42, 0.30, 0.18) * (0.75 + 0.5 * vn3(vec3<f32>(a * 2.0, b * 30.0, 0.0), 17u));
+            s.roughness = 0.9;
+        } else {
+            // Concrete: cement paste, aggregate in it, voids, and its rebar.
+            var cc = vec3<f32>(0.52, 0.51, 0.48) * (0.86 + 0.28 * grain);
+            cc = mix(cc, vec3<f32>(0.36, 0.35, 0.33), select(speck > 0.82, 0.8, 0.0));
+            cc = mix(cc, vec3<f32>(0.66, 0.64, 0.60), select(speck < 0.1, 0.7, 0.0));
+            let rb = rebar(a, b, fpx) * select(kind == KIND_FOUNDATION, 0.0, 1.0);
+            s.base_color = mix(cc, vec3<f32>(0.30, 0.17, 0.10), rb);
+            s.metallic = 0.6 * rb;
+            s.roughness = mix(0.95, 0.5, rb);
+        }
+    } else {
+        // Inside the building: a floor, a ceiling, a wall's inner face, a column.
+        let rh = facade::hash3(floor(lp.x / 6.0), floor(lp.y / 3.0), id);
+        let office = style == facade::STYLE_GLASS || style == facade::STYLE_OFFICE;
+        if (kind == KIND_SLAB && n.y > 0.5) {
+            if (office) {
+                // Carpet tiles, half a metre.
+                let t = facade::hash3(floor(lp.x / 0.5), floor(lp.z / 0.5), id + 3.0);
+                s.base_color = mix(vec3<f32>(0.20, 0.22, 0.26), vec3<f32>(0.30, 0.30, 0.31), fract(rh * 3.1)) * (0.92 + 0.16 * t);
+                s.roughness = 0.95;
+            } else if (style == facade::STYLE_INDUSTRIAL || style == facade::STYLE_PLANT) {
+                s.base_color = vec3<f32>(0.44, 0.43, 0.41) * (0.9 + 0.2 * vn3(lp * 0.7, 5u));
+                s.roughness = 0.8;
+            } else {
+                // Boards 15 cm wide, each its own shade, their joints dark.
+                let board = floor(lp.x / 0.15);
+                let t = facade::hash3(board, floor(lp.z / 2.4 + facade::hash3(board, 1.0, id)), id + 5.0);
+                let jn = facade::pulse(lp.x / 0.15, 0.0, 0.05, fpx / 0.15);
+                s.base_color = mix(vec3<f32>(0.36, 0.22, 0.12), vec3<f32>(0.48, 0.34, 0.20), t) * (1.0 - 0.5 * jn);
+                s.roughness = 0.6;
+            }
+        } else if (kind == KIND_SLAB && n.y < -0.5) {
+            // Ceilings: an office's tiles on a grid, a home's plaster.
+            var cc = vec3<f32>(0.80, 0.79, 0.76);
+            if (office) {
+                let g = max(facade::pulse(lp.x / 0.6, 0.0, 0.04, fpx / 0.6), facade::pulse(lp.z / 0.6, 0.0, 0.04, fpx / 0.6));
+                cc = mix(cc, vec3<f32>(0.55, 0.55, 0.55), g);
+            }
+            s.base_color = cc;
+            s.roughness = 0.9;
+        } else if (kind == KIND_WALL && abs(n.y) < 0.5) {
+            if (mat == MAT_GLASS) {
+                // A curtain wall seen from inside: its glass, dark against the room.
+                s.base_color = vec3<f32>(0.04, 0.05, 0.055);
+                s.roughness = 0.08;
+            } else {
+                // Plaster, the rooms' colour, a skirting board at the floor.
+                let wc = mix(vec3<f32>(0.62, 0.58, 0.50), vec3<f32>(0.48, 0.52, 0.56), rh);
+                let fy = fract((lp.y - v.v2.x) / v.v1.w);
+                let skirt = select(lp.y < v.v2.x, facade::band(lp.y, 0.0, 0.1, fpx), facade::band(fy * v.v1.w, 0.3, 0.4, fpx));
+                s.base_color = mix(wc, vec3<f32>(0.85, 0.84, 0.80), skirt);
+                s.roughness = 0.85;
+            }
+        } else {
+            // Columns, slab edges, foundations: cast concrete, its formwork's lines.
+            let fl = facade::pulse(lp.y / 1.2, 0.0, 0.02, fpx / 1.2);
+            s.base_color = vec3<f32>(0.50, 0.49, 0.46) * (0.9 + 0.2 * vn3(lp * 2.0, 3u)) * (1.0 - 0.25 * fl);
+            if (kind == KIND_FOUNDATION) { s.base_color *= 0.75; }
+            s.roughness = 0.9;
+        }
+    }
+    if (moved) {
+        // Down and through the dust: coated in it, the upturned faces most;
+        // the lights are out.
+        let up = max(dot(s.normal, vec3<f32>(0.0, 1.0, 0.0)), 0.0);
+        let k = 0.25 + 0.45 * up * (0.6 + 0.4 * vn3(lp * 1.7, 19u));
+        s.base_color = mix(s.base_color, vec3<f32>(0.56, 0.54, 0.50), k);
+        s.roughness = mix(s.roughness, 0.95, k);
+        s.metallic *= 1.0 - k;
+        s.emissive = vec3<f32>(0.0, 0.0, 0.0);
+    }
+    return s;
+}
