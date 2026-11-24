@@ -509,7 +509,7 @@ pub fn fragment(v: mesh::Vertex, s_in: mesh::Surface) -> mesh::Surface {
     if (style == STYLE_GLASS || style == STYLE_OFFICE) { lit_p = (hash3(fl, 3.0, id) < 0.3 ? 0.7 : 0.06) * bshare; }
     if (ground && shop) { lit_p = 0.85; }
     let lit = hash3(bay * 1.7, fl * 2.3, id + 5.0) < lit_p;
-    let warm = mix(vec3<f32>(1.0, 0.78, 0.52), vec3<f32>(0.86, 0.92, 1.0), (style == STYLE_GLASS || style == STYLE_OFFICE) ? 0.8 : fract(rh * 4.3) * 0.3);
+    let warm = mix(vec3<f32>(1.0, 0.78, 0.52), vec3<f32>(0.86, 0.92, 1.0), (style == STYLE_GLASS || style == STYLE_OFFICE) ? 0.6 : fract(rh * 4.3) * 0.3);
     let blinds = fract(rh * 11.3) < 0.35;
 
     // The eye ray in the building's frame, then the room's.
@@ -545,14 +545,17 @@ pub fn fragment(v: mesh::Vertex, s_in: mesh::Surface) -> mesh::Surface {
     let glass = glass_tint(style, hue);
     s.base_color = mix(wall, glass, win);
 
-    // The street lamps' light on the street front at night: a row of lamps
-    // (LAMP_CD candela, LAMP_SP apart, LAMP_H up) LAMP_D in front of the
-    // wall, as a line source: E = 2 I d / (sp (d^2 + dy^2)) lux.
+    // The street lamps' light at night: a row of lamps (1600 cd, 30 m apart,
+    // 8 m up) 7 m in front of the street front, as a line source:
+    // E = 2 I d / (sp (d^2 + dy^2)) lux. The sides take it at a slant (a
+    // third), the back none; a mass set back from the street (a wing, a
+    // porch) half as much, so a house is not lit on one face alone.
     var lamp_lum = vec3<f32>(0.0, 0.0, 0.0);
-    if (front && night > 0.0 && (flags & 1) != 0) {
+    if (night > 0.0 && nloc.z > -0.5) {
         let dy = y - 8.0;
         let d = 7.0;
-        let e = 2.0 * 1600.0 * d / (30.0 * (d * d + dy * dy));
+        let face_k = select(front, 1.0, 0.35) * select((flags & 1) != 0, 1.0, 0.5);
+        let e = 2.0 * 1600.0 * d / (30.0 * (d * d + dy * dy)) * face_k;
         lamp_lum = s.base_color * vec3<f32>(1.0, 0.82, 0.62) * (e * night / 3.14159265);
     }
     s.roughness = mix(style == STYLE_GLASS ? 0.4 : 0.82, 0.06, win);
