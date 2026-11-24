@@ -131,12 +131,14 @@ fn k_tile(
         for (var k = cell_start[c]; k < cell_start[c + 1]; k += 1) {
             best = min(best, seg_dist(segs, cell_segs[k], wx, wz).x);
         }
-        // A road 4 m farther than the nearest no longer counts (ground.js GRADE_SPAN).
+        // A road 4 m farther than the nearest no longer counts (ground.js
+        // GRADE_SPAN), more the deeper in a road: a junction one surface.
+        let span = 4.0 + max(0.0, -best);
         var sw = 0.0;
         var sy = 0.0;
         for (var k = cell_start[c]; k < cell_start[c + 1]; k += 1) {
             let dy = seg_dist(segs, cell_segs[k], wx, wz);
-            let w = 1.0 - sstep(0.0, 4.0, dy.x - best);
+            let w = 1.0 - sstep(0.0, span, dy.x - best);
             sw += w;
             sy += w * dy.y;
         }

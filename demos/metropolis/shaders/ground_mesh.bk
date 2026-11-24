@@ -401,8 +401,17 @@ pub fn fragment(v: mesh::Vertex, s_in: mesh::Surface) -> mesh::Surface {
             let lu = fract(au / lane_w);
             let t0 = (lu - 0.27) / 0.09;
             let t1 = (lu - 0.73) / 0.09;
-            let track = exp(-t0 * t0) + exp(-t1 * t1);
+            // (What runs along a road fades out into a junction, which no one
+            // road owns: the nearest's tracks, patches and oil would meet the
+            // crossing road's along the box's diagonals. The tracks fade to
+            // their mean.)
+            let jk = sstep(jr - 2.0, jr + 2.0, sj);
+            let track = mix(0.32, exp(-t0 * t0) + exp(-t1 * t1), jk);
             road_c *= 1.0 + 0.12 * track;
+            // In their place the box is worn every way at once: polished in
+            // drifts where the turns sweep, dark where cars wait and drip.
+            let jw = vnoise2(p * 0.22 + vec2<f32>(5.0, 1.0));
+            road_c *= 1.0 + (1.0 - jk) * (0.16 * (jw - 0.5) - 0.12 * sstep(0.6, 0.9, vnoise2(p * 0.5 + vec2<f32>(13.0, 7.0))));
             // Up close its aggregate: stones of ~2 cm, a few pale ones, each
             // tilting the surface its own way.
             let ag_k = 1.0 - smoothstep(0.012, 0.05, fwn);
@@ -420,15 +429,15 @@ pub fn fragment(v: mesh::Vertex, s_in: mesh::Surface) -> mesh::Surface {
             // Patch repairs across a lane, newer (darker) or older (paler).
             let pc = vec2<f32>(floor(sa / 8.0), floor(au / lane_w));
             let ph = hash2(pc + vec2<f32>(17.0, 3.0));
-            if (ph > 0.8) {
+            if (ph > 0.8 && jk > 0.0) {
                 let x0 = 0.08 + 0.3 * hash2(pc + vec2<f32>(1.7, 0.0));
                 let x1 = min(0.95, x0 + 0.25 + 0.4 * hash2(pc + vec2<f32>(2.9, 0.0)));
                 let inside = band(fract(sa / 8.0), x0, x1, fw / 8.0) * band(fract(au / lane_w), 0.1, 0.9, fw / lane_w);
-                road_c *= mix(1.0, ph > 0.9 ? 0.7 : 1.25, inside);
+                road_c *= mix(1.0, ph > 0.9 ? 0.7 : 1.25, inside * jk);
             }
             // Oil down each lane's middle, and cracks.
             let tm = (lu - 0.5) / 0.07;
-            road_c *= 1.0 - 0.3 * exp(-tm * tm) * vnoise2(vec2<f32>(sa * 0.25, au * 1.5));
+            road_c *= 1.0 - 0.3 * jk * exp(-tm * tm) * vnoise2(vec2<f32>(sa * 0.25, au * 1.5));
             road_c *= 1.0 - 0.6 * cracks(p, fwn);
             // Markings (linear paint albedo): none inside a junction.
             var paint = 0.0;
