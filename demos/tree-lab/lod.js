@@ -59,15 +59,21 @@ export function barkMesh(tubes, sides) {
             };
             const sa = T ? slide([T[s * 6], T[s * 6 + 1], T[s * 6 + 2]], S[o + 3]) : 0;
             const sb = T ? slide([T[s * 6 + 3], T[s * 6 + 4], T[s * 6 + 5]], S[o + 7]) : 0;
+            // (A ring's normals point out from its joint within the joint's
+            // plane, so the two segments that meet there shade as one bend.)
+            const na = [0, 1, 2].map((k) => w[k] * S[o + 3] + z[k] * sa), nb = [0, 1, 2].map((k) => w[k] * S[o + 7] + z[k] * sb);
+            const la = Math.hypot(na[0], na[1], na[2]), lb = Math.hypot(nb[0], nb[1], nb[2]);
             for (let k = 0; k < 3; k++) {
-                pos[va * 3 + k] = a[k] + w[k] * S[o + 3] + z[k] * sa;
-                pos[va * 3 + 3 + k] = b[k] + w[k] * S[o + 7] + z[k] * sb;
-                nrm[va * 3 + k] = nrm[va * 3 + 3 + k] = w[k];
+                pos[va * 3 + k] = a[k] + na[k];
+                pos[va * 3 + 3 + k] = b[k] + nb[k];
+                nrm[va * 3 + k] = la > 0 ? na[k] / la : w[k];
+                nrm[va * 3 + 3 + k] = lb > 0 ? nb[k] / lb : w[k];
             }
             veg.set(rec, va * 16);
             veg.set(rec, va * 16 + 16);
             const vb = (s * sides + (i + 1) % sides) * 2;
-            idx.set([va, va + 1, vb, vb, va + 1, vb + 1], (s * sides + i) * 6);
+            // (Wound to face outward, as the normals do.)
+            idx.set([va, vb, va + 1, vb, vb + 1, va + 1], (s * sides + i) * 6);
         }
     }
     const m = new Mesh({ positions: pos, normals: nrm, indices: idx });
