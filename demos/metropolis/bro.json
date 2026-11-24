@@ -7,5 +7,6 @@
     "vsync": false,
     "maxFps": 0,
     "lib": "../../lib",
+    "mounts": { "tats": "../../../tats" },
     "permissions": []
 }
