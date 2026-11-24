@@ -82,7 +82,7 @@ let interiors = null;
 const ready = Promise.all([
     // The bridges: decks along the graph's bridge edges, on piers in the river.
     createBridges(scene, city.graph, readLib('city/bridge.bk'), { waterBed: RIVER_BED_Y - 1 }).then((b) => { bridges = b; }),
-    // The interiors cut the open building's footprint out of the ground too.
+    // The interiors cut the open buildings' footprints out of the ground too.
     Promise.all([terrain.whenReady(), createBuildingRenderer(scene, city.masses, readLib('city/building.bk'))]).then(([, b]) => {
         buildings = b;
         terrain.node.setShaderBuffer('masses', b.masses);

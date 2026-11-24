@@ -22,7 +22,6 @@ struct GroundParams {
     pad2: f32,
     city: vec4<f32>,     // half, cell, cells, surf cell
     city2: vec4<f32>,    // surf cells
-    open: vec4<f32>,     // the open building's masses [x, y) (lib/city/interior.js): no ground inside them
 }
 
 @binding(4, 0) var params: uniform<GroundParams>;
@@ -33,15 +32,17 @@ struct GroundParams {
 @binding(4, 17) var cell_segs: read_buffer<i32>;
 @binding(4, 18) var surf: read_buffer<u32>;
 @binding(4, 19) var masses: read_buffer<vec4<f32>>;   // lib/city/buildings.js records, 4 a mass
+// The open buildings' masses (lib/city/interior.js): [0] their count, then one a slot.
+@binding(4, 20) var open_list: read_buffer<i32>;
 
-// Inside a mass of the open building: a building stands at its street
+// Inside a mass of an open building: a building stands at its street
 // front's height and cuts into a rise behind, so the ground there is above
 // its floor, hidden by its walls until its rooms are shown.
 fn in_open(p: vec2<f32>) -> bool {
-    let a = params.open.x as i32;
-    let b = min(params.open.y as i32, a + 8);
-    if a < 0 || masses.len() == 0 { return false; }
-    for (var k: i32 = a; k < b; k += 1) {
+    if open_list.len() == 0 || masses.len() == 0 { return false; }
+    let n = min(open_list[0], open_list.len() - 1);
+    for (var q: i32 = 0; q < n; q += 1) {
+        let k = open_list[q + 1];
         let m0 = masses[4 * k];
         let m1 = masses[4 * k + 1];
         let c = cos(m0.w);

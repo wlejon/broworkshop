@@ -20,13 +20,15 @@ struct Params {
     room_day: f32,   // a room's luminance by day, cd/m^2 per unit albedo
     room_night: f32, // a lit room's luminance at night, cd/m^2 per unit albedo
     part: f32,       // 0 walls (box), 1 roof (prism)
-    open: vec4<f32>, // an open building (interior.js): masses [x, y), its windows and door cut from world height z to w
-    open_fade: f32,  // 0..1: the share of the cut made, dithered on the wall (a crossfade to the rooms built)
 }
 
 @binding(4, 0) var params: uniform<Params>;
 @binding(4, 14) var masses: read_buffer<vec4<f32>>;
 @binding(4, 15) var ids: read_buffer<i32>;   // the mass each instance draws
+// Per mass, its building open (interior.js): x the share of the cut made
+// (0..1, dithered on the wall: a crossfade to the rooms built), its windows
+// and door cut from world height y to z.
+@binding(4, 16) var open_state: read_buffer<vec4<f32>>;
 
 const STYLE_GLASS: i32 = 0;
 const STYLE_OFFICE: i32 = 1;
@@ -572,13 +574,17 @@ pub fn fragment(v: mesh::Vertex, s_in: mesh::Surface) -> mesh::Surface {
     // An open building (interior.js builds its rooms): the glass of its
     // windows and its door are cut over the floors built, to see in and go in.
     let wy = v.v5.y + y;
-    if (v.v5.w > params.open.x - 0.5 && v.v5.w < params.open.y - 0.5 && wy > params.open.z && wy < params.open.w) {
-        var hole = win;
-        if (is_door) { hole = band(bu, 0.3, 0.7, fu / bw) * band(fy01, 0.0, 0.62, fy / fh); }
-        // The engine's per-pixel band dither, as its LOD fades use, so the
-        // rooms dissolve in at the finest grain.
-        let dith = scene::band_dither(frag_coord().xy);
-        if (hole > 0.5 && dith < params.open_fade) { s.alpha = 0.0; }
+    let mi = (v.v5.w + 0.5) as i32;
+    if (mi < open_state.len()) {
+        let o = open_state[mi];
+        if (o.x > 0.0 && wy > o.y && wy < o.z) {
+            var hole = win;
+            if (is_door) { hole = band(bu, 0.3, 0.7, fu / bw) * band(fy01, 0.0, 0.62, fy / fh); }
+            // The engine's per-pixel band dither, as its LOD fades use, so the
+            // rooms dissolve in at the finest grain.
+            let dith = scene::band_dither(frag_coord().xy);
+            if (hole > 0.5 && dith < o.x) { s.alpha = 0.0; }
+        }
     }
     return s;
 }
