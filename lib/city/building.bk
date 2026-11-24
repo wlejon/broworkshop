@@ -43,8 +43,9 @@ pub fn vertex(v_in: mesh::Vertex) -> mesh::Vertex {
     let p = v.pos;
     var lp = vec3<f32>(0.0, 0.0, 0.0);
     var ln = v.normal;
-    // A mass taken down (destruction.js draws it as its pieces): nothing.
-    let gone = ((r3.z + 0.5) as i32 & 4) != 0;
+    // A mass taken down (4: destruction.js draws it as its pieces) or hidden
+    // from view (8): nothing.
+    let gone = ((r3.z + 0.5) as i32 & 12) != 0;
 
     if (gone) {
         lp = vec3<f32>(0.0, -100000.0, 0.0);
