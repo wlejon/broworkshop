@@ -30,12 +30,37 @@ pub fn fragment(v: mesh::Vertex, s_in: mesh::Surface) -> mesh::Surface {
     var s = s_in;
     let part = (v.color.x * 10.0 + 0.5) as i32;
     s.emissive = vec3<f32>(0.0, 0.0, 0.0);
+    let lp = v.v0.xyz;
+    let fw = abs(dpdx(lp.x)) + abs(dpdy(lp.x)) + abs(dpdx(lp.y)) + abs(dpdy(lp.y)) + 0.002;
+    let near = 1.0 - smoothstep(0.004, 0.02, fw);
+    // Where it is on a wheel: the nearer axle's centre, the distance and angle from it.
+    let cx = select(lp.x > 0.0, params.axle, -params.axle);
+    let wq = vec2<f32>(lp.x - cx, lp.y - params.wheel_r);
+    let wr = length(wq) / max(params.wheel_r, 0.01);
+    let wa = atan2(wq.y, wq.x) / 6.2831853 + 0.5;
     if (part >= 10) {
-        // Paint: a glossy clear coat.
-        s.roughness = 0.32;
-        s.metallic = 0.0;
-        let lp = v.v0.xyz;
-        let fw = abs(dpdx(lp.x)) + abs(dpdy(lp.x)) + abs(dpdx(lp.y)) + abs(dpdy(lp.y)) + 0.002;
+        // Paint: a clear coat over a solid colour, or over metallic (a
+        // third of cars) whose flakes glint up close.
+        // (By its paint, quantised: the interpolated tint is not the same
+        // bits pixel to pixel, and a hash of raw bits flips per pixel.)
+        let pq = floor(s_in.base_color * 255.0 + vec3<f32>(0.5));
+        let ph = scene::hash2((pq.x + pq.y * 256.0 + pq.z * 65536.0) as u32, 77u);
+        let metal = ph < 0.35;
+        s.roughness = select(metal, 0.24, 0.14);
+        s.metallic = select(metal, 0.5, 0.0);
+        // (Flakes only where a pixel spans a few of them: coarser, they alias to frost.)
+        let flake_k = 1.0 - smoothstep(0.0015, 0.004, fw);
+        if (metal && flake_k > 0.0) {
+            let fc = floor(lp * 700.0);
+            let fl = scene::hash2(bitcast<u32>(fc.x * 3.0 + fc.y * 7.0) ^ 0x2545f491u, bitcast<u32>(fc.z));
+            s.base_color *= 1.0 + flake_k * 0.15 * (fl - 0.5);
+        }
+        // Road grime on the sills and lower doors, thicker toward the wheels.
+        let low = 1.0 - smoothstep(0.12, 0.6, lp.y);
+        let wheelk = 1.0 - smoothstep(1.0, 1.8, wr);
+        let dirt = clamp(low * 0.6 + wheelk * low * 0.4, 0.0, 1.0) * 0.55;
+        s.base_color = mix(s.base_color, vec3<f32>(0.10, 0.09, 0.075), dirt);
+        s.roughness = mix(s.roughness, 0.7, dirt);
         let sidek = smoothstep(params.half_w - 0.3, params.half_w - 0.12, abs(lp.z));
         // The wheel arches: a dark band round each wheel on the sides.
         let da = min(length(vec2<f32>(lp.x - params.axle, lp.y - params.wheel_r)), length(vec2<f32>(lp.x + params.axle, lp.y - params.wheel_r)));
@@ -60,13 +85,20 @@ pub fn fragment(v: mesh::Vertex, s_in: mesh::Surface) -> mesh::Surface {
         let rider = 0.5 + 0.5 * step(0.5, fract(v.v0.x * 0.9 + 0.3 * sin(v.v0.x * 2.3)));
         s.emissive = vec3<f32>(1.0, 0.93, 0.80) * params.cabin.x * params.night * seats * strip * mix(rider, 1.0, smoothstep(0.55, 0.75, up));
     } else if (part == 2) {
-        s.base_color = vec3<f32>(0.025, 0.025, 0.025);
+        // Rubber, its sidewall a shade greyer where it bulges, dusty at the foot.
+        s.base_color = vec3<f32>(0.025, 0.025, 0.025) * (1.0 + 0.5 * smoothstep(0.75, 0.9, wr) * (1.0 - smoothstep(0.92, 1.0, wr)));
+        s.base_color = mix(s.base_color, vec3<f32>(0.07, 0.065, 0.06), 0.4 * (1.0 - smoothstep(0.0, 0.25, lp.y)));
         s.roughness = 0.92;
         s.metallic = 0.0;
     } else if (part == 3) {
         s.base_color = vec3<f32>(0.035, 0.036, 0.038);
         s.roughness = 0.6;
         s.metallic = 0.0;
+        // The grille at the nose: dark slats behind a bright surround.
+        if (lp.x > params.axle + params.wheel_r && abs(lp.z) < params.half_w * 0.5 && near > 0.0) {
+            let slat = 0.5 + 0.5 * sin(lp.y * 6.2831853 / 0.035);
+            s.base_color *= mix(1.0, 0.5 + 1.2 * slat, near);
+        }
     } else if (part == 4) {
         s.base_color = vec3<f32>(0.8, 0.8, 0.78);
         s.roughness = 0.1;
@@ -79,9 +111,21 @@ pub fn fragment(v: mesh::Vertex, s_in: mesh::Surface) -> mesh::Surface {
         s.metallic = 0.0;
         s.emissive = vec3<f32>(1.0, 0.04, 0.02) * (800.0 * params.night);
     } else {
+        // A wheel: a bright rim lip, five spokes with dark gaps between, a hub
+        // cap, brake dust darkening it toward the middle.
         s.base_color = vec3<f32>(0.32, 0.33, 0.34);
         s.roughness = 0.4;
         s.metallic = 0.8;
+        let spoke = fract(wa * 5.0);
+        let gap = smoothstep(0.18, 0.24, spoke) * (1.0 - smoothstep(0.76, 0.82, spoke));
+        // (The rim's disc reaches 0.62 of the wheel's radius.)
+        let in_gap = gap * smoothstep(0.14, 0.18, wr) * (1.0 - smoothstep(0.46, 0.5, wr));
+        let lip = smoothstep(0.54, 0.58, wr);
+        var wc = s.base_color * (0.75 + 0.25 * smoothstep(0.05, 0.4, wr));
+        wc = mix(wc, vec3<f32>(0.55, 0.56, 0.57), lip * 0.6);
+        s.base_color = mix(wc, vec3<f32>(0.012, 0.012, 0.014), in_gap);
+        s.metallic = mix(0.8, 0.0, in_gap);
+        s.roughness = mix(0.35, 0.9, in_gap);
     }
     // The street lamps' light (the ground shader's lamp rows, averaged): some
     // 20 lux on what faces up, 10 on the sides, warm.
