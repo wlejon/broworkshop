@@ -122,7 +122,11 @@ function rectOf(pts, W, H, pad = 0) {
 const carN = m.cars.nodes;
 carN.forEach((n) => n.visible = false);
 const FOV = 60;   // the fly camera's own
-{
+// `only=facades,lods,...` runs those sections alone (facades, lods, cars,
+// dolly, tiles, swim, rooms); none given runs them all.
+const ONLY = bro.app.argv.find((a) => a.startsWith('only='))?.slice(5).split(',');
+const want = (k) => !ONLY || ONLY.includes(k);
+if (want('facades')) {
   // A facade's far shading is its near shading averaged. From one eye, a
   // 12 m patch of a front through a narrow view (~1.5 cm pixels, every
   // facade term resolved: bricks, mortar, ribs, the rooms behind the glass)
@@ -204,7 +208,7 @@ const FOV = 60;   // the fly camera's own
   m.cam.setFov(FOV);
   m.setTimeMode('day');
 }
-{
+if (want('lods')) {
   // Per style a mass and a side from which 150 m, 500 m and 2 km all see
   // its centre and its top corners (no other building in between).
   const clearSide = (M) => {
@@ -274,7 +278,7 @@ const FOV = 60;   // the fly camera's own
   }
 }
 m.setTimeMode('day');
-{
+if (want('cars')) {
   const byType = {};
   for (const n of carN) { const mm = n.name.match(/city_cars_(.+)_lod(\d)/); if (mm) (byType[mm[1]] ??= [])[+mm[2]] = n; }
   const [px, pz] = along(best * 0.5), [qx, qz] = along(best * 0.5 + 1), py = g(px, pz);
@@ -341,7 +345,7 @@ for (const el of [0.3, 0.45, 0.6]) for (let az = 0; az < 360 && !dir; az += 7.5)
   if (ok) dir = dd;
 }
 m.setTimeMode('day'); frames(5);
-{
+if (want('dolly')) {
   // A whole-frame pop (lighting, exposure, the ground's or sky's shade all at
   // once): each step's change of the frame's mean brightness against the
   // steps either side (their median, but never under 1 %: moving past
@@ -366,7 +370,7 @@ m.setTimeMode('day'); frames(5);
   }
   check(worst < 6, `dollying out 25 m to 3 km, no step's brightness change stands out from its neighbours' (largest x${worst.toFixed(1)} their median, at ${at.toFixed(0)} m)`);
 }
-{
+if (want('tiles')) {
   // The ground's tiles swap level by the eye's distance: at each step out
   // the same pose drawn with its own tiles and with the next step's (the
   // tiles chosen from an eye 5 % farther, terrain.update's eye wrapped), the
@@ -458,7 +462,7 @@ function track(poses, every) {
   all.sort((a, b) => a - b);
   return { n: all.length, p95: all[Math.floor(all.length * 0.95)] ?? 0, jumps: all.filter((d) => d > 20).length };
 }
-{
+if (want('swim')) {
   const [ax, az] = along(best * 0.5 + 1);
   const fx = ax - cx, fz = az - cz, ux = -fz, uz = fx, gy = g(cx, cz);
   const strafe = (h, back, side, len, n) => {
@@ -488,7 +492,7 @@ function track(poses, every) {
   }
 }
 for (const n of carN) n.visible = true;
-{
+if (want('rooms')) {
   // Inside by day the outdoors' light stops at the walls: from a corner of a
   // shop's and an office's floor, the lower half of the frame (floor, shelves,
   // desks) is not burnt white. (The interior volume's edge fade at 0.4 m lit

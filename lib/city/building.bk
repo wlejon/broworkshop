@@ -908,12 +908,47 @@ pub fn fragment(v: mesh::Vertex, s_in: mesh::Surface) -> mesh::Surface {
         glow_k = g;
         rough_win = mix(g, 1.0, in_frame * rel_k * 0.4);
     }
-    s.base_color = mix(mix(wall, wall_c, rel_k), glass, g);
+    // Far (the march faded out), masonry's dressed stone the near draws
+    // (fac_depth's quoins, sills, surrounds, courses, cornice and dentils)
+    // and a brick front's darker lintels, as their share of the pixel.
+    var wall_far = wall;
+    if (masonry && rel_k < 1.0) {
+        var st_cov = band(y, h - 0.7, h, fy) + 0.5 * band(y, h - 0.86, h - 0.72, fy);
+        st_cov += band(y, ground_h - 0.12, ground_h + 0.12, fy);
+        if (style != STYLE_INDUSTRIAL) { st_cov += band(u, 0.0, 0.45, fu) + band(u, W - 0.45, W, fu); }
+        var lin_cov = 0.0;
+        if (!ground && !(y > h - 0.9) && corner >= 0.6) {
+            let x = bu * bw;
+            let yy = fy01 * fh;
+            let wx0 = L.wx0 * bw;
+            let wx1 = L.wx1 * bw;
+            let wy0 = L.wy0 * fh;
+            let wy1 = L.wy1 * fh;
+            if (style != STYLE_ROW) { st_cov += band(yy, 0.0, 0.10, fy); }
+            st_cov += band(yy, wy0 - 0.07, wy0, fy) * band(x, wx0 - 0.08, wx1 + 0.08, fu);
+            if (style == STYLE_STONE || style == STYLE_STUCCO || style == STYLE_PLASTER) {
+                let outer = band(x, wx0 - 0.12, wx1 + 0.12, fu) * band(yy, wy0, wy1 + 0.12, fy);
+                let inner = band(x, wx0, wx1, fu) * band(yy, wy0, wy1, fy);
+                st_cov += max(outer - inner, 0.0);
+            }
+            if (style == STYLE_BRICK || style == STYLE_ROW) {
+                lin_cov = band(x, wx0 - 0.1, wx1 + 0.1, fu) * band(yy, wy1, wy1 + 0.22, fy);
+            }
+        }
+        wall_far = mix(wall, stone, clamp(st_cov, 0.0, 1.0)) * (1.0 - 0.18 * lin_cov);
+    }
+    s.base_color = mix(mix(wall_far, wall_c, rel_k), glass, g);
     if (rel_kind > 0) {
         // The sky a recess sees falls off with its depth; the sun as traced.
         s.sky_visibility *= 1.0 - 0.5 * rel_k * smoothstep(0.0, 0.35, rel_d);
         s.sun_visibility *= mix(1.0, rel_sun, rel_k);
     }
+    // Far (the march faded out), a loggia's opening keeps its recess's shade
+    // on the box face: the sky half seen, the sun mostly cut, the lamps too.
+    let loggia_far = (1.0 - rel_k) * select(!ground && y < h - 0.9 && is_loggia(fac, bay, nb, fl), 1.0, 0.0) *
+                     band(bu, 0.06, 0.94, fu / bw) * band(fy01 * fh, 1.05, fh * 0.88, fy);
+    s.sky_visibility *= 1.0 - 0.5 * loggia_far;
+    s.sun_visibility *= 1.0 - 0.7 * loggia_far;
     // The wall's own grain tilts it where the ray met the wall (not trim, glass, a side).
     let on_wall = rel_kind == 0 || (rel_kind == 3 && abs(rel_d - wall_d) < 0.005);
     if (on_wall && (wall_t.x != 0.0 || wall_t.y != 0.0)) {
@@ -962,6 +997,7 @@ pub fn fragment(v: mesh::Vertex, s_in: mesh::Surface) -> mesh::Surface {
             let deep = 1.0 - 0.65 * smoothstep(0.05, 1.0, rel_d);
             e *= mix(1.0, facing * deep, rel_k);
         }
+        e *= 1.0 - 0.65 * loggia_far;
         lamp_lum = s.base_color * vec3<f32>(1.0, 0.82, 0.62) * (e * night / 3.14159265);
     }
     s.roughness = mix(style == STYLE_GLASS ? 0.4 : 0.82, 0.06, rough_win);
