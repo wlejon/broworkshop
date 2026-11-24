@@ -27,7 +27,7 @@ its usage in the file's header comment.
 | `crosshair.js` | screen-centre reticle overlay (bloom, ADS) | games/fps, demos/terrain |
 | `system-menu.js` | `bro.menu` bar: File, View, Debug (inspector, perf HUD) | kit/app.js `boot()`, games/torque, the hands-off speech/image labs |
 | `sweep-runner.js` | content-addressed parameter sweeps rendered to disk | demos/krea2-lab |
-| `city/` | a city grown from a site: street field and tensor streamlines (`field.js`, `streets.js`), planar road graph with blocks (`graph.js`), frontage lots (`lots.js`), building masses (`buildings.js`), all in `generate.js`; GPU-side: `building.bk` + `building_render.js` (every building one instanced record: facade, rooms, night windows), `ground.js` (road segments and block surfaces for a terrain kernel and ground shader) | demos/metropolis |
+| `city/` | a city grown from a site: street field and tensor streamlines (`field.js`, `streets.js`), planar road graph with blocks (`graph.js`), frontage and corner lots (`lots.js`), buildings composed of masses by zone (`buildings.js`: podiums and shafts, setbacks, wings, attics, roofs, plant, crowns, a skyline peaking at the district cores), all in `generate.js`; GPU-side: `building.bk` + `building_render.js` (every mass one instanced record: facade, rooms, night windows), `ground.js` (road segments and block surfaces for a terrain kernel and ground shader) | demos/metropolis |
 
 `system-menu.js` and `sweep-runner.js` would belong in the kit, but the
 hands-off labs import them by these paths; they move when those labs do.

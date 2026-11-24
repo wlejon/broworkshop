@@ -1,7 +1,8 @@
 // Metropolis: a city grown from its land. A street field (tensor streamlines
 // shaped by the river, the hills and the district cores) traces the roads; the
-// blocks between them fill with lots by zone; every building is one record the
-// GPU draws with its facade and rooms (lib/city). Terrain streams through
+// blocks between them fill with lots by zone; every building is composed of
+// masses (podiums, shafts, wings, roofs, plant), each one record the GPU draws
+// with its facade and rooms (lib/city). Terrain streams through
 // bro.tiles, the river is a ribbon, the sky is lib/kit's daylight.
 
 import { SKY, daylight } from "/lib/kit/sky.js";

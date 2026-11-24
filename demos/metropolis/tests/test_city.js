@@ -77,6 +77,71 @@ for (let i = 0; i < masses.count; i++) {
 check(inWater === 0, `no building in the water (${inWater})`);
 check(onRoad === 0, `no building on a carriageway (${onRoad})`);
 
+// Buildings are composed of parts (buildings.js), and no two parts of one
+// draw a face in one plane, facing one way, over an area (they would flicker):
+// walls (foundations included) and flat tops, by building.
+{
+    let composed = 0, clash = 0, worst = null;
+    const faces = (i) => {
+        const o = i * MASS_FLOATS, cx = D[o], y0 = D[o + 1], cz = D[o + 2], yaw = D[o + 3];
+        const hw = D[o + 4], h = D[o + 5], hd = D[o + 6], plinth = D[o + 9];
+        const c = Math.cos(yaw), s = Math.sin(yaw);
+        // Local axes in world: x (c, -s), z (s, c).
+        const out = [];
+        for (const [nx, nz, half, tx, tz, along] of [[s, c, hd, c, -s, hw], [-s, -c, hd, c, -s, hw], [c, -s, hw, s, c, hd], [-c, s, hw, s, c, hd]]) {
+            const off = nx * cx + nz * cz + half, t = tx * cx + tz * cz;
+            out.push({ kind: 'wall', a: Math.atan2(nz, nx), off, t0: t - along, t1: t + along, y0: y0 - plinth, y1: y0 + h });
+        }
+        out.push({ kind: 'top', y: y0 + h, cx, cz, yaw, hw, hd, flat: D[o + 12] < 0.5 });
+        return out;
+    };
+    const overlap = (a0, a1, b0, b1) => Math.min(a1, b1) - Math.max(a0, b0);
+    for (const b of masses.buildings) {
+        if (b.count > 1) composed++;
+        const F = [];
+        for (let k = 0; k < b.count; k++) F.push(faces(b.first + k));
+        for (let i = 0; i < b.count; i++) for (let j = i + 1; j < b.count; j++) {
+            for (const p of F[i]) for (const q of F[j]) {
+                if (p.kind !== q.kind) continue;
+                let bad = false;
+                if (p.kind === 'wall') {
+                    let da = Math.abs(p.a - q.a); da = Math.min(da, 2 * Math.PI - da);
+                    bad = da < 1e-3 && Math.abs(p.off - q.off) < 0.01 && overlap(p.t0, p.t1, q.t0, q.t1) > 0.05 && overlap(p.y0, p.y1, q.y0, q.y1) > 0.05;
+                } else if (p.flat && q.flat && Math.abs(p.y - q.y) < 0.01) {
+                    // Flat tops at one height: overlapping footprints (as circles within them, conservatively).
+                    bad = Math.hypot(p.cx - q.cx, p.cz - q.cz) < Math.min(p.hw, p.hd) + Math.min(q.hw, q.hd) - 0.05;
+                }
+                if (bad) { clash++; worst ??= `${b.zone} at ${b.x.toFixed(0)}, ${b.z.toFixed(0)}: parts ${i} and ${j} of ${b.count}, ${p.kind} ${JSON.stringify(p, (k, v) => typeof v === 'number' ? +v.toFixed(2) : v)} / ${JSON.stringify(q, (k, v) => typeof v === 'number' ? +v.toFixed(2) : v)}`; }
+            }
+        }
+    }
+    check(composed > masses.buildings.length * 0.35, `buildings composed of parts (${composed} of ${masses.buildings.length})`);
+    check(clash === 0, `no two parts of a building draw one face in one plane (${clash}${worst ? `, first: ${worst}` : ''})`);
+}
+// A skyline, not a plateau: each district core's tallest tower stands well
+// above the towers around it, and tower heights spread.
+{
+    const tops = new Map();   // building -> its top
+    for (const b of masses.buildings) {
+        if (b.zone !== 'tower') continue;
+        let top = 0;
+        for (let k = 0; k < b.count; k++) { const o = (b.first + k) * MASS_FLOATS; top = Math.max(top, D[o + 1] + D[o + 5] + (D[o + 12] > 0.5 ? D[o + 13] : 0) - b.y0); }
+        tops.set(b, top);
+    }
+    const hs = [...tops.values()].sort((a, b) => a - b);
+    const q = (f) => hs[Math.floor(f * (hs.length - 1))];
+    let peaks = 0, cores = 0;
+    for (const c of SITE.centers) {
+        const near = [...tops].filter(([b]) => Math.hypot(b.x - c.x, b.z - c.z) < c.r * 0.6).map(([, t]) => t).sort((a, b) => b - a);
+        if (near.length < 10) continue;
+        cores++;
+        if (near[0] > 1.6 * near[Math.floor(near.length / 2)]) peaks++;
+    }
+    // (One tower per lot, every tower the same form, measured 1.85.)
+    check(q(0.9) > 2.0 * q(0.5) && q(0.99) > 250, `tower heights spread (median ${q(0.5).toFixed(0)} m, 90th ${q(0.9).toFixed(0)} m, 99th ${q(0.99).toFixed(0)} m, tallest ${hs[hs.length - 1].toFixed(0)} m)`);
+    check(cores > 0 && peaks === cores, `each district core peaks (${peaks} of ${cores} cores' tallest over 1.6x their median)`);
+}
+
 // Scale.
 let km = 0; for (const e of graph.edges) km += e.len / 1000;
 check(masses.buildings.length > 50000, `a city's worth of buildings (${masses.buildings.length})`);
@@ -156,8 +221,11 @@ check(movingMin > 0.35, `traffic flows: at least 35 % of cars moving throughout 
 {
     let bad = 0, outside = 0, badOpen = 0, doors = 0, doorMasses = 0, lit = 0, rooms = 0, tris = 0;
     const nM = masses.data.length / MASS_FLOATS;
+    // (Plant, stacks and silos have no rooms: interiors skip them.)
+    const roomy = [];
+    for (let i = 0; i < masses.data.length / MASS_FLOATS; i++) if (Math.round(masses.data[i * MASS_FLOATS + 11]) !== STYLE.plant) roomy.push(i);
     for (let k = 0; k < 400; k++) {
-        const M = massRecord(masses.data, Math.floor((k + 0.5) * nM / 400));
+        const M = massRecord(masses.data, roomy[Math.floor((k + 0.5) * roomy.length / 400)]);
         const r = interiorMesh(M, [0, 30]);
         tris += r.tris;
         const c = Math.cos(M.yaw), s = Math.sin(M.yaw);
@@ -188,7 +256,7 @@ check(movingMin > 0.35, `traffic flows: at least 35 % of cars moving throughout 
     for (let i = 0; i < nM && pairs < 100; i += 37) {
         const M = massRecord(masses.data, i);
         const fl = floorsOf(M);
-        if (fl.length < 3 || M.style === 0 || M.style === 1 || M.style === 8) continue;
+        if (fl.length < 3 || M.style === STYLE.glass || M.style === STYLE.office || M.style === STYLE.industrial || M.style === STYLE.plant) continue;
         const plan = (F) => { const P = interiorMesh(M, [F.y0 + 0.01, F.y1 - 0.01]).mesh.positions; let h = 0; for (let k = 0; k < P.length; k += 3) h += P[k] * 0.37 + P[k + 2] * 0.61; return `${P.length}:${h.toFixed(1)}`; };
         pairs++;
         if (plan(fl[1]) === plan(fl[2])) same++;
@@ -197,8 +265,8 @@ check(movingMin > 0.35, `traffic flows: at least 35 % of cars moving throughout 
     // Furnished, not empty boxes: what a floor holds, by use (offices,
     // shops, sheds, flats), averaged over sampled floors.
     const byUse = {};
-    for (let i = 0; i < nM; i += 53) {
-        const M = massRecord(masses.data, i);
+    for (let k = 0; k < roomy.length; k += 53) {
+        const M = massRecord(masses.data, roomy[k]);
         for (const F of floorsOf(M).slice(0, 3)) {
             const it = interiorMesh(M, [F.y0 + 0.01, F.y1 - 0.01]).items;
             const use = it.desk ? 'office' : it.shelving ? 'shop' : it.racking ? 'shed' : it.rug ? 'flat' : 'empty';

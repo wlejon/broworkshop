@@ -1,5 +1,5 @@
-// lib/city/building.bk — every building of a city, one instanced box (and one
-// roof prism), drawn the same way at every distance.
+// lib/city/building.bk — every mass of a city's buildings, one instanced box
+// (and one roof prism), drawn the same way at every distance.
 //
 // The vertex stage places a unit box from the instance's mass record (see
 // buildings.js: centre, yaw, half extents, height, foundation). The fragment
@@ -37,6 +37,7 @@ const STYLE_ROW: i32 = 5;
 const STYLE_SIDING: i32 = 6;
 const STYLE_PLASTER: i32 = 7;
 const STYLE_INDUSTRIAL: i32 = 8;
+const STYLE_PLANT: i32 = 9;      // rooftop plant, stair rooms, stacks, silos: no windows
 
 // Integer hashes of whole-number inputs (floors, bays, a building's id).
 fn hash3(a: f32, b: f32, c: f32) -> f32 {
@@ -136,10 +137,16 @@ fn wall_color(style: i32, hue: f32) -> vec3<f32> {
     if (style == STYLE_STUCCO) { return pick4(hue, vec3<f32>(0.66, 0.58, 0.44), vec3<f32>(0.62, 0.40, 0.28), vec3<f32>(0.52, 0.56, 0.54), vec3<f32>(0.70, 0.66, 0.58)); }
     if (style == STYLE_SIDING) { return pick4(hue, vec3<f32>(0.72, 0.72, 0.68), vec3<f32>(0.40, 0.46, 0.52), vec3<f32>(0.62, 0.58, 0.40), vec3<f32>(0.42, 0.48, 0.40)); }
     if (style == STYLE_PLASTER) { return pick4(hue, vec3<f32>(0.74, 0.68, 0.56), vec3<f32>(0.66, 0.46, 0.34), vec3<f32>(0.76, 0.74, 0.70), vec3<f32>(0.60, 0.56, 0.50)); }
+    // Plant: brick (chimneys, stacks), concrete, rendered, light metal (silos).
+    if (style == STYLE_PLANT) { return pick4(hue, vec3<f32>(0.30, 0.13, 0.08), vec3<f32>(0.40, 0.39, 0.37), vec3<f32>(0.55, 0.54, 0.51), vec3<f32>(0.62, 0.63, 0.63)); }
     return pick4(hue, vec3<f32>(0.36, 0.38, 0.40), vec3<f32>(0.24, 0.30, 0.38), vec3<f32>(0.44, 0.42, 0.38), vec3<f32>(0.30, 0.22, 0.18));
 }
 
 fn roof_color(style: i32, hue: f32, pitched: bool) -> vec3<f32> {
+    if (pitched && style == STYLE_PLANT) {
+        // Spires, pyramids, silo caps: weathered copper, zinc, dark metal.
+        return pick4(fract(hue * 5.9), vec3<f32>(0.22, 0.40, 0.34), vec3<f32>(0.46, 0.47, 0.48), vec3<f32>(0.14, 0.15, 0.16), vec3<f32>(0.55, 0.56, 0.57));
+    }
     if (pitched) {
         return pick4(fract(hue * 7.31), vec3<f32>(0.30, 0.11, 0.06), vec3<f32>(0.10, 0.11, 0.13), vec3<f32>(0.17, 0.16, 0.15), vec3<f32>(0.24, 0.15, 0.11));
     }
@@ -399,6 +406,20 @@ pub fn fragment(v: mesh::Vertex, s_in: mesh::Surface) -> mesh::Surface {
     if (y < 0.0) {
         s.base_color = wallc * 0.55 + vec3<f32>(0.08, 0.08, 0.08);
         s.roughness = 0.9;
+        return s;
+    }
+
+    // Plant: no windows and no rooms. A plant room's upper part louvred, a
+    // coping band at its top; stacks and silos plain.
+    if (style == STYLE_PLANT) {
+        var pw = wallc;
+        if (h > 2.0 && h < 12.0) {
+            let louv = pulse(y / 0.16, 0.0, 0.45, fy / 0.16);
+            pw *= 1.0 - 0.35 * louv * band(y, h * 0.4, h - 0.35, fy);
+        }
+        pw *= 1.0 - 0.25 * band(y, h - 0.3, h + 1.0, fy);
+        s.base_color = pw;
+        s.roughness = 0.85;
         return s;
     }
 

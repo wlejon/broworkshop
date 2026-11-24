@@ -87,10 +87,15 @@ for (const tm of ['day', 'night']) {
 
 // (helpers below need the masses)
 const allM = []; for (let i = 0; i < nM; i++) allM.push(massRecord(MD, i));
+// The building each mass belongs to: a mass's own building (its crown, its
+// wings) does not count as standing in the way of it, being the same at
+// every distance it is seen from.
+const ownerOf = new Int32Array(nM);
+m.city.masses.buildings.forEach((b, bi) => { for (let k = 0; k < b.count; k++) ownerOf[b.first + k] = bi; });
 function blocked(a, b, skip = null) {
   const dx = b[0] - a[0], dy = b[1] - a[1], dz = b[2] - a[2];
   for (const M of allM) {
-    if (M === skip) continue;
+    if (skip && ownerOf[M.i] === ownerOf[skip.i]) continue;
     if (Math.hypot(M.cx - a[0], M.cz - a[2]) > Math.hypot(dx, dz) + 300 && Math.hypot(M.cx - b[0], M.cz - b[2]) > 300) continue;
     const c = Math.cos(M.yaw), s = Math.sin(M.yaw);
     const ox = a[0] - M.cx, oz = a[2] - M.cz;
@@ -155,6 +160,7 @@ const FOV = 60;   // the fly camera's own
   };
   const views = [];
   for (let st = 0; st < NAMES.length; st++) {
+    if (st === STYLE.plant) continue;   // (no windows, no rooms: nothing averaged)
     views.push({ name: NAMES[st], P: pick(st, [0.12, 0.2]) });
     if (st === STYLE.glass || st === STYLE.office || st === STYLE.stone) views.push({ name: `${NAMES[st]} from below`, P: pick(st, [-0.1, -0.06]) });
   }
@@ -200,7 +206,15 @@ const FOV = 60;   // the fly camera's own
     }
     return null;
   };
-  const pick = (f) => { for (const M of allM) { if (!f(M)) continue; const dir = clearSide(M); if (dir) return { M, dir }; } return null; };
+  // (A building of one mass first: another part of its own, at another
+  // depth, moves against it with the eye's distance. Towers always have
+  // more: their podium and crown, outside the shaft's box.)
+  const single = (M) => masses1.has(ownerOf[M.i]);
+  const masses1 = new Set(m.city.masses.buildings.map((b, bi) => b.count === 1 ? bi : -1));
+  const pick = (f) => {
+    for (const only1 of [true, false]) for (const M of allM) { if (!f(M) || (only1 && !single(M))) continue; const dir = clearSide(M); if (dir) return { M, dir }; }
+    return null;
+  };
   const cases = { tower: pick((M) => M.h > 80 && M.style === 0), office: pick((M) => M.style === 1 && M.h > 30), brick: pick((M) => M.style === 2 && M.h > 12), rowhouse: pick((M) => M.style === 5 && M.hw > 4), house: pick((M) => M.style === 6) };
   for (const tm of ['day', 'night']) {
     m.setTimeMode(tm);
