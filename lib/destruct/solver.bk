@@ -612,9 +612,10 @@ fn k_jdual(g: grid<1>, JI: read_store<i32, 1>, JF: rw_store<f32, 1>, X: rw_store
 
 // The loads of a structure's members (a wall, a slab, a column: each many pieces). MF is eight floats a member:
 // weight, what it can carry, load, how many members it rests on, joints to the ground as things stand, its
-// pieces as built, 1 for the ground itself, 1 once overloaded. MC counts the pieces of each still standing.
+// pieces as built, 1 for the ground itself, 1 once given way (nothing sets it: a member's load is told, and
+// nothing gives way by it). MC counts the pieces of each still standing.
 // A member carries its own standing weight and what the members farther from the ground hand down, each
-// shared among the ones it rests on; holed, it can carry as much less as it has lost.
+// shared among the ones it rests on.
 @kernel @grid(1)
 fn k_mclear(g: grid<1>, MC: write_store<i32, 1>) { MC[g.x()] = 0; }
 @kernel @grid(1)
@@ -1036,7 +1037,6 @@ fn k_mload(g: grid<1>, MF: rw_store<f32, 1>, MC: read_store<i32, 1>, MJ0: read_s
     MF[o + 4] = now;
     MF[o + 2] = load;
     MF[o + 3] = under;
-    if (load > MF[o + 1] * frac) { MF[o + 7] = 1.0; }
 }
 
 // A held piece stands fixed where it was built (mass 0, its own mass kept in
