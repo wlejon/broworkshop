@@ -619,7 +619,8 @@ fn k_mcount(g: grid<1>, B: read_store<f32, 1>, SUP: read_store<i32, 1>, MB: read
 // (k_split_blocks).
 @kernel @grid(1)
 fn k_split_pieces(g: grid<1>, X: rw_store<f32, 1>, X0: rw_store<f32, 1>, R: read_store<f32, 1>, V: rw_store<f32, 1>, B: rw_store<f32, 1>,
-                  D: read_store<f32, 1>, PAR: rw_store<i32, 1>, SPL: read_store<i32, 1>, SUP: rw_store<i32, 1>, REL: rw_store<i32, 1>, SL: rw_store<i32, 1>) {
+                  D: read_store<f32, 1>, PAR: rw_store<i32, 1>, SPL: read_store<i32, 1>, SUP: rw_store<i32, 1>, REL: rw_store<i32, 1>, SL: rw_store<i32, 1>,
+                  XP: rw_store<f32, 1>) {
     let i = g.x();
     let p = PAR[i];
     if (p < 0) { return; }
@@ -639,6 +640,12 @@ fn k_split_pieces(g: grid<1>, X: rw_store<f32, 1>, X0: rw_store<f32, 1>, R: read
     X[o + 4] = q.x; X[o + 5] = q.y; X[o + 6] = q.z; X[o + 7] = q.w;
     X0[o] = X0[po] + r0.x; X0[o + 1] = X0[po + 1] + r0.y; X0[o + 2] = X0[po + 2] + r0.z;
     X0[o + 4] = q0.x; X0[o + 5] = q0.y; X0[o + 6] = q0.z; X0[o + 7] = q0.w;
+    // (And where it was last shown: where its block's pose then had it.)
+    let ds = qmul(vec4<f32>(XP[po + 4], XP[po + 5], XP[po + 6], XP[po + 7]), ri);
+    let rs = qrot(ds, off);
+    let qs = qmul(ds, rq);
+    XP[o] = XP[po] + rs.x; XP[o + 1] = XP[po + 1] + rs.y; XP[o + 2] = XP[po + 2] + rs.z;
+    XP[o + 4] = qs.x; XP[o + 5] = qs.y; XP[o + 6] = qs.z; XP[o + 7] = qs.w;
     let w = vec3<f32>(V[po + 4], V[po + 5], V[po + 6]);
     let v = vec3<f32>(V[po], V[po + 1], V[po + 2]) + cross(w, r);
     V[o] = v.x; V[o + 1] = v.y; V[o + 2] = v.z; V[o + 3] = v.y;
@@ -1182,10 +1189,18 @@ fn k_reach(g: grid<1>, X: read_store<f32, 1>, V: read_store<f32, 1>, B: read_sto
     OUT.atomic_add(2 * (cx + dim * cz) + 1, X[o + 1] as i32);
 }
 
+// The poses as shown, kept for the next showing to start from.
+@kernel @grid(1)
+fn k_shown(g: grid<1>, X: read_store<f32, 1>, XP: write_store<f32, 1>) {
+    let o = 8 * g.x();
+    for (var k = 0; k < 8; k += 1) { XP[o + k] = X[o + k]; }
+}
+
 // What a page draws a body from, a row of 20 floats in OUT, all moved from the solver's origin to the world's
 // (ox, oy, oz): where it stood (R, its pose as built) and its faces where a weld has broken, as bits (2 * axis,
-// + 1 for the + face); where it is and where it was a step ago; its turn from how it stood, now and a step ago
-// (a picture between two steps is between the two). And in SPH its bounding sphere there (centre, radius; a little over
+// + 1 for the + face); where it is and where it was when last shown (X0 here: the poses k_shown kept then); its
+// turn from how it stood, now and then (a picture between two showings is between the two, however many
+// steps apart they are). And in SPH its bounding sphere there (centre, radius; a little over
 // its box, for a face drawn jagged), which a draw culls its instances by.
 @kernel @grid(1)
 fn k_show(g: grid<1>, X: read_store<f32, 1>, X0: read_store<f32, 1>, R: read_store<f32, 1>, B: read_store<f32, 1>,
