@@ -905,12 +905,11 @@ fn k_show(g: grid<1>, X: read_store<f32, 1>, R: read_store<f32, 1>, OUT: write_s
 }
 
 // A body's faces where a weld has broken, as bits (2 * axis, + 1 for the +
-// face), into `stride` floats a row of P at `at`: row[i] the body's row.
+// face), into float `at` of its row of P, `stride` floats a row.
 @kernel @grid(1)
 fn k_broken(g: grid<1>, B: read_store<f32, 1>, JI: read_store<i32, 1>, JF: read_store<f32, 1>, JC: read_store<i32, 1>, JR: read_store<i32, 1>,
-            row: read_store<i32, 1>, P: rw_store<f32, 1>, stride: i32, at: i32) {
+            P: rw_store<f32, 1>, stride: i32, at: i32) {
     let i = g.x();
-    if (row[i] < 0) { return; }
     var bits = 0;
     let nj = min(JC[i], MAXJ);
     for (var e = 0; e < nj; e += 1) {
@@ -927,5 +926,5 @@ fn k_broken(g: grid<1>, B: read_store<f32, 1>, JI: read_store<i32, 1>, JF: read_
         if (v > 0.0) { bit += 1; }
         bits = bits | (1 << bit);
     }
-    P[stride * row[i] + at] = bits as f32;
+    P[stride * i + at] = bits as f32;
 }
