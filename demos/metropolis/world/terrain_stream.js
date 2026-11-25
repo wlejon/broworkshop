@@ -169,6 +169,12 @@ export function createTerrainStream(scene, city) {
         setNight(n) { if (shaderReady) ground.setShaderUniform('night', n); },
         whenReady: () => shaderPromise,
         update,
+        /** The ground's heights into `out` (a KernelBuffer of dim * dim floats): `dim` a side, `cell` metres
+         *  apart, about `origin`'s x and z, each less its y. The heights the tiles draw. */
+        heights(out, { origin, dim, cell }) {
+            kernelMod.kernel('k_heights').dispatch([dim, dim], out, dim, cell, origin[0], origin[1], origin[2],
+                segBuf, startBuf, cellBuf, gi.half, gi.cell, gi.cells, gi.reach);
+        },
         stats: () => ({ drawCount: cache.drawCount, wanted: cache.wanted, resident: cache.resident, pending: cache.pending }),
         destroy() {
             if (disposed) return;

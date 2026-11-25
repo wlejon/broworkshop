@@ -88,6 +88,54 @@ fn seg_dist(segs: read_store<vec4<f32>, 1>, si: i32, wx: f32, wz: f32) -> vec2<f
     return vec2<f32>(sqrt(ex * ex + ez * ez) - (b.z + b.w), b.x + (b.y - b.x) * t);
 }
 
+// The ground's height with the roads' grade (lib/city/ground.js
+// gradedHeight, its JS twin): the roads' heights under it and its
+// sidewalks, blended by how much farther each is than the nearest (two
+// alike halfway between, so no step on that line), eased back to the land
+// over `reach` metres past them.
+fn graded_height(wx: f32, wz: f32, segs: read_store<vec4<f32>, 1>, cell_start: read_store<i32, 1>, cell_segs: read_store<i32, 1>,
+                 city_half: f32, city_cell: f32, city_cells: i32, reach: f32) -> f32 {
+    var h = terrain_height(wx, wz);
+    let ci = floor((wx + city_half) / city_cell) as i32;
+    let cj = floor((wz + city_half) / city_cell) as i32;
+    if (ci >= 0 && cj >= 0 && ci < city_cells && cj < city_cells) {
+        let c = cj * city_cells + ci;
+        var best = 1.0e9;
+        for (var k = cell_start[c]; k < cell_start[c + 1]; k += 1) {
+            best = min(best, seg_dist(segs, cell_segs[k], wx, wz).x);
+        }
+        // A road 4 m farther than the nearest no longer counts (ground.js
+        // GRADE_SPAN), more the deeper in a road: a junction one surface.
+        let span = 4.0 + max(0.0, -best);
+        var sw = 0.0;
+        var sy = 0.0;
+        for (var k = cell_start[c]; k < cell_start[c + 1]; k += 1) {
+            let dy = seg_dist(segs, cell_segs[k], wx, wz);
+            let w = 1.0 - sstep(0.0, span, dy.x - best);
+            sw += w;
+            sy += w * dy.y;
+        }
+        let by = sw > 0.0 ? sy / sw : h;
+        if (best < reach) {
+            let w = best <= 0.0 ? 1.0 : 1.0 - sstep(0.0, 1.0, best / reach);
+            h = h + (by - h) * w;
+        }
+    }
+    return h;
+}
+
+// A square of the ground's heights: `dim` a side, `cell` metres apart, about
+// (ox, oz), each less oy. For what stands and falls on the ground the tiles
+// draw (the destruction solver's height field).
+@kernel @grid(2)
+fn k_heights(g: grid<2>, out: write_store<f32, 1>, dim: i32, cell: f32, ox: f32, oy: f32, oz: f32,
+             segs: read_store<vec4<f32>, 1>, cell_start: read_store<i32, 1>, cell_segs: read_store<i32, 1>,
+             city_half: f32, city_cell: f32, city_cells: i32, reach: f32) {
+    let wx = ox + ((g.x() - dim / 2) as f32) * cell;
+    let wz = oz + ((g.y() - dim / 2) as f32) * cell;
+    out[g.x() + dim * g.y()] = graded_height(wx, wz, segs, cell_start, cell_segs, city_half, city_cell, city_cells, reach) - oy;
+}
+
 fn unorm8(x: f32) -> u32 {
     return (clamp(x, 0.0, 1.0) * 255.0 + 0.5) as u32;
 }
@@ -118,36 +166,7 @@ fn k_tile(
     let wz = rec.anchor.z + d.z;
     let local_xz = d.xz + rec.point.xz;
 
-    var h = terrain_height(wx, wz);
-    // The roads' grade (lib/city/ground.js gradedHeight, its JS twin): the
-    // roads' heights under it and its sidewalks, blended by how much farther
-    // each is than the nearest (two alike halfway between, so no step on
-    // that line), eased back to the land over `reach` metres past them.
-    let ci = floor((wx + city_half) / city_cell) as i32;
-    let cj = floor((wz + city_half) / city_cell) as i32;
-    if (ci >= 0 && cj >= 0 && ci < city_cells && cj < city_cells) {
-        let c = cj * city_cells + ci;
-        var best = 1.0e9;
-        for (var k = cell_start[c]; k < cell_start[c + 1]; k += 1) {
-            best = min(best, seg_dist(segs, cell_segs[k], wx, wz).x);
-        }
-        // A road 4 m farther than the nearest no longer counts (ground.js
-        // GRADE_SPAN), more the deeper in a road: a junction one surface.
-        let span = 4.0 + max(0.0, -best);
-        var sw = 0.0;
-        var sy = 0.0;
-        for (var k = cell_start[c]; k < cell_start[c + 1]; k += 1) {
-            let dy = seg_dist(segs, cell_segs[k], wx, wz);
-            let w = 1.0 - sstep(0.0, span, dy.x - best);
-            sw += w;
-            sy += w * dy.y;
-        }
-        let by = sw > 0.0 ? sy / sw : h;
-        if (best < reach) {
-            let w = best <= 0.0 ? 1.0 : 1.0 - sstep(0.0, 1.0, best / reach);
-            h = h + (by - h) * w;
-        }
-    }
+    let h = graded_height(wx, wz, segs, cell_start, cell_segs, city_half, city_cell, city_cells, reach);
     let rd = river_signed_dist(wx, wz);
     let r = length(vec2<f32>(wx, wz));
     let n = value_noise(wx, wz, 280.0, 97);
