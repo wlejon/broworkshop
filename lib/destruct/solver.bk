@@ -70,6 +70,8 @@ fn k_begin(g: grid<1>, X: rw_store<f32, 1>, X0: write_store<f32, 1>, Y: write_st
     let p = vec3<f32>(X[o], X[o + 1], X[o + 2]);
     let q = vec4<f32>(X[o + 4], X[o + 5], X[o + 6], X[o + 7]);
     for (var k = 0; k < 8; k += 1) { X0[o + k] = X[o + k]; }
+    // (One without size is out of the world: a shot retired, a structure removed. It is in no cell.)
+    if (B[o] <= 0.0) { return; }
     // (A large body is in no cell: every body tries it.)
     var large = false;
     for (var k = 0; k < nl; k += 1) { if (LG[k] == i) { large = true; } }
