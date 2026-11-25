@@ -30,6 +30,9 @@ struct Params {
 @binding(4, 15) var pieces: read_buffer<vec4<f32>>;
 // Per body, 3 x vec4: (pivot at rest, 0), (pivot now, 0), rotation (quaternion).
 @binding(4, 16) var bodies: read_buffer<vec4<f32>>;
+// Per mass, its building open (interior.js, as building.bk reads it): a
+// building taken down but standing whole keeps its rooms, its glass cut.
+@binding(4, 17) var open_state: read_buffer<vec4<f32>>;
 
 const KIND_FOUNDATION: i32 = 0;
 const KIND_SLAB: i32 = 1;
@@ -253,7 +256,15 @@ pub fn fragment(v: mesh::Vertex, s_in: mesh::Surface) -> mesh::Surface {
     } else if (outer && !roofk) {
         // The building's outside, as it drew it.
         let m = facade::mass_of(v.v1, v.v2, v.v3, id);
-        s = facade::shade(m, lp, n, false, X, Y, Z, eye, s_in, params.night, params.room_day, params.room_night).s;
+        let o = facade::shade(m, lp, n, false, X, Y, Z, eye, s_in, params.night, params.room_day, params.room_night);
+        s = o.s;
+        // Held open (standing whole): its glass cut over the floors built, as
+        // the building drew it, the rooms and their panes behind.
+        let wy = masses[mi * 4].y + lp.y;
+        if (!moved && mi < open_state.len()) {
+            let op = open_state[mi];
+            if (op.x > 0.0 && wy > op.y && wy < op.z && o.hole > 0.5 && scene::band_dither(frag_coord().xy) < op.x) { s.alpha = 0.0; }
+        }
     } else if (broken) {
         // A break: the jagged surface's own normal, the material raw.
         let wp = v.world_pos;
@@ -294,6 +305,26 @@ pub fn fragment(v: mesh::Vertex, s_in: mesh::Surface) -> mesh::Surface {
             s.roughness = mix(0.95, 0.6, rb);
         }
     } else {
+        // Held open (standing whole): an outer wall's inner face is cut
+        // through where its window is, so the rooms behind show, as through
+        // the building's hollow walls.
+        if (!moved && kind == KIND_WALL && abs(n.y) < 0.5 && mi < open_state.len()) {
+            let op = open_state[mi];
+            let wy = masses[mi * 4].y + lp.y;
+            if (op.x > 0.0 && wy > op.y && wy < op.z) {
+                var po = lp;
+                var no = vec3<f32>(0.0, 0.0, 0.0);
+                if (n.z < -0.5 && lp.z > hd - 0.6) { po.z = hd; no.z = 1.0; }
+                else if (n.z > 0.5 && lp.z < -hd + 0.6) { po.z = -hd; no.z = -1.0; }
+                else if (n.x < -0.5 && lp.x > hw - 0.6) { po.x = hw; no.x = 1.0; }
+                else if (n.x > 0.5 && lp.x < -hw + 0.6) { po.x = -hw; no.x = -1.0; }
+                if (dot(no, no) > 0.5) {
+                    let m = facade::mass_of(v.v1, v.v2, v.v3, id);
+                    let o = facade::shade(m, po, no, false, X, Y, Z, eye, s_in, params.night, params.room_day, params.room_night);
+                    if (o.hole > 0.5 && scene::band_dither(frag_coord().xy) < op.x) { s.alpha = 0.0; }
+                }
+            }
+        }
         // Inside the building: a floor, a ceiling, a wall's inner face, a column.
         let rh = facade::hash3(floor(lp.x / 6.0), floor(lp.y / 3.0), id);
         let office = style == facade::STYLE_GLASS || style == facade::STYLE_OFFICE;
