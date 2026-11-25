@@ -776,6 +776,26 @@ fn k_split_inner(g: grid<1>, PAR: read_store<i32, 1>, SPL: read_store<i32, 1>, R
         for (var b = a + 1; b < count; b += 1) { fine_weld(first + a, first + b, D[4 * i + 2], R, D, JI, JF, JC, JR, WA, njc, dcap); }
     }
 }
+// How many of a structure's bodies (`nb` from `first`) are not as built: a block given way, a body off where
+// it stood (3 cm, or turned a degree), or one with a weld broken. OUT[0], added to.
+@kernel @grid(1)
+fn k_intact(g: grid<1>, X: read_store<f32, 1>, R: read_store<f32, 1>, B: read_store<f32, 1>, SPL: read_store<i32, 1>,
+            JF: read_store<f32, 1>, JC: read_store<i32, 1>, JR: read_store<i32, 1>, OUT: rw_store<i32, 1>, first: i32) {
+    let i = first + g.x();
+    let o = 8 * i;
+    var bad = SPL[i] != 0;
+    // (One out of the world altogether is not as built either.)
+    if (B[o] <= 0.0) { bad = true; }
+    let dp = vec3<f32>(X[o] - R[o], X[o + 1] - R[o + 1], X[o + 2] - R[o + 2]);
+    if (dot(dp, dp) > 0.0009) { bad = true; }
+    let qd = X[o + 4] * R[o + 4] + X[o + 5] * R[o + 5] + X[o + 6] * R[o + 6] + X[o + 7] * R[o + 7];
+    if (abs(qd) < 0.99996) { bad = true; }
+    let nj = min(JC[i], MAXJ);
+    for (var e = 0; e < nj; e += 1) {
+        if (JF[40 * JR[i * MAXJ + e] + 30] == 1.0) { bad = true; }
+    }
+    if (bad) { OUT.atomic_add(0, 1); }
+}
 // What is done with a structure's bodies (`nb` from `first`) of the welds made between pieces: broken.
 @kernel @grid(1)
 fn k_unweld(g: grid<1>, JI: rw_store<i32, 1>, JF: rw_store<f32, 1>, WA: read_store<i32, 1>, ORG: read_store<i32, 1>, first: i32, nb: i32, njc: i32, dcap: i32) {
