@@ -20,6 +20,7 @@ struct Params {
     room_day: f32,
     room_night: f32,
     debug: f32,   // 1: the shading branch's colour (outside red, break green, inside blue); 2: all grey; 3: the dust coat (red full, blue none, black standing)
+    blend: f32,   // how far the picture is from the solver's last step but one (0) to its last (1)
 }
 
 @binding(4, 0) var params: uniform<Params>;
@@ -28,7 +29,8 @@ struct Params {
 // (0: gone), body + 1 (0: standing)), (kind, material, broken faces (bit
 // 2 * axis + 1 for the + face), seed).
 @binding(4, 15) var pieces: read_buffer<vec4<f32>>;
-// Per body, 3 x vec4: (pivot at rest, 0), (pivot now, 0), rotation (quaternion).
+// Per body, 5 x vec4 (the solver's k_show): (pivot at rest, its broken faces as bits), where it is after the
+// solver's last step, where it was before it, and its turn from rest after and before.
 @binding(4, 16) var bodies: read_buffer<vec4<f32>>;
 // Per mass, its building open (interior.js, as building.bk reads it): a
 // building taken down but standing whole keeps its rooms, its glass cut.
@@ -144,7 +146,9 @@ pub fn vertex(v_in: mesh::Vertex) -> mesh::Vertex {
     }
     let u = v.pos;
     let n = v.normal;
-    let rough = (p2.z + 0.5) as i32;
+    let bi = (p1.w + 0.5) as i32 - 1;
+    var rough = 0;
+    if (bi >= 0) { rough = (bodies[bi * 5].w + 0.5) as i32; }
     var lp = p0.xyz + u * 2.0 * p1.xyz;
     // Broken faces jagged: each axis's displacement where the point lies on a
     // broken face across that axis (so an edge's two copies move alike).
@@ -177,10 +181,14 @@ pub fn vertex(v_in: mesh::Vertex) -> mesh::Vertex {
     var coat = 0.0;
     var loose = false;
     if (bi >= 0) {
-        let b0 = bodies[bi * 3];
-        let b1 = bodies[bi * 3 + 1];
-        q = bodies[bi * 3 + 2];
-        w = qrot(q, rw - b0.xyz) + b1.xyz;
+        let b0 = bodies[bi * 5];
+        let at = mix(bodies[bi * 5 + 2].xyz, bodies[bi * 5 + 1].xyz, params.blend);
+        let qa = bodies[bi * 5 + 3];
+        var qb = bodies[bi * 5 + 4];
+        if (dot(qa, qb) < 0.0) { qb = -qb; }
+        q = normalize(mix(qb, qa, params.blend));
+        w = qrot(q, rw - b0.xyz) + at;
+        let b1 = vec4<f32>(at, 0.0);
         let turned = 2.0 * acos(min(abs(q.w), 1.0));
         let come = length(b1.xyz - b0.xyz);
         coat = smoothstep(0.15, 2.5, 0.03 * come + 2.0 * turned);

@@ -958,31 +958,6 @@ fn k_velocity(g: grid<1>, X: rw_store<f32, 1>, X0: read_store<f32, 1>, V: rw_sto
     }
 }
 
-// What a page draws a body from, 12 floats: where it stood (R, its pose as
-// built), where it is, and its turn since, all moved from the solver's origin
-// to the world's (ox, oy, oz).
-@kernel @grid(1)
-fn k_show(g: grid<1>, X: read_store<f32, 1>, R: read_store<f32, 1>, OUT: write_store<f32, 1>, ox: f32, oy: f32, oz: f32) {
-    let i = g.x();
-    let o = 8 * i;
-    let q = vec4<f32>(X[o + 4], X[o + 5], X[o + 6], X[o + 7]);
-    let d = qmul(q, vec4<f32>(-R[o + 4], -R[o + 5], -R[o + 6], R[o + 7]));
-    let t = 12 * i;
-    OUT[t] = R[o] + ox; OUT[t + 1] = R[o + 1] + oy; OUT[t + 2] = R[o + 2] + oz; OUT[t + 3] = 0.0;
-    OUT[t + 4] = X[o] + ox; OUT[t + 5] = X[o + 1] + oy; OUT[t + 6] = X[o + 2] + oz; OUT[t + 7] = 0.0;
-    OUT[t + 8] = d.x; OUT[t + 9] = d.y; OUT[t + 10] = d.z; OUT[t + 11] = d.w;
-}
-
-// Each body's bounding sphere, world space (centre, radius; a little over its box, for a face drawn jagged):
-// what a draw culls its instances by.
-@kernel @grid(1)
-fn k_spheres(g: grid<1>, X: read_store<f32, 1>, B: read_store<f32, 1>, OUT: write_store<f32, 1>, ox: f32, oy: f32, oz: f32) {
-    let i = g.x();
-    let o = 8 * i;
-    OUT[4 * i] = X[o] + ox; OUT[4 * i + 1] = X[o + 1] + oy; OUT[4 * i + 2] = X[o + 2] + oz;
-    OUT[4 * i + 3] = 1.2 * length(vec3<f32>(B[o], B[o + 1], B[o + 2]));
-}
-
 // The rubble asleep within r of a point wakes (what it lay against there is gone).
 @kernel @grid(1)
 fn k_rouse(g: grid<1>, X: read_store<f32, 1>, B: read_store<f32, 1>, SUP: read_store<i32, 1>, REL: rw_store<i32, 1>, px: f32, py: f32, pz: f32, r: f32) {
@@ -1011,12 +986,27 @@ fn k_reach(g: grid<1>, X: read_store<f32, 1>, V: read_store<f32, 1>, B: read_sto
     OUT.atomic_add(2 * (cx + dim * cz) + 1, X[o + 1] as i32);
 }
 
-// A body's faces where a weld has broken, as bits (2 * axis, + 1 for the +
-// face), into float `at` of its row of P, `stride` floats a row.
+// What a page draws a body from, a row of 20 floats in OUT, all moved from the solver's origin to the world's
+// (ox, oy, oz): where it stood (R, its pose as built) and its faces where a weld has broken, as bits (2 * axis,
+// + 1 for the + face); where it is and where it was a step ago; its turn from how it stood, now and a step ago
+// (a picture between two steps is between the two). And in SPH its bounding sphere there (centre, radius; a little over
+// its box, for a face drawn jagged), which a draw culls its instances by.
 @kernel @grid(1)
-fn k_broken(g: grid<1>, B: read_store<f32, 1>, JI: read_store<i32, 1>, JF: read_store<f32, 1>, JC: read_store<i32, 1>, JR: read_store<i32, 1>,
-            P: rw_store<f32, 1>, stride: i32, at: i32) {
+fn k_show(g: grid<1>, X: read_store<f32, 1>, X0: read_store<f32, 1>, R: read_store<f32, 1>, B: read_store<f32, 1>,
+          JI: read_store<i32, 1>, JF: read_store<f32, 1>, JC: read_store<i32, 1>, JR: read_store<i32, 1>,
+          OUT: write_store<f32, 1>, SPH: write_store<f32, 1>, ox: f32, oy: f32, oz: f32) {
     let i = g.x();
+    let o = 8 * i;
+    let ri = vec4<f32>(-R[o + 4], -R[o + 5], -R[o + 6], R[o + 7]);
+    let p = vec3<f32>(X[o], X[o + 1], X[o + 2]);
+    let d = qmul(vec4<f32>(X[o + 4], X[o + 5], X[o + 6], X[o + 7]), ri);
+    var p0 = p;
+    var d0 = d;
+    // (One out of the world, or just put in it, was nowhere a step ago.)
+    if (B[o] > 0.0 && X0[o + 1] > -50000.0) {
+        p0 = vec3<f32>(X0[o], X0[o + 1], X0[o + 2]);
+        d0 = qmul(vec4<f32>(X0[o + 4], X0[o + 5], X0[o + 6], X0[o + 7]), ri);
+    }
     var bits = 0;
     let nj = min(JC[i], MAXJ);
     for (var e = 0; e < nj; e += 1) {
@@ -1033,5 +1023,12 @@ fn k_broken(g: grid<1>, B: read_store<f32, 1>, JI: read_store<i32, 1>, JF: read_
         if (v > 0.0) { bit += 1; }
         bits = bits | (1 << bit);
     }
-    P[stride * i + at] = bits as f32;
+    let t = 20 * i;
+    OUT[t] = R[o] + ox; OUT[t + 1] = R[o + 1] + oy; OUT[t + 2] = R[o + 2] + oz; OUT[t + 3] = bits as f32;
+    OUT[t + 4] = p.x + ox; OUT[t + 5] = p.y + oy; OUT[t + 6] = p.z + oz; OUT[t + 7] = 0.0;
+    OUT[t + 8] = p0.x + ox; OUT[t + 9] = p0.y + oy; OUT[t + 10] = p0.z + oz; OUT[t + 11] = 0.0;
+    OUT[t + 12] = d.x; OUT[t + 13] = d.y; OUT[t + 14] = d.z; OUT[t + 15] = d.w;
+    OUT[t + 16] = d0.x; OUT[t + 17] = d0.y; OUT[t + 18] = d0.z; OUT[t + 19] = d0.w;
+    SPH[4 * i] = p.x + ox; SPH[4 * i + 1] = p.y + oy; SPH[4 * i + 2] = p.z + oz;
+    SPH[4 * i + 3] = 1.2 * length(vec3<f32>(B[o], B[o + 1], B[o + 2])) + length(p - p0);
 }
