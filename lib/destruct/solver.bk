@@ -21,6 +21,7 @@ const JMIN: f32 = 1.0;
 const JALPHA: f32 = 1.0;
 const JBETA: f32 = 100000.0;
 const STRIKE: f32 = 300000.0;
+const AHEAD: f32 = 15.0;   // the closing speed (m/s) past which what is held is let go ahead of what comes
 const SHATTER: f32 = 4000000.0;   // the blow (N) a block breaks into its pieces at
 // The speed (m/s) of a thing touching or welded to sleeping rubble that wakes it.
 const WAKE: f32 = 0.3;
@@ -364,7 +365,7 @@ fn k_contacts(g: grid<1>, X: read_store<f32, 1>, B: read_store<f32, 1>,
               CI: rw_store<i32, 1>, CF: rw_store<f32, 1>, NC: rw_store<i32, 1>, BC: rw_store<i32, 1>, BR: rw_store<i32, 1>,
               OCI: read_store<i32, 1>, OCF: read_store<f32, 1>, OBC: read_store<i32, 1>, OBR: read_store<i32, 1>,
               V: read_store<f32, 1>, LG: read_store<i32, 1>, HG: read_store<f32, 1>,
-              nl: i32, cap: i32, h: f32, hcell: f32, hdim: i32) {
+              nl: i32, cap: i32, h: f32, hcell: f32, hdim: i32, REL: rw_store<i32, 1>) {
     let i = g.x();
     let o = 8 * i;
     let p = vec3<f32>(X[o], X[o + 1], X[o + 2]);
@@ -384,7 +385,14 @@ fn k_contacts(g: grid<1>, X: read_store<f32, 1>, B: read_store<f32, 1>,
         let pj = vec3<f32>(X[8 * j], X[8 * j + 1], X[8 * j + 2]);
         let rj = length(vec3<f32>(B[8 * j], B[8 * j + 1], B[8 * j + 2]));
         let dd = pj - p;
-        let mg = SPEC + length(v - vec3<f32>(V[8 * j], V[8 * j + 1], V[8 * j + 2])) * h + GRAV * h * h;
+        let closing = length(v - vec3<f32>(V[8 * j], V[8 * j + 1], V[8 * j + 2]));
+        let mg = SPEC + closing * h + GRAV * h * h;
+        // (A held piece something fast is about to reach is let go before it is there: held, it stands a blow
+        // only so hard and what struck it goes on through it; free, it is struck with all there is.)
+        if (closing > AHEAD && B[o + 3] <= 0.0 && B[o + 7] > 0.0) {
+            let far = rad + rj + SPEC + closing * 3.0 * h;
+            if (dot(dd, dd) < far * far) { REL[i] = 1; }
+        }
         if (dot(dd, dd) > (rad + rj + mg) * (rad + rj + mg)) { continue; }
         // (A held piece counts by the mass it will have let go: the stiffness is right the moment it is.)
         let mi = max(B[o + 3], B[o + 7]);
@@ -540,7 +548,8 @@ fn crush_cap(i: i32, n: vec3<f32>, X: rw_store<f32, 1>, B: read_store<f32, 1>, S
     if (s <= 0.0) { return 1.0e30; }
     let o = 8 * i;
     let nb = qinv_rot(vec4<f32>(X[o + 4], X[o + 5], X[o + 6], X[o + 7]), n);
-    return s * (B[o + 1] * B[o + 2] * abs(nb.x) + B[o] * B[o + 2] * abs(nb.y) + B[o] * B[o + 1] * abs(nb.z));
+    // (Twice over: it is gone passed half through, and crushing it takes what crushing all of it would.)
+    return 2.0 * s * (B[o + 1] * B[o + 2] * abs(nb.x) + B[o] * B[o + 2] * abs(nb.y) + B[o] * B[o + 1] * abs(nb.z));
 }
 // (How far it reaches along n from its middle.)
 fn reach_along(i: i32, n: vec3<f32>, X: rw_store<f32, 1>, B: read_store<f32, 1>) -> f32 {
@@ -1640,7 +1649,8 @@ fn k_dual(g: grid<1>, X: rw_store<f32, 1>, X0: read_store<f32, 1>, CI: read_stor
 @kernel @grid(1)
 fn k_velocity(g: grid<1>, X: rw_store<f32, 1>, X0: read_store<f32, 1>, V: rw_store<f32, 1>, B: rw_store<f32, 1>,
               SL: rw_store<i32, 1>, SUP: rw_store<i32, 1>, h: f32, sleep: i32, edge: f32,
-              ST: rw_store<f32, 1>, JC: read_store<i32, 1>, JR: read_store<i32, 1>, JF: rw_store<f32, 1>, tick: f32) {
+              ST: rw_store<f32, 1>, JC: read_store<i32, 1>, JR: read_store<i32, 1>, JF: rw_store<f32, 1>, tick: f32,
+              CR: rw_store<i32, 1>, cell: f32, dim: i32) {
     let i = g.x();
     let o = 8 * i;
     if (B[o + 3] <= 0.0) { return; }
@@ -1651,6 +1661,16 @@ fn k_velocity(g: grid<1>, X: rw_store<f32, 1>, X0: read_store<f32, 1>, V: rw_sto
         for (var e = 0; e < nj; e += 1) {
             let jo = 40 * JR[i * MAXJ + e];
             if (JF[jo + 30] < 0.5) { JF[jo + 30] = 1.0; JF[jo + 33] = tick; }
+        }
+        // (Where one was crushed, on the plan: CR, k_reach's cells, two ints each: how many, and the sum of
+        // their heights in whole metres. It is added to until it is read.)
+        if (ST[2 * i + 1] < 0.0) {
+            let cx = (floor(X[o] / cell) as i32) + dim / 2;
+            let cz = (floor(X[o + 2] / cell) as i32) + dim / 2;
+            if (cx >= 0 && cz >= 0 && cx < dim && cz < dim) {
+                CR.atomic_add(2 * (cx + dim * cz), 1);
+                CR.atomic_add(2 * (cx + dim * cz) + 1, X[o + 1] as i32);
+            }
         }
         ST[2 * i] = 0.0; ST[2 * i + 1] = 0.0;
         for (var k = 0; k < 8; k += 1) { B[o + k] = 0.0; V[o + k] = 0.0; }
