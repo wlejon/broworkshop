@@ -10,6 +10,8 @@
 // a piece is let go when it is struck, cut off from the ground, or its member
 // is loaded past what it was built to carry. What comes to rest sleeps, as
 // part of what still stands or as rubble, until something moving touches it.
+const GIVE_SLID: f32 = 0.05;   // how far a weld made as a block gives way slides, in all, before it breaks (m)
+const GIVE_BENT: f32 = 0.6;    // and bends (rad)
 const JMIN: f32 = 1.0;
 const JALPHA: f32 = 1.0;
 const JBETA: f32 = 100000.0;
@@ -541,7 +543,9 @@ fn outranks(j: i32, i: i32) -> bool {
 // their relative turn held at what it was set with (three rows). JF, 40 floats:
 // the point in a (0) and in b (3), b's turn in a's frame (6), the rows' forces
 // (10), stiffnesses (16), what the rows read at the step's start (22), the
-// force and torque it breaks at (28, 29), broken (30), the stiffness scales (31, 32).
+// force and torque it yields at (28, 29), broken (30), the stiffness scales (31, 32),
+// when it broke (33), how far it can give in all before it breaks, slid (34, m) and
+// bent (35, rad), and how far it has (36, 37).
 fn joint_lin(j: i32, JI: read_store<i32, 1>, JF: rw_store<f32, 1>, X: rw_store<f32, 1>) -> vec3<f32> {
     let a = JI[2 * j];
     let b = JI[2 * j + 1];
@@ -582,7 +586,8 @@ fn k_jbegin(g: grid<1>, JI: read_store<i32, 1>, JF: rw_store<f32, 1>, X: rw_stor
     }
 }
 @kernel @grid(1)
-fn k_jdual(g: grid<1>, JI: read_store<i32, 1>, JF: rw_store<f32, 1>, X: rw_store<f32, 1>, WL: read_store<i32, 1>, alpha: f32, tick: f32, breaks: i32) {
+fn k_jdual(g: grid<1>, JI: read_store<i32, 1>, JF: rw_store<f32, 1>, X: rw_store<f32, 1>, WL: read_store<i32, 1>, alpha: f32, tick: f32, breaks: i32,
+           B: read_store<f32, 1>, REL: rw_store<i32, 1>) {
     if (g.x() >= WL[0]) { return; }
     let j = WL[1 + g.x()];
     let o = 40 * j;
@@ -591,6 +596,9 @@ fn k_jdual(g: grid<1>, JI: read_store<i32, 1>, JF: rw_store<f32, 1>, X: rw_store
     let ca = joint_ang(j, JI, JF, X);
     var fl = vec3<f32>(0.0);
     var fa = vec3<f32>(0.0);
+    // (What it gave by, pulled as hard as it holds: along which rows it slid, and whether it bent.)
+    var slid = vec3<f32>(0.0);
+    var bent = false;
     for (var k = 0; k < 3; k += 1) {
         let c = pick(cl, k) - JF[o + 22 + k] * alpha * JALPHA;
         // (A weld carries no more than it breaks at: a blow past that is not handed on through it.)
@@ -603,9 +611,33 @@ fn k_jdual(g: grid<1>, JI: read_store<i32, 1>, JF: rw_store<f32, 1>, X: rw_store
         if (abs(t) < JF[o + 29]) { JF[o + 19 + k] = min(JF[o + 19 + k] + JBETA * JF[o + 32] * abs(d), PEN_MAX * JF[o + 32]); }
         fl = fl + unit(k) * l;
         fa = fa + unit(k) * t;
+        if (abs(l) >= JF[o + 28]) { slid = slid + unit(k) * pick(cl, k); }
+        if (abs(t) >= JF[o + 29]) { bent = true; }
     }
-    // (It gives at its strength and breaks once pulled apart or bent past what it can take: a blow that only loads it for a step leaves it whole.)
-    if (breaks != 0 && (length(cl) > JF[o + 34] || length(ca) > JF[o + 35])) {
+    if (breaks == 0) { return; }
+    // It yields at its strength: on the step's settled forces, what it slid or bent by while it held all it
+    // can is its to keep (the point of it in a moves; b's turn in a's frame is what it is now), so the two stay
+    // as they have come to lie, joined still. It breaks once it has given, in all, more than it can (36, 37
+    // against 34, 35): little pulled apart, far bent. A held body at an end of one giving is let go: what
+    // gives spreads into what stands.
+    let a = JI[2 * j];
+    let b = JI[2 * j + 1];
+    let qa = vec4<f32>(X[8 * a + 4], X[8 * a + 5], X[8 * a + 6], X[8 * a + 7]);
+    if (dot(slid, slid) > 0.0) {
+        let s = qinv_rot(qa, slid);
+        JF[o] = JF[o] - s.x; JF[o + 1] = JF[o + 1] - s.y; JF[o + 2] = JF[o + 2] - s.z;
+        JF[o + 36] = JF[o + 36] + length(slid);
+    }
+    if (bent) {
+        let q = qmul(vec4<f32>(-qa.x, -qa.y, -qa.z, qa.w), vec4<f32>(X[8 * b + 4], X[8 * b + 5], X[8 * b + 6], X[8 * b + 7]));
+        JF[o + 6] = q.x; JF[o + 7] = q.y; JF[o + 8] = q.z; JF[o + 9] = q.w;
+        JF[o + 37] = JF[o + 37] + length(ca);
+    }
+    if (bent || dot(slid, slid) > 0.0) {
+        if (B[8 * a + 3] <= 0.0 && B[8 * a + 7] > 0.0) { REL[a] = 1; }
+        if (B[8 * b + 3] <= 0.0 && B[8 * b + 7] > 0.0) { REL[b] = 1; }
+    }
+    if (JF[o + 36] > JF[o + 34] || JF[o + 37] > JF[o + 35]) {
         JF[o + 30] = 1.0; JF[o + 33] = tick;
     }
 }
@@ -749,7 +781,7 @@ fn fine_weld(a: i32, b: i32, sigma: f32, R: read_store<f32, 1>, D: read_store<f3
     JF[o + 31] = ms; JF[o + 32] = ms * L;
     for (var k = 0; k < 3; k += 1) { JF[o + 16 + k] = 10000.0 * ms; JF[o + 19 + k] = 10000.0 * ms * L; }
     JF[o + 28] = sigma * area; JF[o + 29] = sigma * area * 0.25;
-    JF[o + 34] = 0.03; JF[o + 35] = 0.06;
+    JF[o + 34] = GIVE_SLID; JF[o + 35] = GIVE_BENT; JF[o + 36] = 0.0; JF[o + 37] = 0.0;
     let sa = JC.atomic_add(a, 1);
     if (sa < MAXJ) { JR[MAXJ * a + sa] = j; }
     let sb = JC.atomic_add(b, 1);
