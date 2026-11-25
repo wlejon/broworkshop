@@ -300,13 +300,29 @@ fn box_box(a: i32, b: i32, X: read_store<f32, 1>, B: read_store<f32, 1>, pen: f3
     add_contact(a, b, -bn, ea + da * s - pa, eb + db * t - pb, -best, qa, qb, pen, CI, CF, NC, BC, BR, cap, OCI, OCF, OBC, OBR);
 }
 
+// The ground's height at (x, z): HG is hdim x hdim heights, hcell metres apart, about the origin (the edge's
+// beyond it).
+fn ground_at(HG: read_store<f32, 1>, x: f32, z: f32, hcell: f32, hdim: i32) -> f32 {
+    let top = f32(hdim - 1) - 0.001;
+    let fx = clamp(x / hcell + f32(hdim / 2), 0.0, top);
+    let fz = clamp(z / hcell + f32(hdim / 2), 0.0, top);
+    let ix = floor(fx) as i32;
+    let iz = floor(fz) as i32;
+    let tx = fx - floor(fx);
+    let tz = fz - floor(fz);
+    let a = mix(HG[ix + hdim * iz], HG[ix + 1 + hdim * iz], tx);
+    let b = mix(HG[ix + hdim * (iz + 1)], HG[ix + 1 + hdim * (iz + 1)], tx);
+    return mix(a, b, tz);
+}
+
 @kernel @grid(1)
 fn k_contacts(g: grid<1>, X: read_store<f32, 1>, B: read_store<f32, 1>,
               count: read_store<i32, 1>, slots: read_store<i32, 1>,
               CI: rw_store<i32, 1>, CF: rw_store<f32, 1>, NC: rw_store<i32, 1>, BC: rw_store<i32, 1>, BR: rw_store<i32, 1>,
               OCI: read_store<i32, 1>, OCF: read_store<f32, 1>, OBC: read_store<i32, 1>, OBR: read_store<i32, 1>,
               V: read_store<f32, 1>, LG: read_store<i32, 1>, JI: read_store<i32, 1>, JF: read_store<f32, 1>,
-              JC: read_store<i32, 1>, JR: read_store<i32, 1>, nl: i32, cap: i32, size: f32, dim: i32, h: f32) {
+              JC: read_store<i32, 1>, JR: read_store<i32, 1>, HG: read_store<f32, 1>,
+              nl: i32, cap: i32, size: f32, dim: i32, h: f32, hcell: f32, hdim: i32) {
     let i = g.x();
     let o = 8 * i;
     let p = vec3<f32>(X[o], X[o + 1], X[o + 2]);
@@ -334,14 +350,19 @@ fn k_contacts(g: grid<1>, X: read_store<f32, 1>, B: read_store<f32, 1>,
         box_box(i, j, X, B, ms, mg, CI, CF, NC, BC, BR, cap, OCI, OCF, OBC, OBR);
     }
     if (B[o + 3] <= 0.0) { return; }
-    // The ground: y = 0. (A contact from as far off as the step can close: it stops what would pass through.)
+    // The ground: HG's heights. (A contact from as far off as the step can close: it stops what would pass
+    // through. A corner is tried when the body is within its own reach of the ground under its middle: slopes
+    // to 45 degrees.)
     let gm = SPEC + max(-v.y, 0.0) * h + GRAV * h * h;
-    if (p.y - rad < gm) {
+    if (p.y - 2.0 * rad - ground_at(HG, p.x, p.z, hcell, hdim) < gm) {
         for (var k = 0; k < 8; k += 1) {
             let s = vec3<f32>(f32((k & 1) * 2 - 1), f32(((k >> 1) & 1) * 2 - 1), f32(((k >> 2) & 1) * 2 - 1));
             let r = qrot(q, s * hs);
-            let y = p.y + r.y;
-            if (y < gm) { add_contact(i, -1, vec3<f32>(0.0, 1.0, 0.0), r, vec3<f32>(0.0), y, q, q, B[o + 3], CI, CF, NC, BC, BR, cap, OCI, OCF, OBC, OBR); }
+            let c = p + r;
+            let g0 = ground_at(HG, c.x, c.z, hcell, hdim);
+            let gn = normalize(vec3<f32>(g0 - ground_at(HG, c.x + 1.0, c.z, hcell, hdim), 1.0, g0 - ground_at(HG, c.x, c.z + 1.0, hcell, hdim)));
+            let d = (c.y - g0) * gn.y;
+            if (d < gm) { add_contact(i, -1, gn, r, vec3<f32>(0.0), d, q, q, B[o + 3], CI, CF, NC, BC, BR, cap, OCI, OCF, OBC, OBR); }
         }
     }
     if (large) { return; }
