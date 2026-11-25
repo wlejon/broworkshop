@@ -95,8 +95,12 @@ const ready = Promise.all([
         buildings = b;
         terrain.node.setShaderBuffer('masses', b.masses);
         interiors = createInteriors(scene, city.masses, b.walls, [terrain.node]);
-        // Every building breakable: woken into its structure by what strikes it.
-        return createCityDestruction(scene, city, b, { interiors }).then((d) => { destruction = d; });
+        // Every building breakable: woken into its structure by what strikes it,
+        // stepped in a worker (world/destruct_worker.js; `destruct=page` on
+        // the command line steps it here, where a script can reach its sim).
+        const here = bro.app.argv.includes('destruct=page');
+        const worker = here ? null : new URL('./world/destruct_worker.js', import.meta.url);
+        return createCityDestruction(scene, city, b, { interiors, worker, sources: ['/app/world'] }).then((d) => { destruction = d; });
     }),
     // Traffic on the road graph, simulated in a worker: lanes both ways, lights at the junctions.
     createTrafficRenderer(scene, city.graph, city.field.density, readLib('city/car.bk'), { count: 12000, lines: city.transit }).then((c) => { cars = c; }),
