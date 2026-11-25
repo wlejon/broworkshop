@@ -13,6 +13,7 @@ import scene;
 import mesh;
 import custom;
 import facade;
+from scene import camera;
 
 struct Params {
     night: f32,
@@ -332,13 +333,18 @@ pub fn fragment(v: mesh::Vertex, s_in: mesh::Surface) -> mesh::Surface {
     }
     if (moved) {
         // Down and through the dust: coated in it, the upturned faces most;
-        // the lights are out.
+        // the rooms' lights are out. The street lamps (facade.bk's row,
+        // 1600 cd 30 m apart 8 m up, 7 m out) still reach it where it is
+        // now: by its height above the building's ground, at half a street
+        // front's share (a tumbled piece faces every way).
         let up = max(dot(s.normal, vec3<f32>(0.0, 1.0, 0.0)), 0.0);
         let k = 0.25 + 0.45 * up * (0.6 + 0.4 * vn3(lp * 1.7, 19u));
         s.base_color = mix(s.base_color, vec3<f32>(0.56, 0.54, 0.50), k);
         s.roughness = mix(s.roughness, 0.95, k);
         s.metallic *= 1.0 - k;
-        s.emissive = vec3<f32>(0.0, 0.0, 0.0);
+        let dy = camera.eye_world.y + v.world_pos.y - masses[mi * 4].y - 8.0;
+        let e = 2.0 * 1600.0 * 7.0 / (30.0 * (49.0 + dy * dy)) * 0.5;
+        s.emissive = s.base_color * vec3<f32>(1.0, 0.82, 0.62) * (e * params.night / 3.14159265);
     }
     if (params.debug > 1.5) {
         s.base_color = vec3<f32>(0.5, 0.5, 0.5);
