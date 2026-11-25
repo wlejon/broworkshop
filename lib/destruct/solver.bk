@@ -62,6 +62,32 @@ fn qstep(q: vec4<f32>, w: vec3<f32>) -> vec4<f32> {
 fn cell_of(p: vec3<f32>, size: f32, dim: i32) -> vec3<i32> {
     return vec3<i32>(floor(p / size)) & vec3<i32>(dim - 1);
 }
+// A body in the cells: in every one that its span along the world's axes (e, half of it, about p), drawn in by
+// half a cell on every side, reaches: its own alone unless it is longer than a cell, and no more than COVER to
+// either side of that. CV: the first and last of them along each axis (not wrapped). What is near a body is
+// then in those cells of its own and the ones about them, and a pair is found in the first of them the other
+// is in. NC[1]: how many times a cell had no room (added to; the body is not found there).
+const COVER: i32 = 4;
+fn bin_body(i: i32, p: vec3<f32>, e: vec3<f32>, size: f32, dim: i32, count: rw_store<i32, 1>, slots: write_store<i32, 1>,
+            CV: write_store<i32, 1>, NC: rw_store<i32, 1>) {
+    let c = vec3<i32>(floor(p / size));
+    let r = max(e - vec3<f32>(0.5 * size), vec3<f32>(0.0));
+    let a = vec3<i32>(floor((p - r) / size));
+    let b = vec3<i32>(floor((p + r) / size));
+    let lx = max(a.x, c.x - COVER); let ly = max(a.y, c.y - COVER); let lz = max(a.z, c.z - COVER);
+    let hx = min(b.x, c.x + COVER); let hy = min(b.y, c.y + COVER); let hz = min(b.z, c.z + COVER);
+    CV[6 * i] = lx; CV[6 * i + 1] = ly; CV[6 * i + 2] = lz;
+    CV[6 * i + 3] = hx; CV[6 * i + 4] = hy; CV[6 * i + 5] = hz;
+    for (var z = lz; z <= hz; z += 1) {
+        for (var y = ly; y <= hy; y += 1) {
+            for (var x = lx; x <= hx; x += 1) {
+                let ci = (x & (dim - 1)) + dim * ((y & (dim - 1)) + dim * (z & (dim - 1)));
+                let s = count.atomic_add(ci, 1);
+                if (s < K) { slots[ci * K + s] = i; } else { let t = NC.atomic_add(1, 1); }
+            }
+        }
+    }
+}
 fn tangent1(n: vec3<f32>) -> vec3<f32> {
     if (abs(n.y) < 0.9) { return normalize(cross(n, vec3<f32>(0.0, 1.0, 0.0))); }
     return normalize(cross(n, vec3<f32>(1.0, 0.0, 0.0)));
@@ -77,7 +103,8 @@ fn k_clear(g: grid<1>, count: write_store<i32, 1>) { count[g.x()] = 0; }
 @kernel @grid(1)
 fn k_begin(g: grid<1>, X: rw_store<f32, 1>, X0: write_store<f32, 1>, Y: write_store<f32, 1>, V: rw_store<f32, 1>,
            B: read_store<f32, 1>, BC: write_store<i32, 1>, count: rw_store<i32, 1>, slots: write_store<i32, 1>,
-           LG: read_store<i32, 1>, P: write_store<f32, 1>, M: write_store<f32, 1>, nl: i32, h: f32, size: f32, dim: i32) {
+           LG: read_store<i32, 1>, P: write_store<f32, 1>, M: write_store<f32, 1>, nl: i32, h: f32, size: f32, dim: i32,
+           CV: write_store<i32, 1>, NC: rw_store<i32, 1>) {
     let i = g.x();
     let o = 8 * i;
     BC[i] = 0;
@@ -93,10 +120,7 @@ fn k_begin(g: grid<1>, X: rw_store<f32, 1>, X0: write_store<f32, 1>, Y: write_st
     if (B[o + 3] <= 0.0) {
         if (large) { return; }
         P[4 * i] = p.x; P[4 * i + 1] = p.y; P[4 * i + 2] = p.z; P[4 * i + 3] = length(vec3<f32>(B[o], B[o + 1], B[o + 2]));
-        let cs = cell_of(p, size, dim);
-        let cis = cs.x + dim * (cs.y + dim * cs.z);
-        let ss = count.atomic_add(cis, 1);
-        if (ss < K) { slots[cis * K + ss] = i; }
+        bin_body(i, p, span(q, vec3<f32>(B[o], B[o + 1], B[o + 2])) + vec3<f32>(SPEC + GRAV * h * h), size, dim, count, slots, CV, NC);
         return;
     }
     let v = vec3<f32>(V[o], V[o + 1], V[o + 2]);
@@ -119,10 +143,7 @@ fn k_begin(g: grid<1>, X: rw_store<f32, 1>, X0: write_store<f32, 1>, Y: write_st
     // (Binned, and its contacts found, where the step starts: a contact's rows measure the step's motion from there.)
     if (large) { return; }
     P[4 * i] = p.x; P[4 * i + 1] = p.y; P[4 * i + 2] = p.z; P[4 * i + 3] = length(vec3<f32>(B[o], B[o + 1], B[o + 2])) + length(v) * h;
-    let c = cell_of(p, size, dim);
-    let ci = c.x + dim * (c.y + dim * c.z);
-    let s = count.atomic_add(ci, 1);
-    if (s < K) { slots[ci * K + s] = i; }
+    bin_body(i, p, span(q, vec3<f32>(B[o], B[o + 1], B[o + 2])) + vec3<f32>(SPEC + GRAV * h * h + length(v) * h), size, dim, count, slots, CV, NC);
 }
 
 // A contact, starting from the last step's contact of the same pair nearest it
@@ -423,9 +444,9 @@ fn k_contacts(g: grid<1>, X: read_store<f32, 1>, B: read_store<f32, 1>,
     }
 }
 
-// The pairs of bodies that may touch: each awake body's search of the cells about its own for what is in
-// reach, listed for k_pairs. NEAR threads to a body, each a row of three cells: a pass is as long as its
-// longest thread, and in a heap the 27 cells hold hundreds.
+// The pairs of bodies that may touch: each awake body's search of the cells it is in and the ones about them
+// (bin_body) for what is in reach, listed for k_pairs. NEAR threads to a body, the cells dealt among them (three
+// each of a body in one cell): a pass is as long as its longest thread, and in a heap the 27 cells hold hundreds.
 const NEAR: i32 = 9;
 @kernel @grid(1)
 fn k_near(g: grid<1>, X: read_store<f32, 1>, B: read_store<f32, 1>,
@@ -435,7 +456,7 @@ fn k_near(g: grid<1>, X: read_store<f32, 1>, B: read_store<f32, 1>,
           V: read_store<f32, 1>, LG: read_store<i32, 1>, JI: read_store<i32, 1>, JF: read_store<f32, 1>,
           JC: read_store<i32, 1>, JR: read_store<i32, 1>, P: read_store<f32, 1>,
           NP: rw_store<i32, 1>, PL: write_store<i32, 1>, PF: write_store<f32, 1>, AL: read_store<i32, 1>, pcap: i32,
-          nl: i32, cap: i32, size: f32, dim: i32, h: f32) {
+          nl: i32, cap: i32, size: f32, dim: i32, h: f32, CV: read_store<i32, 1>) {
     if (g.x() / NEAR >= AL[0]) { return; }
     let i = AL[1 + g.x() / NEAR];
     let row = g.x() % NEAR;
@@ -450,53 +471,53 @@ fn k_near(g: grid<1>, X: read_store<f32, 1>, B: read_store<f32, 1>,
     let nw = min(JC[i], MAXJ);
     let ext = span(q, hs);
     let far = rad + length(v) * h + SPEC + GRAV * h * h;
-    let c = cell_of(p, size, dim);
-    for (var dz = row / 3 - 1; dz <= row / 3 - 1; dz += 1) {
-        for (var dy = row % 3 - 1; dy <= row % 3 - 1; dy += 1) {
-            for (var dx = -1; dx <= 1; dx += 1) {
-                let cc = (c + vec3<i32>(dx, dy, dz)) & vec3<i32>(dim - 1);
-                let ci = cc.x + dim * (cc.y + dim * cc.z);
-                let n = min(count[ci], K);
-                for (var s = 0; s < n; s += 1) {
-                    let j = slots[ci * K + s];
-                    // (A pair is the lower-numbered body's to find; one with a fixed body the moving one's. And
-                    // most in the cells around are out of reach: told from P alone.)
-                    if (j == i) { continue; }
-                    let rp = abs(P[4 * j + 3]);
-                    let dp = vec3<f32>(P[4 * j], P[4 * j + 1], P[4 * j + 2]) - p;
-                    if (dot(dp, dp) > (far + rp) * (far + rp)) { continue; }
-                    // (Whether it moves is as it is now: one let go since the step began is moving.)
-                    let mj = B[8 * j + 3];
-                    if (j < i && mj > 0.0) { continue; }
-                    let pj = vec3<f32>(X[8 * j], X[8 * j + 1], X[8 * j + 2]);
-                    let rj = length(vec3<f32>(B[8 * j], B[8 * j + 1], B[8 * j + 2]));
-                    let dd = pj - p;
-                    let mg = SPEC + length(v - vec3<f32>(V[8 * j], V[8 * j + 1], V[8 * j + 2])) * h + GRAV * h * h;
-                    if (dot(dd, dd) > (rad + rj + mg) * (rad + rj + mg)) { continue; }
-                    // (Nor do boxes whose spans along the world's axes are apart touch: most of what the
-                    // spheres let through.)
-                    let gap = abs(dd) - ext - span(vec4<f32>(X[8 * j + 4], X[8 * j + 5], X[8 * j + 6], X[8 * j + 7]), vec3<f32>(B[8 * j], B[8 * j + 1], B[8 * j + 2]));
-                    if (max(gap.x, max(gap.y, gap.z)) > mg) { continue; }
-                    // (Two pieces welded are held apart by the weld: no contact until it breaks.)
-                    var welded = false;
-                    for (var e = 0; e < nw; e += 1) {
-                        let w = JR[i * MAXJ + e];
-                        if (JF[40 * w + 30] < 0.5 && other_of(w, i, JI) == j) { welded = true; }
-                    }
-                    if (welded) { continue; }
-                    var ms = B[o + 3];
-                    let mjj = max(mj, B[8 * j + 7]);
-                    if (mjj > 0.0) { ms = ms * mjj / (ms + mjj); }
-                    // (The pair is listed, for k_pairs to find its contacts: one in a heap has many pairs,
-                    // and a pass is as long as its longest body's work. Past the list's room, here.)
-                    let k = NP.atomic_add(0, 1);
-                    if (k < pcap) {
-                        PL[2 * k] = i; PL[2 * k + 1] = j;
-                        PF[2 * k] = ms; PF[2 * k + 1] = mg;
-                    } else {
-                        box_box(i, j, X, B, ms, mg, CI, CF, NC, BC, BR, cap, OCI, OCF, OBC, OBR);
-                    }
-                }
+    // (The cells it is in and the ones about them, every NEARth of them this thread's.)
+    let lx = CV[6 * i] - 1; let ly = CV[6 * i + 1] - 1; let lz = CV[6 * i + 2] - 1;
+    let nx = CV[6 * i + 3] - lx + 2; let ny = CV[6 * i + 4] - ly + 2; let nz = CV[6 * i + 5] - lz + 2;
+    for (var kk = row; kk < nx * ny * nz; kk += NEAR) {
+        let cx = lx + kk % nx; let cy = ly + (kk / nx) % ny; let cz = lz + kk / (nx * ny);
+        let ci = (cx & (dim - 1)) + dim * ((cy & (dim - 1)) + dim * (cz & (dim - 1)));
+        let n = min(count[ci], K);
+        for (var s = 0; s < n; s += 1) {
+            let j = slots[ci * K + s];
+            if (j == i) { continue; }
+            // (Found in the first of these cells the other is in, and in no other.)
+            if (cx != max(lx, CV[6 * j]) || cy != max(ly, CV[6 * j + 1]) || cz != max(lz, CV[6 * j + 2])) { continue; }
+            // (Most in the cells around are out of reach: told from P alone.)
+            let rp = abs(P[4 * j + 3]);
+            let dp = vec3<f32>(P[4 * j], P[4 * j + 1], P[4 * j + 2]) - p;
+            if (dot(dp, dp) > (far + rp) * (far + rp)) { continue; }
+            // (A pair is the lower-numbered body's to find; one with a fixed body the moving one's. Whether
+            // it moves is as it is now: one let go since the step began is moving.)
+            let mj = B[8 * j + 3];
+            if (j < i && mj > 0.0) { continue; }
+            let pj = vec3<f32>(X[8 * j], X[8 * j + 1], X[8 * j + 2]);
+            let rj = length(vec3<f32>(B[8 * j], B[8 * j + 1], B[8 * j + 2]));
+            let dd = pj - p;
+            let mg = SPEC + length(v - vec3<f32>(V[8 * j], V[8 * j + 1], V[8 * j + 2])) * h + GRAV * h * h;
+            if (dot(dd, dd) > (rad + rj + mg) * (rad + rj + mg)) { continue; }
+            // (Nor do boxes whose spans along the world's axes are apart touch: most of what the
+            // spheres let through.)
+            let gap = abs(dd) - ext - span(vec4<f32>(X[8 * j + 4], X[8 * j + 5], X[8 * j + 6], X[8 * j + 7]), vec3<f32>(B[8 * j], B[8 * j + 1], B[8 * j + 2]));
+            if (max(gap.x, max(gap.y, gap.z)) > mg) { continue; }
+            // (Two pieces welded are held apart by the weld: no contact until it breaks.)
+            var welded = false;
+            for (var e = 0; e < nw; e += 1) {
+                let w = JR[i * MAXJ + e];
+                if (JF[40 * w + 30] < 0.5 && other_of(w, i, JI) == j) { welded = true; }
+            }
+            if (welded) { continue; }
+            var ms = B[o + 3];
+            let mjj = max(mj, B[8 * j + 7]);
+            if (mjj > 0.0) { ms = ms * mjj / (ms + mjj); }
+            // (The pair is listed, for k_pairs to find its contacts: one in a heap has many pairs,
+            // and a pass is as long as its longest body's work. Past the list's room, here.)
+            let k = NP.atomic_add(0, 1);
+            if (k < pcap) {
+                PL[2 * k] = i; PL[2 * k + 1] = j;
+                PF[2 * k] = ms; PF[2 * k + 1] = mg;
+            } else {
+                box_box(i, j, X, B, ms, mg, CI, CF, NC, BC, BR, cap, OCI, OCF, OBC, OBR);
             }
         }
     }
