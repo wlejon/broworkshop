@@ -17,8 +17,8 @@
 // weld's bending strength is its pulling strength at, by the face it joins over.
 fn give_bent(ductile: i32) -> f32 { return 0.04 * f32(1 << clamp(ductile, 0, 7)); }
 fn weld_arm(area: f32) -> f32 { return 0.4 * sqrt(area); }
-// (A block's last float: how many pieces it is along x, y and z, two bits each, then how ductile.)
-fn block_ductile(D: read_store<f32, 1>, i: i32) -> i32 { return ((D[4 * i + 3] + 0.5) as i32) / 64; }
+// (A block's last float: how many pieces it is along x, y and z, five bits each, then how ductile.)
+fn block_ductile(D: read_store<f32, 1>, i: i32) -> i32 { return ((D[4 * i + 3] + 0.5) as i32) / 32768; }
 const JMIN: f32 = 1.0;
 const JALPHA: f32 = 1.0;
 const JBETA: f32 = 100000.0;
@@ -38,7 +38,7 @@ const SPEC: f32 = 0.03;
 const MU: f32 = 0.6;
 const MATCH: f32 = 0.1;
 const MERGE: f32 = 0.03;
-const MAXJ: i32 = 12;
+const MAXJ: i32 = 40;
 const GRAV: f32 = 10.0;
 
 fn qmul(a: vec4<f32>, b: vec4<f32>) -> vec4<f32> {
@@ -762,7 +762,7 @@ fn k_mcount(g: grid<1>, B: read_store<f32, 1>, SUP: read_store<i32, 1>, MB: read
 //   7, 8     set when it wanted pieces, welds, and there were none: the page's cue
 //   9        the welds its pieces went without, both runs spent in the one step
 //   10       the tick a body of it was last found awake (k_reach)
-// (A run of pieces is all but spent with fewer left than any block's pieces may be: 27, three a side.)
+// (A run of pieces is all but spent with fewer left than any block's pieces may be: 64.)
 const GROUP: i32 = 12;
 const PIECE_RUN: i32 = 512;
 const WELD_RUN: i32 = 2048;
@@ -887,9 +887,9 @@ fn k_split_alloc(g: grid<1>, PAR: rw_store<i32, 1>, SPL: rw_store<i32, 1>, D: rw
     let first = ns + s;
     D[4 * i] = f32(first);
     let enc = (D[4 * i + 3] + 0.5) as i32;
-    let nx = enc % 4;
-    let ny = (enc / 4) % 4;
-    let nz = (enc / 16) % 4;
+    let nx = enc % 32;
+    let ny = (enc / 32) % 32;
+    let nz = (enc / 1024) % 32;
     let o = 8 * i;
     let h = vec3<f32>(B[o], B[o + 1], B[o + 2]);
     let hp = h / vec3<f32>(f32(nx), f32(ny), f32(nz));
@@ -964,8 +964,15 @@ fn k_split_inner(g: grid<1>, PAR: read_store<i32, 1>, SPL: read_store<i32, 1>, R
     if (SPL[i] != 1) { return; }
     let first = (D[4 * i] + 0.5) as i32;
     let count = (D[4 * i + 1] + 0.5) as i32;
+    // (Each piece and the next along each side: they are counted along x, then y, then z.)
+    let enc = (D[4 * i + 3] + 0.5) as i32;
+    let nx = enc % 32;
+    let ny = (enc / 32) % 32;
+    let duct = block_ductile(D, i);
     for (var a = 0; a < count; a += 1) {
-        for (var b = a + 1; b < count; b += 1) { fine_weld(first + a, first + b, D[4 * i + 2], block_ductile(D, i), R, D, JI, JF, JC, JR, GA, GI[i], njc, dcap); }
+        if (a % nx + 1 < nx) { fine_weld(first + a, first + a + 1, D[4 * i + 2], duct, R, D, JI, JF, JC, JR, GA, GI[i], njc, dcap); }
+        if ((a / nx) % ny + 1 < ny) { fine_weld(first + a, first + a + nx, D[4 * i + 2], duct, R, D, JI, JF, JC, JR, GA, GI[i], njc, dcap); }
+        if (a + nx * ny < count) { fine_weld(first + a, first + a + nx * ny, D[4 * i + 2], duct, R, D, JI, JF, JC, JR, GA, GI[i], njc, dcap); }
     }
 }
 // How many of a structure's bodies (`nb` from `first`) are not as built: a block given way, a body off where
