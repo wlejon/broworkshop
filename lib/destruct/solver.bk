@@ -466,8 +466,9 @@ fn unit(k: i32) -> vec3<f32> {
 }
 // A step's start for a joint: its stiffness eased, what its rows read now kept.
 @kernel @grid(1)
-fn k_jbegin(g: grid<1>, JI: read_store<i32, 1>, JF: rw_store<f32, 1>, X: rw_store<f32, 1>) {
-    let j = g.x();
+fn k_jbegin(g: grid<1>, JI: read_store<i32, 1>, JF: rw_store<f32, 1>, X: rw_store<f32, 1>, WL: read_store<i32, 1>) {
+    if (g.x() >= WL[0]) { return; }
+    let j = WL[1 + g.x()];
     let o = 40 * j;
     if (JF[o + 30] > 0.5) { return; }
     let cl = joint_lin(j, JI, JF, X);
@@ -480,8 +481,9 @@ fn k_jbegin(g: grid<1>, JI: read_store<i32, 1>, JF: rw_store<f32, 1>, X: rw_stor
     }
 }
 @kernel @grid(1)
-fn k_jdual(g: grid<1>, JI: read_store<i32, 1>, JF: rw_store<f32, 1>, X: rw_store<f32, 1>, alpha: f32, tick: f32, breaks: i32) {
-    let j = g.x();
+fn k_jdual(g: grid<1>, JI: read_store<i32, 1>, JF: rw_store<f32, 1>, X: rw_store<f32, 1>, WL: read_store<i32, 1>, alpha: f32, tick: f32, breaks: i32) {
+    if (g.x() >= WL[0]) { return; }
+    let j = WL[1 + g.x()];
     let o = 40 * j;
     if (JF[o + 30] > 0.5) { return; }
     let cl = joint_lin(j, JI, JF, X);
@@ -654,6 +656,25 @@ fn k_support(g: grid<1>, B: rw_store<f32, 1>, V: rw_store<f32, 1>, SUP: rw_store
     }
 }
 
+// The lists the passes go over, so a pass costs what is moving and not what exists: the bodies awake (AL),
+// and the welds unbroken with a body awake at either end (WL). Each is its count, then that many indices, in
+// no order.
+@kernel @grid(1)
+fn k_list(g: grid<1>, B: read_store<f32, 1>, AL: rw_store<i32, 1>) {
+    let i = g.x();
+    if (B[8 * i + 3] <= 0.0) { return; }
+    let s = AL.atomic_add(0, 1);
+    AL[1 + s] = i;
+}
+@kernel @grid(1)
+fn k_wlist(g: grid<1>, B: read_store<f32, 1>, JI: read_store<i32, 1>, JF: read_store<f32, 1>, WL: rw_store<i32, 1>) {
+    let j = g.x();
+    if (JF[40 * j + 30] > 0.5) { return; }
+    if (B[8 * JI[2 * j] + 3] <= 0.0 && B[8 * JI[2 * j + 1] + 3] <= 0.0) { return; }
+    let s = WL.atomic_add(0, 1);
+    WL[1 + s] = j;
+}
+
 // Colours (1..ncol; 0 none) such that no two bodies in contact share one. A
 // body keeps its colour from step to step; one whose new neighbour has the
 // same gives it up (the lower ranked of the two).
@@ -718,10 +739,11 @@ fn k_colour(g: grid<1>, COL: rw_store<i32, 1>, B: read_store<f32, 1>, CI: read_s
 fn k_primal(g: grid<1>, X: rw_store<f32, 1>, X0: read_store<f32, 1>, Y: read_store<f32, 1>, B: read_store<f32, 1>,
             CI: read_store<i32, 1>, CF: read_store<f32, 1>, BC: read_store<i32, 1>, BR: read_store<i32, 1>, COL: read_store<i32, 1>,
             JI: read_store<i32, 1>, JF: rw_store<f32, 1>, JC: read_store<i32, 1>, JR: read_store<i32, 1>,
-            h: f32, alpha: f32, colour: i32, omega0: f32) {
+            AL: read_store<i32, 1>, h: f32, alpha: f32, colour: i32, omega0: f32) {
     let ih2 = 1.0 / (h * h);
     for (var s = 0; s < 1; s += 1) {
-        let i = g.x();
+        if (g.x() >= AL[0]) { continue; }
+        let i = AL[1 + g.x()];
         let o = 8 * i;
         let m = B[o + 3];
         if (m <= 0.0 || COL[i] != colour) { continue; }
