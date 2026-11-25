@@ -653,6 +653,7 @@ fn k_mcount(g: grid<1>, B: read_store<f32, 1>, SUP: read_store<i32, 1>, MB: read
 //   3..6     its two runs of welds, each the next to take and its end, counted from the welds' room's end back
 //   7, 8     set when it wanted pieces, welds, and there were none: the page's cue
 //   9        the welds its pieces went without, both runs spent in the one step
+//   10       the tick a body of it was last found awake (k_reach)
 // (A run of pieces is all but spent with fewer left than any block's pieces may be: 27, three a side.)
 const GROUP: i32 = 12;
 const PIECE_RUN: i32 = 512;
@@ -1584,11 +1585,14 @@ fn k_rouse(g: grid<1>, X: read_store<f32, 1>, B: read_store<f32, 1>, SUP: read_s
 // moving faster than 1 m/s over it, and the sum of their heights (whole metres);
 // and after them one int, the count of the bodies awake (with mass) at all.
 @kernel @grid(1)
-fn k_reach(g: grid<1>, X: read_store<f32, 1>, V: read_store<f32, 1>, B: read_store<f32, 1>, OUT: rw_store<i32, 1>, cell: f32, dim: i32) {
+fn k_reach(g: grid<1>, X: read_store<f32, 1>, V: read_store<f32, 1>, B: read_store<f32, 1>, OUT: rw_store<i32, 1>, cell: f32, dim: i32,
+           GI: read_store<i32, 1>, GA: rw_store<i32, 1>, tick: i32) {
     let i = g.x();
     let o = 8 * i;
     if (B[o + 3] <= 0.0) { return; }
     OUT.atomic_add(2 * dim * dim, 1);
+    // (Its structure: when anything of it was last found awake.)
+    GA[GROUP * GI[i] + 10] = tick;
     if (length(vec3<f32>(V[o], V[o + 1], V[o + 2])) < 1.0) { return; }
     let cx = (floor(X[o] / cell) as i32) + dim / 2;
     let cz = (floor(X[o + 2] / cell) as i32) + dim / 2;
