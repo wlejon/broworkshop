@@ -868,11 +868,13 @@ fn k_split_welds(g: grid<1>, JI: rw_store<i32, 1>, JF: rw_store<f32, 1>, JA: rea
     }
 }
 @kernel @grid(1)
-fn k_split_blocks(g: grid<1>, X: rw_store<f32, 1>, V: rw_store<f32, 1>, B: rw_store<f32, 1>, PAR: read_store<i32, 1>, SPL: rw_store<i32, 1>, SUP: rw_store<i32, 1>, SL: rw_store<i32, 1>) {
+fn k_split_blocks(g: grid<1>, X: rw_store<f32, 1>, V: rw_store<f32, 1>, B: rw_store<f32, 1>, PAR: read_store<i32, 1>, SPL: rw_store<i32, 1>, SUP: rw_store<i32, 1>, SL: rw_store<i32, 1>, WHY: rw_store<i32, 1>) {
     let i = g.x();
     if (PAR[i] != -2) { return; }
     if (SPL[i] != 1) { return; }
     let o = 8 * i;
+    // (Struck, whatever else: its structure is not as it was built.)
+    if (WHY[i] == 0) { WHY[i] = 1; }
     for (var k = 0; k < 8; k += 1) { B[o + k] = 0.0; V[o + k] = 0.0; }
     X[o + 1] = -100000.0;
     SUP[2 * i] = 0; SUP[2 * i + 1] = 1048576;
