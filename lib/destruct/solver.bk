@@ -888,3 +888,44 @@ fn k_velocity(g: grid<1>, X: read_store<f32, 1>, X0: read_store<f32, 1>, V: rw_s
         if (SL[i] > sleep) { SL[i] = -1; }
     }
 }
+
+// What a page draws a body from, 12 floats: where it stood (R, its pose as
+// built), where it is, and its turn since, all moved from the solver's origin
+// to the world's (ox, oy, oz).
+@kernel @grid(1)
+fn k_show(g: grid<1>, X: read_store<f32, 1>, R: read_store<f32, 1>, OUT: write_store<f32, 1>, ox: f32, oy: f32, oz: f32) {
+    let i = g.x();
+    let o = 8 * i;
+    let q = vec4<f32>(X[o + 4], X[o + 5], X[o + 6], X[o + 7]);
+    let d = qmul(q, vec4<f32>(-R[o + 4], -R[o + 5], -R[o + 6], R[o + 7]));
+    let t = 12 * i;
+    OUT[t] = R[o] + ox; OUT[t + 1] = R[o + 1] + oy; OUT[t + 2] = R[o + 2] + oz; OUT[t + 3] = 0.0;
+    OUT[t + 4] = X[o] + ox; OUT[t + 5] = X[o + 1] + oy; OUT[t + 6] = X[o + 2] + oz; OUT[t + 7] = 0.0;
+    OUT[t + 8] = d.x; OUT[t + 9] = d.y; OUT[t + 10] = d.z; OUT[t + 11] = d.w;
+}
+
+// A body's faces where a weld has broken, as bits (2 * axis, + 1 for the +
+// face), into `stride` floats a row of P at `at`: row[i] the body's row.
+@kernel @grid(1)
+fn k_broken(g: grid<1>, B: read_store<f32, 1>, JI: read_store<i32, 1>, JF: read_store<f32, 1>, JC: read_store<i32, 1>, JR: read_store<i32, 1>,
+            row: read_store<i32, 1>, P: rw_store<f32, 1>, stride: i32, at: i32) {
+    let i = g.x();
+    if (row[i] < 0) { return; }
+    var bits = 0;
+    let nj = min(JC[i], MAXJ);
+    for (var e = 0; e < nj; e += 1) {
+        let j = JR[i * MAXJ + e];
+        if (JF[40 * j + 30] <= 0.5) { continue; }
+        var s = 0;
+        if (JI[2 * j] != i) { s = 3; }
+        let a = vec3<f32>(JF[40 * j + s], JF[40 * j + s + 1], JF[40 * j + s + 2]) / vec3<f32>(B[8 * i], B[8 * i + 1], B[8 * i + 2]);
+        var axis = 0;
+        var v = a.x;
+        if (abs(a.y) > abs(v)) { axis = 1; v = a.y; }
+        if (abs(a.z) > abs(v)) { axis = 2; v = a.z; }
+        var bit = 2 * axis;
+        if (v > 0.0) { bit += 1; }
+        bits = bits | (1 << bit);
+    }
+    P[stride * row[i] + at] = bits as f32;
+}
