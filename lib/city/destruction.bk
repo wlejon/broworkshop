@@ -353,8 +353,10 @@ pub fn fragment(v: mesh::Vertex, s_in: mesh::Surface) -> mesh::Surface {
         // Down and through the dust: coated in it, the upturned faces most;
         // the rooms' lights are out. The street lamps (facade.bk's row,
         // 1600 cd 30 m apart 8 m up, 7 m out) still reach it where it is
-        // now: by its height above the building's ground, at half a street
-        // front's share (a tumbled piece faces every way).
+        // now: by its height above the building's ground, and by how its
+        // face turns to them (from above and aside: an upturned face all of
+        // a street front's share, a side under half, an underside none, so
+        // a heap is lit on its tops and dark in its gaps, not aglow through).
         let up = max(dot(s.normal, vec3<f32>(0.0, 1.0, 0.0)), 0.0);
         // (Every face takes some, in patches; the rooms' pale ceilings and
         // walls do not show clean through a fall.)
@@ -368,7 +370,8 @@ pub fn fragment(v: mesh::Vertex, s_in: mesh::Surface) -> mesh::Surface {
         s.roughness = mix(s.roughness, 0.95, k);
         s.metallic *= 1.0 - k;
         let dy = camera.eye_world.y + v.world_pos.y - masses[mi * 4].y - 8.0;
-        let e = 2.0 * 1600.0 * 7.0 / (30.0 * (49.0 + dy * dy)) * 0.5;
+        let facing = clamp(0.4 + 0.6 * s.normal.y, 0.0, 1.0);
+        let e = 2.0 * 1600.0 * 7.0 / (30.0 * (49.0 + dy * dy)) * facing;
         let lamps = s.base_color * vec3<f32>(1.0, 0.82, 0.62) * (e * params.night / 3.14159265);
         // The lamps reach every moved piece; the rooms' glow behind its glass
         // goes out with the coat (where the facade's own lamp term is the
