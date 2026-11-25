@@ -298,7 +298,7 @@ pub fn fragment(v: mesh::Vertex, s_in: mesh::Surface) -> mesh::Surface {
             }
         } else if (kind == KIND_SLAB && n.y < -0.5) {
             // Ceilings: an office's tiles on a grid, a home's plaster.
-            var cc = vec3<f32>(0.80, 0.79, 0.76);
+            var cc = vec3<f32>(0.70, 0.69, 0.66);
             if (office) {
                 let g = max(facade::pulse(lp.x / 0.6, 0.0, 0.04, fpx / 0.6), facade::pulse(lp.z / 0.6, 0.0, 0.04, fpx / 0.6));
                 cc = mix(cc, vec3<f32>(0.55, 0.55, 0.55), g);
@@ -338,7 +338,9 @@ pub fn fragment(v: mesh::Vertex, s_in: mesh::Surface) -> mesh::Surface {
         // now: by its height above the building's ground, at half a street
         // front's share (a tumbled piece faces every way).
         let up = max(dot(s.normal, vec3<f32>(0.0, 1.0, 0.0)), 0.0);
-        let k = 0.25 + 0.45 * up * (0.6 + 0.4 * vn3(lp * 1.7, 19u));
+        // (Every face takes some, in patches; the rooms' pale ceilings and
+        // walls do not show clean through a fall.)
+        let k = 0.45 + 0.1 * vn3(lp * 0.9, 17u) + 0.4 * up * (0.6 + 0.4 * vn3(lp * 1.7, 19u));
         s.base_color = mix(s.base_color, vec3<f32>(0.56, 0.54, 0.50), k);
         s.roughness = mix(s.roughness, 0.95, k);
         s.metallic *= 1.0 - k;
