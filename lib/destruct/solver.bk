@@ -1218,7 +1218,8 @@ fn k_shown(g: grid<1>, X: read_store<f32, 1>, XP: write_store<f32, 1>) {
 // + 1 for the + face); where it is and where it was when last shown (X0 here: the poses k_shown kept then); its
 // turn from how it stood, now and then (a picture between two showings is between the two, however many
 // steps apart they are). And in SPH its bounding sphere there (centre, radius; a little over
-// its box, for a face drawn jagged), which a draw culls its instances by.
+// its box, for a face drawn jagged), which a draw culls its instances by: a block's while it is whole, in
+// place of its pieces' (theirs are out of every view until it gives way, and then its own is).
 @kernel @grid(1)
 fn k_show(g: grid<1>, X: read_store<f32, 1>, X0: read_store<f32, 1>, R: read_store<f32, 1>, B: read_store<f32, 1>,
           JI: read_store<i32, 1>, JF: read_store<f32, 1>, JC: read_store<i32, 1>, JR: read_store<i32, 1>,
@@ -1269,6 +1270,11 @@ fn k_show(g: grid<1>, X: read_store<f32, 1>, X0: read_store<f32, 1>, R: read_sto
     OUT[t + 8] = p0.x + ox; OUT[t + 9] = p0.y + oy; OUT[t + 10] = p0.z + oz; OUT[t + 11] = 0.0;
     OUT[t + 12] = d.x; OUT[t + 13] = d.y; OUT[t + 14] = d.z; OUT[t + 15] = d.w;
     OUT[t + 16] = d0.x; OUT[t + 17] = d0.y; OUT[t + 18] = d0.z; OUT[t + 19] = d0.w;
+    // (A block whole is drawn, as one box, and its pieces are not; given way, its pieces are and it is not.)
+    if (PAR[i] >= 0 || (PAR[i] == -2 && B[o] <= 0.0)) {
+        SPH[4 * i] = 0.0; SPH[4 * i + 1] = -100000.0; SPH[4 * i + 2] = 0.0; SPH[4 * i + 3] = 0.0;
+        return;
+    }
     SPH[4 * i] = p.x + ox; SPH[4 * i + 1] = p.y + oy; SPH[4 * i + 2] = p.z + oz;
     SPH[4 * i + 3] = 1.2 * length(hs) + length(p - p0);
 }
