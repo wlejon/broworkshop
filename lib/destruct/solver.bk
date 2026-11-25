@@ -952,6 +952,16 @@ fn k_show(g: grid<1>, X: read_store<f32, 1>, R: read_store<f32, 1>, OUT: write_s
     OUT[t + 8] = d.x; OUT[t + 9] = d.y; OUT[t + 10] = d.z; OUT[t + 11] = d.w;
 }
 
+// Each body's bounding sphere, world space (centre, radius; a little over its box, for a face drawn jagged):
+// what a draw culls its instances by.
+@kernel @grid(1)
+fn k_spheres(g: grid<1>, X: read_store<f32, 1>, B: read_store<f32, 1>, OUT: write_store<f32, 1>, ox: f32, oy: f32, oz: f32) {
+    let i = g.x();
+    let o = 8 * i;
+    OUT[4 * i] = X[o] + ox; OUT[4 * i + 1] = X[o + 1] + oy; OUT[4 * i + 2] = X[o + 2] + oz;
+    OUT[4 * i + 3] = 1.2 * length(vec3<f32>(B[o], B[o + 1], B[o + 2]));
+}
+
 // The rubble asleep within r of a point wakes (what it lay against there is gone).
 @kernel @grid(1)
 fn k_rouse(g: grid<1>, X: read_store<f32, 1>, B: read_store<f32, 1>, SUP: read_store<i32, 1>, REL: rw_store<i32, 1>, px: f32, py: f32, pz: f32, r: f32) {
