@@ -14,7 +14,7 @@ const JMIN: f32 = 1.0;
 const JALPHA: f32 = 1.0;
 const JBETA: f32 = 100000.0;
 const STRIKE: f32 = 300000.0;
-const SHATTER: f32 = 1200000.0;   // the blow (N) a block breaks into its pieces at
+const SHATTER: f32 = 4000000.0;   // the blow (N) a block breaks into its pieces at
 // The speed (m/s) of a thing touching or welded to sleeping rubble that wakes it.
 const WAKE: f32 = 0.3;
 const K: i32 = 64;
