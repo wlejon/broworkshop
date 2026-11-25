@@ -61,7 +61,7 @@ fn tangent1(n: vec3<f32>) -> vec3<f32> {
 fn k_clear(g: grid<1>, count: write_store<i32, 1>) { count[g.x()] = 0; }
 
 // A step's start: the inertial pose, the pose the step starts from, the first guess. P, for one in a cell: where
-// it is and how far it reaches this step (its corner's distance and its speed's), negative for one not moving:
+// it is and how far it reaches this step (its corner's distance and its speed's):
 // all that finding what is near it reads of it.
 @kernel @grid(1)
 fn k_begin(g: grid<1>, X: rw_store<f32, 1>, X0: write_store<f32, 1>, Y: write_store<f32, 1>, V: rw_store<f32, 1>,
@@ -81,7 +81,7 @@ fn k_begin(g: grid<1>, X: rw_store<f32, 1>, X0: write_store<f32, 1>, Y: write_st
     // (A fixed body is binned where it stands: the moving ones find it.)
     if (B[o + 3] <= 0.0) {
         if (large) { return; }
-        P[4 * i] = p.x; P[4 * i + 1] = p.y; P[4 * i + 2] = p.z; P[4 * i + 3] = -length(vec3<f32>(B[o], B[o + 1], B[o + 2]));
+        P[4 * i] = p.x; P[4 * i + 1] = p.y; P[4 * i + 2] = p.z; P[4 * i + 3] = length(vec3<f32>(B[o], B[o + 1], B[o + 2]));
         let cs = cell_of(p, size, dim);
         let cis = cs.x + dim * (cs.y + dim * cs.z);
         let ss = count.atomic_add(cis, 1);
@@ -414,11 +414,13 @@ fn k_contacts(g: grid<1>, X: read_store<f32, 1>, B: read_store<f32, 1>,
                     let j = slots[ci * K + s];
                     // (A pair is the lower-numbered body's to find; one with a fixed body the moving one's. And
                     // most in the cells around are out of reach: told from P alone.)
-                    let rp = P[4 * j + 3];
-                    if (j == i || (j < i && rp > 0.0)) { continue; }
+                    if (j == i) { continue; }
+                    let rp = abs(P[4 * j + 3]);
                     let dp = vec3<f32>(P[4 * j], P[4 * j + 1], P[4 * j + 2]) - p;
-                    if (dot(dp, dp) > (far + abs(rp)) * (far + abs(rp))) { continue; }
+                    if (dot(dp, dp) > (far + rp) * (far + rp)) { continue; }
+                    // (Whether it moves is as it is now: one let go since the step began is moving.)
                     let mj = B[8 * j + 3];
+                    if (j < i && mj > 0.0) { continue; }
                     let pj = vec3<f32>(X[8 * j], X[8 * j + 1], X[8 * j + 2]);
                     let rj = length(vec3<f32>(B[8 * j], B[8 * j + 1], B[8 * j + 2]));
                     let dd = pj - p;
