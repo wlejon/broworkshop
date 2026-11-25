@@ -611,12 +611,82 @@ fn k_mcount(g: grid<1>, B: read_store<f32, 1>, SUP: read_store<i32, 1>, MB: read
 // Blocks. A structure's pieces are grouped into blocks, each a body in its pieces' place while it is whole:
 // the pieces are in the world without size (PAR: their block), and a block (PAR -2) that is struck hard
 // (SHATTER) is marked (SPL 1) and at the next step's start gives way to its pieces: they take up
-// from where it is, moving as it moves (k_split_pieces), the welds between pieces that are both their own
-// bodies now take hold and each weld of the block's goes to the piece that stands for it there, or is done
-// with if the block across has split too (k_split_welds; JA, 8 floats a weld: on each side the anchor in the
-// frame of the piece that stands for the block there, and that piece; the piece -1 for a weld between two
-// pieces, which waits (JF's 30th float 2) until both are their own bodies), and the block leaves the world
-// (k_split_blocks).
+// from where it is, moving as it moves (k_split_pieces), the welds between its pieces are made
+// (k_split_inner), each weld of the block's goes to the piece that stands for it there, or, the block across
+// having split too, is done with (JF's 30th float 2) for welds made between the two sides' pieces
+// (k_split_welds; JA, 8 floats a weld: on each side the anchor in the frame of the piece that stands for the
+// block there, and that piece; the piece -1 for a weld between two pieces), and the block leaves the world
+// (k_split_blocks). A block's D: its first piece, how many they are (one after another), and what a weld
+// between them holds, a square metre. The welds made here are taken from the end of the welds' room back
+// (WA: how many; `njc` the room, `dcap` how many of it are theirs).
+
+// The weld between pieces `a` and `b` if they stood face to face (R: how each stood; D: its half sides),
+// made and put on both their lists.
+fn fine_weld(a: i32, b: i32, sigma: f32, R: read_store<f32, 1>, D: read_store<f32, 1>, JI: rw_store<i32, 1>, JF: rw_store<f32, 1>,
+             JC: rw_store<i32, 1>, JR: rw_store<i32, 1>, WA: rw_store<i32, 1>, njc: i32, dcap: i32) {
+    let q = vec4<f32>(R[8 * a + 4], R[8 * a + 5], R[8 * a + 6], R[8 * a + 7]);
+    let d = qinv_rot(q, vec3<f32>(R[8 * b] - R[8 * a], R[8 * b + 1] - R[8 * a + 1], R[8 * b + 2] - R[8 * a + 2]));
+    var deep = 0;
+    var area = 1.0;
+    for (var k = 0; k < 3; k += 1) {
+        let gap = abs(pick(d, k)) - D[4 * a + k] - D[4 * b + k];
+        if (gap > 0.01) { return; }
+        if (gap < -0.05) { deep += 1; area = area * min(-gap, 2.0 * min(D[4 * a + k], D[4 * b + k])); }
+    }
+    if (deep < 2) { return; }
+    let s = WA.atomic_add(0, 1);
+    if (s >= dcap) { return; }
+    let j = njc - 1 - s;
+    let o = 40 * j;
+    for (var k = 0; k < 40; k += 1) { JF[o + k] = 0.0; }
+    JI[2 * j] = a; JI[2 * j + 1] = b;
+    let ma = D[4 * a + 3];
+    let mb = D[4 * b + 3];
+    let ms = ma * mb / (ma + mb);
+    let L = dot(d, d);
+    JF[o] = 0.5 * d.x; JF[o + 1] = 0.5 * d.y; JF[o + 2] = 0.5 * d.z;
+    JF[o + 3] = -0.5 * d.x; JF[o + 4] = -0.5 * d.y; JF[o + 5] = -0.5 * d.z;
+    JF[o + 9] = 1.0;
+    JF[o + 31] = ms; JF[o + 32] = ms * L;
+    for (var k = 0; k < 3; k += 1) { JF[o + 16 + k] = 10000.0 * ms; JF[o + 19 + k] = 10000.0 * ms * L; }
+    JF[o + 28] = sigma * area; JF[o + 29] = sigma * area * 0.25;
+    JF[o + 34] = 0.03; JF[o + 35] = 0.06;
+    let sa = JC.atomic_add(a, 1);
+    if (sa < MAXJ) { JR[MAXJ * a + sa] = j; }
+    let sb = JC.atomic_add(b, 1);
+    if (sb < MAXJ) { JR[MAXJ * b + sb] = j; }
+}
+// A block giving way: the welds between its pieces.
+@kernel @grid(1)
+fn k_split_inner(g: grid<1>, PAR: read_store<i32, 1>, SPL: read_store<i32, 1>, R: read_store<f32, 1>, D: read_store<f32, 1>,
+                 JI: rw_store<i32, 1>, JF: rw_store<f32, 1>, JC: rw_store<i32, 1>, JR: rw_store<i32, 1>, WA: rw_store<i32, 1>, njc: i32, dcap: i32) {
+    let i = g.x();
+    if (PAR[i] != -2) { return; }
+    if (SPL[i] != 1) { return; }
+    let first = (D[4 * i] + 0.5) as i32;
+    let count = (D[4 * i + 1] + 0.5) as i32;
+    for (var a = 0; a < count; a += 1) {
+        for (var b = a + 1; b < count; b += 1) { fine_weld(first + a, first + b, D[4 * i + 2], R, D, JI, JF, JC, JR, WA, njc, dcap); }
+    }
+}
+// What is done with a structure's bodies (`nb` from `first`) of the welds made between pieces: broken.
+@kernel @grid(1)
+fn k_unweld(g: grid<1>, JI: rw_store<i32, 1>, JF: rw_store<f32, 1>, WA: read_store<i32, 1>, first: i32, nb: i32, njc: i32, dcap: i32) {
+    if (g.x() >= min(WA[0], dcap)) { return; }
+    let j = njc - 1 - g.x();
+    let a = JI[2 * j];
+    if (a < first || a >= first + nb) { return; }
+    JF[40 * j + 30] = 1.0;
+    JI[2 * j] = 0; JI[2 * j + 1] = 0;
+}
+// The thread groups of a pass over all the welds: the structures' (the first `nj`) and those made since.
+@kernel @grid(1)
+fn k_wgroups(g: grid<1>, WA: read_store<i32, 1>, G: rw_store<i32, 1>, at: i32, nj: i32, ls: i32, dcap: i32) {
+    if (g.x() != 0) { return; }
+    G[3 * at] = (nj + clamp(WA[0], 0, dcap) + ls - 1) / ls;
+    G[3 * at + 1] = 1;
+    G[3 * at + 2] = 1;
+}
 @kernel @grid(1)
 fn k_split_pieces(g: grid<1>, X: rw_store<f32, 1>, X0: rw_store<f32, 1>, R: read_store<f32, 1>, V: rw_store<f32, 1>, B: rw_store<f32, 1>,
                   D: read_store<f32, 1>, PAR: rw_store<i32, 1>, SPL: read_store<i32, 1>, SUP: rw_store<i32, 1>, REL: rw_store<i32, 1>, SL: rw_store<i32, 1>,
@@ -660,29 +730,37 @@ fn k_split_pieces(g: grid<1>, X: rw_store<f32, 1>, X0: rw_store<f32, 1>, R: read
     PAR[i] = -1;
 }
 @kernel @grid(1)
-fn k_split_welds(g: grid<1>, JI: rw_store<i32, 1>, JF: rw_store<f32, 1>, JA: read_store<f32, 1>, PAR: read_store<i32, 1>, SPL: read_store<i32, 1>) {
+fn k_split_welds(g: grid<1>, JI: rw_store<i32, 1>, JF: rw_store<f32, 1>, JA: read_store<f32, 1>, ORG: read_store<i32, 1>, SPL: read_store<i32, 1>,
+                 R: read_store<f32, 1>, D: read_store<f32, 1>, JC: rw_store<i32, 1>, JR: rw_store<i32, 1>, WA: rw_store<i32, 1>, njc: i32, dcap: i32) {
     let j = g.x();
     let o = 40 * j;
     let a = JI[2 * j];
     let b = JI[2 * j + 1];
-    if (JA[8 * j + 3] < -0.5) {
-        // (Between two pieces, waiting for both to be their own bodies.)
-        // (Across a blocks' weld that broke, it is broken.)
-        if (JF[o + 30] == 2.0) {
-            if (PAR[a] == -1 && PAR[b] == -1) {
-                var to = 0.0;
-                if (JA[8 * j + 4] > -0.5) { if (JF[40 * ((JA[8 * j + 4] + 0.5) as i32) + 30] == 1.0) { to = 1.0; } }
-                JF[o + 30] = to;
-            }
-        }
-        return;
-    }
+    // (Between two pieces on their own from the start: nothing gives way.)
+    if (JA[8 * j + 3] < -0.5) { return; }
+    // (Broken, across it no welds are made; and one done with is done with.)
     if (JF[o + 30] > 0.5) { return; }
-    let sa = PAR[a] == -2 && SPL[a] == 1;
-    let sb = PAR[b] == -2 && SPL[b] == 1;
+    // (ORG: -2 a block, which the weld is on until it gives way.)
+    let sa = ORG[a] == -2 && SPL[a] == 1;
+    let sb = ORG[b] == -2 && SPL[b] == 1;
     if (!sa && !sb) { return; }
     // (Pieces on both sides now: the welds between those pieces are what joins them.)
-    if ((sa || PAR[a] == -1) && (sb || PAR[b] == -1)) { JF[o + 30] = 2.0; return; }
+    if ((sa || ORG[a] != -2) && (sb || ORG[b] != -2)) {
+        let pa = (JA[8 * j + 3] + 0.5) as i32;
+        let pb = (JA[8 * j + 7] + 0.5) as i32;
+        var fa = pa;
+        var na = 1;
+        var sigma = 0.0;
+        if (ORG[pa] >= 0) { fa = (D[4 * ORG[pa]] + 0.5) as i32; na = (D[4 * ORG[pa] + 1] + 0.5) as i32; sigma = D[4 * ORG[pa] + 2]; }
+        var fb = pb;
+        var nb = 1;
+        if (ORG[pb] >= 0) { fb = (D[4 * ORG[pb]] + 0.5) as i32; nb = (D[4 * ORG[pb] + 1] + 0.5) as i32; sigma = D[4 * ORG[pb] + 2]; }
+        for (var s = 0; s < na; s += 1) {
+            for (var t = 0; t < nb; t += 1) { fine_weld(fa + s, fb + t, sigma, R, D, JI, JF, JC, JR, WA, njc, dcap); }
+        }
+        JF[o + 30] = 2.0;
+        return;
+    }
     if (sa) { JI[2 * j] = (JA[8 * j + 3] + 0.5) as i32; JF[o] = JA[8 * j]; JF[o + 1] = JA[8 * j + 1]; JF[o + 2] = JA[8 * j + 2]; }
     if (sb) { JI[2 * j + 1] = (JA[8 * j + 7] + 0.5) as i32; JF[o + 3] = JA[8 * j + 4]; JF[o + 4] = JA[8 * j + 5]; JF[o + 5] = JA[8 * j + 6]; }
 }
@@ -855,8 +933,14 @@ fn k_list(g: grid<1>, B: read_store<f32, 1>, AL: write_store<i32, 1>, LN: rw_sto
     AL[1 + s] = i;
 }
 @kernel @grid(1)
-fn k_wlist(g: grid<1>, B: read_store<f32, 1>, JI: read_store<i32, 1>, JF: read_store<f32, 1>, WL: write_store<i32, 1>, LN: rw_store<i32, 1>, slot: i32) {
-    let j = g.x();
+fn k_wlist(g: grid<1>, B: read_store<f32, 1>, JI: read_store<i32, 1>, JF: read_store<f32, 1>, WL: write_store<i32, 1>, LN: rw_store<i32, 1>, slot: i32,
+           WA: read_store<i32, 1>, nj: i32, njc: i32, dcap: i32) {
+    // (The structures' welds, then those made since, from the end of the room back.)
+    var j = g.x();
+    if (j >= nj) {
+        if (j - nj >= min(WA[0], dcap)) { return; }
+        j = njc - 1 - (j - nj);
+    }
     if (JF[40 * j + 30] > 0.5) { return; }
     if (B[8 * JI[2 * j] + 3] <= 0.0 && B[8 * JI[2 * j + 1] + 3] <= 0.0) { return; }
     let s = LN.atomic_add(slot, 1);
