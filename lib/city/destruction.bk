@@ -19,7 +19,7 @@ struct Params {
     night: f32,
     room_day: f32,
     room_night: f32,
-    debug: f32,   // 1: the shading branch's colour (outside red, break green, inside blue); 2: all grey
+    debug: f32,   // 1: the shading branch's colour (outside red, break green, inside blue); 2: all grey; 3: the dust coat (red full, blue none, black standing)
 }
 
 @binding(4, 0) var params: uniform<Params>;
@@ -161,11 +161,17 @@ pub fn vertex(v_in: mesh::Vertex) -> mesh::Vertex {
     let bi = (p1.w + 0.5) as i32 - 1;
     var q = vec4<f32>(0.0, 0.0, 0.0, 1.0);
     var w = rw;
+    // How much a body has been through (0..1): coated in the dust by how far
+    // it has come and turned from where it stood, so a panel cracked loose
+    // and still in its place keeps its glass and its face.
+    var coat = 0.0;
     if (bi >= 0) {
         let b0 = bodies[bi * 3];
         let b1 = bodies[bi * 3 + 1];
         q = bodies[bi * 3 + 2];
         w = qrot(q, rw - b0.xyz) + b1.xyz;
+        let turned = 2.0 * acos(min(abs(q.w), 1.0));
+        coat = smoothstep(0.15, 2.5, length(b1.xyz - b0.xyz) + 2.0 * turned);
     }
     v.pos = w;
     v.normal = qrot(q, nw0);
@@ -175,7 +181,10 @@ pub fn vertex(v_in: mesh::Vertex) -> mesh::Vertex {
     v.v3 = r3;
     v.v4 = vec4<f32>(n, p2.y);
     v.v5 = q;
-    v.vi = vec4<i32>(floor(r2.z * 1048576.0) as i32, rough, mi, select(bi >= 0, 1, 0));
+    // (w: 0 standing, else 1 + the coat in thousandths + 1001 * a tone 0..63
+    // of its own, the body's: no two chunks of a pile dusted alike.)
+    let tone = select(bi >= 0, (bi * 37 + 11) % 64, 0);
+    v.vi = vec4<i32>(floor(r2.z * 1048576.0) as i32, rough, mi, select(bi >= 0, 1 + (coat * 1000.0 + 0.5) as i32 + 1001 * tone, 0));
     return v;
 }
 
@@ -199,6 +208,9 @@ pub fn fragment(v: mesh::Vertex, s_in: mesh::Surface) -> mesh::Surface {
     let mi = v.vi.z;
     let rough = v.vi.y;
     let moved = v.vi.w > 0;
+    let packed = max(v.vi.w - 1, 0);
+    let coat = (packed % 1001) as f32 / 1000.0;
+    let tone = (packed / 1001) as f32 / 63.0;
     let yaw = masses[mi * 4].w;
     let hw = v.v1.x;
     let h = v.v1.y;
@@ -340,15 +352,26 @@ pub fn fragment(v: mesh::Vertex, s_in: mesh::Surface) -> mesh::Surface {
         let up = max(dot(s.normal, vec3<f32>(0.0, 1.0, 0.0)), 0.0);
         // (Every face takes some, in patches; the rooms' pale ceilings and
         // walls do not show clean through a fall.)
-        let k = 0.45 + 0.1 * vn3(lp * 0.9, 17u) + 0.4 * up * (0.6 + 0.4 * vn3(lp * 1.7, 19u));
-        s.base_color = mix(s.base_color, vec3<f32>(0.56, 0.54, 0.50), k);
+        let k = coat * (0.45 + 0.1 * vn3(lp * 0.9, 17u) + 0.4 * up * (0.6 + 0.4 * vn3(lp * 1.7, 19u)));
+        // Each chunk its own: a shade lighter or darker, warmer or greyer.
+        let dust = vec3<f32>(0.47, 0.45, 0.42) * (0.78 + 0.4 * tone) + vec3<f32>(0.02, 0.01, -0.02) * (fract(tone * 7.3) - 0.5);
+        s.base_color = mix(s.base_color, dust, k);
+        // And its faces under the dust darkened a little, by the chunk, so
+        // a pile reads as many pieces, not one pale mass.
+        s.base_color *= mix(1.0, 0.8 + 0.3 * fract(tone * 3.7), coat);
         s.roughness = mix(s.roughness, 0.95, k);
         s.metallic *= 1.0 - k;
         let dy = camera.eye_world.y + v.world_pos.y - masses[mi * 4].y - 8.0;
         let e = 2.0 * 1600.0 * 7.0 / (30.0 * (49.0 + dy * dy)) * 0.5;
-        s.emissive = s.base_color * vec3<f32>(1.0, 0.82, 0.62) * (e * params.night / 3.14159265);
+        let lamps = s.base_color * vec3<f32>(1.0, 0.82, 0.62) * (e * params.night / 3.14159265);
+        s.emissive = mix(s.emissive, lamps, coat);
     }
-    if (params.debug > 1.5) {
+    if (params.debug > 2.5) {
+        // 3: the dust coat, red full to blue none (standing: black).
+        s.base_color = select(moved, vec3<f32>(coat, 0.0, 1.0 - coat), vec3<f32>(0.0, 0.0, 0.0));
+        s.metallic = 0.0;
+        s.emissive = vec3<f32>(0.0, 0.0, 0.0);
+    } else if (params.debug > 1.5) {
         s.base_color = vec3<f32>(0.5, 0.5, 0.5);
         s.metallic = 0.0;
         s.emissive = vec3<f32>(0.0, 0.0, 0.0);
