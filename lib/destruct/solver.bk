@@ -1583,7 +1583,8 @@ fn k_rouse(g: grid<1>, X: read_store<f32, 1>, B: read_store<f32, 1>, SUP: read_s
 // Where things are moving, on the plan: OUT is dim x dim cells of `cell`
 // metres about the origin, two ints each: the count of the bodies with mass
 // moving faster than 1 m/s over it, and the sum of their heights (whole metres);
-// and after them one int, the count of the bodies awake (with mass) at all.
+// and after them one int, the count of the bodies awake (with mass) at all, and then
+// an int a cell again: the count of the bodies awake over it, at any speed.
 @kernel @grid(1)
 fn k_reach(g: grid<1>, X: read_store<f32, 1>, V: read_store<f32, 1>, B: read_store<f32, 1>, OUT: rw_store<i32, 1>, cell: f32, dim: i32,
            GI: read_store<i32, 1>, GA: rw_store<i32, 1>, tick: i32) {
@@ -1593,10 +1594,11 @@ fn k_reach(g: grid<1>, X: read_store<f32, 1>, V: read_store<f32, 1>, B: read_sto
     OUT.atomic_add(2 * dim * dim, 1);
     // (Its structure: when anything of it was last found awake.)
     GA[GROUP * GI[i] + 10] = tick;
-    if (length(vec3<f32>(V[o], V[o + 1], V[o + 2])) < 1.0) { return; }
     let cx = (floor(X[o] / cell) as i32) + dim / 2;
     let cz = (floor(X[o + 2] / cell) as i32) + dim / 2;
     if (cx < 0 || cz < 0 || cx >= dim || cz >= dim) { return; }
+    OUT.atomic_add(2 * dim * dim + 1 + cx + dim * cz, 1);
+    if (length(vec3<f32>(V[o], V[o + 1], V[o + 2])) < 1.0) { return; }
     OUT.atomic_add(2 * (cx + dim * cz), 1);
     OUT.atomic_add(2 * (cx + dim * cz) + 1, X[o + 1] as i32);
 }
