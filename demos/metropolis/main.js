@@ -97,7 +97,7 @@ const ready = Promise.all([
         interiors = createInteriors(scene, city.masses, b.walls, [terrain.node]);
         // Every building breakable: woken into its structure by what comes at it,
         // its pieces stepped on the GPU.
-        return createCityDestruction(scene, city, b, { interiors, heights: terrain.heights }).then((d) => { destruction = d; });
+        return createCityDestruction(scene, city, b, { interiors, heights: terrain.heights, eye: () => cam.state().pos }).then((d) => { destruction = d; });
     }),
     // Traffic on the road graph, simulated in a worker: lanes both ways, lights at the junctions.
     createTrafficRenderer(scene, city.graph, city.field.density, readLib('city/car.bk'), { count: 12000, lines: city.transit }).then((c) => { cars = c; }),

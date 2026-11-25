@@ -1,0 +1,133 @@
+// lib/destruct/grit.bk — the fine scale of things breaking: crumbs and shards
+// shed by the bodies that are broken and on the move (grit.js). A crumb is 8
+// floats of S: where it is and the seconds it has left (0: none, its place
+// free), how fast it goes and its seed. A free place tries one body a step,
+// its own pick of them: a body near enough the eye, with a face broken, turned
+// from how it stood, that moved fast between its last two showings sheds a crumb there, from within it,
+// going as it goes and a little its own way. Then it falls, with the air's
+// drag, comes to rest on the ground (HG, the solver's heights), lies there,
+// and sinks away in its last second. Crumbs touch nothing but the ground:
+// what is behind a wall or under the heap is not seen.
+// SPH is each crumb's sphere, for the draw's cull: a free place's is nowhere.
+
+const G: f32 = 9.81;
+const LIFE: f32 = 7.0;
+
+fn pcg(v: u32) -> u32 {
+    var x = v * 747796405u + 2891336453u;
+    x = ((x >> ((x >> 28u) + 4u)) ^ x) * 277803737u;
+    return (x >> 22u) ^ x;
+}
+
+fn unit(h: u32) -> f32 {
+    return f32(h & 0xffffffu) / 16777216.0;
+}
+
+fn ground_at(HG: read_store<f32, 1>, x: f32, z: f32, hcell: f32, hdim: i32) -> f32 {
+    let top = f32(hdim - 1) - 0.001;
+    let fx = clamp(x / hcell + f32(hdim / 2), 0.0, top);
+    let fz = clamp(z / hcell + f32(hdim / 2), 0.0, top);
+    let ix = floor(fx) as i32;
+    let iz = floor(fz) as i32;
+    let tx = fx - floor(fx);
+    let tz = fz - floor(fz);
+    let a = mix(HG[ix + hdim * iz], HG[ix + 1 + hdim * iz], tx);
+    let b = mix(HG[ix + hdim * (iz + 1)], HG[ix + 1 + hdim * (iz + 1)], tx);
+    return mix(a, b, tz);
+}
+
+// One step of dt seconds. ROWS is the solver's k_show rows (20 floats a
+// body: where it stood and its broken faces, where it is and was, its turns),
+// SA / SB the spheres of the bodies as built (na of them) and of the pieces
+// (nb, bodies `units` on). `blend` is how far the picture is from the earlier
+// showing to the later, `span` the seconds between the two; (ex, ey, ez) the
+// eye and `reach` how far from it a crumb is worth shedding; (ox, oy, oz)
+// the point HG's heights are about.
+@kernel @grid(1)
+fn k_grit(g: grid<1>, S: rw_store<f32, 1>, SPH: write_store<f32, 1>, ROWS: read_store<f32, 1>,
+          SA: read_store<f32, 1>, SB: read_store<f32, 1>, HG: read_store<f32, 1>,
+          na: i32, nb: i32, units: i32, frame: i32, dt: f32, blend: f32, span: f32,
+          ex: f32, ey: f32, ez: f32, reach: f32, ox: f32, oy: f32, oz: f32, hcell: f32, hdim: i32) {
+    let i = g.x();
+    let o = 8 * i;
+    var p = vec3<f32>(S[o], S[o + 1], S[o + 2]);
+    var life = S[o + 3];
+    var v = vec3<f32>(S[o + 4], S[o + 5], S[o + 6]);
+    var seed = S[o + 7];
+    if (life <= 0.0) {
+        life = 0.0;
+        let n = na + nb;
+        if (n > 0 && dt > 0.0) {
+            let h0 = pcg(u32(i) * 2654435761u + u32(frame) * 40503u);
+            let pick = i32(h0 % u32(n));
+            var body = pick;
+            var c = vec4<f32>(0.0, -100000.0, 0.0, 0.0);
+            if (pick < na) {
+                c = vec4<f32>(SA[4 * pick], SA[4 * pick + 1], SA[4 * pick + 2], SA[4 * pick + 3]);
+            } else {
+                body = units + pick - na;
+                let s = 4 * (pick - na);
+                c = vec4<f32>(SB[s], SB[s + 1], SB[s + 2], SB[s + 3]);
+            }
+            let r = 20 * body;
+            let now = vec3<f32>(ROWS[r + 4], ROWS[r + 5], ROWS[r + 6]);
+            let was = vec3<f32>(ROWS[r + 8], ROWS[r + 9], ROWS[r + 10]);
+            let moved = length(now - was);
+            let at = mix(was, now, blend);
+            let far = length(at - vec3<f32>(ex, ey, ez));
+            // (The faster it goes and the bigger it is the more it sheds: a
+            // slab on its way down trails them, a brick rolling to rest
+            // lets one go now and then.)
+            let speed = moved / max(span, 0.001);
+            let h1 = pcg(h0);
+            // (And the nearer the eye the more of them: the places are spent where they are seen.)
+            let close = clamp(1.0 - far / reach, 0.0, 1.0);
+            let chance = clamp(speed * 0.02, 0.0, 0.5) * clamp(c.w * 0.5, 0.15, 1.0) * close * close;
+            // (Only what has come loose: turned from how it stood. A tower going down whole sheds nothing
+            // from its faces.)
+            let qv = vec3<f32>(ROWS[r + 12], ROWS[r + 13], ROWS[r + 14]);
+            let loose = dot(qv, qv) > 0.01;
+            if (c.w > 0.0 && ROWS[r + 3] > 0.5 && loose && speed > 2.0 && far < reach && unit(h1) < chance) {
+                let h2 = pcg(h1);
+                let h3 = pcg(h2);
+                let h4 = pcg(h3);
+                let h5 = pcg(h4);
+                let h6 = pcg(h5);
+                let d = vec3<f32>(unit(h2) - 0.5, unit(h3) - 0.5, unit(h4) - 0.5);
+                p = at + d * c.w * 0.9;
+                // As its body goes, and a little its own way, by how hard
+                // the body goes.
+                let kick = 0.25 * speed + 0.6;
+                v = (now - was) / max(span, 0.001) + vec3<f32>(unit(h5) - 0.5, unit(h6) - 0.3, unit(pcg(h6)) - 0.5) * kick;
+                seed = unit(pcg(h6 + 17u));
+                life = LIFE * (0.6 + 0.4 * unit(pcg(h6 + 91u)));
+            }
+        }
+    } else {
+        life = max(life - dt, 0.0);
+        let ground = ground_at(HG, p.x - ox, p.z - oz, hcell, hdim) + oy + 0.03;
+        if (p.y > ground || v.y > 0.0) {
+            v.y -= G * dt;
+            // (Small things are slowed by the air soon: the smaller the seed's size, the sooner.)
+            let drag = 0.25 + 0.9 * seed;
+            v = v * max(1.0 - drag * dt, 0.0);
+            p = p + v * dt;
+            if (p.y <= ground && v.y < 0.0) {
+                // One low bounce, then it lies.
+                p.y = ground;
+                if (v.y < -2.5) { v = vec3<f32>(v.x * 0.45, -v.y * 0.22, v.z * 0.45); }
+                else { v = vec3<f32>(0.0, 0.0, 0.0); }
+            }
+        } else {
+            v = vec3<f32>(0.0, 0.0, 0.0);
+            p.y = ground;
+        }
+    }
+    S[o] = p.x; S[o + 1] = p.y; S[o + 2] = p.z; S[o + 3] = life;
+    S[o + 4] = v.x; S[o + 5] = v.y; S[o + 6] = v.z; S[o + 7] = seed;
+    if (life > 0.0) {
+        SPH[4 * i] = p.x; SPH[4 * i + 1] = p.y; SPH[4 * i + 2] = p.z; SPH[4 * i + 3] = 0.7;
+    } else {
+        SPH[4 * i] = 0.0; SPH[4 * i + 1] = -100000.0; SPH[4 * i + 2] = 0.0; SPH[4 * i + 3] = 0.0;
+    }
+}
