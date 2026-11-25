@@ -574,20 +574,26 @@ fn k_support(g: grid<1>, B: rw_store<f32, 1>, V: rw_store<f32, 1>, SUP: rw_store
         var joined = false;
         var heard = 0;
         var rests = tick - GR[i] <= 2;
+        var welded = false;
         let njs = min(JC[i], MAXJ);
         for (var e = 0; e < njs; e += 1) {
             let j = JR[i * MAXJ + e];
             if (JF[40 * j + 30] > 0.5) { continue; }
+            welded = true;
             let n = other_of(j, i, JI);
             // (It hears from the ground what they have heard: a part cut off does not keep itself up.)
             if (B[8 * n + 3] <= 0.0 && B[8 * n + 7] > 0.0 && SUP[2 * n + 1] >= 0) { joined = true; heard = max(heard, SUP[2 * n]); }
             if (B[8 * n + 3] <= 0.0 && B[8 * n + 7] > 0.0 && SUP[2 * n + 1] < 0) { rests = true; }
         }
-        if (SUP[2 * i + 1] < 0) { joined = false; }
-        if (MB[i] >= 0) { if (MF[8 * MB[i] + 7] > 0.5) { joined = false; } }
+        // (Rubble once, it is rubble still: welded to a piece that stands, it rests on that.)
+        if (SUP[2 * i + 1] < 0) { if (joined) { rests = true; } joined = false; }
+        // (Of a member that has given way, it is no part of the structure: still for this long on its welds to
+        // what stands, it rests there as rubble.)
+        if (MB[i] >= 0) { if (MF[8 * MB[i] + 7] > 0.5) { if (joined) { rests = true; } joined = false; } }
         // (Rubble sleeps on something: the ground, a thing not moving, or welded to rubble that does. Hanging still
-        // from pieces that are themselves about to fall is not rest.)
-        if (!joined && !rests) { return; }
+        // from pieces that are themselves about to fall is not rest. A piece welded to nothing that has lain still
+        // this long is at rest on whatever it is: nothing falls that slowly.)
+        if (!joined && !rests && welded) { return; }
         B[o + 7] = B[o + 3];
         B[o + 3] = 0.0;
         for (var k = 0; k < 8; k += 1) { V[o + k] = 0.0; }
@@ -936,7 +942,11 @@ fn k_velocity(g: grid<1>, X: rw_store<f32, 1>, X0: read_store<f32, 1>, V: rw_sto
     V[o + 3] = V[o + 1];
     V[o] = (X[o] - X0[o]) / h; V[o + 1] = (X[o + 1] - X0[o + 1]) / h; V[o + 2] = (X[o + 2] - X0[o + 2]) / h;
     let w = rotvec(vec4<f32>(X[o + 4], X[o + 5], X[o + 6], X[o + 7]), vec4<f32>(X0[o + 4], X0[o + 5], X0[o + 6], X0[o + 7])) / h;
-    V[o + 4] = w.x; V[o + 5] = w.y; V[o + 6] = w.z;
+    // (All but still, its turning dies away: a slab rocking on an edge comes to rest. Slower than anything
+    // tipping over gathers speed.)
+    var wd = 1.0;
+    if (length(vec3<f32>(V[o], V[o + 1], V[o + 2])) < 0.15 && length(w) < 0.6) { wd = 0.97; }
+    V[o + 4] = w.x * wd; V[o + 5] = w.y * wd; V[o + 6] = w.z * wd;
     // Lying still long enough, it sleeps: held where it is (as a piece not yet let go, but owing nothing to the
     // ground: SUP's distance -1), until something moving touches it or it is pushed past what it stands.
     if (sleep > 0) {
