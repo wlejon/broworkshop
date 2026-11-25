@@ -584,6 +584,8 @@ fn k_support(g: grid<1>, B: rw_store<f32, 1>, V: rw_store<f32, 1>, SUP: rw_store
             // (It hears from the ground what they have heard: a part cut off does not keep itself up.)
             if (B[8 * n + 3] <= 0.0 && B[8 * n + 7] > 0.0 && SUP[2 * n + 1] >= 0) { joined = true; heard = max(heard, SUP[2 * n]); }
             if (B[8 * n + 3] <= 0.0 && B[8 * n + 7] > 0.0 && SUP[2 * n + 1] < 0) { rests = true; }
+            // (Welded to what never moves, a footing: it rests on that.)
+            if (B[8 * n + 3] <= 0.0 && B[8 * n + 7] <= 0.0) { rests = true; }
         }
         // (Rubble once, it is rubble still: welded to a piece that stands, it rests on that.)
         if (SUP[2 * i + 1] < 0) { if (joined) { rests = true; } joined = false; }
@@ -950,7 +952,7 @@ fn k_velocity(g: grid<1>, X: rw_store<f32, 1>, X0: read_store<f32, 1>, V: rw_sto
     // Lying still long enough, it sleeps: held where it is (as a piece not yet let go, but owing nothing to the
     // ground: SUP's distance -1), until something moving touches it or it is pushed past what it stands.
     if (sleep > 0) {
-        if (length(vec3<f32>(V[o], V[o + 1], V[o + 2])) < 0.15 && length(w) < 0.3) { SL[i] = max(SL[i], 0) + 1; } else { SL[i] = 0; }
+        if (length(vec3<f32>(V[o], V[o + 1], V[o + 2])) < 0.15 && length(w) < 0.3) { SL[i] = max(SL[i], 0) + 1; } else { SL[i] = max(SL[i] - 4, 0); }   // (a twitch sets it back; it does not start it again)
         // (k_support puts it to sleep, as rubble or as part of what still stands.)
         if (SL[i] > sleep) { SL[i] = -1; }
     }
