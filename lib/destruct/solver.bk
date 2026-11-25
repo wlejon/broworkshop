@@ -60,19 +60,20 @@ fn tangent1(n: vec3<f32>) -> vec3<f32> {
 @kernel @grid(1)
 fn k_clear(g: grid<1>, count: write_store<i32, 1>) { count[g.x()] = 0; }
 
-// A step's start: the inertial pose, the pose the step starts from, the first guess. P, for one in a cell: where
+// A step's start: the inertial pose, the pose the step starts from, the first guess. M: how far each has moved
+// and turned since the step's start (k_primal keeps it), which is what a contact reads of its other body. P, for one in a cell: where
 // it is and how far it reaches this step (its corner's distance and its speed's):
 // all that finding what is near it reads of it.
 @kernel @grid(1)
 fn k_begin(g: grid<1>, X: rw_store<f32, 1>, X0: write_store<f32, 1>, Y: write_store<f32, 1>, V: rw_store<f32, 1>,
            B: read_store<f32, 1>, BC: write_store<i32, 1>, count: rw_store<i32, 1>, slots: write_store<i32, 1>,
-           LG: read_store<i32, 1>, P: write_store<f32, 1>, nl: i32, h: f32, size: f32, dim: i32) {
+           LG: read_store<i32, 1>, P: write_store<f32, 1>, M: write_store<f32, 1>, nl: i32, h: f32, size: f32, dim: i32) {
     let i = g.x();
     let o = 8 * i;
     BC[i] = 0;
     let p = vec3<f32>(X[o], X[o + 1], X[o + 2]);
     let q = vec4<f32>(X[o + 4], X[o + 5], X[o + 6], X[o + 7]);
-    for (var k = 0; k < 8; k += 1) { X0[o + k] = X[o + k]; }
+    for (var k = 0; k < 8; k += 1) { X0[o + k] = X[o + k]; M[o + k] = 0.0; }
     // (One without size is out of the world: a shot retired, a structure removed. It is in no cell.)
     if (B[o] <= 0.0) { return; }
     // (A large body is in no cell: every body tries it.)
@@ -102,6 +103,9 @@ fn k_begin(g: grid<1>, X: rw_store<f32, 1>, X0: write_store<f32, 1>, Y: write_st
     let pn = p + v * h + gh * aw;
     X[o] = pn.x; X[o + 1] = pn.y; X[o + 2] = pn.z;
     X[o + 4] = qy.x; X[o + 5] = qy.y; X[o + 6] = qy.z; X[o + 7] = qy.w;
+    let tm = rotvec(qy, q);
+    M[o] = pn.x - p.x; M[o + 1] = pn.y - p.y; M[o + 2] = pn.z - p.z;
+    M[o + 4] = tm.x; M[o + 5] = tm.y; M[o + 6] = tm.z;
     // (Binned, and its contacts found, where the step starts: a contact's rows measure the step's motion from there.)
     if (large) { return; }
     P[4 * i] = p.x; P[4 * i + 1] = p.y; P[4 * i + 2] = p.z; P[4 * i + 3] = length(vec3<f32>(B[o], B[o + 1], B[o + 2])) + length(v) * h;
@@ -911,7 +915,7 @@ fn k_colour(g: grid<1>, COL: rw_store<i32, 1>, B: read_store<f32, 1>, CI: read_s
 fn k_primal(g: grid<1>, X: rw_store<f32, 1>, X0: read_store<f32, 1>, Y: read_store<f32, 1>, B: read_store<f32, 1>,
             CI: read_store<i32, 1>, CF: read_store<f32, 1>, BC: read_store<i32, 1>, BR: read_store<i32, 1>, COL: read_store<i32, 1>,
             JI: read_store<i32, 1>, JF: rw_store<f32, 1>, JC: read_store<i32, 1>, JR: read_store<i32, 1>,
-            AL: read_store<i32, 1>, h: f32, alpha: f32, colour: i32, omega0: f32) {
+            AL: read_store<i32, 1>, M: rw_store<f32, 1>, h: f32, alpha: f32, colour: i32, omega0: f32) {
     let ih2 = 1.0 / (h * h);
     for (var s = 0; s < 1; s += 1) {
         if (g.x() >= AL[0]) { continue; }
@@ -944,8 +948,10 @@ fn k_primal(g: grid<1>, X: rw_store<f32, 1>, X0: read_store<f32, 1>, Y: read_sto
         let th = rotvec(q, vec4<f32>(Y[o + 4], Y[o + 5], Y[o + 6], Y[o + 7]));
         let da = c0 * th.x + c1 * th.y + c2 * th.z;
         r[0] = dl.x; r[1] = dl.y; r[2] = dl.z; r[3] = da.x; r[4] = da.y; r[5] = da.z;
-        let dS = p - vec3<f32>(X0[o], X0[o + 1], X0[o + 2]);
-        let tS = rotvec(q, vec4<f32>(X0[o + 4], X0[o + 5], X0[o + 6], X0[o + 7]));
+        let p0 = vec3<f32>(X0[o], X0[o + 1], X0[o + 2]);
+        let q0 = vec4<f32>(X0[o + 4], X0[o + 5], X0[o + 6], X0[o + 7]);
+        let dS = p - p0;
+        let tS = rotvec(q, q0);
         let nc = min(BC[i], MAXREF);
         for (var e = 0; e < nc; e += 1) {
             let k = BR[i * MAXREF + e];
@@ -962,8 +968,8 @@ fn k_primal(g: grid<1>, X: rw_store<f32, 1>, X0: read_store<f32, 1>, Y: read_sto
             var dO = vec3<f32>(0.0);
             var tO = vec3<f32>(0.0);
             if (ot >= 0) {
-                dO = vec3<f32>(X[8 * ot] - X0[8 * ot], X[8 * ot + 1] - X0[8 * ot + 1], X[8 * ot + 2] - X0[8 * ot + 2]);
-                tO = rotvec(vec4<f32>(X[8 * ot + 4], X[8 * ot + 5], X[8 * ot + 6], X[8 * ot + 7]), vec4<f32>(X0[8 * ot + 4], X0[8 * ot + 5], X0[8 * ot + 6], X0[8 * ot + 7]));
+                dO = vec3<f32>(M[8 * ot], M[8 * ot + 1], M[8 * ot + 2]);
+                tO = vec3<f32>(M[8 * ot + 4], M[8 * ot + 5], M[8 * ot + 6]);
             }
             let ca = vec3<f32>(CF[ko + 3], CF[ko + 4], CF[ko + 5]);
             let cb = vec3<f32>(CF[ko + 6], CF[ko + 7], CF[ko + 8]);
@@ -1043,8 +1049,13 @@ fn k_primal(g: grid<1>, X: rw_store<f32, 1>, X0: read_store<f32, 1>, Y: read_sto
         for (var u = 0; u < 6; u += 1) { r[u] = r[u] / a[u * 6 + u]; }
         for (var v = 0; v < 6; v += 1) { let u = 5 - v; for (var k = 0; k < 6; k += 1) { if (k > u) { r[u] = r[u] - a[k * 6 + u] * r[k]; } } }
         let qn = qstep(q, vec3<f32>(-r[3], -r[4], -r[5]) * omega);
-        X[o] = p.x - r[0] * omega; X[o + 1] = p.y - r[1] * omega; X[o + 2] = p.z - r[2] * omega;
+        let pn = vec3<f32>(p.x - r[0] * omega, p.y - r[1] * omega, p.z - r[2] * omega);
+        X[o] = pn.x; X[o + 1] = pn.y; X[o + 2] = pn.z;
         X[o + 4] = qn.x; X[o + 5] = qn.y; X[o + 6] = qn.z; X[o + 7] = qn.w;
+        // (And its motion over the step so far, as its contacts' other bodies read it.)
+        let tn = rotvec(qn, q0);
+        M[o] = pn.x - p0.x; M[o + 1] = pn.y - p0.y; M[o + 2] = pn.z - p0.z;
+        M[o + 4] = tn.x; M[o + 5] = tn.y; M[o + 6] = tn.z;
     }
 }
 
