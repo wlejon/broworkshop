@@ -626,6 +626,7 @@ fn joint_ang(j: i32, JI: read_store<i32, 1>, JF: rw_store<f32, 1>, X: rw_store<f
 // What a weld holds now: it hardens as it gives, to HARDEN times more at its limit, so one that has given
 // outlasts its neighbours' strength as built and they give in their turn: a dent spreads, it does not cut.
 const HARDEN: f32 = 1.0;
+const SPREAD: f32 = 0.003;
 fn weld_holds(JF: rw_store<f32, 1>, o: i32) -> f32 {
     return JF[o + 28] * (1.0 + HARDEN * clamp(JF[o + 36] / max(JF[o + 34], 1.0e-6), 0.0, 1.0));
 }
@@ -717,7 +718,9 @@ fn k_jdual(g: grid<1>, JI: read_store<i32, 1>, JF: rw_store<f32, 1>, X: rw_store
         JF[o + 6] = q.x; JF[o + 7] = q.y; JF[o + 8] = q.z; JF[o + 9] = q.w;
         JF[o + 37] = JF[o + 37] + length(ca);
     }
-    if (bent || dot(slid, slid) > 0.0) {
+    // (By more than SPREAD, metres or radians, in the step: a body let go takes up its load on welds that give
+    // a hair as they do, and that lets nothing go.)
+    if ((bent && length(ca) > SPREAD) || dot(slid, slid) > SPREAD * SPREAD) {
         if (B[8 * a + 3] <= 0.0 && B[8 * a + 7] > 0.0) { REL[a] = 1; }
         if (B[8 * b + 3] <= 0.0 && B[8 * b + 7] > 0.0) { REL[b] = 1; }
     }
