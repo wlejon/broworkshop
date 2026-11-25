@@ -652,6 +652,8 @@ fn k_mcount(g: grid<1>, B: read_store<f32, 1>, SUP: read_store<i32, 1>, MB: read
 //   2        a run of pieces waiting, taken up when that one is all but spent (-1: none)
 //   3..6     its two runs of welds, each the next to take and its end, counted from the welds' room's end back
 //   7, 8     set when it wanted pieces, welds, and there were none: the page's cue
+//   9        the welds its pieces went without, both runs spent in the one step
+// (A run of pieces is all but spent with fewer left than any block's pieces may be: 27, three a side.)
 const GROUP: i32 = 12;
 const PIECE_RUN: i32 = 512;
 const WELD_RUN: i32 = 2048;
@@ -728,7 +730,7 @@ fn fine_weld(a: i32, b: i32, sigma: f32, R: read_store<f32, 1>, D: read_store<f3
     var s = GA.atomic_add(w + 3, 1);
     if (s >= GA[w + 4]) {
         s = GA.atomic_add(w + 5, 1);
-        if (s >= GA[w + 6]) { GA[w + 8] = 1; return; }
+        if (s >= GA[w + 6]) { GA[w + 8] = 1; GA.atomic_add(w + 9, 1); return; }
     }
     if (s < 0 || s >= dcap) { return; }
     let j = njc - 1 - s;
