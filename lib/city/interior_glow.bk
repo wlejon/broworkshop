@@ -1,0 +1,50 @@
+// lib/city/interior_glow.bk — an open building's floor (interior.js), its
+// lit rooms glowing as facade.bk paints them: a room's lamps light its
+// ceiling, walls and contents some 25 lux all over, which the facade shows as
+// albedo x warm x room_night x night; here the same term, over the rooms the
+// facade shows lit. (The point lights pool brighter under the nearest lamps;
+// this is the light that has bounced, everywhere in the room.)
+module hook;
+import mesh;
+
+struct Params {
+    // The mass's centre (world x, z) and its yaw's cos and sin: world to the
+    // mass's frame, where the rooms are axis-aligned boxes.
+    frame: vec4<f32>,
+    // The glow (rgb: warm x room_night x night x the room's share of its
+    // lamps), and the rooms' count.
+    glow: vec4<f32>,
+}
+
+@binding(4, 0) var params: uniform<Params>;
+// Per lit room: (x0, z0, x1, z1) in the mass's frame.
+@binding(4, 14) var rooms: read_buffer<vec4<f32>>;
+
+const MAX: i32 = 64;
+
+pub fn vertex(v: mesh::Vertex) -> mesh::Vertex {
+    var o = v;
+    // (The floor's mesh is built in world coordinates.)
+    o.v0 = vec4<f32>(v.pos, 0.0);
+    return o;
+}
+
+pub fn fragment(v: mesh::Vertex, s: mesh::Surface) -> mesh::Surface {
+    var out = s;
+    let n = min(params.glow.w as i32, MAX);
+    if (n <= 0 || rooms.len() == 0) { return out; }
+    let dx = v.v0.x - params.frame.x;
+    let dz = v.v0.z - params.frame.y;
+    let c = params.frame.z;
+    let sn = params.frame.w;
+    // (interior.js's world(): x' = c x + s z, z' = -s x + c z; inverted.)
+    let lx = c * dx - sn * dz;
+    let lz = sn * dx + c * dz;
+    var lit = false;
+    for (var i: i32 = 0; i < n; i += 1) {
+        let b = rooms[i];
+        if (lx >= b.x && lx <= b.z && lz >= b.y && lz <= b.w) { lit = true; break; }
+    }
+    if (lit) { out.emissive = out.emissive + out.base_color * params.glow.xyz; }
+    return out;
+}
