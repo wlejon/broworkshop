@@ -1031,11 +1031,29 @@ fn k_support(g: grid<1>, B: rw_store<f32, 1>, V: rw_store<f32, 1>, SUP: rw_store
 // of them zeroed once, as the step begins), and k_listed puts the count at the list's head and the thread
 // groups a pass over it takes where a counted dispatch reads them (as k_groups).
 @kernel @grid(1)
-fn k_list(g: grid<1>, B: read_store<f32, 1>, AL: write_store<i32, 1>, LN: rw_store<i32, 1>, slot: i32) {
+// (With a body's place on the list go its rows of the solve pass's sums, k_primal_part: SB its first, or -1
+// were there none left, which there cannot be while the room is a row to PART_C contacts' two ends and two
+// to a body; RB each row's body and part.)
+@kernel @grid(1)
+fn k_list(g: grid<1>, B: read_store<f32, 1>, AL: write_store<i32, 1>, LN: rw_store<i32, 1>, slot: i32,
+          BC: read_store<i32, 1>, JC: read_store<i32, 1>, SB: write_store<i32, 1>, RB: write_store<i32, 1>, rslot: i32, rcap: i32) {
     let i = g.x();
     if (B[8 * i + 3] <= 0.0) { return; }
     let s = LN.atomic_add(slot, 1);
     AL[1 + s] = i;
+    let parts = (min(BC[i], MAXREF) + PART_C - 1) / PART_C;
+    var rows = parts;
+    if (JC[i] > 0) { rows += 1; }
+    let first = LN.atomic_add(rslot, rows);
+    if (first + rows > rcap) { SB[i] = -1; return; }
+    SB[i] = first;
+    for (var k = 0; k < PART_W + 1; k += 1) {
+        if (k >= rows) { continue; }
+        RB[2 * (first + k)] = i;
+        var part = k;
+        if (k >= parts) { part = PART_W; }
+        RB[2 * (first + k) + 1] = part;
+    }
 }
 @kernel @grid(1)
 fn k_wlist(g: grid<1>, B: read_store<f32, 1>, JI: read_store<i32, 1>, JF: read_store<f32, 1>, WL: write_store<i32, 1>, LN: rw_store<i32, 1>, slot: i32,
@@ -1057,6 +1075,14 @@ fn k_listed(g: grid<1>, LN: read_store<i32, 1>, slot: i32, L: write_store<i32, 1
     let n = clamp(LN[slot], 0, cap);
     L[0] = n;
     G[3 * at] = (n + ls - 1) / ls;
+    G[3 * at + 1] = 1;
+    G[3 * at + 2] = 1;
+}
+// The thread groups of a pass over what one of LN's places has counted (the rows k_list handed out).
+@kernel @grid(1)
+fn k_counted(g: grid<1>, LN: read_store<i32, 1>, slot: i32, G: rw_store<i32, 1>, at: i32, ls: i32, cap: i32) {
+    if (g.x() != 0) { return; }
+    G[3 * at] = (clamp(LN[slot], 0, cap) + ls - 1) / ls;
     G[3 * at + 1] = 1;
     G[3 * at + 2] = 1;
 }
@@ -1120,53 +1146,44 @@ fn k_colour(g: grid<1>, COL: rw_store<i32, 1>, B: read_store<f32, 1>, CI: read_s
     }
 }
 
-// The primal pass over the bodies of one colour, in place: each takes its
-// Newton step against its contacts with the others where they are now. Colour
-// 0 is the bodies with none yet: those step all at once, scaled by omega (two
-// in contact each correcting it in full would overshoot).
+// The primal pass over the bodies of one colour: each takes its Newton step against its contacts and welds
+// with the others where they are now. It is two passes. A pass is as long as its longest thread, and a body
+// has up to 48 contacts and 12 welds, each a handful of reads from all over: so first a thread to a part of
+// a body (its contacts PART_C at a time, then its welds) sums that part's rows into a row of S (28 floats:
+// the force's six, then the lower half of the matrix's 36), and then a thread to a body adds its parts up,
+// solves, and moves it (k_primal). The rows are handed out as the awake are listed (k_list: SB a body's
+// first, RB a row's body and part), so the parts' pass is over the rows there are. Colour 0 is the bodies
+// with none yet: those step all at once, scaled by omega (two in contact each correcting it in full would
+// overshoot).
+const PART_C: i32 = 8;
+const PART_W: i32 = 6;   // (the part that is a body's welds: MAXREF / PART_C)
 @kernel @grid(1)
-fn k_primal(g: grid<1>, X: rw_store<f32, 1>, X0: read_store<f32, 1>, Y: read_store<f32, 1>, B: read_store<f32, 1>,
-            CI: read_store<i32, 1>, CF: read_store<f32, 1>, BC: read_store<i32, 1>, BR: read_store<i32, 1>, COL: read_store<i32, 1>,
-            JI: read_store<i32, 1>, JF: rw_store<f32, 1>, JC: read_store<i32, 1>, JR: read_store<i32, 1>,
-            AL: read_store<i32, 1>, M: rw_store<f32, 1>, h: f32, alpha: f32, colour: i32, omega0: f32) {
-    let ih2 = 1.0 / (h * h);
-    for (var s = 0; s < 1; s += 1) {
-        if (g.x() >= AL[0]) { continue; }
-        let i = AL[1 + g.x()];
-        let o = 8 * i;
-        let m = B[o + 3];
-        if (m <= 0.0 || COL[i] != colour) { continue; }
-        var omega = 1.0;
-        if (colour == 0) { omega = omega0; }
-        let p = vec3<f32>(X[o], X[o + 1], X[o + 2]);
-        let q = vec4<f32>(X[o + 4], X[o + 5], X[o + 6], X[o + 7]);
-        var a: array<f32, 36>;
-        var r: array<f32, 6>;
-        for (var k = 0; k < 36; k += 1) { a[k] = 0.0; }
-        a[0] = m * ih2; a[7] = m * ih2; a[14] = m * ih2;
-        // The inertia in the world: R diag(I) R^T.
-        let ex = qrot(q, vec3<f32>(1.0, 0.0, 0.0));
-        let ey = qrot(q, vec3<f32>(0.0, 1.0, 0.0));
-        let ez = qrot(q, vec3<f32>(0.0, 0.0, 1.0));
-        let ix = B[o + 4] * ih2;
-        let iy = B[o + 5] * ih2;
-        let iz = B[o + 6] * ih2;
-        let c0 = ex * (ix * ex.x) + ey * (iy * ey.x) + ez * (iz * ez.x);
-        let c1 = ex * (ix * ex.y) + ey * (iy * ey.y) + ez * (iz * ez.y);
-        let c2 = ex * (ix * ex.z) + ey * (iy * ey.z) + ez * (iz * ez.z);
-        a[21] = c0.x; a[22] = c1.x; a[23] = c2.x;
-        a[27] = c0.y; a[28] = c1.y; a[29] = c2.y;
-        a[33] = c0.z; a[34] = c1.z; a[35] = c2.z;
-        let dl = (p - vec3<f32>(Y[o], Y[o + 1], Y[o + 2])) * (m * ih2);
-        let th = rotvec(q, vec4<f32>(Y[o + 4], Y[o + 5], Y[o + 6], Y[o + 7]));
-        let da = c0 * th.x + c1 * th.y + c2 * th.z;
-        r[0] = dl.x; r[1] = dl.y; r[2] = dl.z; r[3] = da.x; r[4] = da.y; r[5] = da.z;
-        let p0 = vec3<f32>(X0[o], X0[o + 1], X0[o + 2]);
-        let q0 = vec4<f32>(X0[o + 4], X0[o + 5], X0[o + 6], X0[o + 7]);
-        let dS = p - p0;
-        let tS = rotvec(q, q0);
-        let nc = min(BC[i], MAXREF);
-        for (var e = 0; e < nc; e += 1) {
+fn k_primal_part(g: grid<1>, X: rw_store<f32, 1>, X0: read_store<f32, 1>, B: read_store<f32, 1>,
+                 CI: read_store<i32, 1>, CF: read_store<f32, 1>, BC: read_store<i32, 1>, BR: read_store<i32, 1>, COL: read_store<i32, 1>,
+                 JI: read_store<i32, 1>, JF: rw_store<f32, 1>, JC: read_store<i32, 1>, JR: read_store<i32, 1>,
+                 RB: read_store<i32, 1>, M: read_store<f32, 1>, S: write_store<f32, 1>, alpha: f32, colour: i32,
+                 LN: read_store<i32, 1>, rslot: i32, rcap: i32) {
+    if (g.x() >= min(LN[rslot], rcap)) { return; }
+    let i = RB[2 * g.x()];
+    let part = RB[2 * g.x() + 1];
+    let o = 8 * i;
+    if (B[o + 3] <= 0.0 || COL[i] != colour) { return; }
+    let cparts = PART_W;
+    var e0 = PART_C * part;
+    var e1 = min(min(BC[i], MAXREF), e0 + PART_C);
+    if (part >= cparts) {
+        e0 = 0;
+        e1 = min(JC[i], MAXJ);
+    }
+    let q = vec4<f32>(X[o + 4], X[o + 5], X[o + 6], X[o + 7]);
+    var a: array<f32, 36>;
+    var r: array<f32, 6>;
+    for (var k = 0; k < 36; k += 1) { a[k] = 0.0; }
+    for (var k = 0; k < 6; k += 1) { r[k] = 0.0; }
+    if (part < cparts) {
+        let dS = vec3<f32>(X[o] - X0[o], X[o + 1] - X0[o + 1], X[o + 2] - X0[o + 2]);
+        let tS = rotvec(q, vec4<f32>(X0[o + 4], X0[o + 5], X0[o + 6], X0[o + 7]));
+        for (var e = e0; e < e1; e += 1) {
             let k = BR[i * MAXREF + e];
             let ko = 20 * k;
             let isA = CI[2 * k] == i;
@@ -1215,8 +1232,8 @@ fn k_primal(g: grid<1>, X: rw_store<f32, 1>, X0: read_store<f32, 1>, Y: read_sto
                 }
             }
         }
-        let nj = min(JC[i], MAXJ);
-        for (var e = 0; e < nj; e += 1) {
+    } else {
+        for (var e = e0; e < e1; e += 1) {
             let j = JR[i * MAXJ + e];
             let jo = 40 * j;
             if (JF[jo + 30] > 0.5) { continue; }
@@ -1242,6 +1259,65 @@ fn k_primal(g: grid<1>, X: rw_store<f32, 1>, X0: read_store<f32, 1>, Y: read_sto
                     r[u] = r[u] + J[u] * f;
                     for (var w = 0; w < 6; w += 1) { a[u * 6 + w] = a[u * 6 + w] + pen * J[u] * J[w]; }
                 }
+            }
+        }
+    }
+    let so = 28 * g.x();
+    for (var u = 0; u < 6; u += 1) { S[so + u] = r[u]; }
+    var at = so + 6;
+    for (var u = 0; u < 6; u += 1) {
+        for (var w = 0; w < 6; w += 1) { if (w <= u) { S[at] = a[u * 6 + w]; at += 1; } }
+    }
+}
+@kernel @grid(1)
+fn k_primal(g: grid<1>, X: rw_store<f32, 1>, X0: read_store<f32, 1>, Y: read_store<f32, 1>, B: read_store<f32, 1>,
+            BC: read_store<i32, 1>, COL: read_store<i32, 1>, JC: read_store<i32, 1>,
+            AL: read_store<i32, 1>, M: rw_store<f32, 1>, S: read_store<f32, 1>, SB: read_store<i32, 1>, h: f32, colour: i32, omega0: f32) {
+    let ih2 = 1.0 / (h * h);
+    for (var s = 0; s < 1; s += 1) {
+        if (g.x() >= AL[0]) { continue; }
+        let i = AL[1 + g.x()];
+        let o = 8 * i;
+        let m = B[o + 3];
+        if (m <= 0.0 || COL[i] != colour || SB[i] < 0) { continue; }
+        var omega = 1.0;
+        if (colour == 0) { omega = omega0; }
+        let p = vec3<f32>(X[o], X[o + 1], X[o + 2]);
+        let q = vec4<f32>(X[o + 4], X[o + 5], X[o + 6], X[o + 7]);
+        var a: array<f32, 36>;
+        var r: array<f32, 6>;
+        for (var k = 0; k < 36; k += 1) { a[k] = 0.0; }
+        a[0] = m * ih2; a[7] = m * ih2; a[14] = m * ih2;
+        // The inertia in the world: R diag(I) R^T.
+        let ex = qrot(q, vec3<f32>(1.0, 0.0, 0.0));
+        let ey = qrot(q, vec3<f32>(0.0, 1.0, 0.0));
+        let ez = qrot(q, vec3<f32>(0.0, 0.0, 1.0));
+        let ix = B[o + 4] * ih2;
+        let iy = B[o + 5] * ih2;
+        let iz = B[o + 6] * ih2;
+        let c0 = ex * (ix * ex.x) + ey * (iy * ey.x) + ez * (iz * ez.x);
+        let c1 = ex * (ix * ex.y) + ey * (iy * ey.y) + ez * (iz * ez.y);
+        let c2 = ex * (ix * ex.z) + ey * (iy * ey.z) + ez * (iz * ez.z);
+        a[21] = c0.x; a[22] = c1.x; a[23] = c2.x;
+        a[27] = c0.y; a[28] = c1.y; a[29] = c2.y;
+        a[33] = c0.z; a[34] = c1.z; a[35] = c2.z;
+        let dl = (p - vec3<f32>(Y[o], Y[o + 1], Y[o + 2])) * (m * ih2);
+        let th = rotvec(q, vec4<f32>(Y[o + 4], Y[o + 5], Y[o + 6], Y[o + 7]));
+        let da = c0 * th.x + c1 * th.y + c2 * th.z;
+        r[0] = dl.x; r[1] = dl.y; r[2] = dl.z; r[3] = da.x; r[4] = da.y; r[5] = da.z;
+        let p0 = vec3<f32>(X0[o], X0[o + 1], X0[o + 2]);
+        let q0 = vec4<f32>(X0[o + 4], X0[o + 5], X0[o + 6], X0[o + 7]);
+        // (Its parts' sums, the ones it has: the matrix's lower half is all the solve below reads.)
+        var rows = (min(BC[i], MAXREF) + PART_C - 1) / PART_C;
+        if (JC[i] > 0) { rows += 1; }
+        let first = SB[i];
+        for (var part = 0; part < PART_W + 1; part += 1) {
+            if (part >= rows) { continue; }
+            let so = 28 * (first + part);
+            for (var u = 0; u < 6; u += 1) { r[u] = r[u] + S[so + u]; }
+            var at = so + 6;
+            for (var u = 0; u < 6; u += 1) {
+                for (var w = 0; w < 6; w += 1) { if (w <= u) { a[u * 6 + w] = a[u * 6 + w] + S[at]; at += 1; } }
             }
         }
         // LDL^T, in place.
