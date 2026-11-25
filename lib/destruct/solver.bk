@@ -14,6 +14,7 @@ const JMIN: f32 = 1.0;
 const JALPHA: f32 = 1.0;
 const JBETA: f32 = 100000.0;
 const STRIKE: f32 = 300000.0;
+const SHATTER: f32 = 1200000.0;   // the blow (N) a block breaks into its pieces at
 // The speed (m/s) of a thing touching or welded to sleeping rubble that wakes it.
 const WAKE: f32 = 0.3;
 const K: i32 = 64;
@@ -330,6 +331,8 @@ fn k_contacts(g: grid<1>, X: read_store<f32, 1>, B: read_store<f32, 1>,
     let p = vec3<f32>(X[o], X[o + 1], X[o + 2]);
     let q = vec4<f32>(X[o + 4], X[o + 5], X[o + 6], X[o + 7]);
     let hs = vec3<f32>(B[o], B[o + 1], B[o + 2]);
+    // (One without size is out of the world, or a piece still part of its block: it touches nothing.)
+    if (hs.x <= 0.0) { return; }
     let rad = length(hs);
     let v = vec3<f32>(V[o], V[o + 1], V[o + 2]);
     // The large bodies (too big or too fast for the cells; few): every body, fixed ones too, tries each.
@@ -504,7 +507,9 @@ fn k_jdual(g: grid<1>, JI: read_store<i32, 1>, JF: rw_store<f32, 1>, X: rw_store
         fa = fa + unit(k) * t;
     }
     // (It gives at its strength and breaks once pulled apart or bent past what it can take: a blow that only loads it for a step leaves it whole.)
-    if (breaks != 0 && (length(cl) > JF[o + 34] || length(ca) > JF[o + 35])) { JF[o + 30] = 1.0; JF[o + 33] = tick; }
+    if (breaks != 0 && (length(cl) > JF[o + 34] || length(ca) > JF[o + 35])) {
+        JF[o + 30] = 1.0; JF[o + 33] = tick;
+    }
 }
 
 // The loads of a structure's members (a wall, a slab, a column: each many pieces). MF is eight floats a member:
@@ -515,13 +520,101 @@ fn k_jdual(g: grid<1>, JI: read_store<i32, 1>, JF: rw_store<f32, 1>, X: rw_store
 @kernel @grid(1)
 fn k_mclear(g: grid<1>, MC: write_store<i32, 1>) { MC[g.x()] = 0; }
 @kernel @grid(1)
-fn k_mcount(g: grid<1>, B: read_store<f32, 1>, SUP: read_store<i32, 1>, MB: read_store<i32, 1>, MC: rw_store<i32, 1>, tick: i32, rate: i32) {
+fn k_mcount(g: grid<1>, B: read_store<f32, 1>, SUP: read_store<i32, 1>, MB: read_store<i32, 1>, MC: rw_store<i32, 1>, PAR: read_store<i32, 1>, tick: i32, rate: i32) {
     let i = g.x();
     let m = MB[i];
-    if (m < 0) { return; }
+    // (A member's pieces are what is counted: a block is not one, and a piece still part of its block is
+    // joined to the ground as its block is.)
+    if (m < 0 || PAR[i] == -2) { return; }
+    var s = i;
+    if (PAR[i] >= 0) { s = PAR[i]; }
     // (A piece counts while its welds still join it to the ground, held or knocked loose.)
-    let hop = SUP[2 * i + 1];
-    if (hop >= 0 && tick - SUP[2 * i] <= 2 * hop / rate + 4) { let t = MC.atomic_add(m, 1); }
+    let hop = SUP[2 * s + 1];
+    if (hop >= 0 && tick - SUP[2 * s] <= 2 * hop / rate + 4) { let t = MC.atomic_add(m, 1); }
+}
+
+// Blocks. A structure's pieces are grouped into blocks, each a body in its pieces' place while it is whole:
+// the pieces are in the world without size (PAR: their block), and a block (PAR -2) that is struck hard
+// (SHATTER) is marked (SPL 1) and at the next step's start gives way to its pieces: they take up
+// from where it is, moving as it moves (k_split_pieces), the welds between pieces that are both their own
+// bodies now take hold and each weld of the block's goes to the piece that stands for it there, or is done
+// with if the block across has split too (k_split_welds; JA, 8 floats a weld: on each side the anchor in the
+// frame of the piece that stands for the block there, and that piece; the piece -1 for a weld between two
+// pieces, which waits (JF's 30th float 2) until both are their own bodies), and the block leaves the world
+// (k_split_blocks).
+@kernel @grid(1)
+fn k_split_pieces(g: grid<1>, X: rw_store<f32, 1>, X0: rw_store<f32, 1>, R: read_store<f32, 1>, V: rw_store<f32, 1>, B: rw_store<f32, 1>,
+                  D: read_store<f32, 1>, PAR: rw_store<i32, 1>, SPL: read_store<i32, 1>, SUP: rw_store<i32, 1>, REL: rw_store<i32, 1>, SL: rw_store<i32, 1>) {
+    let i = g.x();
+    let p = PAR[i];
+    if (p < 0) { return; }
+    if (SPL[p] != 1) { return; }
+    let o = 8 * i;
+    let po = 8 * p;
+    let off = vec3<f32>(R[o] - R[po], R[o + 1] - R[po + 1], R[o + 2] - R[po + 2]);
+    let ri = vec4<f32>(-R[po + 4], -R[po + 5], -R[po + 6], R[po + 7]);
+    let rq = vec4<f32>(R[o + 4], R[o + 5], R[o + 6], R[o + 7]);
+    let d = qmul(vec4<f32>(X[po + 4], X[po + 5], X[po + 6], X[po + 7]), ri);
+    let d0 = qmul(vec4<f32>(X0[po + 4], X0[po + 5], X0[po + 6], X0[po + 7]), ri);
+    let r = qrot(d, off);
+    let r0 = qrot(d0, off);
+    let q = qmul(d, rq);
+    let q0 = qmul(d0, rq);
+    X[o] = X[po] + r.x; X[o + 1] = X[po + 1] + r.y; X[o + 2] = X[po + 2] + r.z;
+    X[o + 4] = q.x; X[o + 5] = q.y; X[o + 6] = q.z; X[o + 7] = q.w;
+    X0[o] = X0[po] + r0.x; X0[o + 1] = X0[po + 1] + r0.y; X0[o + 2] = X0[po + 2] + r0.z;
+    X0[o + 4] = q0.x; X0[o + 5] = q0.y; X0[o + 6] = q0.z; X0[o + 7] = q0.w;
+    let w = vec3<f32>(V[po + 4], V[po + 5], V[po + 6]);
+    let v = vec3<f32>(V[po], V[po + 1], V[po + 2]) + cross(w, r);
+    V[o] = v.x; V[o + 1] = v.y; V[o + 2] = v.z; V[o + 3] = v.y;
+    V[o + 4] = w.x; V[o + 5] = w.y; V[o + 6] = w.z;
+    B[o] = D[4 * i]; B[o + 1] = D[4 * i + 1]; B[o + 2] = D[4 * i + 2];
+    // (Moving, held or asleep, as its block was.)
+    if (B[po + 3] > 0.0) { B[o + 3] = D[4 * i + 3]; B[o + 7] = 0.0; } else { B[o + 3] = 0.0; B[o + 7] = D[4 * i + 3]; }
+    SUP[2 * i] = SUP[2 * p];
+    if (SUP[2 * p + 1] < 0) { SUP[2 * i + 1] = -1; }
+    REL[i] = REL[p];
+    SL[i] = 0;
+    PAR[i] = -1;
+}
+@kernel @grid(1)
+fn k_split_welds(g: grid<1>, JI: rw_store<i32, 1>, JF: rw_store<f32, 1>, JA: read_store<f32, 1>, PAR: read_store<i32, 1>, SPL: read_store<i32, 1>) {
+    let j = g.x();
+    let o = 40 * j;
+    let a = JI[2 * j];
+    let b = JI[2 * j + 1];
+    if (JA[8 * j + 3] < -0.5) {
+        // (Between two pieces, waiting for both to be their own bodies.)
+        // (Across a blocks' weld that broke, it is broken.)
+        if (JF[o + 30] == 2.0) {
+            if (PAR[a] == -1 && PAR[b] == -1) {
+                var to = 0.0;
+                if (JA[8 * j + 4] > -0.5) { if (JF[40 * ((JA[8 * j + 4] + 0.5) as i32) + 30] == 1.0) { to = 1.0; } }
+                JF[o + 30] = to;
+            }
+        }
+        return;
+    }
+    if (JF[o + 30] > 0.5) { return; }
+    let sa = PAR[a] == -2 && SPL[a] == 1;
+    let sb = PAR[b] == -2 && SPL[b] == 1;
+    if (!sa && !sb) { return; }
+    // (Pieces on both sides now: the welds between those pieces are what joins them.)
+    if ((sa || PAR[a] == -1) && (sb || PAR[b] == -1)) { JF[o + 30] = 2.0; return; }
+    if (sa) { JI[2 * j] = (JA[8 * j + 3] + 0.5) as i32; JF[o] = JA[8 * j]; JF[o + 1] = JA[8 * j + 1]; JF[o + 2] = JA[8 * j + 2]; }
+    if (sb) { JI[2 * j + 1] = (JA[8 * j + 7] + 0.5) as i32; JF[o + 3] = JA[8 * j + 4]; JF[o + 4] = JA[8 * j + 5]; JF[o + 5] = JA[8 * j + 6]; }
+}
+@kernel @grid(1)
+fn k_split_blocks(g: grid<1>, X: rw_store<f32, 1>, V: rw_store<f32, 1>, B: rw_store<f32, 1>, PAR: read_store<i32, 1>, SPL: rw_store<i32, 1>, SUP: rw_store<i32, 1>, SL: rw_store<i32, 1>) {
+    let i = g.x();
+    if (PAR[i] != -2) { return; }
+    if (SPL[i] != 1) { return; }
+    let o = 8 * i;
+    for (var k = 0; k < 8; k += 1) { B[o + k] = 0.0; V[o + k] = 0.0; }
+    X[o + 1] = -100000.0;
+    SUP[2 * i] = 0; SUP[2 * i + 1] = 1048576;
+    SL[i] = 0;
+    SPL[i] = 2;
 }
 @kernel @grid(1)
 fn k_mload(g: grid<1>, MF: rw_store<f32, 1>, MC: read_store<i32, 1>, MJ0: read_store<i32, 1>, MJ: read_store<i32, 1>) {
@@ -871,7 +964,8 @@ fn k_primal(g: grid<1>, X: rw_store<f32, 1>, X0: read_store<f32, 1>, Y: read_sto
 
 @kernel @grid(1)
 fn k_dual(g: grid<1>, X: rw_store<f32, 1>, X0: read_store<f32, 1>, CI: read_store<i32, 1>, CF: rw_store<f32, 1>,
-          NC: read_store<i32, 1>, REL: rw_store<i32, 1>, B: read_store<f32, 1>, V: read_store<f32, 1>, SUP: read_store<i32, 1>, GR: rw_store<i32, 1>, alpha: f32, tick: i32) {
+          NC: read_store<i32, 1>, REL: rw_store<i32, 1>, B: read_store<f32, 1>, V: read_store<f32, 1>, SUP: read_store<i32, 1>, GR: rw_store<i32, 1>,
+          PAR: read_store<i32, 1>, SPL: rw_store<i32, 1>, alpha: f32, tick: i32) {
     let k = g.x();
     if (k >= NC[0]) { return; }
     let o = 20 * k;
@@ -882,6 +976,11 @@ fn k_dual(g: grid<1>, X: rw_store<f32, 1>, X0: read_store<f32, 1>, CI: read_stor
     let b = CI[2 * k + 1];
     var held = B[8 * a + 3] <= 0.0 && B[8 * a + 7] > 0.0;
     if (b >= 0) { if (B[8 * b + 3] <= 0.0 && B[8 * b + 7] > 0.0) { held = true; } }
+    // (A block struck hard enough, moving or held, breaks into its pieces.)
+    if (ln <= -SHATTER) {
+        if (PAR[a] == -2) { SPL[a] = 1; }
+        if (b >= 0) { if (PAR[b] == -2) { SPL[b] = 1; } }
+    }
     if (held && ln <= -STRIKE) {
         ln = -STRIKE;
         REL[a] = 1;
@@ -994,24 +1093,36 @@ fn k_reach(g: grid<1>, X: read_store<f32, 1>, V: read_store<f32, 1>, B: read_sto
 @kernel @grid(1)
 fn k_show(g: grid<1>, X: read_store<f32, 1>, X0: read_store<f32, 1>, R: read_store<f32, 1>, B: read_store<f32, 1>,
           JI: read_store<i32, 1>, JF: read_store<f32, 1>, JC: read_store<i32, 1>, JR: read_store<i32, 1>,
+          PAR: read_store<i32, 1>, D: read_store<f32, 1>,
           OUT: write_store<f32, 1>, SPH: write_store<f32, 1>, ox: f32, oy: f32, oz: f32) {
     let i = g.x();
     let o = 8 * i;
-    let ri = vec4<f32>(-R[o + 4], -R[o + 5], -R[o + 6], R[o + 7]);
-    let p = vec3<f32>(X[o], X[o + 1], X[o + 2]);
-    let d = qmul(vec4<f32>(X[o + 4], X[o + 5], X[o + 6], X[o + 7]), ri);
+    // (A piece still part of its block is where the block has carried it.)
+    var so = o;
+    var off = vec3<f32>(0.0);
+    var hs = vec3<f32>(B[o], B[o + 1], B[o + 2]);
+    if (PAR[i] >= 0) {
+        so = 8 * PAR[i];
+        off = vec3<f32>(R[o] - R[so], R[o + 1] - R[so + 1], R[o + 2] - R[so + 2]);
+        hs = vec3<f32>(D[4 * i], D[4 * i + 1], D[4 * i + 2]);
+    }
+    let ri = vec4<f32>(-R[so + 4], -R[so + 5], -R[so + 6], R[so + 7]);
+    let d = qmul(vec4<f32>(X[so + 4], X[so + 5], X[so + 6], X[so + 7]), ri);
+    let p = vec3<f32>(X[so], X[so + 1], X[so + 2]) + qrot(d, off);
     var p0 = p;
     var d0 = d;
     // (One out of the world, or just put in it, was nowhere a step ago.)
-    if (B[o] > 0.0 && X0[o + 1] > -50000.0) {
-        p0 = vec3<f32>(X0[o], X0[o + 1], X0[o + 2]);
-        d0 = qmul(vec4<f32>(X0[o + 4], X0[o + 5], X0[o + 6], X0[o + 7]), ri);
+    if (B[so] > 0.0 && X0[so + 1] > -50000.0) {
+        d0 = qmul(vec4<f32>(X0[so + 4], X0[so + 5], X0[so + 6], X0[so + 7]), ri);
+        p0 = vec3<f32>(X0[so], X0[so + 1], X0[so + 2]) + qrot(d0, off);
     }
     var bits = 0;
-    let nj = min(JC[i], MAXJ);
+    var nj = min(JC[i], MAXJ);
+    if (PAR[i] >= 0) { nj = 0; }
     for (var e = 0; e < nj; e += 1) {
         let j = JR[i * MAXJ + e];
-        if (JF[40 * j + 30] <= 0.5) { continue; }
+        // (Broken, and one of its own: not one waiting, nor a block's it has not taken up.)
+        if (JF[40 * j + 30] != 1.0 || (JI[2 * j] != i && JI[2 * j + 1] != i)) { continue; }
         var s = 0;
         if (JI[2 * j] != i) { s = 3; }
         let a = vec3<f32>(JF[40 * j + s], JF[40 * j + s + 1], JF[40 * j + s + 2]) / vec3<f32>(B[8 * i], B[8 * i + 1], B[8 * i + 2]);
@@ -1030,5 +1141,5 @@ fn k_show(g: grid<1>, X: read_store<f32, 1>, X0: read_store<f32, 1>, R: read_sto
     OUT[t + 12] = d.x; OUT[t + 13] = d.y; OUT[t + 14] = d.z; OUT[t + 15] = d.w;
     OUT[t + 16] = d0.x; OUT[t + 17] = d0.y; OUT[t + 18] = d0.z; OUT[t + 19] = d0.w;
     SPH[4 * i] = p.x + ox; SPH[4 * i + 1] = p.y + oy; SPH[4 * i + 2] = p.z + oz;
-    SPH[4 * i + 3] = 1.2 * length(vec3<f32>(B[o], B[o + 1], B[o + 2])) + length(p - p0);
+    SPH[4 * i + 3] = 1.2 * length(hs) + length(p - p0);
 }
