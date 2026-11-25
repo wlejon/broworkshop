@@ -919,11 +919,20 @@ fn k_dual(g: grid<1>, X: rw_store<f32, 1>, X0: read_store<f32, 1>, CI: read_stor
 }
 
 @kernel @grid(1)
-fn k_velocity(g: grid<1>, X: read_store<f32, 1>, X0: read_store<f32, 1>, V: rw_store<f32, 1>, B: rw_store<f32, 1>,
-              SL: rw_store<i32, 1>, h: f32, sleep: i32) {
+fn k_velocity(g: grid<1>, X: rw_store<f32, 1>, X0: read_store<f32, 1>, V: rw_store<f32, 1>, B: rw_store<f32, 1>,
+              SL: rw_store<i32, 1>, SUP: rw_store<i32, 1>, h: f32, sleep: i32, edge: f32) {
     let i = g.x();
     let o = 8 * i;
     if (B[o + 3] <= 0.0) { return; }
+    // Past the edge of the ground the solver knows (or fallen through it), it is out of the world: no size, no
+    // mass, far under the ground.
+    if (abs(X[o]) > edge || abs(X[o + 2]) > edge || X[o + 1] < -1000.0) {
+        for (var k = 0; k < 8; k += 1) { B[o + k] = 0.0; V[o + k] = 0.0; }
+        X[o + 1] = -100000.0;
+        SUP[2 * i] = 0; SUP[2 * i + 1] = 1048576;
+        SL[i] = 0;
+        return;
+    }
     V[o + 3] = V[o + 1];
     V[o] = (X[o] - X0[o]) / h; V[o + 1] = (X[o + 1] - X0[o + 1]) / h; V[o + 2] = (X[o + 2] - X0[o + 2]) / h;
     let w = rotvec(vec4<f32>(X[o + 4], X[o + 5], X[o + 6], X[o + 7]), vec4<f32>(X0[o + 4], X0[o + 5], X0[o + 6], X0[o + 7])) / h;
