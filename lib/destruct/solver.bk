@@ -905,7 +905,8 @@ fn k_show(g: grid<1>, X: read_store<f32, 1>, R: read_store<f32, 1>, OUT: write_s
 }
 
 // Where things are moving, on the plan: OUT is dim x dim cells of `cell`
-// metres about the origin, set where a body with mass moves faster than 1 m/s.
+// metres about the origin, each the count of the bodies with mass moving
+// faster than 1 m/s over it.
 @kernel @grid(1)
 fn k_reach(g: grid<1>, X: read_store<f32, 1>, V: read_store<f32, 1>, B: read_store<f32, 1>, OUT: rw_store<i32, 1>, cell: f32, dim: i32) {
     let i = g.x();
@@ -915,7 +916,7 @@ fn k_reach(g: grid<1>, X: read_store<f32, 1>, V: read_store<f32, 1>, B: read_sto
     let cx = (floor(X[o] / cell) as i32) + dim / 2;
     let cz = (floor(X[o + 2] / cell) as i32) + dim / 2;
     if (cx < 0 || cz < 0 || cx >= dim || cz >= dim) { return; }
-    OUT[cx + dim * cz] = 1;
+    OUT.atomic_add(cx + dim * cz, 1);
 }
 
 // A body's faces where a weld has broken, as bits (2 * axis, + 1 for the +
