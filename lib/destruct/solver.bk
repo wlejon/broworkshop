@@ -863,8 +863,10 @@ fn k_wlist(g: grid<1>, B: read_store<f32, 1>, JI: read_store<i32, 1>, JF: read_s
 // same gives it up (the lower ranked of the two).
 @kernel @grid(1)
 fn k_uncolour(g: grid<1>, COL: rw_store<i32, 1>, B: read_store<f32, 1>, CI: read_store<i32, 1>, BC: read_store<i32, 1>, BR: read_store<i32, 1>,
-              JI: read_store<i32, 1>, JC: read_store<i32, 1>, JR: read_store<i32, 1>) {
-    let i = g.x();
+              JI: read_store<i32, 1>, JC: read_store<i32, 1>, JR: read_store<i32, 1>, AL: read_store<i32, 1>) {
+    // (Over the awake, by list: only they are solved by colour, and one asleep keeps its own till it wakes.)
+    if (g.x() >= AL[0]) { return; }
+    let i = AL[1 + g.x()];
     let c = COL[i];
     if (c == 0) { return; }
     let nj = min(JC[i], MAXJ);
@@ -883,8 +885,9 @@ fn k_uncolour(g: grid<1>, COL: rw_store<i32, 1>, B: read_store<f32, 1>, CI: read
 // A round: an uncoloured body that outranks its uncoloured neighbours takes the lowest colour its neighbours do not have.
 @kernel @grid(1)
 fn k_colour(g: grid<1>, COL: rw_store<i32, 1>, B: read_store<f32, 1>, CI: read_store<i32, 1>, BC: read_store<i32, 1>, BR: read_store<i32, 1>,
-            JI: read_store<i32, 1>, JC: read_store<i32, 1>, JR: read_store<i32, 1>, ncol: i32) {
-    let i = g.x();
+            JI: read_store<i32, 1>, JC: read_store<i32, 1>, JR: read_store<i32, 1>, AL: read_store<i32, 1>, ncol: i32) {
+    if (g.x() >= AL[0]) { return; }
+    let i = AL[1 + g.x()];
     if (COL[i] != 0 || B[8 * i + 3] <= 0.0) { return; }
     var used = 0u;
     let nj = min(JC[i], MAXJ);
