@@ -6,10 +6,12 @@
 // passes of k_primal with k_dual / k_jdual, and k_velocity).
 // A standing building costs almost nothing: its pieces are held (no mass) and
 // only kept in account, each hearing from the ground through its welds
-// (k_support) and each member carrying the load of those above it (k_mload);
-// a piece is let go when it is struck, cut off from the ground, or its member
-// is loaded past what it was built to carry. What comes to rest sleeps, as
-// part of what still stands or as rubble, until something moving touches it.
+// (k_support), the load each member carries of those above it tallied (k_mload);
+// a piece is let go when it is struck, about to be by something fast, at the
+// held end of a weld that gives, or cut off from the ground. A weld yields at
+// its strength and hardens as it gives; a piece pressed past its own crushes
+// and is gone. What comes to rest sleeps, as part of what still stands or as
+// rubble, until something moving touches it.
 // How far a weld gives in all before it breaks, by how ductile what it joins is (0, as glass, to 5, as
 // steel): bent 0.04 rad, twice as far with each step up; slid half of that in metres. And the arm a
 // weld's bending strength is its pulling strength at, by the face it joins over.
@@ -389,8 +391,10 @@ fn k_contacts(g: grid<1>, X: read_store<f32, 1>, B: read_store<f32, 1>,
         let mg = SPEC + closing * h + GRAV * h * h;
         // (A held piece something fast is about to reach is let go before it is there: held, it stands a blow
         // only so hard and what struck it goes on through it; free, it is struck with all there is.)
-        if (closing > AHEAD && B[o + 3] <= 0.0 && B[o + 7] > 0.0) {
-            let far = rad + rj + SPEC + closing * 3.0 * h;
+        // (Coming at it: one passing by or going away lets nothing go.)
+        let toward = dot(vec3<f32>(V[8 * j], V[8 * j + 1], V[8 * j + 2]) - v, -dd) / max(length(dd), 0.001);
+        if (toward > AHEAD && B[o + 3] <= 0.0 && B[o + 7] > 0.0) {
+            let far = rad + rj + SPEC + toward * 3.0 * h;
             if (dot(dd, dd) < far * far) { REL[i] = 1; }
         }
         if (dot(dd, dd) > (rad + rj + mg) * (rad + rj + mg)) { continue; }
