@@ -1,0 +1,890 @@
+// lib/destruct/solver.bk — a rigid-body solver for breaking buildings, on the
+// GPU: boxes (8 floats of pose in X: position, 0, quaternion; 8 of shape in B:
+// half extents, mass, the inertia's diagonal, its mass while held) with contacts against each other and
+// a ground plane, breakable welds between them, and a step of augmented
+// vertex block descent (k_begin, k_contacts, k_jbegin, the colouring, then
+// passes of k_primal with k_dual / k_jdual, and k_velocity).
+// A standing building costs almost nothing: its pieces are held (no mass) and
+// only kept in account, each hearing from the ground through its welds
+// (k_support) and each member carrying the load of those above it (k_mload);
+// a piece is let go when it is struck, cut off from the ground, or its member
+// is loaded past what it was built to carry. What comes to rest sleeps, as
+// part of what still stands or as rubble, until something moving touches it.
+const JMIN: f32 = 1.0;
+const JALPHA: f32 = 1.0;
+const JBETA: f32 = 100000.0;
+const STRIKE: f32 = 300000.0;
+// The speed (m/s) of a thing touching or welded to sleeping rubble that wakes it.
+const WAKE: f32 = 0.3;
+const K: i32 = 64;
+const MAXREF: i32 = 48;
+const PEN_MIN: f32 = 1.0;
+const PEN_MAX: f32 = 1000000000.0;
+const BETA: f32 = 100000.0;
+const GAMMA: f32 = 0.99;
+const MARGIN: f32 = 0.0005;
+const SPEC: f32 = 0.03;
+const MU: f32 = 0.6;
+const MATCH: f32 = 0.1;
+const MERGE: f32 = 0.03;
+const MAXJ: i32 = 12;
+const GRAV: f32 = 10.0;
+
+fn qmul(a: vec4<f32>, b: vec4<f32>) -> vec4<f32> {
+    return vec4<f32>(a.w * b.xyz + b.w * a.xyz + cross(a.xyz, b.xyz), a.w * b.w - dot(a.xyz, b.xyz));
+}
+fn qrot(q: vec4<f32>, v: vec3<f32>) -> vec3<f32> {
+    return v + 2.0 * cross(q.xyz, cross(q.xyz, v) + q.w * v);
+}
+fn qinv_rot(q: vec4<f32>, v: vec3<f32>) -> vec3<f32> {
+    return qrot(vec4<f32>(-q.x, -q.y, -q.z, q.w), v);
+}
+// The rotation vector taking q0 to q.
+fn rotvec(q: vec4<f32>, q0: vec4<f32>) -> vec3<f32> {
+    let d = qmul(q, vec4<f32>(-q0.x, -q0.y, -q0.z, q0.w));
+    if (d.w < 0.0) { return -2.0 * d.xyz; }
+    return 2.0 * d.xyz;
+}
+fn qstep(q: vec4<f32>, w: vec3<f32>) -> vec4<f32> {
+    return normalize(q + 0.5 * qmul(vec4<f32>(w.x, w.y, w.z, 0.0), q));
+}
+fn cell_of(p: vec3<f32>, size: f32, dim: i32) -> vec3<i32> {
+    return vec3<i32>(floor(p / size)) & vec3<i32>(dim - 1);
+}
+fn tangent1(n: vec3<f32>) -> vec3<f32> {
+    if (abs(n.y) < 0.9) { return normalize(cross(n, vec3<f32>(0.0, 1.0, 0.0))); }
+    return normalize(cross(n, vec3<f32>(1.0, 0.0, 0.0)));
+}
+
+@kernel @grid(1)
+fn k_clear(g: grid<1>, count: write_store<i32, 1>) { count[g.x()] = 0; }
+
+// A step's start: the inertial pose, the pose the step starts from, the first guess.
+@kernel @grid(1)
+fn k_begin(g: grid<1>, X: rw_store<f32, 1>, X0: write_store<f32, 1>, Y: write_store<f32, 1>, V: rw_store<f32, 1>,
+           B: read_store<f32, 1>, BC: write_store<i32, 1>, count: rw_store<i32, 1>, slots: write_store<i32, 1>,
+           LG: read_store<i32, 1>, nl: i32, h: f32, size: f32, dim: i32) {
+    let i = g.x();
+    let o = 8 * i;
+    BC[i] = 0;
+    let p = vec3<f32>(X[o], X[o + 1], X[o + 2]);
+    let q = vec4<f32>(X[o + 4], X[o + 5], X[o + 6], X[o + 7]);
+    for (var k = 0; k < 8; k += 1) { X0[o + k] = X[o + k]; }
+    // (A large body is in no cell: every body tries it.)
+    var large = false;
+    for (var k = 0; k < nl; k += 1) { if (LG[k] == i) { large = true; } }
+    // (A fixed body is binned where it stands: the moving ones find it.)
+    if (B[o + 3] <= 0.0) {
+        if (large) { return; }
+        let cs = cell_of(p, size, dim);
+        let cis = cs.x + dim * (cs.y + dim * cs.z);
+        let ss = count.atomic_add(cis, 1);
+        if (ss < K) { slots[cis * K + ss] = i; }
+        return;
+    }
+    let v = vec3<f32>(V[o], V[o + 1], V[o + 2]);
+    var w = vec3<f32>(V[o + 4], V[o + 5], V[o + 6]);
+    let wl = length(w);
+    if (wl > 50.0) { w = w * (50.0 / wl); }
+    let gh = vec3<f32>(0.0, -GRAV * h * h, 0.0);
+    let py = p + v * h + gh;
+    let qy = qstep(q, w * h);
+    Y[o] = py.x; Y[o + 1] = py.y; Y[o + 2] = py.z;
+    Y[o + 4] = qy.x; Y[o + 5] = qy.y; Y[o + 6] = qy.z; Y[o + 7] = qy.w;
+    // (How much of gravity's fall it took last step: at rest none, falling all.)
+    let aw = clamp(-((v.y - V[o + 3]) / h) / GRAV, 0.0, 1.0);
+    let pn = p + v * h + gh * aw;
+    X[o] = pn.x; X[o + 1] = pn.y; X[o + 2] = pn.z;
+    X[o + 4] = qy.x; X[o + 5] = qy.y; X[o + 6] = qy.z; X[o + 7] = qy.w;
+    // (Binned, and its contacts found, where the step starts: a contact's rows measure the step's motion from there.)
+    if (large) { return; }
+    let c = cell_of(p, size, dim);
+    let ci = c.x + dim * (c.y + dim * c.z);
+    let s = count.atomic_add(ci, 1);
+    if (s < K) { slots[ci * K + s] = i; }
+}
+
+// A contact, starting from the last step's contact of the same pair nearest it
+// on body a (its force and stiffness carried), else from nothing.
+fn add_contact(a: i32, b: i32, n: vec3<f32>, ra: vec3<f32>, rb: vec3<f32>, c0: f32, qa: vec4<f32>, qb: vec4<f32>, ms: f32,
+               CI: rw_store<i32, 1>, CF: rw_store<f32, 1>, NC: rw_store<i32, 1>, BC: rw_store<i32, 1>, BR: rw_store<i32, 1>, cap: i32,
+               OCI: read_store<i32, 1>, OCF: read_store<f32, 1>, OBC: read_store<i32, 1>, OBR: read_store<i32, 1>) {
+    let k = NC.atomic_add(0, 1);
+    if (k >= cap) { return; }
+    CI[2 * k] = a; CI[2 * k + 1] = b;
+    let o = 20 * k;
+    // (Where it is on the pair's lower-numbered body: which of the two is a can change from step to step.)
+    var la = qinv_rot(qa, ra);
+    if (b >= 0 && b < a) { la = qinv_rot(qb, rb); }
+    var lam = vec3<f32>(0.0);
+    // (Stiffness is per kilogram of the pair's reduced mass: the ramp tuned for unit masses holds for any.)
+    var pen = vec3<f32>(PEN_MIN * ms);
+    var bd = MATCH * MATCH;
+    let no = min(OBC[a], MAXREF);
+    for (var e = 0; e < no; e += 1) {
+        let q = OBR[a * MAXREF + e];
+        let same = OCI[2 * q] == a && OCI[2 * q + 1] == b;
+        let swapped = OCI[2 * q] == b && OCI[2 * q + 1] == a;
+        if (!same && !swapped) { continue; }
+        let qo = 20 * q;
+        let dl = la - vec3<f32>(OCF[qo + 10], OCF[qo + 11], OCF[qo + 18]);
+        if (dot(dl, dl) < bd) {
+            bd = dot(dl, dl);
+            lam = vec3<f32>(OCF[qo + 12], OCF[qo + 13], OCF[qo + 14]);
+            if (swapped) { lam = vec3<f32>(lam.x, 0.0, 0.0); }
+            pen = clamp(vec3<f32>(OCF[qo + 15], OCF[qo + 16], OCF[qo + 17]) * GAMMA, vec3<f32>(PEN_MIN * ms), vec3<f32>(PEN_MAX * ms));
+        }
+    }
+    CF[o] = n.x; CF[o + 1] = n.y; CF[o + 2] = n.z;
+    CF[o + 3] = ra.x; CF[o + 4] = ra.y; CF[o + 5] = ra.z;
+    CF[o + 6] = rb.x; CF[o + 7] = rb.y; CF[o + 8] = rb.z;
+    CF[o + 9] = c0 + MARGIN; CF[o + 10] = la.x; CF[o + 11] = la.y; CF[o + 18] = la.z; CF[o + 19] = ms;
+    CF[o + 12] = lam.x; CF[o + 13] = lam.y; CF[o + 14] = lam.z;
+    CF[o + 15] = pen.x; CF[o + 16] = pen.y; CF[o + 17] = pen.z;
+    let sa = BC.atomic_add(a, 1);
+    if (sa < MAXREF) { BR[a * MAXREF + sa] = k; }
+    if (b >= 0) {
+        let sb = BC.atomic_add(b, 1);
+        if (sb < MAXREF) { BR[b * MAXREF + sb] = k; }
+    }
+}
+
+fn pick(v: vec3<f32>, k: i32) -> f32 {
+    if (k == 0) { return v.x; }
+    if (k == 1) { return v.y; }
+    return v.z;
+}
+fn axis(q: vec4<f32>, k: i32) -> vec3<f32> {
+    if (k == 0) { return qrot(q, vec3<f32>(1.0, 0.0, 0.0)); }
+    if (k == 1) { return qrot(q, vec3<f32>(0.0, 1.0, 0.0)); }
+    return qrot(q, vec3<f32>(0.0, 0.0, 1.0));
+}
+// A box's reach along a unit direction.
+fn reach(q: vec4<f32>, hs: vec3<f32>, l: vec3<f32>) -> f32 {
+    return hs.x * abs(dot(axis(q, 0), l)) + hs.y * abs(dot(axis(q, 1), l)) + hs.z * abs(dot(axis(q, 2), l));
+}
+
+// A face contact: box r's face k (its outward normal m, towards box i) against
+// box i's face most opposed to it, clipped to r's face: a contact at each
+// point of the clipped face at or under r's (i the contact's a, r its b).
+fn face_contacts(r: i32, i: i32, k: i32, m: vec3<f32>, X: read_store<f32, 1>, B: read_store<f32, 1>, pen: f32, mg: f32,
+                 CI: rw_store<i32, 1>, CF: rw_store<f32, 1>, NC: rw_store<i32, 1>, BC: rw_store<i32, 1>, BR: rw_store<i32, 1>, cap: i32,
+    OCI: read_store<i32, 1>, OCF: read_store<f32, 1>, OBC: read_store<i32, 1>, OBR: read_store<i32, 1>) {
+    let pr = vec3<f32>(X[8 * r], X[8 * r + 1], X[8 * r + 2]);
+    let qr = vec4<f32>(X[8 * r + 4], X[8 * r + 5], X[8 * r + 6], X[8 * r + 7]);
+    let hr = vec3<f32>(B[8 * r], B[8 * r + 1], B[8 * r + 2]);
+    let pi = vec3<f32>(X[8 * i], X[8 * i + 1], X[8 * i + 2]);
+    let qi = vec4<f32>(X[8 * i + 4], X[8 * i + 5], X[8 * i + 6], X[8 * i + 7]);
+    let hi = vec3<f32>(B[8 * i], B[8 * i + 1], B[8 * i + 2]);
+    // The incident face: i's most against m.
+    var f = 0;
+    var fv = dot(axis(qi, 0), m);
+    for (var e = 1; e < 3; e += 1) {
+        let v = dot(axis(qi, e), m);
+        if (abs(v) > abs(fv)) { fv = v; f = e; }
+    }
+    let fu = (f + 1) % 3;
+    let fw = (f + 2) % 3;
+    let ctr = pi - axis(qi, f) * (sign(fv) * pick(hi, f));
+    let eu = axis(qi, fu) * pick(hi, fu);
+    let ew = axis(qi, fw) * pick(hi, fw);
+    var poly: array<f32, 24>;
+    var tmp: array<f32, 24>;
+    var np = 4;
+    for (var c = 0; c < 4; c += 1) {
+        let su = f32((((c >> 1) ^ c) & 1) * 2 - 1);
+        let sw = f32(((c >> 1) & 1) * 2 - 1);
+        let v = ctr + eu * su + ew * sw;
+        poly[3 * c] = v.x; poly[3 * c + 1] = v.y; poly[3 * c + 2] = v.z;
+    }
+    // Clipped to the reference face's four sides.
+    let ru = (k + 1) % 3;
+    let rw = (k + 2) % 3;
+    for (var side = 0; side < 4; side += 1) {
+        var ax = axis(qr, ru);
+        var ext = pick(hr, ru);
+        if (side >= 2) { ax = axis(qr, rw); ext = pick(hr, rw); }
+        if ((side & 1) == 1) { ax = -ax; }
+        var nt = 0;
+        for (var c = 0; c < np; c += 1) {
+            let d = (c + 1) % np;
+            let a = vec3<f32>(poly[3 * c], poly[3 * c + 1], poly[3 * c + 2]);
+            let b = vec3<f32>(poly[3 * d], poly[3 * d + 1], poly[3 * d + 2]);
+            let da = dot(a - pr, ax) - ext;
+            let db = dot(b - pr, ax) - ext;
+            if (da <= 0.0 && nt < 8) { tmp[3 * nt] = a.x; tmp[3 * nt + 1] = a.y; tmp[3 * nt + 2] = a.z; nt += 1; }
+            if (da * db < 0.0 && nt < 8) {
+                let x = a + (b - a) * (da / (da - db));
+                tmp[3 * nt] = x.x; tmp[3 * nt + 1] = x.y; tmp[3 * nt + 2] = x.z; nt += 1;
+            }
+        }
+        np = nt;
+        for (var c = 0; c < 3 * np; c += 1) { poly[c] = tmp[c]; }
+    }
+    let top = pick(hr, k);
+    for (var c = 0; c < np; c += 1) {
+        let v = vec3<f32>(poly[3 * c], poly[3 * c + 1], poly[3 * c + 2]);
+        let sep = dot(v - pr, m) - top;
+        // (One contact a point: clipping leaves points all but on each other.)
+        var dup = false;
+        for (var e = 0; e < c; e += 1) {
+            let u = v - vec3<f32>(poly[3 * e], poly[3 * e + 1], poly[3 * e + 2]);
+            if (dot(u, u) < MERGE * MERGE) { dup = true; }
+        }
+        if (sep < mg && !dup) { add_contact(i, r, m, v - pi, v - m * sep - pr, sep, qi, qr, pen, CI, CF, NC, BC, BR, cap, OCI, OCF, OBC, OBR); }
+    }
+}
+
+// Boxes a and b: the axis of least overlap of the 15 (their faces', their
+// edges' crosses); a face's is a clipped face manifold, an edge pair's the
+// closest points of the two edges.
+fn box_box(a: i32, b: i32, X: read_store<f32, 1>, B: read_store<f32, 1>, pen: f32, mg: f32,
+           CI: rw_store<i32, 1>, CF: rw_store<f32, 1>, NC: rw_store<i32, 1>, BC: rw_store<i32, 1>, BR: rw_store<i32, 1>, cap: i32,
+    OCI: read_store<i32, 1>, OCF: read_store<f32, 1>, OBC: read_store<i32, 1>, OBR: read_store<i32, 1>) {
+    let pa = vec3<f32>(X[8 * a], X[8 * a + 1], X[8 * a + 2]);
+    let qa = vec4<f32>(X[8 * a + 4], X[8 * a + 5], X[8 * a + 6], X[8 * a + 7]);
+    let ha = vec3<f32>(B[8 * a], B[8 * a + 1], B[8 * a + 2]);
+    let pb = vec3<f32>(X[8 * b], X[8 * b + 1], X[8 * b + 2]);
+    let qb = vec4<f32>(X[8 * b + 4], X[8 * b + 5], X[8 * b + 6], X[8 * b + 7]);
+    let hb = vec3<f32>(B[8 * b], B[8 * b + 1], B[8 * b + 2]);
+    let d = pb - pa;
+    var best = 1.0e30;
+    var kind = -1;
+    var bn = vec3<f32>(0.0, 1.0, 0.0);   // from a to b
+    for (var k = 0; k < 3; k += 1) {
+        let l = axis(qa, k);
+        let s = dot(d, l);
+        let ov = pick(ha, k) + reach(qb, hb, l) - abs(s);
+        if (ov < -mg) { return; }
+        if (ov < best) { best = ov; kind = k; bn = l * sign(s); }
+    }
+    for (var k = 0; k < 3; k += 1) {
+        let l = axis(qb, k);
+        let s = dot(d, l);
+        let ov = pick(hb, k) + reach(qa, ha, l) - abs(s);
+        if (ov < -mg) { return; }
+        if (ov < best) { best = ov; kind = 3 + k; bn = l * sign(s); }
+    }
+    for (var i = 0; i < 3; i += 1) {
+        for (var j = 0; j < 3; j += 1) {
+            var l = cross(axis(qa, i), axis(qb, j));
+            let ll = length(l);
+            if (ll < 0.001) { continue; }
+            l = l / ll;
+            let s = dot(d, l);
+            let ov = reach(qa, ha, l) + reach(qb, hb, l) - abs(s);
+            if (ov < -mg) { return; }
+            // (A face's axis unless the edges' is clearly the shallower.)
+            if (ov < best * 0.95 - 0.005) { best = ov; kind = 6 + 3 * i + j; bn = l * sign(s); }
+        }
+    }
+    if (kind < 3) { face_contacts(a, b, kind, bn, X, B, pen, mg, CI, CF, NC, BC, BR, cap, OCI, OCF, OBC, OBR); return; }
+    if (kind < 6) { face_contacts(b, a, kind - 3, -bn, X, B, pen, mg, CI, CF, NC, BC, BR, cap, OCI, OCF, OBC, OBR); return; }
+    let i = (kind - 6) / 3;
+    let j = (kind - 6) % 3;
+    var ea = pa;
+    var eb = pb;
+    for (var k = 0; k < 3; k += 1) {
+        if (k != i) { ea = ea + axis(qa, k) * (sign(dot(axis(qa, k), bn)) * pick(ha, k)); }
+        if (k != j) { eb = eb - axis(qb, k) * (sign(dot(axis(qb, k), bn)) * pick(hb, k)); }
+    }
+    let da = axis(qa, i);
+    let db = axis(qb, j);
+    let r = ea - eb;
+    let bb = dot(da, db);
+    let c = dot(da, r);
+    let f = dot(db, r);
+    let den = max(1.0 - bb * bb, 0.0001);
+    let s = clamp((bb * f - c) / den, -pick(ha, i), pick(ha, i));
+    let t = clamp((f - bb * c) / den, -pick(hb, j), pick(hb, j));
+    add_contact(a, b, -bn, ea + da * s - pa, eb + db * t - pb, -best, qa, qb, pen, CI, CF, NC, BC, BR, cap, OCI, OCF, OBC, OBR);
+}
+
+@kernel @grid(1)
+fn k_contacts(g: grid<1>, X: read_store<f32, 1>, B: read_store<f32, 1>,
+              count: read_store<i32, 1>, slots: read_store<i32, 1>,
+              CI: rw_store<i32, 1>, CF: rw_store<f32, 1>, NC: rw_store<i32, 1>, BC: rw_store<i32, 1>, BR: rw_store<i32, 1>,
+              OCI: read_store<i32, 1>, OCF: read_store<f32, 1>, OBC: read_store<i32, 1>, OBR: read_store<i32, 1>,
+              V: read_store<f32, 1>, LG: read_store<i32, 1>, JI: read_store<i32, 1>, JF: read_store<f32, 1>,
+              JC: read_store<i32, 1>, JR: read_store<i32, 1>, nl: i32, cap: i32, size: f32, dim: i32, h: f32) {
+    let i = g.x();
+    let o = 8 * i;
+    let p = vec3<f32>(X[o], X[o + 1], X[o + 2]);
+    let q = vec4<f32>(X[o + 4], X[o + 5], X[o + 6], X[o + 7]);
+    let hs = vec3<f32>(B[o], B[o + 1], B[o + 2]);
+    let rad = length(hs);
+    let v = vec3<f32>(V[o], V[o + 1], V[o + 2]);
+    // The large bodies (too big or too fast for the cells; few): every body, fixed ones too, tries each.
+    var large = false;
+    for (var k = 0; k < nl; k += 1) { if (LG[k] == i) { large = true; } }
+    for (var k = 0; k < nl; k += 1) {
+        let j = LG[k];
+        let mj = B[8 * j + 3];
+        if (j == i || (large && j < i) || (mj <= 0.0 && B[o + 3] <= 0.0)) { continue; }
+        let pj = vec3<f32>(X[8 * j], X[8 * j + 1], X[8 * j + 2]);
+        let rj = length(vec3<f32>(B[8 * j], B[8 * j + 1], B[8 * j + 2]));
+        let dd = pj - p;
+        let mg = SPEC + length(v - vec3<f32>(V[8 * j], V[8 * j + 1], V[8 * j + 2])) * h + GRAV * h * h;
+        if (dot(dd, dd) > (rad + rj + mg) * (rad + rj + mg)) { continue; }
+        // (A held piece counts by the mass it will have let go: the stiffness is right the moment it is.)
+        let mi = max(B[o + 3], B[o + 7]);
+        let mjj = max(mj, B[8 * j + 7]);
+        var ms = max(mi, mjj);
+        if (mi > 0.0 && mjj > 0.0) { ms = mi * mjj / (mi + mjj); }
+        box_box(i, j, X, B, ms, mg, CI, CF, NC, BC, BR, cap, OCI, OCF, OBC, OBR);
+    }
+    if (B[o + 3] <= 0.0) { return; }
+    // The ground: y = 0. (A contact from as far off as the step can close: it stops what would pass through.)
+    let gm = SPEC + max(-v.y, 0.0) * h + GRAV * h * h;
+    if (p.y - rad < gm) {
+        for (var k = 0; k < 8; k += 1) {
+            let s = vec3<f32>(f32((k & 1) * 2 - 1), f32(((k >> 1) & 1) * 2 - 1), f32(((k >> 2) & 1) * 2 - 1));
+            let r = qrot(q, s * hs);
+            let y = p.y + r.y;
+            if (y < gm) { add_contact(i, -1, vec3<f32>(0.0, 1.0, 0.0), r, vec3<f32>(0.0), y, q, q, B[o + 3], CI, CF, NC, BC, BR, cap, OCI, OCF, OBC, OBR); }
+        }
+    }
+    if (large) { return; }
+    let nw = min(JC[i], MAXJ);
+    let c = cell_of(p, size, dim);
+    for (var dz = -1; dz <= 1; dz += 1) {
+        for (var dy = -1; dy <= 1; dy += 1) {
+            for (var dx = -1; dx <= 1; dx += 1) {
+                let cc = (c + vec3<i32>(dx, dy, dz)) & vec3<i32>(dim - 1);
+                let ci = cc.x + dim * (cc.y + dim * cc.z);
+                let n = min(count[ci], K);
+                for (var s = 0; s < n; s += 1) {
+                    let j = slots[ci * K + s];
+                    // (A pair is the lower-numbered body's to find; one with a fixed body the moving one's.)
+                    let mj = B[8 * j + 3];
+                    if (j == i || (j < i && mj > 0.0)) { continue; }
+                    let pj = vec3<f32>(X[8 * j], X[8 * j + 1], X[8 * j + 2]);
+                    let rj = length(vec3<f32>(B[8 * j], B[8 * j + 1], B[8 * j + 2]));
+                    let dd = pj - p;
+                    let mg = SPEC + length(v - vec3<f32>(V[8 * j], V[8 * j + 1], V[8 * j + 2])) * h + GRAV * h * h;
+                    if (dot(dd, dd) > (rad + rj + mg) * (rad + rj + mg)) { continue; }
+                    // (Two pieces welded are held apart by the weld: no contact until it breaks.)
+                    var welded = false;
+                    for (var e = 0; e < nw; e += 1) {
+                        let w = JR[i * MAXJ + e];
+                        if (JF[40 * w + 30] < 0.5 && other_of(w, i, JI) == j) { welded = true; }
+                    }
+                    if (welded) { continue; }
+                    var ms = B[o + 3];
+                    let mjj = max(mj, B[8 * j + 7]);
+                    if (mjj > 0.0) { ms = ms * mjj / (ms + mjj); }
+                    box_box(i, j, X, B, ms, mg, CI, CF, NC, BC, BR, cap, OCI, OCF, OBC, OBR);
+                }
+            }
+        }
+    }
+}
+
+// Contact k's three rows now: (C normal, C tangent 1, C tangent 2).
+fn rows_c(a: i32, b: i32, n: vec3<f32>, ra: vec3<f32>, rb: vec3<f32>, c0: f32, X: rw_store<f32, 1>, X0: read_store<f32, 1>, alpha: f32) -> vec3<f32> {
+    let t1 = tangent1(n);
+    let t2 = cross(n, t1);
+    let da = vec3<f32>(X[8 * a] - X0[8 * a], X[8 * a + 1] - X0[8 * a + 1], X[8 * a + 2] - X0[8 * a + 2]);
+    let ta = rotvec(vec4<f32>(X[8 * a + 4], X[8 * a + 5], X[8 * a + 6], X[8 * a + 7]), vec4<f32>(X0[8 * a + 4], X0[8 * a + 5], X0[8 * a + 6], X0[8 * a + 7]));
+    var d = da + cross(ta, ra);
+    if (b >= 0) {
+        let db = vec3<f32>(X[8 * b] - X0[8 * b], X[8 * b + 1] - X0[8 * b + 1], X[8 * b + 2] - X0[8 * b + 2]);
+        let tb = rotvec(vec4<f32>(X[8 * b + 4], X[8 * b + 5], X[8 * b + 6], X[8 * b + 7]), vec4<f32>(X0[8 * b + 4], X0[8 * b + 5], X0[8 * b + 6], X0[8 * b + 7]));
+        d = d - db - cross(tb, rb);
+    }
+    // (A gap is a gap in every pass; an overlap is what only the stabilizing pass takes out.)
+    var c = c0;
+    if (c0 < 0.0) { c = c0 * (1.0 - alpha); }
+    return vec3<f32>(c + dot(n, d), dot(t1, d), dot(t2, d));
+}
+
+fn prio(i: i32) -> u32 {
+    var x = u32(i) * 747796405u + 2891336453u;
+    x = ((x >> ((x >> 28u) + 4u)) ^ x) * 277803737u;
+    return (x >> 22u) ^ x;
+}
+fn other_of(k: i32, i: i32, CI: read_store<i32, 1>) -> i32 {
+    if (CI[2 * k] == i) { return CI[2 * k + 1]; }
+    return CI[2 * k];
+}
+fn outranks(j: i32, i: i32) -> bool {
+    let a = prio(j);
+    let b = prio(i);
+    return a > b || (a == b && j > i);
+}
+
+// A joint welds two bodies: a point of each held together (three rows) and
+// their relative turn held at what it was set with (three rows). JF, 40 floats:
+// the point in a (0) and in b (3), b's turn in a's frame (6), the rows' forces
+// (10), stiffnesses (16), what the rows read at the step's start (22), the
+// force and torque it breaks at (28, 29), broken (30), the stiffness scales (31, 32).
+fn joint_lin(j: i32, JI: read_store<i32, 1>, JF: rw_store<f32, 1>, X: rw_store<f32, 1>) -> vec3<f32> {
+    let a = JI[2 * j];
+    let b = JI[2 * j + 1];
+    let o = 40 * j;
+    let pa = vec3<f32>(X[8 * a], X[8 * a + 1], X[8 * a + 2]);
+    let qa = vec4<f32>(X[8 * a + 4], X[8 * a + 5], X[8 * a + 6], X[8 * a + 7]);
+    let pb = vec3<f32>(X[8 * b], X[8 * b + 1], X[8 * b + 2]);
+    let qb = vec4<f32>(X[8 * b + 4], X[8 * b + 5], X[8 * b + 6], X[8 * b + 7]);
+    return pa + qrot(qa, vec3<f32>(JF[o], JF[o + 1], JF[o + 2])) - pb - qrot(qb, vec3<f32>(JF[o + 3], JF[o + 4], JF[o + 5]));
+}
+fn joint_ang(j: i32, JI: read_store<i32, 1>, JF: rw_store<f32, 1>, X: rw_store<f32, 1>) -> vec3<f32> {
+    let a = JI[2 * j];
+    let b = JI[2 * j + 1];
+    let o = 40 * j;
+    let qa = vec4<f32>(X[8 * a + 4], X[8 * a + 5], X[8 * a + 6], X[8 * a + 7]);
+    let qb = vec4<f32>(X[8 * b + 4], X[8 * b + 5], X[8 * b + 6], X[8 * b + 7]);
+    return rotvec(qmul(qa, vec4<f32>(JF[o + 6], JF[o + 7], JF[o + 8], JF[o + 9])), qb);
+}
+fn unit(k: i32) -> vec3<f32> {
+    if (k == 0) { return vec3<f32>(1.0, 0.0, 0.0); }
+    if (k == 1) { return vec3<f32>(0.0, 1.0, 0.0); }
+    return vec3<f32>(0.0, 0.0, 1.0);
+}
+// A step's start for a joint: its stiffness eased, what its rows read now kept.
+@kernel @grid(1)
+fn k_jbegin(g: grid<1>, JI: read_store<i32, 1>, JF: rw_store<f32, 1>, X: rw_store<f32, 1>) {
+    let j = g.x();
+    let o = 40 * j;
+    if (JF[o + 30] > 0.5) { return; }
+    let cl = joint_lin(j, JI, JF, X);
+    let ca = joint_ang(j, JI, JF, X);
+    for (var k = 0; k < 3; k += 1) {
+        JF[o + 22 + k] = pick(cl, k);
+        JF[o + 25 + k] = pick(ca, k);
+        JF[o + 16 + k] = clamp(JF[o + 16 + k] * GAMMA, JMIN * JF[o + 31], PEN_MAX * JF[o + 31]);
+        JF[o + 19 + k] = clamp(JF[o + 19 + k] * GAMMA, JMIN * JF[o + 32], PEN_MAX * JF[o + 32]);
+    }
+}
+@kernel @grid(1)
+fn k_jdual(g: grid<1>, JI: read_store<i32, 1>, JF: rw_store<f32, 1>, X: rw_store<f32, 1>, alpha: f32, tick: f32, breaks: i32) {
+    let j = g.x();
+    let o = 40 * j;
+    if (JF[o + 30] > 0.5) { return; }
+    let cl = joint_lin(j, JI, JF, X);
+    let ca = joint_ang(j, JI, JF, X);
+    var fl = vec3<f32>(0.0);
+    var fa = vec3<f32>(0.0);
+    for (var k = 0; k < 3; k += 1) {
+        let c = pick(cl, k) - JF[o + 22 + k] * alpha * JALPHA;
+        // (A weld carries no more than it breaks at: a blow past that is not handed on through it.)
+        let l = clamp(JF[o + 16 + k] * c + JF[o + 10 + k], -JF[o + 28], JF[o + 28]);
+        JF[o + 10 + k] = l;
+        if (abs(l) < JF[o + 28]) { JF[o + 16 + k] = min(JF[o + 16 + k] + JBETA * JF[o + 31] * abs(c), PEN_MAX * JF[o + 31]); }
+        let d = pick(ca, k) - JF[o + 25 + k] * alpha * JALPHA;
+        let t = clamp(JF[o + 19 + k] * d + JF[o + 13 + k], -JF[o + 29], JF[o + 29]);
+        JF[o + 13 + k] = t;
+        if (abs(t) < JF[o + 29]) { JF[o + 19 + k] = min(JF[o + 19 + k] + JBETA * JF[o + 32] * abs(d), PEN_MAX * JF[o + 32]); }
+        fl = fl + unit(k) * l;
+        fa = fa + unit(k) * t;
+    }
+    // (It gives at its strength and breaks once pulled apart or bent past what it can take: a blow that only loads it for a step leaves it whole.)
+    if (breaks != 0 && (length(cl) > JF[o + 34] || length(ca) > JF[o + 35])) { JF[o + 30] = 1.0; JF[o + 33] = tick; }
+}
+
+// The loads of a structure's members (a wall, a slab, a column: each many pieces). MF is eight floats a member:
+// weight, what it can carry, load, how many members it rests on, joints to the ground as things stand, its
+// pieces as built, 1 for the ground itself, 1 once overloaded. MC counts the pieces of each still standing.
+// A member carries its own standing weight and what the members farther from the ground hand down, each
+// shared among the ones it rests on; holed, it can carry as much less as it has lost.
+@kernel @grid(1)
+fn k_mclear(g: grid<1>, MC: write_store<i32, 1>) { MC[g.x()] = 0; }
+@kernel @grid(1)
+fn k_mcount(g: grid<1>, B: read_store<f32, 1>, SUP: read_store<i32, 1>, MB: read_store<i32, 1>, MC: rw_store<i32, 1>, tick: i32, rate: i32) {
+    let i = g.x();
+    let m = MB[i];
+    if (m < 0) { return; }
+    // (A piece counts while its welds still join it to the ground, held or knocked loose.)
+    let hop = SUP[2 * i + 1];
+    if (hop >= 0 && tick - SUP[2 * i] <= 2 * hop / rate + 4) { let t = MC.atomic_add(m, 1); }
+}
+@kernel @grid(1)
+fn k_mload(g: grid<1>, MF: rw_store<f32, 1>, MC: read_store<i32, 1>, MJ0: read_store<i32, 1>, MJ: read_store<i32, 1>) {
+    let i = g.x();
+    let o = 8 * i;
+    if (MF[o + 6] > 0.5) { return; }
+    let frac = f32(MC[i]) / max(MF[o + 5], 1.0);
+    if (frac <= 0.0) { MF[o + 2] = 0.0; MF[o + 3] = 0.0; MF[o + 4] = 1.0e6; return; }
+    let mine = MF[o + 4];
+    let own = MF[o] * frac;
+    var near = 1.0e6;
+    var under = 0.0;
+    var load = own;
+    let n0 = MJ0[2 * i];
+    let nn = MJ0[2 * i + 1];
+    for (var e = 0; e < nn; e += 1) {
+        let n = MJ[n0 + e];
+        if (MF[8 * n + 6] < 0.5 && MC[n] <= 0) { continue; }
+        let theirs = MF[8 * n + 4];
+        near = min(near, theirs);
+        if (theirs < mine) { under = under + 1.0; }
+        if (theirs > mine) { load = load + MF[8 * n + 2] / max(MF[8 * n + 3], 1.0); }
+    }
+    // (Its way to the ground changing, only its own weight: loads are found from below.)
+    let now = min(near + 1.0, 1.0e6);
+    if (now != mine) { load = own; }
+    MF[o + 4] = now;
+    MF[o + 2] = load;
+    MF[o + 3] = under;
+    if (load > MF[o + 1] * frac) { MF[o + 7] = 1.0; }
+}
+
+// A held piece stands fixed where it was built (mass 0, its own mass kept in
+// B[7]) until it is let go: struck harder than STRIKE (REL, set by the contact
+// pass), or no longer joined to the ground through held pieces. SUP is two
+// ints a body: the last tick ground support reached it, and how many welds from
+// the ground it was built (0: on the ground itself). Support passes one weld a
+// pass, so a piece cut off stops hearing from the ground and goes once it has
+// heard nothing for longer than twice its distance takes.
+@kernel @grid(1)
+fn k_support(g: grid<1>, B: rw_store<f32, 1>, V: rw_store<f32, 1>, SUP: rw_store<i32, 1>, REL: rw_store<i32, 1>,
+             JI: read_store<i32, 1>, JF: rw_store<f32, 1>, JC: read_store<i32, 1>, JR: read_store<i32, 1>,
+             X0: read_store<f32, 1>, Y: rw_store<f32, 1>, MB: read_store<i32, 1>, MF: read_store<f32, 1>, SL: rw_store<i32, 1>, GR: read_store<i32, 1>, WHY: rw_store<i32, 1>, tick: i32, rate: i32, h: f32) {
+    let i = g.x();
+    let o = 8 * i;
+    if (B[o + 3] > 0.0 && SL[i] < 0) {
+        // Lying still: it sleeps. Still welded to a standing piece it is part of the structure again (held, owing
+        // its support to the ground); else rubble (distance -1), held until something moving touches it.
+        SL[i] = 0;
+        var joined = false;
+        var heard = 0;
+        var rests = tick - GR[i] <= 2;
+        let njs = min(JC[i], MAXJ);
+        for (var e = 0; e < njs; e += 1) {
+            let j = JR[i * MAXJ + e];
+            if (JF[40 * j + 30] > 0.5) { continue; }
+            let n = other_of(j, i, JI);
+            // (It hears from the ground what they have heard: a part cut off does not keep itself up.)
+            if (B[8 * n + 3] <= 0.0 && B[8 * n + 7] > 0.0 && SUP[2 * n + 1] >= 0) { joined = true; heard = max(heard, SUP[2 * n]); }
+            if (B[8 * n + 3] <= 0.0 && B[8 * n + 7] > 0.0 && SUP[2 * n + 1] < 0) { rests = true; }
+        }
+        if (SUP[2 * i + 1] < 0) { joined = false; }
+        if (MB[i] >= 0) { if (MF[8 * MB[i] + 7] > 0.5) { joined = false; } }
+        // (Rubble sleeps on something: the ground, a thing not moving, or welded to rubble that does. Hanging still
+        // from pieces that are themselves about to fall is not rest.)
+        if (!joined && !rests) { return; }
+        B[o + 7] = B[o + 3];
+        B[o + 3] = 0.0;
+        for (var k = 0; k < 8; k += 1) { V[o + k] = 0.0; }
+        REL[i] = 0;
+        if (joined) { SUP[2 * i] = heard; } else { SUP[2 * i + 1] = -1; }
+        return;
+    }
+    if (B[o + 3] > 0.0 && SUP[2 * i + 1] >= 0) {
+        // (Let go but not rubble: what its welds still join to the ground hears of the ground through it.)
+        var sm = SUP[2 * i];
+        let njm = min(JC[i], MAXJ);
+        for (var e = 0; e < njm; e += 1) {
+            let j = JR[i * MAXJ + e];
+            if (JF[40 * j + 30] > 0.5) { continue; }
+            let n = other_of(j, i, JI);
+            if (SUP[2 * n + 1] >= 0) { sm = max(sm, SUP[2 * n]); }
+            if (MB[i] >= 0) { if (MF[8 * MB[i] + 7] > 0.5 && MB[n] != MB[i]) { JF[40 * j + 30] = 1.0; } }
+        }
+        SUP[2 * i] = sm;
+        return;
+    }
+    if (B[o + 3] > 0.0 || B[o + 7] <= 0.0) { return; }
+    let hop = SUP[2 * i + 1];
+    if (hop < 0) {
+        // (Asleep: woken by what touches it (REL: struck, or in contact with a thing that moves, so what it lay on
+        // giving way wakes it), or by a piece it is welded to moving off.)
+        var wake = REL[i] != 0;
+        let nja = min(JC[i], MAXJ);
+        for (var e = 0; e < nja; e += 1) {
+            let j = JR[i * MAXJ + e];
+            if (JF[40 * j + 30] > 0.5) { continue; }
+            let n = other_of(j, i, JI);
+            if (B[8 * n + 3] > 0.0 && length(vec3<f32>(V[8 * n], V[8 * n + 1], V[8 * n + 2])) > WAKE) { wake = true; }
+        }
+        if (wake) {
+            B[o + 3] = B[o + 7];
+            B[o + 7] = 0.0;
+            for (var k = 0; k < 8; k += 1) { V[o + k] = 0.0; Y[o + k] = X0[o + k]; }
+            Y[o + 1] = X0[o + 1] - GRAV * h * h;
+        }
+        return;
+    }
+    var s = SUP[2 * i];
+    if (hop == 0) { s = tick; }
+    let nj = min(JC[i], MAXJ);
+    let mb = MB[i];
+    var over = false;
+    if (mb >= 0) { over = MF[8 * mb + 7] > 0.5; }
+    for (var e = 0; e < nj; e += 1) {
+        let j = JR[i * MAXJ + e];
+        if (JF[40 * j + 30] > 0.5) { continue; }
+        let n = other_of(j, i, JI);
+        if (SUP[2 * n + 1] >= 0) { s = max(s, SUP[2 * n]); }
+        // (Its member overloaded, the member fails where it joins the others, and falls in one piece.)
+        if (over && MB[n] != mb) { JF[40 * j + 30] = 1.0; }
+    }
+    SUP[2 * i] = s;
+    // (WHY it was let go, the first time: 1 struck, 2 cut off, 3 overloaded.)
+    if (WHY[i] == 0) { if (REL[i] != 0) { WHY[i] = 1; } else if (tick - s > 2 * hop / rate + 4) { WHY[i] = 2; } else if (over) { WHY[i] = 3; } }
+    if (REL[i] != 0 || tick - s > 2 * hop / rate + 4 || over) {
+        B[o + 3] = B[o + 7];
+        B[o + 7] = 0.0;
+        // (It may go in the middle of a step's passes: from rest, where it stood, falling.)
+        for (var k = 0; k < 8; k += 1) { V[o + k] = 0.0; Y[o + k] = X0[o + k]; }
+        Y[o + 1] = X0[o + 1] - GRAV * h * h;
+    }
+}
+
+// Colours (1..ncol; 0 none) such that no two bodies in contact share one. A
+// body keeps its colour from step to step; one whose new neighbour has the
+// same gives it up (the lower ranked of the two).
+@kernel @grid(1)
+fn k_uncolour(g: grid<1>, COL: rw_store<i32, 1>, B: read_store<f32, 1>, CI: read_store<i32, 1>, BC: read_store<i32, 1>, BR: read_store<i32, 1>,
+              JI: read_store<i32, 1>, JC: read_store<i32, 1>, JR: read_store<i32, 1>) {
+    let i = g.x();
+    let c = COL[i];
+    if (c == 0) { return; }
+    let nj = min(JC[i], MAXJ);
+    for (var e = 0; e < nj; e += 1) {
+        let j = other_of(JR[i * MAXJ + e], i, JI);
+        if (B[8 * j + 3] <= 0.0) { continue; }
+        if (COL[j] == c && outranks(j, i)) { COL[i] = 0; return; }
+    }
+    let nc = min(BC[i], MAXREF);
+    for (var e = 0; e < nc; e += 1) {
+        let j = other_of(BR[i * MAXREF + e], i, CI);
+        if (j < 0 || B[8 * j + 3] <= 0.0) { continue; }
+        if (COL[j] == c && outranks(j, i)) { COL[i] = 0; return; }
+    }
+}
+// A round: an uncoloured body that outranks its uncoloured neighbours takes the lowest colour its neighbours do not have.
+@kernel @grid(1)
+fn k_colour(g: grid<1>, COL: rw_store<i32, 1>, B: read_store<f32, 1>, CI: read_store<i32, 1>, BC: read_store<i32, 1>, BR: read_store<i32, 1>,
+            JI: read_store<i32, 1>, JC: read_store<i32, 1>, JR: read_store<i32, 1>, ncol: i32) {
+    let i = g.x();
+    if (COL[i] != 0 || B[8 * i + 3] <= 0.0) { return; }
+    var used = 0u;
+    let nj = min(JC[i], MAXJ);
+    for (var e = 0; e < nj; e += 1) {
+        let j = other_of(JR[i * MAXJ + e], i, JI);
+        if (B[8 * j + 3] <= 0.0) { continue; }
+        let c = COL[j];
+        if (c == 0) {
+            if (outranks(j, i)) { return; }
+        } else {
+            used = used | (1u << u32(c));
+        }
+    }
+    let nc = min(BC[i], MAXREF);
+    for (var e = 0; e < nc; e += 1) {
+        let j = other_of(BR[i * MAXREF + e], i, CI);
+        if (j < 0 || B[8 * j + 3] <= 0.0) { continue; }
+        let c = COL[j];
+        if (c == 0) {
+            if (outranks(j, i)) { return; }
+        } else {
+            used = used | (1u << u32(c));
+        }
+    }
+    for (var c = 1; c <= ncol; c += 1) {
+        if ((used & (1u << u32(c))) == 0u) { COL[i] = c; return; }
+    }
+}
+
+// The primal pass over the bodies of one colour, in place: each takes its
+// Newton step against its contacts with the others where they are now. Colour
+// 0 is the bodies with none yet: those step all at once, scaled by omega (two
+// in contact each correcting it in full would overshoot).
+@kernel @grid(1)
+fn k_primal(g: grid<1>, X: rw_store<f32, 1>, X0: read_store<f32, 1>, Y: read_store<f32, 1>, B: read_store<f32, 1>,
+            CI: read_store<i32, 1>, CF: read_store<f32, 1>, BC: read_store<i32, 1>, BR: read_store<i32, 1>, COL: read_store<i32, 1>,
+            JI: read_store<i32, 1>, JF: rw_store<f32, 1>, JC: read_store<i32, 1>, JR: read_store<i32, 1>,
+            h: f32, alpha: f32, colour: i32, omega0: f32) {
+    let ih2 = 1.0 / (h * h);
+    for (var s = 0; s < 1; s += 1) {
+        let i = g.x();
+        let o = 8 * i;
+        let m = B[o + 3];
+        if (m <= 0.0 || COL[i] != colour) { continue; }
+        var omega = 1.0;
+        if (colour == 0) { omega = omega0; }
+        let p = vec3<f32>(X[o], X[o + 1], X[o + 2]);
+        let q = vec4<f32>(X[o + 4], X[o + 5], X[o + 6], X[o + 7]);
+        var a: array<f32, 36>;
+        var r: array<f32, 6>;
+        for (var k = 0; k < 36; k += 1) { a[k] = 0.0; }
+        a[0] = m * ih2; a[7] = m * ih2; a[14] = m * ih2;
+        // The inertia in the world: R diag(I) R^T.
+        let ex = qrot(q, vec3<f32>(1.0, 0.0, 0.0));
+        let ey = qrot(q, vec3<f32>(0.0, 1.0, 0.0));
+        let ez = qrot(q, vec3<f32>(0.0, 0.0, 1.0));
+        let ix = B[o + 4] * ih2;
+        let iy = B[o + 5] * ih2;
+        let iz = B[o + 6] * ih2;
+        let c0 = ex * (ix * ex.x) + ey * (iy * ey.x) + ez * (iz * ez.x);
+        let c1 = ex * (ix * ex.y) + ey * (iy * ey.y) + ez * (iz * ez.y);
+        let c2 = ex * (ix * ex.z) + ey * (iy * ey.z) + ez * (iz * ez.z);
+        a[21] = c0.x; a[22] = c1.x; a[23] = c2.x;
+        a[27] = c0.y; a[28] = c1.y; a[29] = c2.y;
+        a[33] = c0.z; a[34] = c1.z; a[35] = c2.z;
+        let dl = (p - vec3<f32>(Y[o], Y[o + 1], Y[o + 2])) * (m * ih2);
+        let th = rotvec(q, vec4<f32>(Y[o + 4], Y[o + 5], Y[o + 6], Y[o + 7]));
+        let da = c0 * th.x + c1 * th.y + c2 * th.z;
+        r[0] = dl.x; r[1] = dl.y; r[2] = dl.z; r[3] = da.x; r[4] = da.y; r[5] = da.z;
+        let nc = min(BC[i], MAXREF);
+        for (var e = 0; e < nc; e += 1) {
+            let k = BR[i * MAXREF + e];
+            let ko = 20 * k;
+            let isA = CI[2 * k] == i;
+            let n = vec3<f32>(CF[ko], CF[ko + 1], CF[ko + 2]);
+            let t1 = tangent1(n);
+            let t2 = cross(n, t1);
+            var arm = vec3<f32>(CF[ko + 3], CF[ko + 4], CF[ko + 5]);
+            var sg = 1.0;
+            if (!isA) { arm = vec3<f32>(CF[ko + 6], CF[ko + 7], CF[ko + 8]); sg = -1.0; }
+            let c = rows_c(CI[2 * k], CI[2 * k + 1], n, vec3<f32>(CF[ko + 3], CF[ko + 4], CF[ko + 5]), vec3<f32>(CF[ko + 6], CF[ko + 7], CF[ko + 8]), CF[ko + 9], X, X0, alpha);
+            let ln = CF[ko + 12];
+            let bound = abs(ln) * MU;
+            // (A held piece pushes back no harder than it can stand: past that it is let go, not a wall.)
+            let ot = other_of(k, i, CI);
+            var nlo = -1.0e30;
+            if (ot >= 0) { if (B[8 * ot + 3] <= 0.0 && B[8 * ot + 7] > 0.0) { nlo = -STRIKE; } }
+            for (var row = 0; row < 3; row += 1) {
+                var dir = n;
+                var cv = c.x;
+                var lo = nlo;
+                var hi = 0.0;
+                if (row == 1) { dir = t1; cv = c.y; lo = -bound; hi = bound; }
+                if (row == 2) { dir = t2; cv = c.z; lo = -bound; hi = bound; }
+                let pen = CF[ko + 15 + row];
+                let f = clamp(pen * cv + CF[ko + 12 + row], lo, hi);
+                let jl = dir * sg;
+                let ja = cross(arm, dir) * sg;
+                var J: array<f32, 6>;
+                J[0] = jl.x; J[1] = jl.y; J[2] = jl.z; J[3] = ja.x; J[4] = ja.y; J[5] = ja.z;
+                for (var u = 0; u < 6; u += 1) {
+                    r[u] = r[u] + J[u] * f;
+                    for (var w = 0; w < 6; w += 1) { a[u * 6 + w] = a[u * 6 + w] + pen * J[u] * J[w]; }
+                }
+            }
+        }
+        let nj = min(JC[i], MAXJ);
+        for (var e = 0; e < nj; e += 1) {
+            let j = JR[i * MAXJ + e];
+            let jo = 40 * j;
+            if (JF[jo + 30] > 0.5) { continue; }
+            var arm = qrot(q, vec3<f32>(JF[jo], JF[jo + 1], JF[jo + 2]));
+            var sg = 1.0;
+            if (JI[2 * j] != i) { arm = qrot(q, vec3<f32>(JF[jo + 3], JF[jo + 4], JF[jo + 5])); sg = -1.0; }
+            let cl = joint_lin(j, JI, JF, X);
+            let ca = joint_ang(j, JI, JF, X);
+            for (var row = 0; row < 6; row += 1) {
+                let dir = unit(row % 3);
+                var cv = pick(cl, row % 3);
+                var jl = dir * sg;
+                var ja = cross(arm, dir) * sg;
+                if (row >= 3) { cv = pick(ca, row - 3); jl = vec3<f32>(0.0); ja = dir * sg; }
+                cv = cv - JF[jo + 22 + row] * alpha * JALPHA;
+                let pen = JF[jo + 16 + row];
+                var cap = JF[jo + 28];
+                if (row >= 3) { cap = JF[jo + 29]; }
+                let f = clamp(pen * cv + JF[jo + 10 + row], -cap, cap);
+                var J: array<f32, 6>;
+                J[0] = jl.x; J[1] = jl.y; J[2] = jl.z; J[3] = ja.x; J[4] = ja.y; J[5] = ja.z;
+                for (var u = 0; u < 6; u += 1) {
+                    r[u] = r[u] + J[u] * f;
+                    for (var w = 0; w < 6; w += 1) { a[u * 6 + w] = a[u * 6 + w] + pen * J[u] * J[w]; }
+                }
+            }
+        }
+        // LDL^T, in place.
+        for (var j = 0; j < 6; j += 1) {
+            var d = a[j * 6 + j];
+            for (var k = 0; k < j; k += 1) { d = d - a[j * 6 + k] * a[j * 6 + k] * a[k * 6 + k]; }
+            a[j * 6 + j] = d;
+            for (var u = j + 1; u < 6; u += 1) {
+                var l = a[u * 6 + j];
+                for (var k = 0; k < j; k += 1) { l = l - a[u * 6 + k] * a[j * 6 + k] * a[k * 6 + k]; }
+                a[u * 6 + j] = l / d;
+            }
+        }
+        for (var u = 0; u < 6; u += 1) { for (var k = 0; k < u; k += 1) { r[u] = r[u] - a[u * 6 + k] * r[k]; } }
+        for (var u = 0; u < 6; u += 1) { r[u] = r[u] / a[u * 6 + u]; }
+        for (var u = 5; u >= 0; u -= 1) { for (var k = u + 1; k < 6; k += 1) { r[u] = r[u] - a[k * 6 + u] * r[k]; } }
+        let qn = qstep(q, vec3<f32>(-r[3], -r[4], -r[5]) * omega);
+        X[o] = p.x - r[0] * omega; X[o + 1] = p.y - r[1] * omega; X[o + 2] = p.z - r[2] * omega;
+        X[o + 4] = qn.x; X[o + 5] = qn.y; X[o + 6] = qn.z; X[o + 7] = qn.w;
+    }
+}
+
+@kernel @grid(1)
+fn k_dual(g: grid<1>, X: rw_store<f32, 1>, X0: read_store<f32, 1>, CI: read_store<i32, 1>, CF: rw_store<f32, 1>,
+          NC: read_store<i32, 1>, REL: rw_store<i32, 1>, B: read_store<f32, 1>, V: read_store<f32, 1>, SUP: read_store<i32, 1>, GR: rw_store<i32, 1>, alpha: f32, tick: i32) {
+    let k = g.x();
+    if (k >= NC[0]) { return; }
+    let o = 20 * k;
+    let c = rows_c(CI[2 * k], CI[2 * k + 1], vec3<f32>(CF[o], CF[o + 1], CF[o + 2]), vec3<f32>(CF[o + 3], CF[o + 4], CF[o + 5]), vec3<f32>(CF[o + 6], CF[o + 7], CF[o + 8]), CF[o + 9], X, X0, alpha);
+    var ln = min(CF[o + 15] * c.x + CF[o + 12], 0.0);
+    // (Against a held piece the force stops at what the piece can stand, and reaching that lets it go.)
+    let a = CI[2 * k];
+    let b = CI[2 * k + 1];
+    var held = B[8 * a + 3] <= 0.0 && B[8 * a + 7] > 0.0;
+    if (b >= 0) { if (B[8 * b + 3] <= 0.0 && B[8 * b + 7] > 0.0) { held = true; } }
+    if (held && ln <= -STRIKE) {
+        ln = -STRIKE;
+        REL[a] = 1;
+        if (b >= 0) { REL[b] = 1; }
+    }
+    // (And what moves wakes the sleeping thing it touches.)
+    // (Bearing on the ground or on something that is not moving: GR says when it last did, for sleeping.)
+    if (ln < 0.0) {
+        if (b < 0) { GR[a] = tick; }
+        else {
+            if (B[8 * b + 3] <= 0.0) { GR[a] = tick; }
+            if (B[8 * a + 3] <= 0.0) { GR[b] = tick; }
+        }
+    }
+    var asleep = SUP[2 * a + 1] < 0 && B[8 * a + 3] <= 0.0;
+    if (b >= 0) { if (SUP[2 * b + 1] < 0 && B[8 * b + 3] <= 0.0) { asleep = true; } }
+    if (asleep && b >= 0) {
+        let va = length(vec3<f32>(V[8 * a], V[8 * a + 1], V[8 * a + 2]));
+        let vb = length(vec3<f32>(V[8 * b], V[8 * b + 1], V[8 * b + 2]));
+        if (max(va, vb) > WAKE) { REL[a] = 1; REL[b] = 1; }
+    }
+    // (A piece let go since the contact was made: its stiffness goes by the pair's mass as it is now.)
+    if (b >= 0) {
+        let ma = B[8 * a + 3];
+        let mb = B[8 * b + 3];
+        var live = max(ma, mb);
+        if (ma > 0.0 && mb > 0.0) { live = ma * mb / (ma + mb); }
+        if (live < CF[o + 19]) {
+            let f = live / CF[o + 19];
+            CF[o + 15] = CF[o + 15] * f; CF[o + 16] = CF[o + 16] * f; CF[o + 17] = CF[o + 17] * f;
+            CF[o + 19] = live;
+        }
+    }
+    CF[o + 12] = ln;
+    let ms = CF[o + 19];
+    if (ln < 0.0) { CF[o + 15] = min(CF[o + 15] + BETA * ms * abs(c.x), PEN_MAX * ms); }
+    let bound = abs(ln) * MU;
+    let l1 = clamp(CF[o + 16] * c.y + CF[o + 13], -bound, bound);
+    let l2 = clamp(CF[o + 17] * c.z + CF[o + 14], -bound, bound);
+    CF[o + 13] = l1; CF[o + 14] = l2;
+    if (abs(l1) < bound) { CF[o + 16] = min(CF[o + 16] + BETA * ms * abs(c.y), PEN_MAX * ms); }
+    if (abs(l2) < bound) { CF[o + 17] = min(CF[o + 17] + BETA * ms * abs(c.z), PEN_MAX * ms); }
+}
+
+@kernel @grid(1)
+fn k_velocity(g: grid<1>, X: read_store<f32, 1>, X0: read_store<f32, 1>, V: rw_store<f32, 1>, B: rw_store<f32, 1>,
+              SL: rw_store<i32, 1>, h: f32, sleep: i32) {
+    let i = g.x();
+    let o = 8 * i;
+    if (B[o + 3] <= 0.0) { return; }
+    V[o + 3] = V[o + 1];
+    V[o] = (X[o] - X0[o]) / h; V[o + 1] = (X[o + 1] - X0[o + 1]) / h; V[o + 2] = (X[o + 2] - X0[o + 2]) / h;
+    let w = rotvec(vec4<f32>(X[o + 4], X[o + 5], X[o + 6], X[o + 7]), vec4<f32>(X0[o + 4], X0[o + 5], X0[o + 6], X0[o + 7])) / h;
+    V[o + 4] = w.x; V[o + 5] = w.y; V[o + 6] = w.z;
+    // Lying still long enough, it sleeps: held where it is (as a piece not yet let go, but owing nothing to the
+    // ground: SUP's distance -1), until something moving touches it or it is pushed past what it stands.
+    if (sleep > 0) {
+        if (length(vec3<f32>(V[o], V[o + 1], V[o + 2])) < 0.15 && length(w) < 0.3) { SL[i] = max(SL[i], 0) + 1; } else { SL[i] = 0; }
+        // (k_support puts it to sleep, as rubble or as part of what still stands.)
+        if (SL[i] > sleep) { SL[i] = -1; }
+    }
+}
