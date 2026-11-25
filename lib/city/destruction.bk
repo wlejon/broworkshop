@@ -133,6 +133,12 @@ pub fn vertex(v_in: mesh::Vertex) -> mesh::Vertex {
     let r1 = masses[mi * 4 + 1];
     let r2 = masses[mi * 4 + 2];
     let r3 = masses[mi * 4 + 3];
+    // Its mass hidden from view (flag 8, building_render.js hide({view})):
+    // its pieces too.
+    if ((((r3.z + 0.5) as i32) & 8) != 0) {
+        v.pos = vec3<f32>(0.0, -100000.0, 0.0);
+        return v;
+    }
     let u = v.pos;
     let n = v.normal;
     let rough = (p2.z + 0.5) as i32;
