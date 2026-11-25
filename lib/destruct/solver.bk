@@ -456,6 +456,16 @@ fn k_contacts(g: grid<1>, X: read_store<f32, 1>, B: read_store<f32, 1>,
     }
 }
 
+// The thread groups (of ls threads) a pass over N[0] things takes, no more than cap of them: three counts at
+// G's `at`th place, where a counted dispatch reads them.
+@kernel @grid(1)
+fn k_groups(g: grid<1>, N: read_store<i32, 1>, G: rw_store<i32, 1>, at: i32, ls: i32, cap: i32) {
+    if (g.x() != 0) { return; }
+    G[3 * at] = (clamp(N[0], 0, cap) + ls - 1) / ls;
+    G[3 * at + 1] = 1;
+    G[3 * at + 2] = 1;
+}
+
 // The contacts of the pairs k_contacts listed, a pair a thread.
 @kernel @grid(1)
 fn k_pairs(g: grid<1>, X: read_store<f32, 1>, B: read_store<f32, 1>,
