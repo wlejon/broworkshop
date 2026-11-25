@@ -60,11 +60,13 @@ fn tangent1(n: vec3<f32>) -> vec3<f32> {
 @kernel @grid(1)
 fn k_clear(g: grid<1>, count: write_store<i32, 1>) { count[g.x()] = 0; }
 
-// A step's start: the inertial pose, the pose the step starts from, the first guess.
+// A step's start: the inertial pose, the pose the step starts from, the first guess. P, for one in a cell: where
+// it is and how far it reaches this step (its corner's distance and its speed's), negative for one not moving:
+// all that finding what is near it reads of it.
 @kernel @grid(1)
 fn k_begin(g: grid<1>, X: rw_store<f32, 1>, X0: write_store<f32, 1>, Y: write_store<f32, 1>, V: rw_store<f32, 1>,
            B: read_store<f32, 1>, BC: write_store<i32, 1>, count: rw_store<i32, 1>, slots: write_store<i32, 1>,
-           LG: read_store<i32, 1>, nl: i32, h: f32, size: f32, dim: i32) {
+           LG: read_store<i32, 1>, P: write_store<f32, 1>, nl: i32, h: f32, size: f32, dim: i32) {
     let i = g.x();
     let o = 8 * i;
     BC[i] = 0;
@@ -79,6 +81,7 @@ fn k_begin(g: grid<1>, X: rw_store<f32, 1>, X0: write_store<f32, 1>, Y: write_st
     // (A fixed body is binned where it stands: the moving ones find it.)
     if (B[o + 3] <= 0.0) {
         if (large) { return; }
+        P[4 * i] = p.x; P[4 * i + 1] = p.y; P[4 * i + 2] = p.z; P[4 * i + 3] = -length(vec3<f32>(B[o], B[o + 1], B[o + 2]));
         let cs = cell_of(p, size, dim);
         let cis = cs.x + dim * (cs.y + dim * cs.z);
         let ss = count.atomic_add(cis, 1);
@@ -101,6 +104,7 @@ fn k_begin(g: grid<1>, X: rw_store<f32, 1>, X0: write_store<f32, 1>, Y: write_st
     X[o + 4] = qy.x; X[o + 5] = qy.y; X[o + 6] = qy.z; X[o + 7] = qy.w;
     // (Binned, and its contacts found, where the step starts: a contact's rows measure the step's motion from there.)
     if (large) { return; }
+    P[4 * i] = p.x; P[4 * i + 1] = p.y; P[4 * i + 2] = p.z; P[4 * i + 3] = length(vec3<f32>(B[o], B[o + 1], B[o + 2])) + length(v) * h;
     let c = cell_of(p, size, dim);
     let ci = c.x + dim * (c.y + dim * c.z);
     let s = count.atomic_add(ci, 1);
@@ -162,9 +166,15 @@ fn axis(q: vec4<f32>, k: i32) -> vec3<f32> {
     if (k == 1) { return qrot(q, vec3<f32>(0.0, 1.0, 0.0)); }
     return qrot(q, vec3<f32>(0.0, 0.0, 1.0));
 }
-// A box's reach along a unit direction.
-fn reach(q: vec4<f32>, hs: vec3<f32>, l: vec3<f32>) -> f32 {
-    return hs.x * abs(dot(axis(q, 0), l)) + hs.y * abs(dot(axis(q, 1), l)) + hs.z * abs(dot(axis(q, 2), l));
+// One of a box's three axes (x, y, z: worked out once a pair, not at each use).
+fn sel(x: vec3<f32>, y: vec3<f32>, z: vec3<f32>, k: i32) -> vec3<f32> {
+    if (k == 0) { return x; }
+    if (k == 1) { return y; }
+    return z;
+}
+// A box's reach along a unit direction: its axes x, y, z, its half extents hs.
+fn reach(x: vec3<f32>, y: vec3<f32>, z: vec3<f32>, hs: vec3<f32>, l: vec3<f32>) -> f32 {
+    return hs.x * abs(dot(x, l)) + hs.y * abs(dot(y, l)) + hs.z * abs(dot(z, l));
 }
 
 // A face contact: box r's face k (its outward normal m, towards box i) against
@@ -179,18 +189,24 @@ fn face_contacts(r: i32, i: i32, k: i32, m: vec3<f32>, X: read_store<f32, 1>, B:
     let pi = vec3<f32>(X[8 * i], X[8 * i + 1], X[8 * i + 2]);
     let qi = vec4<f32>(X[8 * i + 4], X[8 * i + 5], X[8 * i + 6], X[8 * i + 7]);
     let hi = vec3<f32>(B[8 * i], B[8 * i + 1], B[8 * i + 2]);
+    let i0 = axis(qi, 0);
+    let i1 = axis(qi, 1);
+    let i2 = axis(qi, 2);
+    let r0 = axis(qr, 0);
+    let r1 = axis(qr, 1);
+    let r2 = axis(qr, 2);
     // The incident face: i's most against m.
     var f = 0;
-    var fv = dot(axis(qi, 0), m);
+    var fv = dot(i0, m);
     for (var e = 1; e < 3; e += 1) {
-        let v = dot(axis(qi, e), m);
+        let v = dot(sel(i0, i1, i2, e), m);
         if (abs(v) > abs(fv)) { fv = v; f = e; }
     }
     let fu = (f + 1) % 3;
     let fw = (f + 2) % 3;
-    let ctr = pi - axis(qi, f) * (sign(fv) * pick(hi, f));
-    let eu = axis(qi, fu) * pick(hi, fu);
-    let ew = axis(qi, fw) * pick(hi, fw);
+    let ctr = pi - sel(i0, i1, i2, f) * (sign(fv) * pick(hi, f));
+    let eu = sel(i0, i1, i2, fu) * pick(hi, fu);
+    let ew = sel(i0, i1, i2, fw) * pick(hi, fw);
     var poly: array<f32, 24>;
     var tmp: array<f32, 24>;
     var np = 4;
@@ -204,9 +220,9 @@ fn face_contacts(r: i32, i: i32, k: i32, m: vec3<f32>, X: read_store<f32, 1>, B:
     let ru = (k + 1) % 3;
     let rw = (k + 2) % 3;
     for (var side = 0; side < 4; side += 1) {
-        var ax = axis(qr, ru);
+        var ax = sel(r0, r1, r2, ru);
         var ext = pick(hr, ru);
-        if (side >= 2) { ax = axis(qr, rw); ext = pick(hr, rw); }
+        if (side >= 2) { ax = sel(r0, r1, r2, rw); ext = pick(hr, rw); }
         if ((side & 1) == 1) { ax = -ax; }
         var nt = 0;
         for (var c = 0; c < np; c += 1) {
@@ -251,31 +267,37 @@ fn box_box(a: i32, b: i32, X: read_store<f32, 1>, B: read_store<f32, 1>, pen: f3
     let qb = vec4<f32>(X[8 * b + 4], X[8 * b + 5], X[8 * b + 6], X[8 * b + 7]);
     let hb = vec3<f32>(B[8 * b], B[8 * b + 1], B[8 * b + 2]);
     let d = pb - pa;
+    let a0 = axis(qa, 0);
+    let a1 = axis(qa, 1);
+    let a2 = axis(qa, 2);
+    let b0 = axis(qb, 0);
+    let b1 = axis(qb, 1);
+    let b2 = axis(qb, 2);
     var best = 1.0e30;
     var kind = -1;
     var bn = vec3<f32>(0.0, 1.0, 0.0);   // from a to b
     for (var k = 0; k < 3; k += 1) {
-        let l = axis(qa, k);
+        let l = sel(a0, a1, a2, k);
         let s = dot(d, l);
-        let ov = pick(ha, k) + reach(qb, hb, l) - abs(s);
+        let ov = pick(ha, k) + reach(b0, b1, b2, hb, l) - abs(s);
         if (ov < -mg) { return; }
         if (ov < best) { best = ov; kind = k; bn = l * sign(s); }
     }
     for (var k = 0; k < 3; k += 1) {
-        let l = axis(qb, k);
+        let l = sel(b0, b1, b2, k);
         let s = dot(d, l);
-        let ov = pick(hb, k) + reach(qa, ha, l) - abs(s);
+        let ov = pick(hb, k) + reach(a0, a1, a2, ha, l) - abs(s);
         if (ov < -mg) { return; }
         if (ov < best) { best = ov; kind = 3 + k; bn = l * sign(s); }
     }
     for (var i = 0; i < 3; i += 1) {
         for (var j = 0; j < 3; j += 1) {
-            var l = cross(axis(qa, i), axis(qb, j));
+            var l = cross(sel(a0, a1, a2, i), sel(b0, b1, b2, j));
             let ll = length(l);
             if (ll < 0.001) { continue; }
             l = l / ll;
             let s = dot(d, l);
-            let ov = reach(qa, ha, l) + reach(qb, hb, l) - abs(s);
+            let ov = reach(a0, a1, a2, ha, l) + reach(b0, b1, b2, hb, l) - abs(s);
             if (ov < -mg) { return; }
             // (A face's axis unless the edges' is clearly the shallower.)
             if (ov < best * 0.95 - 0.005) { best = ov; kind = 6 + 3 * i + j; bn = l * sign(s); }
@@ -288,11 +310,13 @@ fn box_box(a: i32, b: i32, X: read_store<f32, 1>, B: read_store<f32, 1>, pen: f3
     var ea = pa;
     var eb = pb;
     for (var k = 0; k < 3; k += 1) {
-        if (k != i) { ea = ea + axis(qa, k) * (sign(dot(axis(qa, k), bn)) * pick(ha, k)); }
-        if (k != j) { eb = eb - axis(qb, k) * (sign(dot(axis(qb, k), bn)) * pick(hb, k)); }
+        let ak = sel(a0, a1, a2, k);
+        let bk = sel(b0, b1, b2, k);
+        if (k != i) { ea = ea + ak * (sign(dot(ak, bn)) * pick(ha, k)); }
+        if (k != j) { eb = eb - bk * (sign(dot(bk, bn)) * pick(hb, k)); }
     }
-    let da = axis(qa, i);
-    let db = axis(qb, j);
+    let da = sel(a0, a1, a2, i);
+    let db = sel(b0, b1, b2, j);
     let r = ea - eb;
     let bb = dot(da, db);
     let c = dot(da, r);
@@ -318,13 +342,18 @@ fn ground_at(HG: read_store<f32, 1>, x: f32, z: f32, hcell: f32, hdim: i32) -> f
     return mix(a, b, tz);
 }
 
+// Half of a box's span along each of the world's axes: its half extents hs turned by q.
+fn span(q: vec4<f32>, hs: vec3<f32>) -> vec3<f32> {
+    return abs(qrot(q, vec3<f32>(hs.x, 0.0, 0.0))) + abs(qrot(q, vec3<f32>(0.0, hs.y, 0.0))) + abs(qrot(q, vec3<f32>(0.0, 0.0, hs.z)));
+}
+
 @kernel @grid(1)
 fn k_contacts(g: grid<1>, X: read_store<f32, 1>, B: read_store<f32, 1>,
               count: read_store<i32, 1>, slots: read_store<i32, 1>,
               CI: rw_store<i32, 1>, CF: rw_store<f32, 1>, NC: rw_store<i32, 1>, BC: rw_store<i32, 1>, BR: rw_store<i32, 1>,
               OCI: read_store<i32, 1>, OCF: read_store<f32, 1>, OBC: read_store<i32, 1>, OBR: read_store<i32, 1>,
               V: read_store<f32, 1>, LG: read_store<i32, 1>, JI: read_store<i32, 1>, JF: read_store<f32, 1>,
-              JC: read_store<i32, 1>, JR: read_store<i32, 1>, HG: read_store<f32, 1>,
+              JC: read_store<i32, 1>, JR: read_store<i32, 1>, HG: read_store<f32, 1>, P: read_store<f32, 1>,
               nl: i32, cap: i32, size: f32, dim: i32, h: f32, hcell: f32, hdim: i32) {
     let i = g.x();
     let o = 8 * i;
@@ -372,6 +401,8 @@ fn k_contacts(g: grid<1>, X: read_store<f32, 1>, B: read_store<f32, 1>,
     }
     if (large) { return; }
     let nw = min(JC[i], MAXJ);
+    let ext = span(q, hs);
+    let far = rad + length(v) * h + SPEC + GRAV * h * h;
     let c = cell_of(p, size, dim);
     for (var dz = -1; dz <= 1; dz += 1) {
         for (var dy = -1; dy <= 1; dy += 1) {
@@ -381,14 +412,22 @@ fn k_contacts(g: grid<1>, X: read_store<f32, 1>, B: read_store<f32, 1>,
                 let n = min(count[ci], K);
                 for (var s = 0; s < n; s += 1) {
                     let j = slots[ci * K + s];
-                    // (A pair is the lower-numbered body's to find; one with a fixed body the moving one's.)
+                    // (A pair is the lower-numbered body's to find; one with a fixed body the moving one's. And
+                    // most in the cells around are out of reach: told from P alone.)
+                    let rp = P[4 * j + 3];
+                    if (j == i || (j < i && rp > 0.0)) { continue; }
+                    let dp = vec3<f32>(P[4 * j], P[4 * j + 1], P[4 * j + 2]) - p;
+                    if (dot(dp, dp) > (far + abs(rp)) * (far + abs(rp))) { continue; }
                     let mj = B[8 * j + 3];
-                    if (j == i || (j < i && mj > 0.0)) { continue; }
                     let pj = vec3<f32>(X[8 * j], X[8 * j + 1], X[8 * j + 2]);
                     let rj = length(vec3<f32>(B[8 * j], B[8 * j + 1], B[8 * j + 2]));
                     let dd = pj - p;
                     let mg = SPEC + length(v - vec3<f32>(V[8 * j], V[8 * j + 1], V[8 * j + 2])) * h + GRAV * h * h;
                     if (dot(dd, dd) > (rad + rj + mg) * (rad + rj + mg)) { continue; }
+                    // (Nor do boxes whose spans along the world's axes are apart touch: most of what the
+                    // spheres let through.)
+                    let gap = abs(dd) - ext - span(vec4<f32>(X[8 * j + 4], X[8 * j + 5], X[8 * j + 6], X[8 * j + 7]), vec3<f32>(B[8 * j], B[8 * j + 1], B[8 * j + 2]));
+                    if (max(gap.x, max(gap.y, gap.z)) > mg) { continue; }
                     // (Two pieces welded are held apart by the weld: no contact until it breaks.)
                     var welded = false;
                     for (var e = 0; e < nw; e += 1) {
