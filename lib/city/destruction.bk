@@ -171,16 +171,20 @@ pub fn vertex(v_in: mesh::Vertex) -> mesh::Vertex {
     var q = vec4<f32>(0.0, 0.0, 0.0, 1.0);
     var w = rw;
     // How much a body has been through (0..1): coated in the dust by how far
-    // it has come and turned from where it stood, so a panel cracked loose
-    // and still in its place keeps its glass and its face.
+    // it has turned from how it stood, and (far less) how far it has come: a
+    // panel cracked loose and still in its place keeps its glass and its
+    // face, and so do the storeys of a tower on their way down whole.
     var coat = 0.0;
+    var loose = false;
     if (bi >= 0) {
         let b0 = bodies[bi * 3];
         let b1 = bodies[bi * 3 + 1];
         q = bodies[bi * 3 + 2];
         w = qrot(q, rw - b0.xyz) + b1.xyz;
         let turned = 2.0 * acos(min(abs(q.w), 1.0));
-        coat = smoothstep(0.15, 2.5, length(b1.xyz - b0.xyz) + 2.0 * turned);
+        let come = length(b1.xyz - b0.xyz);
+        coat = smoothstep(0.15, 2.5, 0.03 * come + 2.0 * turned);
+        loose = come > 0.01 || turned > 0.002;
     }
     v.pos = w;
     v.normal = qrot(q, nw0);
@@ -191,9 +195,9 @@ pub fn vertex(v_in: mesh::Vertex) -> mesh::Vertex {
     v.v4 = vec4<f32>(n, p2.y);
     v.v5 = q;
     // (w: 0 standing, else 1 + the coat in thousandths + 1001 * a tone 0..63
-    // of its own, the body's: no two chunks of a pile dusted alike.)
-    let tone = select(bi >= 0, (bi * 37 + 11) % 64, 0);
-    v.vi = vec4<i32>(floor(r2.z * 1048576.0) as i32, rough, mi, select(bi >= 0, 1 + (coat * 1000.0 + 0.5) as i32 + 1001 * tone, 0));
+    // of its member's: the chunks of a pile are not all dusted alike.)
+    let tone = (p2.w * 64.0) as i32 % 64;
+    v.vi = vec4<i32>(floor(r2.z * 1048576.0) as i32, rough, mi, select(loose, 1 + (coat * 1000.0 + 0.5) as i32 + 1001 * tone, 0));
     return v;
 }
 

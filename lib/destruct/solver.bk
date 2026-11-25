@@ -904,6 +904,20 @@ fn k_show(g: grid<1>, X: read_store<f32, 1>, R: read_store<f32, 1>, OUT: write_s
     OUT[t + 8] = d.x; OUT[t + 9] = d.y; OUT[t + 10] = d.z; OUT[t + 11] = d.w;
 }
 
+// Where things are moving, on the plan: OUT is dim x dim cells of `cell`
+// metres about the origin, set where a body with mass moves faster than 1 m/s.
+@kernel @grid(1)
+fn k_reach(g: grid<1>, X: read_store<f32, 1>, V: read_store<f32, 1>, B: read_store<f32, 1>, OUT: rw_store<i32, 1>, cell: f32, dim: i32) {
+    let i = g.x();
+    let o = 8 * i;
+    if (B[o + 3] <= 0.0) { return; }
+    if (length(vec3<f32>(V[o], V[o + 1], V[o + 2])) < 1.0) { return; }
+    let cx = (floor(X[o] / cell) as i32) + dim / 2;
+    let cz = (floor(X[o + 2] / cell) as i32) + dim / 2;
+    if (cx < 0 || cz < 0 || cx >= dim || cz >= dim) { return; }
+    OUT[cx + dim * cz] = 1;
+}
+
 // A body's faces where a weld has broken, as bits (2 * axis, + 1 for the +
 // face), into float `at` of its row of P, `stride` floats a row.
 @kernel @grid(1)
