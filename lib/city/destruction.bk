@@ -21,6 +21,7 @@ struct Params {
     room_night: f32,
     debug: f32,   // 1: the shading branch's colour (outside red, break green, inside blue); 2: all grey; 3: the dust coat (red full, blue none, black standing)
     blend: f32,   // how far the picture is from the solver's last step but one (0) to its last (1)
+    base: f32,    // the body the node's first instance draws
 }
 
 @binding(4, 0) var params: uniform<Params>;
@@ -125,7 +126,7 @@ fn roof_normal(n: vec3<f32>, end: bool, zc: f32, r1: vec4<f32>, r3: vec4<f32>) -
 
 pub fn vertex(v_in: mesh::Vertex) -> mesh::Vertex {
     var v = v_in;
-    let k = v.instance_index;
+    let k = v.instance_index + ((params.base + 0.5) as i32);
     let p0 = pieces[k * 3];
     let p1 = pieces[k * 3 + 1];
     let p2 = pieces[k * 3 + 2];

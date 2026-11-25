@@ -595,17 +595,19 @@ fn k_jdual(g: grid<1>, JI: read_store<i32, 1>, JF: rw_store<f32, 1>, X: rw_store
 @kernel @grid(1)
 fn k_mclear(g: grid<1>, MC: write_store<i32, 1>) { MC[g.x()] = 0; }
 @kernel @grid(1)
-fn k_mcount(g: grid<1>, B: read_store<f32, 1>, SUP: read_store<i32, 1>, MB: read_store<i32, 1>, MC: rw_store<i32, 1>, PAR: read_store<i32, 1>, tick: i32, rate: i32) {
+fn k_mcount(g: grid<1>, B: read_store<f32, 1>, SUP: read_store<i32, 1>, MB: read_store<i32, 1>, MC: rw_store<i32, 1>, PAR: read_store<i32, 1>, SPL: read_store<i32, 1>, D: read_store<f32, 1>, tick: i32, rate: i32) {
     let i = g.x();
     let m = MB[i];
-    // (A member's pieces are what is counted: a block is not one, and a piece still part of its block is
-    // joined to the ground as its block is.)
-    if (m < 0 || PAR[i] == -2) { return; }
-    var s = i;
-    if (PAR[i] >= 0) { s = PAR[i]; }
+    if (m < 0) { return; }
+    // (A member's pieces are what is counted: a block whole is all of its own, and one given way none.)
+    var count = 1;
+    if (PAR[i] == -2) {
+        if (SPL[i] == 2) { return; }
+        count = (D[4 * i + 1] + 0.5) as i32;
+    }
     // (A piece counts while its welds still join it to the ground, held or knocked loose.)
-    let hop = SUP[2 * s + 1];
-    if (hop >= 0 && tick - SUP[2 * s] <= 2 * hop / rate + 4) { let t = MC.atomic_add(m, 1); }
+    let hop = SUP[2 * i + 1];
+    if (hop >= 0 && tick - SUP[2 * i] <= 2 * hop / rate + 4) { let t = MC.atomic_add(m, count); }
 }
 
 // Blocks. A structure's pieces are grouped into blocks, each a body in its pieces' place while it is whole:
@@ -656,6 +658,85 @@ fn fine_weld(a: i32, b: i32, sigma: f32, R: read_store<f32, 1>, D: read_store<f3
     let sb = JC.atomic_add(b, 1);
     if (sb < MAXJ) { JR[MAXJ * b + sb] = j; }
 }
+// A block giving way: its pieces take bodies of their own, from the room after the structures' (`ns` on, `dc`
+// of them; PA: how many are taken), as its pieces still: where each stood, its size and mass, its block. A
+// block there is no room for stays whole.
+@kernel @grid(1)
+fn k_split_alloc(g: grid<1>, PAR: rw_store<i32, 1>, SPL: rw_store<i32, 1>, D: rw_store<f32, 1>, R: rw_store<f32, 1>, B: read_store<f32, 1>,
+                 MB: rw_store<i32, 1>, SUP: rw_store<i32, 1>, ORG: rw_store<i32, 1>, PA: rw_store<i32, 1>, ns: i32, dc: i32) {
+    let i = g.x();
+    if (PAR[i] != -2) { return; }
+    if (SPL[i] != 1) { return; }
+    let count = (D[4 * i + 1] + 0.5) as i32;
+    let s = PA.atomic_add(0, count);
+    if (s + count > dc) { SPL[i] = 0; return; }
+    let first = ns + s;
+    D[4 * i] = f32(first);
+    let enc = (D[4 * i + 3] + 0.5) as i32;
+    let nx = enc % 4;
+    let ny = (enc / 4) % 4;
+    let nz = enc / 16;
+    let o = 8 * i;
+    let h = vec3<f32>(B[o], B[o + 1], B[o + 2]);
+    let hp = h / vec3<f32>(f32(nx), f32(ny), f32(nz));
+    let mass = (B[o + 3] + B[o + 7]) / f32(count);
+    let q = vec4<f32>(R[o + 4], R[o + 5], R[o + 6], R[o + 7]);
+    for (var k = 0; k < count; k += 1) {
+        let la = k % nx;
+        let lb = (k / nx) % ny;
+        let ld = k / (nx * ny);
+        let off = qrot(q, vec3<f32>(hp.x * f32(2 * la + 1) - h.x, hp.y * f32(2 * lb + 1) - h.y, hp.z * f32(2 * ld + 1) - h.z));
+        let p = first + k;
+        let po = 8 * p;
+        R[po] = R[o] + off.x; R[po + 1] = R[o + 1] + off.y; R[po + 2] = R[o + 2] + off.z; R[po + 3] = 0.0;
+        R[po + 4] = q.x; R[po + 5] = q.y; R[po + 6] = q.z; R[po + 7] = q.w;
+        D[4 * p] = hp.x; D[4 * p + 1] = hp.y; D[4 * p + 2] = hp.z; D[4 * p + 3] = mass;
+        PAR[p] = i; ORG[p] = i; MB[p] = MB[i];
+        SUP[2 * p] = SUP[2 * i]; SUP[2 * p + 1] = SUP[2 * i + 1];
+    }
+}
+// The thread groups of a pass over the bodies: the structures' (the first `n`) alone while no block has given
+// way, else all their room and the pieces taken after it.
+@kernel @grid(1)
+fn k_bgroups(g: grid<1>, PA: read_store<i32, 1>, G: rw_store<i32, 1>, at: i32, n: i32, ns: i32, ls: i32, dc: i32) {
+    if (g.x() != 0) { return; }
+    var count = n;
+    if (PA[0] > 0) { count = ns + clamp(PA[0], 0, dc); }
+    G[3 * at] = (count + ls - 1) / ls;
+    G[3 * at + 1] = 1;
+    G[3 * at + 2] = 1;
+}
+// What is done with a structure's bodies (`nb` from `first`) of the pieces its blocks gave way to: out of the
+// world, no one's.
+@kernel @grid(1)
+fn k_unpiece(g: grid<1>, ORG: rw_store<i32, 1>, PAR: rw_store<i32, 1>, X: rw_store<f32, 1>, X0: rw_store<f32, 1>, B: rw_store<f32, 1>, V: rw_store<f32, 1>,
+             MB: rw_store<i32, 1>, SUP: rw_store<i32, 1>, JC: rw_store<i32, 1>, PA: read_store<i32, 1>, first: i32, nb: i32, ns: i32, dc: i32) {
+    if (g.x() >= min(PA[0], dc)) { return; }
+    let p = ns + g.x();
+    if (ORG[p] < first || ORG[p] >= first + nb) { return; }
+    let o = 8 * p;
+    for (var k = 0; k < 8; k += 1) { B[o + k] = 0.0; V[o + k] = 0.0; }
+    X[o + 1] = -100000.0; X0[o + 1] = -100000.0;
+    ORG[p] = -1; PAR[p] = -1; MB[p] = -1; JC[p] = 0;
+    SUP[2 * p] = 0; SUP[2 * p + 1] = 1048576;
+}
+// A table kept a row of 12 floats a body (0..2 its centre as built, in its structure's axes; 4..6 its half
+// sides; 7 its number and one more; the rest whose it is): the rows of the pieces blocks have given way to,
+// each its block's but for those, written once.
+@kernel @grid(1)
+fn k_piece_rows(g: grid<1>, ORG: read_store<i32, 1>, R: read_store<f32, 1>, D: read_store<f32, 1>, ROWS: rw_store<f32, 1>, PA: read_store<i32, 1>, ns: i32, dc: i32) {
+    if (g.x() >= min(PA[0], dc)) { return; }
+    let p = ns + g.x();
+    let b = ORG[p];
+    if (b < 0 || ROWS[12 * p + 7] != 0.0) { return; }
+    let q = vec4<f32>(R[8 * b + 4], R[8 * b + 5], R[8 * b + 6], R[8 * b + 7]);
+    let off = qinv_rot(q, vec3<f32>(R[8 * p] - R[8 * b], R[8 * p + 1] - R[8 * b + 1], R[8 * p + 2] - R[8 * b + 2]));
+    for (var k = 8; k < 12; k += 1) { ROWS[12 * p + k] = ROWS[12 * b + k]; }
+    ROWS[12 * p] = ROWS[12 * b] + off.x; ROWS[12 * p + 1] = ROWS[12 * b + 1] + off.y; ROWS[12 * p + 2] = ROWS[12 * b + 2] + off.z;
+    ROWS[12 * p + 3] = ROWS[12 * b + 3];
+    ROWS[12 * p + 4] = D[4 * p]; ROWS[12 * p + 5] = D[4 * p + 1]; ROWS[12 * p + 6] = D[4 * p + 2];
+    ROWS[12 * p + 7] = f32(p + 1);
+}
 // A block giving way: the welds between its pieces.
 @kernel @grid(1)
 fn k_split_inner(g: grid<1>, PAR: read_store<i32, 1>, SPL: read_store<i32, 1>, R: read_store<f32, 1>, D: read_store<f32, 1>,
@@ -671,10 +752,13 @@ fn k_split_inner(g: grid<1>, PAR: read_store<i32, 1>, SPL: read_store<i32, 1>, R
 }
 // What is done with a structure's bodies (`nb` from `first`) of the welds made between pieces: broken.
 @kernel @grid(1)
-fn k_unweld(g: grid<1>, JI: rw_store<i32, 1>, JF: rw_store<f32, 1>, WA: read_store<i32, 1>, first: i32, nb: i32, njc: i32, dcap: i32) {
+fn k_unweld(g: grid<1>, JI: rw_store<i32, 1>, JF: rw_store<f32, 1>, WA: read_store<i32, 1>, ORG: read_store<i32, 1>, first: i32, nb: i32, njc: i32, dcap: i32) {
     if (g.x() >= min(WA[0], dcap)) { return; }
     let j = njc - 1 - g.x();
-    let a = JI[2 * j];
+    if (JF[40 * j + 30] == 1.0 && JI[2 * j] == 0 && JI[2 * j + 1] == 0) { return; }
+    // (A weld made is between pieces, and one at least a block's: ORG, its block.)
+    var a = ORG[JI[2 * j]];
+    if (a < 0) { a = ORG[JI[2 * j + 1]]; }
     if (a < first || a >= first + nb) { return; }
     JF[40 * j + 30] = 1.0;
     JI[2 * j] = 0; JI[2 * j + 1] = 0;
@@ -721,6 +805,10 @@ fn k_split_pieces(g: grid<1>, X: rw_store<f32, 1>, X0: rw_store<f32, 1>, R: read
     V[o] = v.x; V[o + 1] = v.y; V[o + 2] = v.z; V[o + 3] = v.y;
     V[o + 4] = w.x; V[o + 5] = w.y; V[o + 6] = w.z;
     B[o] = D[4 * i]; B[o + 1] = D[4 * i + 1]; B[o + 2] = D[4 * i + 2];
+    let third = D[4 * i + 3] / 3.0;
+    B[o + 4] = third * (B[o + 1] * B[o + 1] + B[o + 2] * B[o + 2]);
+    B[o + 5] = third * (B[o] * B[o] + B[o + 2] * B[o + 2]);
+    B[o + 6] = third * (B[o] * B[o] + B[o + 1] * B[o + 1]);
     // (Moving, held or asleep, as its block was.)
     if (B[po + 3] > 0.0) { B[o + 3] = D[4 * i + 3]; B[o + 7] = 0.0; } else { B[o + 3] = 0.0; B[o + 7] = D[4 * i + 3]; }
     SUP[2 * i] = SUP[2 * p];
@@ -737,17 +825,20 @@ fn k_split_welds(g: grid<1>, JI: rw_store<i32, 1>, JF: rw_store<f32, 1>, JA: rea
     let a = JI[2 * j];
     let b = JI[2 * j + 1];
     // (Between two pieces on their own from the start: nothing gives way.)
-    if (JA[8 * j + 3] < -0.5) { return; }
+    if (JA[8 * j + 3] < -0.5 && JA[8 * j + 3] > -1.5) { return; }
     // (Broken, across it no welds are made; and one done with is done with.)
     if (JF[o + 30] > 0.5) { return; }
     // (ORG: -2 a block, which the weld is on until it gives way.)
     let sa = ORG[a] == -2 && SPL[a] == 1;
     let sb = ORG[b] == -2 && SPL[b] == 1;
     if (!sa && !sb) { return; }
+    // (The piece it goes to on each side: the one it is on already, or of a block the one JA names.)
+    var pa = a;
+    if (ORG[a] == -2) { pa = ((D[4 * a] + 0.5) as i32) + ((-1.5 - JA[8 * j + 3]) as i32); }
+    var pb = b;
+    if (ORG[b] == -2) { pb = ((D[4 * b] + 0.5) as i32) + ((-1.5 - JA[8 * j + 7]) as i32); }
     // (Pieces on both sides now: the welds between those pieces are what joins them.)
     if ((sa || ORG[a] != -2) && (sb || ORG[b] != -2)) {
-        let pa = (JA[8 * j + 3] + 0.5) as i32;
-        let pb = (JA[8 * j + 7] + 0.5) as i32;
         var fa = pa;
         var na = 1;
         var sigma = 0.0;
@@ -761,8 +852,17 @@ fn k_split_welds(g: grid<1>, JI: rw_store<i32, 1>, JF: rw_store<f32, 1>, JA: rea
         JF[o + 30] = 2.0;
         return;
     }
-    if (sa) { JI[2 * j] = (JA[8 * j + 3] + 0.5) as i32; JF[o] = JA[8 * j]; JF[o + 1] = JA[8 * j + 1]; JF[o + 2] = JA[8 * j + 2]; }
-    if (sb) { JI[2 * j + 1] = (JA[8 * j + 7] + 0.5) as i32; JF[o + 3] = JA[8 * j + 4]; JF[o + 4] = JA[8 * j + 5]; JF[o + 5] = JA[8 * j + 6]; }
+    // (And it is on that piece's list from now.)
+    if (sa) {
+        JI[2 * j] = pa; JF[o] = JA[8 * j]; JF[o + 1] = JA[8 * j + 1]; JF[o + 2] = JA[8 * j + 2];
+        let s = JC.atomic_add(pa, 1);
+        if (s < MAXJ) { JR[MAXJ * pa + s] = j; }
+    }
+    if (sb) {
+        JI[2 * j + 1] = pb; JF[o + 3] = JA[8 * j + 4]; JF[o + 4] = JA[8 * j + 5]; JF[o + 5] = JA[8 * j + 6];
+        let s = JC.atomic_add(pb, 1);
+        if (s < MAXJ) { JR[MAXJ * pb + s] = j; }
+    }
 }
 @kernel @grid(1)
 fn k_split_blocks(g: grid<1>, X: rw_store<f32, 1>, V: rw_store<f32, 1>, B: rw_store<f32, 1>, PAR: read_store<i32, 1>, SPL: rw_store<i32, 1>, SUP: rw_store<i32, 1>, SL: rw_store<i32, 1>) {
@@ -1308,7 +1408,7 @@ fn k_shown(g: grid<1>, X: read_store<f32, 1>, XP: write_store<f32, 1>) {
 fn k_show(g: grid<1>, X: read_store<f32, 1>, X0: read_store<f32, 1>, R: read_store<f32, 1>, B: read_store<f32, 1>,
           JI: read_store<i32, 1>, JF: read_store<f32, 1>, JC: read_store<i32, 1>, JR: read_store<i32, 1>,
           PAR: read_store<i32, 1>, D: read_store<f32, 1>,
-          OUT: write_store<f32, 1>, SPH: write_store<f32, 1>, ox: f32, oy: f32, oz: f32) {
+          OUT: write_store<f32, 1>, SPH: write_store<f32, 1>, SPH2: write_store<f32, 1>, ns: i32, ox: f32, oy: f32, oz: f32) {
     let i = g.x();
     let o = 8 * i;
     // (A piece still part of its block is where the block has carried it.)
@@ -1355,10 +1455,14 @@ fn k_show(g: grid<1>, X: read_store<f32, 1>, X0: read_store<f32, 1>, R: read_sto
     OUT[t + 12] = d.x; OUT[t + 13] = d.y; OUT[t + 14] = d.z; OUT[t + 15] = d.w;
     OUT[t + 16] = d0.x; OUT[t + 17] = d0.y; OUT[t + 18] = d0.z; OUT[t + 19] = d0.w;
     // (A block whole is drawn, as one box, and its pieces are not; given way, its pieces are and it is not.)
-    if (PAR[i] >= 0 || (PAR[i] == -2 && B[o] <= 0.0)) {
-        SPH[4 * i] = 0.0; SPH[4 * i + 1] = -100000.0; SPH[4 * i + 2] = 0.0; SPH[4 * i + 3] = 0.0;
-        return;
+    var sp = vec4<f32>(p.x + ox, p.y + oy, p.z + oz, 1.2 * length(hs) + length(p - p0));
+    if (PAR[i] >= 0 || (PAR[i] == -2 && B[o] <= 0.0)) { sp = vec4<f32>(0.0, -100000.0, 0.0, 0.0); }
+    // (The structures' bodies' spheres in one table, the pieces' their blocks gave way to in another: each
+    // is drawn as far as it goes.)
+    if (i < ns) {
+        SPH[4 * i] = sp.x; SPH[4 * i + 1] = sp.y; SPH[4 * i + 2] = sp.z; SPH[4 * i + 3] = sp.w;
+    } else {
+        let s = 4 * (i - ns);
+        SPH2[s] = sp.x; SPH2[s + 1] = sp.y; SPH2[s + 2] = sp.z; SPH2[s + 3] = sp.w;
     }
-    SPH[4 * i] = p.x + ox; SPH[4 * i + 1] = p.y + oy; SPH[4 * i + 2] = p.z + oz;
-    SPH[4 * i + 3] = 1.2 * length(hs) + length(p - p0);
 }
