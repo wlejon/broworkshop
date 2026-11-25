@@ -16,7 +16,6 @@
 // steel): bent 0.04 rad, twice as far with each step up; slid half of that in metres. And the arm a
 // weld's bending strength is its pulling strength at, by the face it joins over.
 fn give_bent(ductile: i32) -> f32 { return 0.04 * f32(1 << clamp(ductile, 0, 7)); }
-fn weld_arm(area: f32) -> f32 { return 0.4 * sqrt(area); }
 // (A block's last float: how many pieces it is along x, y and z, five bits each, then how ductile.)
 fn block_ductile(D: read_store<f32, 1>, i: i32) -> i32 { return ((D[4 * i + 3] + 0.5) as i32) / 32768; }
 const JMIN: f32 = 1.0;
@@ -602,7 +601,8 @@ fn outranks(j: i32, i: i32) -> bool {
 // their relative turn held at what it was set with (three rows). JF, 40 floats:
 // the point in a (0) and in b (3), b's turn in a's frame (6), the rows' forces
 // (10), stiffnesses (16), what the rows read at the step's start (22), the
-// force and torque it yields at (28, 29), broken (30), the stiffness scales (31, 32),
+// force it yields at (28) and the torque about a's first axis (29; about its other two, 38 and
+// 39), broken (30), the stiffness scales (31, 32),
 // when it broke (33), how far it can give in all before it breaks, slid (34, m) and
 // bent (35, rad), and how far it has (36, 37).
 fn joint_lin(j: i32, JI: read_store<i32, 1>, JF: rw_store<f32, 1>, X: rw_store<f32, 1>) -> vec3<f32> {
@@ -629,8 +629,17 @@ const HARDEN: f32 = 1.0;
 fn weld_holds(JF: rw_store<f32, 1>, o: i32) -> f32 {
     return JF[o + 28] * (1.0 + HARDEN * clamp(JF[o + 36] / max(JF[o + 34], 1.0e-6), 0.0, 1.0));
 }
-fn weld_turns(JF: rw_store<f32, 1>, o: i32) -> f32 {
-    return JF[o + 29] * (1.0 + HARDEN * clamp(JF[o + 37] / max(JF[o + 35], 1.0e-6), 0.0, 1.0));
+// (The torque it holds about each of the world's axes: about a's own axes what the face it joins across is
+// shaped to hold (29, 38, 39; turn_caps), a turned by qa.)
+fn weld_turns(JF: rw_store<f32, 1>, o: i32, qa: vec4<f32>) -> vec3<f32> {
+    return span(qa, vec3<f32>(JF[o + 29], JF[o + 38], JF[o + 39])) * (1.0 + HARDEN * clamp(JF[o + 37] / max(JF[o + 35], 1.0e-6), 0.0, 1.0));
+}
+// The torque a weld across a face holds about each of its first body's axes: e, how far the face reaches along
+// each (nothing along the one it faces); `holds`, the force it holds. About an axis the face lies along, by
+// how far it reaches across that; about the one it faces, by its longer side: a long thin face turns easily
+// about its length and hardly at all the other ways.
+fn turn_caps(holds: f32, e: vec3<f32>) -> vec3<f32> {
+    return 0.4 * holds * vec3<f32>(max(e.y, e.z), max(e.x, e.z), max(e.x, e.y));
 }
 fn unit(k: i32) -> vec3<f32> {
     if (k == 0) { return vec3<f32>(1.0, 0.0, 0.0); }
@@ -668,8 +677,12 @@ fn k_jdual(g: grid<1>, JI: read_store<i32, 1>, JF: rw_store<f32, 1>, X: rw_store
     var slid = vec3<f32>(0.0);
     var bent = false;
     let holds = weld_holds(JF, o);
-    let turns = weld_turns(JF, o);
+    let a = JI[2 * j];
+    let b = JI[2 * j + 1];
+    let qa = vec4<f32>(X[8 * a + 4], X[8 * a + 5], X[8 * a + 6], X[8 * a + 7]);
+    let turn3 = weld_turns(JF, o, qa);
     for (var k = 0; k < 3; k += 1) {
+        let turns = pick(turn3, k);
         let c = pick(cl, k) - JF[o + 22 + k] * alpha * JALPHA;
         // (A weld carries no more than it holds: a blow past that is not handed on through it.)
         let l = clamp(JF[o + 16 + k] * c + JF[o + 10 + k], -holds, holds);
@@ -690,9 +703,6 @@ fn k_jdual(g: grid<1>, JI: read_store<i32, 1>, JF: rw_store<f32, 1>, X: rw_store
     // as they have come to lie, joined still. It breaks once it has given, in all, more than it can (36, 37
     // against 34, 35): little pulled apart, far bent. A held body at an end of one giving is let go: what
     // gives spreads into what stands.
-    let a = JI[2 * j];
-    let b = JI[2 * j + 1];
-    let qa = vec4<f32>(X[8 * a + 4], X[8 * a + 5], X[8 * a + 6], X[8 * a + 7]);
     if (dot(slid, slid) > 0.0) {
         let s = qinv_rot(qa, slid);
         // (Pressed together, the two are no nearer parting: that part of it counts a quarter.)
@@ -828,10 +838,13 @@ fn fine_weld(a: i32, b: i32, sigma: f32, ductile: i32, R: read_store<f32, 1>, D:
     let d = qinv_rot(q, vec3<f32>(R[8 * b] - R[8 * a], R[8 * b + 1] - R[8 * a + 1], R[8 * b + 2] - R[8 * a + 2]));
     var deep = 0;
     var area = 1.0;
+    // (How far the face they share reaches along each of a's axes.)
+    var ext: array<f32, 3>;
     for (var k = 0; k < 3; k += 1) {
         let gap = abs(pick(d, k)) - D[4 * a + k] - D[4 * b + k];
         if (gap > 0.01) { return; }
-        if (gap < -0.05) { deep += 1; area = area * min(-gap, 2.0 * min(D[4 * a + k], D[4 * b + k])); }
+        ext[k] = 0.0;
+        if (gap < -0.05) { deep += 1; ext[k] = min(-gap, 2.0 * min(D[4 * a + k], D[4 * b + k])); area = area * ext[k]; }
     }
     if (deep < 2) { return; }
     // (From its structure's welds' room: the first of its two runs, then the second.)
@@ -855,7 +868,9 @@ fn fine_weld(a: i32, b: i32, sigma: f32, ductile: i32, R: read_store<f32, 1>, D:
     JF[o + 9] = 1.0;
     JF[o + 31] = ms; JF[o + 32] = ms * L;
     for (var k = 0; k < 3; k += 1) { JF[o + 16 + k] = 10000.0 * ms; JF[o + 19 + k] = 10000.0 * ms * L; }
-    JF[o + 28] = sigma * area; JF[o + 29] = sigma * area * weld_arm(area);
+    JF[o + 28] = sigma * area;
+    let caps = turn_caps(sigma * area, vec3<f32>(ext[0], ext[1], ext[2]));
+    JF[o + 29] = caps.x; JF[o + 38] = caps.y; JF[o + 39] = caps.z;
     JF[o + 34] = 0.5 * give_bent(ductile); JF[o + 35] = give_bent(ductile);
     let sa = JC.atomic_add(a, 1);
     if (sa < MAXJ) { JR[MAXJ * a + sa] = j; }
@@ -1494,7 +1509,9 @@ fn k_primal_part(g: grid<1>, X: rw_store<f32, 1>, X0: read_store<f32, 1>, B: rea
             let cl = joint_lin(j, JI, JF, X);
             let ca = joint_ang(j, JI, JF, X);
             let holds = weld_holds(JF, jo);
-            let turns = weld_turns(JF, jo);
+            var qa = q;
+            if (JI[2 * j] != i) { let oa = 8 * JI[2 * j]; qa = vec4<f32>(X[oa + 4], X[oa + 5], X[oa + 6], X[oa + 7]); }
+            let turn3 = weld_turns(JF, jo, qa);
             for (var row = 0; row < 6; row += 1) {
                 let dir = unit(row % 3);
                 var cv = pick(cl, row % 3);
@@ -1504,7 +1521,7 @@ fn k_primal_part(g: grid<1>, X: rw_store<f32, 1>, X0: read_store<f32, 1>, B: rea
                 cv = cv - JF[jo + 22 + row] * alpha * JALPHA;
                 let pen = JF[jo + 16 + row];
                 var cap = holds;
-                if (row >= 3) { cap = turns; }
+                if (row >= 3) { cap = pick(turn3, row - 3); }
                 let f = clamp(pen * cv + JF[jo + 10 + row], -cap, cap);
                 var J: array<f32, 6>;
                 J[0] = jl.x; J[1] = jl.y; J[2] = jl.z; J[3] = ja.x; J[4] = ja.y; J[5] = ja.z;
