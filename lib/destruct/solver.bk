@@ -1559,7 +1559,9 @@ fn k_show(g: grid<1>, X: read_store<f32, 1>, X0: read_store<f32, 1>, R: read_sto
     OUT[t + 12] = d.x; OUT[t + 13] = d.y; OUT[t + 14] = d.z; OUT[t + 15] = d.w;
     OUT[t + 16] = d0.x; OUT[t + 17] = d0.y; OUT[t + 18] = d0.z; OUT[t + 19] = d0.w;
     // (A block whole is drawn, as one box, and its pieces are not; given way, its pieces are and it is not.)
-    var sp = vec4<f32>(p.x + ox, p.y + oy, p.z + oz, 1.2 * length(hs) + length(p - p0));
+    // (Each face may stand off its plane by 0.7 of the half extent, 0.45 m at most: the sphere holds that, as
+    // a draw that leaves out what is hidden behind others needs it to.)
+    var sp = vec4<f32>(p.x + ox, p.y + oy, p.z + oz, length(hs + min(0.7 * hs, vec3<f32>(0.45, 0.45, 0.45))) + length(p - p0));
     if (PAR[i] >= 0 || (PAR[i] == -2 && B[o] <= 0.0)) { sp = vec4<f32>(0.0, -100000.0, 0.0, 0.0); }
     // (The structures' bodies' spheres in one table, the pieces' their blocks gave way to in another: each
     // is drawn as far as it goes.)
