@@ -10,8 +10,13 @@
 // a piece is let go when it is struck, cut off from the ground, or its member
 // is loaded past what it was built to carry. What comes to rest sleeps, as
 // part of what still stands or as rubble, until something moving touches it.
-const GIVE_SLID: f32 = 0.05;   // how far a weld made as a block gives way slides, in all, before it breaks (m)
-const GIVE_BENT: f32 = 0.6;    // and bends (rad)
+// How far a weld gives in all before it breaks, by how ductile what it joins is (0, as glass, to 5, as
+// steel): bent 0.04 rad, twice as far with each step up; slid a tenth of that in metres. And the arm a
+// weld's bending strength is its pulling strength at, by the face it joins over.
+fn give_bent(ductile: i32) -> f32 { return 0.04 * f32(1 << clamp(ductile, 0, 7)); }
+fn weld_arm(area: f32) -> f32 { return 0.4 * sqrt(area); }
+// (A block's last float: how many pieces it is along x, y and z, two bits each, then how ductile.)
+fn block_ductile(D: read_store<f32, 1>, i: i32) -> i32 { return ((D[4 * i + 3] + 0.5) as i32) / 64; }
 const JMIN: f32 = 1.0;
 const JALPHA: f32 = 1.0;
 const JBETA: f32 = 100000.0;
@@ -747,7 +752,7 @@ fn k_weld_run(g: grid<1>, JI: rw_store<i32, 1>, JF: rw_store<f32, 1>, first: i32
 
 // The weld between pieces `a` and `b` if they stood face to face (R: how each stood; D: its half sides),
 // made and put on both their lists.
-fn fine_weld(a: i32, b: i32, sigma: f32, R: read_store<f32, 1>, D: read_store<f32, 1>, JI: rw_store<i32, 1>, JF: rw_store<f32, 1>,
+fn fine_weld(a: i32, b: i32, sigma: f32, ductile: i32, R: read_store<f32, 1>, D: read_store<f32, 1>, JI: rw_store<i32, 1>, JF: rw_store<f32, 1>,
              JC: rw_store<i32, 1>, JR: rw_store<i32, 1>, GA: rw_store<i32, 1>, grp: i32, njc: i32, dcap: i32) {
     let q = vec4<f32>(R[8 * a + 4], R[8 * a + 5], R[8 * a + 6], R[8 * a + 7]);
     let d = qinv_rot(q, vec3<f32>(R[8 * b] - R[8 * a], R[8 * b + 1] - R[8 * a + 1], R[8 * b + 2] - R[8 * a + 2]));
@@ -780,8 +785,8 @@ fn fine_weld(a: i32, b: i32, sigma: f32, R: read_store<f32, 1>, D: read_store<f3
     JF[o + 9] = 1.0;
     JF[o + 31] = ms; JF[o + 32] = ms * L;
     for (var k = 0; k < 3; k += 1) { JF[o + 16 + k] = 10000.0 * ms; JF[o + 19 + k] = 10000.0 * ms * L; }
-    JF[o + 28] = sigma * area; JF[o + 29] = sigma * area * 0.25;
-    JF[o + 34] = GIVE_SLID; JF[o + 35] = GIVE_BENT; JF[o + 36] = 0.0; JF[o + 37] = 0.0;
+    JF[o + 28] = sigma * area; JF[o + 29] = sigma * area * weld_arm(area);
+    JF[o + 34] = 0.1 * give_bent(ductile); JF[o + 35] = give_bent(ductile);
     let sa = JC.atomic_add(a, 1);
     if (sa < MAXJ) { JR[MAXJ * a + sa] = j; }
     let sb = JC.atomic_add(b, 1);
@@ -814,7 +819,7 @@ fn k_split_alloc(g: grid<1>, PAR: rw_store<i32, 1>, SPL: rw_store<i32, 1>, D: rw
     let enc = (D[4 * i + 3] + 0.5) as i32;
     let nx = enc % 4;
     let ny = (enc / 4) % 4;
-    let nz = enc / 16;
+    let nz = (enc / 16) % 4;
     let o = 8 * i;
     let h = vec3<f32>(B[o], B[o + 1], B[o + 2]);
     let hp = h / vec3<f32>(f32(nx), f32(ny), f32(nz));
@@ -890,7 +895,7 @@ fn k_split_inner(g: grid<1>, PAR: read_store<i32, 1>, SPL: read_store<i32, 1>, R
     let first = (D[4 * i] + 0.5) as i32;
     let count = (D[4 * i + 1] + 0.5) as i32;
     for (var a = 0; a < count; a += 1) {
-        for (var b = a + 1; b < count; b += 1) { fine_weld(first + a, first + b, D[4 * i + 2], R, D, JI, JF, JC, JR, GA, GI[i], njc, dcap); }
+        for (var b = a + 1; b < count; b += 1) { fine_weld(first + a, first + b, D[4 * i + 2], block_ductile(D, i), R, D, JI, JF, JC, JR, GA, GI[i], njc, dcap); }
     }
 }
 // How many of a structure's bodies (`nb` from `first`) are not as built: a block given way, a body off where
@@ -1004,13 +1009,15 @@ fn k_split_welds(g: grid<1>, JI: rw_store<i32, 1>, JF: rw_store<f32, 1>, JA: rea
     if ((sa || ORG[a] != -2) && (sb || ORG[b] != -2)) {
         var fa = pa;
         var na = 1;
-        var sigma = 0.0;
-        if (ORG[pa] >= 0) { fa = (D[4 * ORG[pa]] + 0.5) as i32; na = (D[4 * ORG[pa] + 1] + 0.5) as i32; sigma = D[4 * ORG[pa] + 2]; }
+        // (As strong and as ductile as the weaker and the more brittle of the two.)
+        var sigma = 1.0e30;
+        var ductile = 7;
+        if (ORG[pa] >= 0) { fa = (D[4 * ORG[pa]] + 0.5) as i32; na = (D[4 * ORG[pa] + 1] + 0.5) as i32; sigma = min(sigma, D[4 * ORG[pa] + 2]); ductile = min(ductile, block_ductile(D, ORG[pa])); }
         var fb = pb;
         var nb = 1;
-        if (ORG[pb] >= 0) { fb = (D[4 * ORG[pb]] + 0.5) as i32; nb = (D[4 * ORG[pb] + 1] + 0.5) as i32; sigma = D[4 * ORG[pb] + 2]; }
+        if (ORG[pb] >= 0) { fb = (D[4 * ORG[pb]] + 0.5) as i32; nb = (D[4 * ORG[pb] + 1] + 0.5) as i32; sigma = min(sigma, D[4 * ORG[pb] + 2]); ductile = min(ductile, block_ductile(D, ORG[pb])); }
         for (var s = 0; s < na; s += 1) {
-            for (var t = 0; t < nb; t += 1) { fine_weld(fa + s, fb + t, sigma, R, D, JI, JF, JC, JR, GA, GI[a], njc, dcap); }
+            for (var t = 0; t < nb; t += 1) { fine_weld(fa + s, fb + t, sigma, ductile, R, D, JI, JF, JC, JR, GA, GI[a], njc, dcap); }
         }
         JF[o + 30] = 2.0;
         return;
