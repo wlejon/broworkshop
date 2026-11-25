@@ -28,7 +28,8 @@ struct Params {
 @binding(4, 14) var puffs: read_buffer<vec4<f32>>;
 
 const MAX: i32 = 128;
-const STEPS: i32 = 28;
+const STEPS: i32 = 40;      // samples and gaps crossed, at most, along a ray
+const STEP: f32 = 0.3;    // a step, as a share of the radius of the smallest puff it is in
 const SUN_STEPS: i32 = 3;
 
 fn lattice(x: f32, y: f32, z: f32) -> f32 {
@@ -59,14 +60,14 @@ fn billow(p: vec3<f32>, t: f32) -> vec2<f32> {
     return vec2<f32>(s, 0.68 * f1 + 0.32 * f2);
 }
 
-// The dust's density at world point p over the puffs in mask (4 x 32 bits).
-fn density(p: vec3<f32>, m0: u32, m1: u32, m2: u32, m3: u32, n: i32) -> f32 {
+// The dust's density at world point p over the puffs in mask (4 x 32 bits),
+// with the billows bb there (billow()).
+fn density(p: vec3<f32>, bb: vec2<f32>, m0: u32, m1: u32, m2: u32, m3: u32, n: i32) -> f32 {
     var d = 0.0;
     // The billows move each puff's boundary in and out, by a share of its
     // radius: a lumpy outline, not a sphere's. The fine ones by a metre or
     // so whatever the radius: a small puff's edge tatters, a big cloud's
     // only frays.
-    let bb = billow(p, params.time);
     let bl = bb.x;
     let lump = 1.0 + 1.6 * (bl - 0.5);
     let tat = (bb.y - 0.5) * 6.0;
@@ -82,18 +83,54 @@ fn density(p: vec3<f32>, m0: u32, m1: u32, m2: u32, m3: u32, n: i32) -> f32 {
             let a = puffs[i * 2];
             let b = puffs[i * 2 + 1];
             let q = (p - a.xyz) / a.w;
-            let r2 = dot(q, q) * max(lump + tat / max(a.w, 1.5), 0.2);
-            if (r2 >= 1.0) { continue; }
+            let q2 = dot(q, q);
+            let r2 = q2 * max(lump + tat / max(a.w, 1.5), 0.2);
+            if (r2 >= 1.0 || q2 >= 1.0) { continue; }
             // Below the ground it stood on, nothing.
             if (p.y < b.z) { continue; }
             let k = 1.0 - r2;
-            d += b.x * k * k;
+            // (A lump that billows out past the puff's own radius thins to
+            // nothing there: the ray is marched over the puffs' spheres,
+            // and a sphere's edge is not to show.)
+            d += b.x * k * k * clamp((1.0 - q2) * 3.0, 0.0, 1.0);
         }
     }
     if (d <= 0.0) { return 0.0; }
     // And thin it within: denser lumps, thinner gaps.
     let c = clamp((bl - 0.3) * 2.5, 0.0, 1.0);
     return d * (0.1 + 1.8 * c * c);
+}
+
+// Where the ray (eye, dir) is at p, t along it, among the mask's puffs: x the
+// radius of the smallest it is in (1e30: in none), and for when it is in
+// none, y how far along the next one's near side is (1e30: none ahead) and z
+// that one's radius.
+fn around(p: vec3<f32>, eye: vec3<f32>, dir: vec3<f32>, t: f32, m0: u32, m1: u32, m2: u32, m3: u32) -> vec3<f32> {
+    var rmin = 1e30;
+    var ne = 1e30;
+    var nr = 1.0;
+    for (var w = 0; w < 4; w += 1) {
+        var mw = m0;
+        if (w == 1) { mw = m1; } else if (w == 2) { mw = m2; } else if (w == 3) { mw = m3; }
+        while (mw != 0u) {
+            let low = mw & (0u - mw);
+            mw = mw ^ low;
+            let i = w * 32 + ((log2(low as f32) + 0.5) as i32);
+            let a = puffs[i * 2];
+            let dq = p - a.xyz;
+            if (dot(dq, dq) < a.w * a.w) {
+                if (p.y >= puffs[i * 2 + 1].z) { rmin = min(rmin, a.w); }
+                continue;
+            }
+            let oc = eye - a.xyz;
+            let bq = dot(oc, dir);
+            let disc = bq * bq - (dot(oc, oc) - a.w * a.w);
+            if (disc <= 0.0) { continue; }
+            let e0 = -bq - sqrt(disc);
+            if (e0 > t && e0 < ne) { ne = e0; nr = a.w; }
+        }
+    }
+    return vec3<f32>(rmin, ne, nr);
 }
 
 // Henyey-Greenstein, normalised over the sphere.
@@ -114,7 +151,6 @@ pub fn volume(ray: volume::Ray) -> volume::Light {
     var m3 = 0u;
     var t0 = 1e30;
     var t1 = 0.0;
-    var rsum = 0.0;
     var hits = 0.0;
     for (var i = 0; i < n; i += 1) {
         let a = puffs[i * 2];
@@ -129,13 +165,12 @@ pub fn volume(ray: volume::Ray) -> volume::Light {
         if (e1 <= 0.0 || e0 >= ray.scene_dist) { continue; }
         t0 = min(t0, e0);
         t1 = max(t1, e1);
-        rsum += a.w;
         hits += 1.0;
         let w = i / 32;
         let bit = 1u << ((i - w * 32) as u32);
         if (w == 0) { m0 |= bit; } else if (w == 1) { m1 |= bit; } else if (w == 2) { m2 |= bit; } else { m3 |= bit; }
     }
-    if (hits == 0.0) { return volume::light(vec3<f32>(0.0, 0.0, 0.0), 1.0, 0.0); }
+    if (hits <= 0.0) { return volume::light(vec3<f32>(0.0, 0.0, 0.0), 1.0, 0.0); }
     t1 = min(t1, ray.scene_dist);
     if (t1 <= t0) { return volume::light(vec3<f32>(0.0, 0.0, 0.0), 1.0, 0.0); }
 
@@ -143,23 +178,48 @@ pub fn volume(ray: volume::Ray) -> volume::Light {
     let cos_sun = dot(dir, to_sun);
     // Forward and back lobes: dust glows against the sun, and a little toward it.
     let phase = mix(hg(cos_sun, 0.55), hg(cos_sun, -0.2), 0.3);
-    let sun_step = rsum / hits * 0.3;
-    let dt = (t1 - t0) / (STEPS as f32);
     let jit = fract(scene::hash2(bitcast<u32>(ray.pixel.x) ^ (bitcast<u32>(ray.pixel.y) * 1973u), volume::march_index() as u32) + 0.5);
     let albedo = params.albedo.xyz;
     var T = 1.0;
     var rad = vec3<f32>(0.0, 0.0, 0.0);
     var depth = 0.0;
     var wsum = 0.0;
+    // The march keeps to the puffs: from one's near side on in steps a
+    // share of its radius (the smallest's it is in), and across a gap
+    // between them at once. A step's length is the dust's own there, and
+    // not the ray's whole stretch over a step count: another puff's
+    // outline, crossed far along the ray, changes nothing of how this
+    // one is sampled, and does not show in it.
+    var t = max(t0 - 0.01, 0.0);
+    var jittered = false;
     for (var k = 0; k < STEPS; k += 1) {
-        let t = t0 + ((k as f32) + jit) * dt;
+        if (t >= t1) { break; }
         let p = eye + dir * t;
-        let d = density(p, m0, m1, m2, m3, n);
+        let ar = around(p, eye, dir, t, m0, m1, m2, m3);
+        if (ar.x > 1e29) {
+            if (ar.y >= t1) { break; }
+            t = ar.y + jit * STEP * ar.z;
+            jittered = true;
+            continue;
+        }
+        let dt = max(STEP * ar.x, 0.5);
+        if (!jittered) {
+            t += jit * dt;
+            jittered = true;
+            continue;
+        }
+        let sun_step = dt;
+        t += dt;
+        let bb = billow(p, params.time);
+        let d = density(p, bb, m0, m1, m2, m3, n);
         if (d <= 0.001) { continue; }
-        // The sun through the dust toward it.
+        // The sun through the dust toward it: the puffs' on the way, with
+        // the billows of this point (the noise is the cost of a density,
+        // and the way to the sun is short beside a billow).
         var od = 0.0;
         for (var j = 1; j <= SUN_STEPS; j += 1) {
-            od += density(p + to_sun * (sun_step * (j as f32)), m0, m1, m2, m3, n);
+            let ps = p + to_sun * (sun_step * (j as f32));
+            od += density(ps, bb, m0, m1, m2, m3, n);
         }
         let Ts = exp(-params.sigma * od * sun_step);
         let rel = p - eye;
@@ -176,7 +236,7 @@ pub fn volume(ray: volume::Ray) -> volume::Light {
         let a = exp(-sg * dt);
         rad += T * S * (1.0 - a);
         let w = T * (1.0 - a);
-        depth += w * t;
+        depth += w * (t - dt);
         wsum += w;
         T *= a;
         if (T < 0.01) { break; }
