@@ -668,6 +668,9 @@ fn k_split_alloc(g: grid<1>, PAR: rw_store<i32, 1>, SPL: rw_store<i32, 1>, D: rw
     if (PAR[i] != -2) { return; }
     if (SPL[i] != 1) { return; }
     let count = (D[4 * i + 1] + 0.5) as i32;
+    // (Looked at before it is taken from: a block struck is marked again every step, and what is taken is
+    // not given back.)
+    if (PA[0] + count > dc) { SPL[i] = 0; return; }
     let s = PA.atomic_add(0, count);
     if (s + count > dc) { SPL[i] = 0; return; }
     let first = ns + s;
