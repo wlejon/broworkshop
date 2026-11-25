@@ -643,12 +643,76 @@ fn k_mcount(g: grid<1>, B: read_store<f32, 1>, SUP: read_store<i32, 1>, MB: read
 // block there, and that piece; the piece -1 for a weld between two pieces), and the block leaves the world
 // (k_split_blocks). A block's D: its first piece, how many they are (one after another), and what a weld
 // between them holds, a square metre. The welds made here are taken from the end of the welds' room back
-// (WA: how many; `njc` the room, `dcap` how many of it are theirs).
+// (`njc` the room, `dcap` how many of it are theirs; WA: how far into those any has been handed out).
+
+// The room pieces and the welds made between them are taken from is each structure's own (GI: a body's
+// structure; GA: GROUP ints a structure), in runs the page hands it as it wants them (k_grant) and has back
+// whole when the structure leaves:
+//   0, 1     its run of pieces: the next to take and its end, counted from the pieces' room's start
+//   2        a run of pieces waiting, taken up when that one is all but spent (-1: none)
+//   3..6     its two runs of welds, each the next to take and its end, counted from the welds' room's end back
+//   7, 8     set when it wanted pieces, welds, and there were none: the page's cue
+const GROUP: i32 = 12;
+const PIECE_RUN: i32 = 512;
+const WELD_RUN: i32 = 2048;
+// The welds there must be room for before a block gives way to its pieces: three a piece of a run of
+// pieces, the most a step can take (a run of welds holds that, so one run full is always enough).
+const WELDS_AHEAD: i32 = 1536;
+
+// Each structure's runs brought up at the head of a step: a run of pieces all but spent gives way to the
+// one waiting, a first run of welds spent to the second.
+@kernel @grid(1)
+fn k_runs(g: grid<1>, GA: rw_store<i32, 1>) {
+    let w = GROUP * g.x();
+    GA[w] = min(GA[w], GA[w + 1]);
+    if (GA[w + 1] - GA[w] < 64 && GA[w + 2] >= 0) { GA[w] = GA[w + 2]; GA[w + 1] = GA[w + 2] + PIECE_RUN; GA[w + 2] = -1; }
+    GA[w + 3] = min(GA[w + 3], GA[w + 4]);
+    GA[w + 5] = min(GA[w + 5], GA[w + 6]);
+    if (GA[w + 3] >= GA[w + 4] && GA[w + 5] < GA[w + 6]) { GA[w + 3] = GA[w + 5]; GA[w + 4] = GA[w + 6]; GA[w + 5] = 0; GA[w + 6] = 0; }
+}
+// A run handed to structure `grp`: of pieces (kind 0: its run if it has none, else the one waiting) or of
+// welds (kind 1: whichever of its two is empty), from `first`; and the rooms' high marks kept (PA, WA: how
+// far into each anything has been handed out).
+@kernel @grid(1)
+fn k_grant(g: grid<1>, GA: rw_store<i32, 1>, PA: rw_store<i32, 1>, WA: rw_store<i32, 1>, grp: i32, kind: i32, first: i32) {
+    if (g.x() != 0) { return; }
+    let w = GROUP * grp;
+    if (kind == 0) {
+        if (GA[w + 1] - GA[w] < 64) { GA[w] = first; GA[w + 1] = first + PIECE_RUN; } else { GA[w + 2] = first; }
+        GA[w + 7] = 0;
+        PA[0] = max(PA[0], first + PIECE_RUN);
+    } else {
+        if (GA[w + 3] >= GA[w + 4]) { GA[w + 3] = first; GA[w + 4] = first + WELD_RUN; } else { GA[w + 5] = first; GA[w + 6] = first + WELD_RUN; }
+        GA[w + 8] = 0;
+        WA[0] = max(WA[0], first + WELD_RUN);
+    }
+}
+
+// A run of pieces, from `first` of the pieces' room, as it is handed out: no one's, out of the world.
+@kernel @grid(1)
+fn k_piece_run(g: grid<1>, ORG: rw_store<i32, 1>, PAR: rw_store<i32, 1>, X: rw_store<f32, 1>, X0: rw_store<f32, 1>, XP: rw_store<f32, 1>, B: rw_store<f32, 1>,
+               V: rw_store<f32, 1>, MB: rw_store<i32, 1>, SUP: rw_store<i32, 1>, JC: rw_store<i32, 1>, first: i32, ns: i32) {
+    let p = ns + first + g.x();
+    let o = 8 * p;
+    for (var k = 0; k < 8; k += 1) { B[o + k] = 0.0; V[o + k] = 0.0; }
+    X[o + 1] = -100000.0; X0[o + 1] = -100000.0; XP[o + 1] = -100000.0;
+    X[o + 7] = 1.0; X0[o + 7] = 1.0; XP[o + 7] = 1.0;
+    ORG[p] = -1; PAR[p] = -1; MB[p] = -1; JC[p] = 0;
+    SUP[2 * p] = 0; SUP[2 * p + 1] = 1048576;
+}
+// A run of welds, from `first` of the welds' room's end back, as it is handed out: each broken, joining
+// nothing (as k_unweld leaves one).
+@kernel @grid(1)
+fn k_weld_run(g: grid<1>, JI: rw_store<i32, 1>, JF: rw_store<f32, 1>, first: i32, njc: i32) {
+    let j = njc - 1 - first - g.x();
+    JF[40 * j + 30] = 1.0;
+    JI[2 * j] = 0; JI[2 * j + 1] = 0;
+}
 
 // The weld between pieces `a` and `b` if they stood face to face (R: how each stood; D: its half sides),
 // made and put on both their lists.
 fn fine_weld(a: i32, b: i32, sigma: f32, R: read_store<f32, 1>, D: read_store<f32, 1>, JI: rw_store<i32, 1>, JF: rw_store<f32, 1>,
-             JC: rw_store<i32, 1>, JR: rw_store<i32, 1>, WA: rw_store<i32, 1>, njc: i32, dcap: i32) {
+             JC: rw_store<i32, 1>, JR: rw_store<i32, 1>, GA: rw_store<i32, 1>, grp: i32, njc: i32, dcap: i32) {
     let q = vec4<f32>(R[8 * a + 4], R[8 * a + 5], R[8 * a + 6], R[8 * a + 7]);
     let d = qinv_rot(q, vec3<f32>(R[8 * b] - R[8 * a], R[8 * b + 1] - R[8 * a + 1], R[8 * b + 2] - R[8 * a + 2]));
     var deep = 0;
@@ -659,8 +723,14 @@ fn fine_weld(a: i32, b: i32, sigma: f32, R: read_store<f32, 1>, D: read_store<f3
         if (gap < -0.05) { deep += 1; area = area * min(-gap, 2.0 * min(D[4 * a + k], D[4 * b + k])); }
     }
     if (deep < 2) { return; }
-    let s = WA.atomic_add(0, 1);
-    if (s >= dcap) { return; }
+    // (From its structure's welds' room: the first of its two runs, then the second.)
+    let w = GROUP * grp;
+    var s = GA.atomic_add(w + 3, 1);
+    if (s >= GA[w + 4]) {
+        s = GA.atomic_add(w + 5, 1);
+        if (s >= GA[w + 6]) { GA[w + 8] = 1; return; }
+    }
+    if (s < 0 || s >= dcap) { return; }
     let j = njc - 1 - s;
     let o = 40 * j;
     for (var k = 0; k < 40; k += 1) { JF[o + k] = 0.0; }
@@ -686,16 +756,23 @@ fn fine_weld(a: i32, b: i32, sigma: f32, R: read_store<f32, 1>, D: read_store<f3
 // block there is no room for stays whole.
 @kernel @grid(1)
 fn k_split_alloc(g: grid<1>, PAR: rw_store<i32, 1>, SPL: rw_store<i32, 1>, D: rw_store<f32, 1>, R: rw_store<f32, 1>, B: read_store<f32, 1>,
-                 MB: rw_store<i32, 1>, SUP: rw_store<i32, 1>, ORG: rw_store<i32, 1>, PA: rw_store<i32, 1>, ns: i32, dc: i32) {
+                 MB: rw_store<i32, 1>, SUP: rw_store<i32, 1>, ORG: rw_store<i32, 1>, GI: rw_store<i32, 1>, GA: rw_store<i32, 1>, ns: i32, dc: i32) {
     let i = g.x();
     if (PAR[i] != -2) { return; }
-    if (SPL[i] != 1) { return; }
+    // (3: marked in a step before, and waiting for room since.)
+    if (SPL[i] != 1 && SPL[i] != 3) { return; }
     let count = (D[4 * i + 1] + 0.5) as i32;
-    // (Looked at before it is taken from: a block struck is marked again every step, and what is taken is
-    // not given back.)
-    if (PA[0] + count > dc) { SPL[i] = 0; return; }
-    let s = PA.atomic_add(0, count);
-    if (s + count > dc) { SPL[i] = 0; return; }
+    let w = GROUP * GI[i];
+    // (Looked at before it is taken from: one waiting looks again every step, and what is taken is not
+    // given back. And not without room for the welds its pieces will want: a block's pieces unjoined are
+    // not that block.)
+    let welds = max(GA[w + 4] - GA[w + 3], 0) + max(GA[w + 6] - GA[w + 5], 0);
+    if (welds < WELDS_AHEAD) { GA[w + 8] = 1; }
+    if (GA[w] + count > GA[w + 1]) { GA[w + 7] = 1; }
+    if (welds < WELDS_AHEAD || GA[w] + count > GA[w + 1]) { SPL[i] = 3; return; }
+    let s = GA.atomic_add(w, count);
+    if (s + count > GA[w + 1] || s + count > dc) { GA[w + 7] = 1; SPL[i] = 3; return; }
+    SPL[i] = 1;
     let first = ns + s;
     D[4 * i] = f32(first);
     let enc = (D[4 * i + 3] + 0.5) as i32;
@@ -717,7 +794,7 @@ fn k_split_alloc(g: grid<1>, PAR: rw_store<i32, 1>, SPL: rw_store<i32, 1>, D: rw
         R[po] = R[o] + off.x; R[po + 1] = R[o + 1] + off.y; R[po + 2] = R[o + 2] + off.z; R[po + 3] = 0.0;
         R[po + 4] = q.x; R[po + 5] = q.y; R[po + 6] = q.z; R[po + 7] = q.w;
         D[4 * p] = hp.x; D[4 * p + 1] = hp.y; D[4 * p + 2] = hp.z; D[4 * p + 3] = mass;
-        PAR[p] = i; ORG[p] = i; MB[p] = MB[i];
+        PAR[p] = i; ORG[p] = i; MB[p] = MB[i]; GI[p] = GI[i];
         SUP[2 * p] = SUP[2 * i]; SUP[2 * p + 1] = SUP[2 * i + 1];
     }
 }
@@ -748,13 +825,17 @@ fn k_unpiece(g: grid<1>, ORG: rw_store<i32, 1>, PAR: rw_store<i32, 1>, X: rw_sto
 }
 // A table kept a row of 12 floats a body (0..2 its centre as built, in its structure's axes; 4..6 its half
 // sides; 7 its number and one more; the rest whose it is): the rows of the pieces blocks have given way to,
-// each its block's but for those, written once.
+// each its block's but for those.
 @kernel @grid(1)
 fn k_piece_rows(g: grid<1>, ORG: read_store<i32, 1>, R: read_store<f32, 1>, D: read_store<f32, 1>, ROWS: rw_store<f32, 1>, PA: read_store<i32, 1>, ns: i32, dc: i32) {
     if (g.x() >= min(PA[0], dc)) { return; }
     let p = ns + g.x();
     let b = ORG[p];
-    if (b < 0 || ROWS[12 * p + 7] != 0.0) { return; }
+    // (No one's: no row. A place in the room is handed out again once its structure has left.)
+    if (b < 0) {
+        if (ROWS[12 * p + 7] != 0.0) { ROWS[12 * p + 4] = 0.0; ROWS[12 * p + 7] = 0.0; }
+        return;
+    }
     let q = vec4<f32>(R[8 * b + 4], R[8 * b + 5], R[8 * b + 6], R[8 * b + 7]);
     let off = qinv_rot(q, vec3<f32>(R[8 * p] - R[8 * b], R[8 * p + 1] - R[8 * b + 1], R[8 * p + 2] - R[8 * b + 2]));
     for (var k = 8; k < 12; k += 1) { ROWS[12 * p + k] = ROWS[12 * b + k]; }
@@ -766,14 +847,14 @@ fn k_piece_rows(g: grid<1>, ORG: read_store<i32, 1>, R: read_store<f32, 1>, D: r
 // A block giving way: the welds between its pieces.
 @kernel @grid(1)
 fn k_split_inner(g: grid<1>, PAR: read_store<i32, 1>, SPL: read_store<i32, 1>, R: read_store<f32, 1>, D: read_store<f32, 1>,
-                 JI: rw_store<i32, 1>, JF: rw_store<f32, 1>, JC: rw_store<i32, 1>, JR: rw_store<i32, 1>, WA: rw_store<i32, 1>, njc: i32, dcap: i32) {
+                 JI: rw_store<i32, 1>, JF: rw_store<f32, 1>, JC: rw_store<i32, 1>, JR: rw_store<i32, 1>, GI: read_store<i32, 1>, GA: rw_store<i32, 1>, njc: i32, dcap: i32) {
     let i = g.x();
     if (PAR[i] != -2) { return; }
     if (SPL[i] != 1) { return; }
     let first = (D[4 * i] + 0.5) as i32;
     let count = (D[4 * i + 1] + 0.5) as i32;
     for (var a = 0; a < count; a += 1) {
-        for (var b = a + 1; b < count; b += 1) { fine_weld(first + a, first + b, D[4 * i + 2], R, D, JI, JF, JC, JR, WA, njc, dcap); }
+        for (var b = a + 1; b < count; b += 1) { fine_weld(first + a, first + b, D[4 * i + 2], R, D, JI, JF, JC, JR, GA, GI[i], njc, dcap); }
     }
 }
 // How many of a structure's bodies (`nb` from `first`) are not as built: a block given way, a body off where
@@ -865,7 +946,7 @@ fn k_split_pieces(g: grid<1>, X: rw_store<f32, 1>, X0: rw_store<f32, 1>, R: read
 }
 @kernel @grid(1)
 fn k_split_welds(g: grid<1>, JI: rw_store<i32, 1>, JF: rw_store<f32, 1>, JA: read_store<f32, 1>, ORG: read_store<i32, 1>, SPL: read_store<i32, 1>,
-                 R: read_store<f32, 1>, D: read_store<f32, 1>, JC: rw_store<i32, 1>, JR: rw_store<i32, 1>, WA: rw_store<i32, 1>, njc: i32, dcap: i32) {
+                 R: read_store<f32, 1>, D: read_store<f32, 1>, JC: rw_store<i32, 1>, JR: rw_store<i32, 1>, GI: read_store<i32, 1>, GA: rw_store<i32, 1>, njc: i32, dcap: i32) {
     let j = g.x();
     let o = 40 * j;
     let a = JI[2 * j];
@@ -893,7 +974,7 @@ fn k_split_welds(g: grid<1>, JI: rw_store<i32, 1>, JF: rw_store<f32, 1>, JA: rea
         var nb = 1;
         if (ORG[pb] >= 0) { fb = (D[4 * ORG[pb]] + 0.5) as i32; nb = (D[4 * ORG[pb] + 1] + 0.5) as i32; sigma = D[4 * ORG[pb] + 2]; }
         for (var s = 0; s < na; s += 1) {
-            for (var t = 0; t < nb; t += 1) { fine_weld(fa + s, fb + t, sigma, R, D, JI, JF, JC, JR, WA, njc, dcap); }
+            for (var t = 0; t < nb; t += 1) { fine_weld(fa + s, fb + t, sigma, R, D, JI, JF, JC, JR, GA, GI[a], njc, dcap); }
         }
         JF[o + 30] = 2.0;
         return;
