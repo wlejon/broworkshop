@@ -716,7 +716,8 @@ fn k_mcount(g: grid<1>, B: read_store<f32, 1>, SUP: read_store<i32, 1>, MB: read
     }
     // (A piece counts while its welds still join it to the ground, held or knocked loose.)
     let hop = SUP[2 * i + 1];
-    if (hop >= 0 && tick - SUP[2 * i] <= 2 * hop / rate + 4) { let t = MC.atomic_add(m, count); }
+    // (One out of the world, crushed or over the edge, is no way to the ground: its distance is 2^20.)
+    if (hop >= 0 && hop < 1048576 && tick - SUP[2 * i] <= 2 * hop / rate + 4) { let t = MC.atomic_add(m, count); }
 }
 
 // Blocks. A structure's pieces are grouped into blocks, each a body in its pieces' place while it is whole:
