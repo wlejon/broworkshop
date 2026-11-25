@@ -739,7 +739,7 @@ fn k_mload(g: grid<1>, MF: rw_store<f32, 1>, MC: read_store<i32, 1>, MJ0: read_s
 @kernel @grid(1)
 fn k_support(g: grid<1>, B: rw_store<f32, 1>, V: rw_store<f32, 1>, SUP: rw_store<i32, 1>, REL: rw_store<i32, 1>,
              JI: read_store<i32, 1>, JF: rw_store<f32, 1>, JC: read_store<i32, 1>, JR: read_store<i32, 1>,
-             X0: read_store<f32, 1>, Y: rw_store<f32, 1>, MB: read_store<i32, 1>, MF: read_store<f32, 1>, SL: rw_store<i32, 1>, GR: read_store<i32, 1>, WHY: rw_store<i32, 1>, tick: i32, rate: i32, h: f32) {
+             X0: read_store<f32, 1>, Y: rw_store<f32, 1>, MB: read_store<i32, 1>, MF: read_store<f32, 1>, SL: rw_store<i32, 1>, GR: read_store<i32, 1>, WHY: rw_store<i32, 1>, COL: write_store<i32, 1>, tick: i32, rate: i32, h: f32) {
     let i = g.x();
     let o = 8 * i;
     if (B[o + 3] > 0.0 && SL[i] < 0) {
@@ -775,6 +775,9 @@ fn k_support(g: grid<1>, B: rw_store<f32, 1>, V: rw_store<f32, 1>, SUP: rw_store
         B[o + 3] = 0.0;
         for (var k = 0; k < 8; k += 1) { V[o + k] = 0.0; }
         REL[i] = 0;
+        // (Its colour goes with it: the colouring is over the awake, and one woken in the middle of a step, after
+        // it, must not be solved in a pass with a neighbour of the colour it once had.)
+        COL[i] = 0;
         if (joined) { SUP[2 * i] = heard; } else { SUP[2 * i + 1] = -1; }
         return;
     }
