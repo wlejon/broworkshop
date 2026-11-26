@@ -37,8 +37,7 @@ hands-off labs import them by these paths; they move when those labs do.
 
 `lib-tests/` is a harness app for unit tests of `lib/` code: `test_*.js`
 there import what they test from `/lib` (`history`, `project`,
-`tot-reasoning`) or exercise engine bindings the kit leans on (`Physics`,
-sprites and particles, polygon triangulation). `scripts/validate.sh
+`tot-reasoning`) or exercise engine bindings the kit leans on (sprites and particles, polygon triangulation). `scripts/validate.sh
 lib-tests` runs them. Tests for app-owned code live in the app's `tests/`.
 
 ## Conventions
