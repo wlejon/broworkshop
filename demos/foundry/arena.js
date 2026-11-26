@@ -12,32 +12,46 @@ function buildBunkerStructure(world, scene, x, z) {
     const kinds = [];
     const ties = [];
     const cols = [[-2.6, -2.6], [2.6, -2.6], [-2.6, 2.6], [2.6, 2.6]];
+    // Shallow anchored foundation footings at ground level; all columns & slabs above are destructible!
+    const footBase = members.length;
+    for (const [cx, cz] of cols) {
+        members.push({
+            center: [x + cx, 0.22, z + cz],
+            half: [0.68, 0.22, 0.68],
+            sigma: 2.4e6,
+            crush: 1.6e7,
+            anchored: true,
+            span: 6,
+        });
+        kinds.push('footing');
+    }
     for (let f = 0; f < 3; f++) {
-        const y0 = f * 3.4;
+        const y0 = 0.44 + f * 3.4;
         const base = members.length;
         for (const [cx, cz] of cols) {
             members.push({
                 center: [x + cx, y0 + 1.4, z + cz],
                 half: [0.52, 1.4, 0.52],
-                sigma: 2.0e6,
-                crush: 1.6e7,
-                anchored: f === 0,
+                sigma: 1.2e6,
+                crush: 8.5e6,
+                anchored: false,
                 span: 6,
             });
-            kinds.push(f === 0 ? 'footing' : 'column');
+            kinds.push('column');
         }
         const slab = members.length;
         members.push({
             center: [x, y0 + 3.1, z],
             half: [3.4, 0.34, 3.4],
-            sigma: 1.9e6,
-            crush: 1.5e7,
+            sigma: 1.1e6,
+            crush: 8.0e6,
             span: 6,
         });
         kinds.push('slab');
         for (let i = 0; i < 4; i++) {
             ties.push([base + i, slab]);
-            if (f > 0) ties.push([base - 5 + i, base + i]);
+            if (f === 0) ties.push([footBase + i, base + i]);
+            else ties.push([base - 5 + i, base + i]);
         }
     }
     const TINT = {
@@ -45,7 +59,7 @@ function buildBunkerStructure(world, scene, x, z) {
         column: [0.56, 0.53, 0.49],
         slab: [0.44, 0.45, 0.47],
     };
-    const structure = world.addStructure({ members, ties, chunk: 1.2, safety: 1.8, maxPieces: 120 });
+    const structure = world.addStructure({ members, ties, chunk: 1.2, safety: 1.4, maxPieces: 120 });
     const view = structureView(scene, structure, {
         color(member, cell) {
             const t = TINT[kinds[member]] || TINT.column;
@@ -142,23 +156,23 @@ export function createArena(scene) {
         if (world) { world.destroy(); world = null; }
     };
 
-    const spawnBurst = (pos, color = '#ff9933', maxR = 1.8) => {
+    const spawnBurst = (pos, color = '#ff9933', maxR = 1.2, maxAge = 0.16) => {
         const core = scene.createMesh({
-            mesh: 'sphere', radius: 0.28, segments: 12, rings: 8,
-            color: '#fff3cc', emissive: 2.4, emissiveColor: '#ffe08a',
+            mesh: 'sphere', radius: 0.18, segments: 12, rings: 8,
+            color: '#fff4d2', emissive: 2.6, emissiveColor: '#ffe08a',
         });
         const shell = scene.createMesh({
-            mesh: 'sphere', radius: 0.42, segments: 12, rings: 8,
-            color, emissive: 1.5, emissiveColor: color,
+            mesh: 'sphere', radius: 0.28, segments: 12, rings: 8,
+            color, emissive: 1.6, emissiveColor: color,
         });
         core.x = pos[0]; core.y = pos[1]; core.z = pos[2];
         shell.x = pos[0]; shell.y = pos[1]; shell.z = pos[2];
-        bursts.push({ core, shell, age: 0, maxAge: 0.26, maxR });
+        bursts.push({ core, shell, age: 0, maxAge, maxR });
 
         if (flashLight) {
             flashLight.x = pos[0]; flashLight.y = pos[1] + 0.6; flashLight.z = pos[2];
-            flashLight.intensity = 22 * Math.min(2.2, maxR);
-            flashLife = 0.20;
+            flashLight.intensity = 22 * Math.min(2.0, maxR);
+            flashLife = maxAge;
         }
     };
 
@@ -213,7 +227,7 @@ export function createArena(scene) {
         for (const pr of inst.projectilesOut) {
             const color = pr.ownerTeam === 1 ? '#4cc9ff' : '#ff6242';
             const p = world.pose(pr.body);
-            spawnBurst([p[0], p[1], p[2]], '#ffbe55', 1.3);
+            spawnBurst([p[0], p[1], p[2]], '#ffbe55', 0.55, 0.11);
             const node = scene.createMesh({
                 mesh: 'sphere', radius: pr.radius, segments: 12, rings: 8,
                 color, emissive: 2.0, emissiveColor: color, castsShadow: true,
@@ -242,7 +256,7 @@ export function createArena(scene) {
         lastStepMs = world.counts.stepMs;
 
         for (const ht of world.hits()) {
-            if (ht.speed > 18) spawnBurst(ht.point, '#ff7722', Math.min(3.6, 0.9 + ht.speed * 0.032));
+            if (ht.speed > 18) spawnBurst(ht.point, '#ff7722', Math.min(2.2, 0.65 + ht.speed * 0.022), 0.22);
         }
 
         if (flashLight && flashLife > 0) {
