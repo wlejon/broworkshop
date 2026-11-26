@@ -1,5 +1,6 @@
-// demos/foundry/main.js — Wires the sunlit Foundry Assembly Bay, 3D part/socket
-// picking, Nameplate Inspector, and full-viewport HDR Battle Arena.
+// demos/foundry/main.js — Wires the Foundry Assembly Bay (ACES studio lighting,
+// 3D part/socket picking, bro.gizmo dragging, alloy swatches, Nameplate Inspector)
+// and full-viewport Proving Ground Battle Arena with tactical HUD.
 
 import { boot } from "/lib/kit/app.js";
 import { sceneViewport, orbitRotation, localPoint, Camera } from "/lib/kit/viewport3d.js";
@@ -7,26 +8,93 @@ import { pickRay } from "/lib/kit/dynamics3d.js";
 import { skyEnvironment, sunDirection } from "/lib/kit/sky.js";
 import { fixedStep, fpsMeter } from "/lib/kit/ui.js";
 import { compileMachine } from "/lib/machine/compiler.js";
-import { createFoundryBay } from "/app/bay.js";
+import { createFoundryBay, BAY_HERO_YAW, BAY_HERO_PITCH } from "/app/bay.js";
 import { createArena } from "/app/arena.js";
 
 boot();
 
 const $ = (id) => document.getElementById(id);
 const vp = sceneViewport('#stage', {
-    orbit: { target: [0, 1.5, 0], dist: 9.5, fov: 46, near: 0.3, far: 1200, rot: orbitRotation(0.65, -0.32) },
-    controls: { minDist: 2.0, maxDist: 160 },
+    orbit: { target: [0, 1.5, 0], dist: 8.8, fov: 44, near: 0.25, far: 1200, rot: orbitRotation(BAY_HERO_YAW, BAY_HERO_PITCH) },
+    controls: { minDist: 1.6, maxDist: 160 },
 });
 
 const scene = vp.scene;
-skyEnvironment(scene, { hdri: 'kloofendal_43d_clear_puresky', intensity: 1.05, fallbackAmbient: [0.22, 0.25, 0.30] });
-scene.setSSAO({ enabled: true, radius: 0.65, intensity: 0.85, bias: 0.02 });
-const sun = scene.createLight({ type: 'directional', direction: sunDirection(42, 130), color: [1.0, 0.96, 0.90], intensity: 2.8 });
-sun.castsShadow = true;
-scene.createLight({ type: 'directional', direction: [-0.6, -0.3, -0.5], color: [0.55, 0.72, 0.98], intensity: 0.75 });
+scene.setToneMap({ mode: 'aces' });
+scene.setShadowQuality({ pcfTaps: 5 });
+scene.setSSAO({ enabled: true, radius: 0.72, intensity: 1.10, bias: 0.015 });
+scene.setBloom({ threshold: 1.12, intensity: 0.24, radius: 0.72, iterations: 4 });
 
-const bay = createFoundryBay(scene, vp);
-const arena = createArena(scene);
+// Key sun (illuminating front 3/4 face cleanly), cool steel rim from rear, and warm overhead bay lamp
+const sun = scene.createLight({ type: 'directional', direction: sunDirection(44, 326), color: [1.0, 0.95, 0.88], intensity: 3.6 });
+sun.castsShadow = true;
+const rim = scene.createLight({ type: 'directional', direction: sunDirection(26, 142), color: [0.48, 0.72, 1.0], intensity: 1.25 });
+const bayLamp = scene.createLight({ type: 'point', position: [5.5, 7.5, -6.5], color: [1.0, 0.86, 0.68], intensity: 28, range: 32 });
+
+const BAY_MOODS = {
+    atelier: {
+        bg: '#0c1016',
+        hdri: 'kloppenheim_06_puresky', envIntensity: 0.34, envRotation: 1.4,
+        sunDir: sunDirection(44, 326), sunColor: [1.0, 0.95, 0.88], sunIntensity: 3.6,
+        rimDir: sunDirection(24, 142), rimColor: [0.46, 0.72, 1.0], rimIntensity: 1.25,
+        lampColor: [1.0, 0.88, 0.72], lampIntensity: 28,
+        exposure: { mode: 'fixed', ev: 0.10 },
+        fog: { mode: 'linear', start: 20, end: 52, color: [0.06, 0.075, 0.098] },
+        bounce: [0.11, 0.12, 0.15],
+    },
+    foundry: {
+        bg: '#130b08',
+        hdri: 'belfast_sunset_puresky', envIntensity: 0.30, envRotation: 2.2,
+        sunDir: sunDirection(40, 322), sunColor: [1.0, 0.78, 0.48], sunIntensity: 4.0,
+        rimDir: sunDirection(24, 146), rimColor: [0.40, 0.66, 0.98], rimIntensity: 1.4,
+        lampColor: [1.0, 0.64, 0.28], lampIntensity: 34,
+        exposure: { mode: 'fixed', ev: 0.08 },
+        fog: { mode: 'linear', start: 18, end: 48, color: [0.085, 0.055, 0.042] },
+        bounce: [0.14, 0.09, 0.05],
+    },
+    daylight: {
+        bg: '#1c2430',
+        hdri: 'kloofendal_43d_clear_puresky', envIntensity: 0.45, envRotation: 2.0,
+        sunDir: sunDirection(44, 332), sunColor: [1.0, 0.96, 0.88], sunIntensity: 3.8,
+        rimDir: sunDirection(22, 150), rimColor: [0.58, 0.76, 0.98], rimIntensity: 0.85,
+        lampColor: [1.0, 0.94, 0.84], lampIntensity: 14,
+        exposure: { mode: 'fixed', ev: 0.15 },
+        fog: { mode: 'linear', start: 26, end: 72, color: [0.14, 0.18, 0.23] },
+        bounce: [0.15, 0.16, 0.19],
+    },
+};
+
+let activeMood = 'atelier';
+
+function applyBayLighting(moodKey = activeMood) {
+    const m = BAY_MOODS[moodKey] || BAY_MOODS.atelier;
+    activeMood = moodKey;
+    vp.canvas.style.background = m.bg;
+    skyEnvironment(scene, { hdri: m.hdri, intensity: m.envIntensity, rotation: m.envRotation, fallbackAmbient: [0.12, 0.14, 0.18] });
+    sun.direction = m.sunDir; sun.color = m.sunColor; sun.intensity = m.sunIntensity;
+    rim.direction = m.rimDir; rim.color = m.rimColor; rim.intensity = m.rimIntensity;
+    bayLamp.color = m.lampColor; bayLamp.intensity = m.lampIntensity;
+    scene.setExposure(m.exposure);
+    scene.setFog(m.fog);
+    if (typeof scene.setGroundBounce === 'function') scene.setGroundBounce(m.bounce);
+}
+
+function applyArenaLighting() {
+    vp.canvas.style.background = '#1b222c';
+    skyEnvironment(scene, { hdri: 'belfast_sunset_puresky', intensity: 0.48, rotation: 1.8, fallbackAmbient: [0.16, 0.18, 0.22] });
+    sun.direction = sunDirection(28, 128);
+    sun.color = [1.0, 0.89, 0.74];
+    sun.intensity = 4.2;
+    rim.direction = sunDirection(20, 305);
+    rim.color = [0.52, 0.70, 0.96];
+    rim.intensity = 0.80;
+    bayLamp.intensity = 0;
+    scene.setExposure({ mode: 'fixed', ev: 0.36 });
+    scene.setFog({ mode: 'linear', start: 70, end: 230, color: [0.48, 0.52, 0.58] });
+    if (typeof scene.setGroundBounce === 'function') scene.setGroundBounce([0.12, 0.13, 0.15]);
+}
+
+applyBayLighting('atelier');
 
 let mode = 'bay';
 let activeTier = 3;
@@ -34,6 +102,9 @@ let followCam = true;
 let turretYaw = 0, turretPitch = 0.16;
 let spadeLatch = false, fireQueued = false, clutchQueued = false;
 const keys = new Set();
+
+const bay = createFoundryBay(scene, vp, { onChanged: () => refreshInspector() });
+const arena = createArena(scene);
 
 function refreshCatalogUI() {
     const entries = bay.catalogList();
@@ -72,8 +143,15 @@ function refreshCatalogUI() {
 function refreshSelectionUI() {
     const cn = bay.selectedCompiledNode();
     $('sel-part-name').textContent = cn ? `${cn.rawId} (${cn.material})` : '—';
-    $('sel-socket-badge').textContent = bay.state.selectedSocket || '+Y';
-    if (cn && cn.material) $('alloy-select').value = cn.material;
+    const sock = bay.state.selectedSocket || '+Y';
+    $('sel-socket-badge').textContent = sock;
+    for (const b of $('socket-dpad').querySelectorAll('button')) {
+        b.classList.toggle('active', b.dataset.face === sock);
+    }
+    const activeMat = cn?.material || bay.state.activeAlloy;
+    for (const b of $('alloy-swatches').querySelectorAll('button')) {
+        b.classList.toggle('active', b.dataset.alloy === activeMat);
+    }
 }
 
 function refreshInspector() {
@@ -148,7 +226,7 @@ function syncSweepReadout() {
     $('sweep-val').textContent = j.kind === 'hinge' ? `${(val * 180 / Math.PI).toFixed(0)}°` : `${val.toFixed(2)}m`;
     const ex = c.extents.find((e) => e.jointId === j.id);
     $('sweep-info').textContent = ex
-        ? `Range [${j.lower.toFixed(2)}..${j.upper.toFixed(2)}], peak load ${Math.round(ex.maxLoad)} / ${Math.round(ex.capacity)} (${(ex.stallMargin * 100).toFixed(0)}% margin)`
+        ? `Range [${j.lower.toFixed(2)}..${j.upper.toFixed(2)}], peak ${Math.round(ex.maxLoad)} / ${Math.round(ex.capacity)} (${(ex.stallMargin * 100).toFixed(0)}% margin)`
         : `${j.kind} motor rated to ${Math.round(j.maxEffort)}`;
 }
 
@@ -156,6 +234,7 @@ function launchBattle() {
     mode = 'battle';
     document.body.classList.add('battle-mode');
     bay.setVisible(false);
+    applyArenaLighting();
     $('mode-bay').classList.remove('active');
     $('mode-battle').classList.add('active');
     const enemyBp = bay.resolver($('enemy-select').value);
@@ -163,11 +242,13 @@ function launchBattle() {
     arena.spawnMatch(bay.state.compiled, enemyCompiled);
     followCam = true;
     spadeLatch = false;
-    vp.reframe([0, 2.5, 22], 24, { yaw: 0.35, pitch: -0.26 });
-    $('hud-overlay').innerHTML =
-        `<b>Battle Arena: ${bay.state.compiled.name} vs ${enemyCompiled.name}</b><br>` +
-        'W/S: drive/walk · A/D: turn · Q/E: turret · Z/C: elevate · Space / Click: fire / ram<br>' +
-        'R: spades / flywheel clutch · Tab: follow/free cam · V: live stress';
+    vp.reframe([0, 2.4, 22], 21, { yaw: 0.34, pitch: -0.25 });
+    $('hud-p-name').textContent = bay.state.compiled.name;
+    $('hud-e-name').textContent = enemyCompiled.name;
+    $('hud-p-pct').textContent = '100%';
+    $('hud-e-pct').textContent = '100%';
+    $('hud-p-bar').style.width = '100%';
+    $('hud-e-bar').style.width = '100%';
     $('status').textContent = `Battle live: ${bay.state.compiled.name} vs ${enemyCompiled.name}`;
 }
 
@@ -175,16 +256,12 @@ function enterBay() {
     mode = 'bay';
     document.body.classList.remove('battle-mode');
     arena.cleanup();
+    applyBayLighting(activeMood);
     bay.setVisible(true);
     $('mode-battle').classList.remove('active');
     $('mode-bay').classList.add('active');
-    const ext = bay.state.compiled.bounds.max, min = bay.state.compiled.bounds.min;
-    const span = Math.max(3.5, Math.hypot(ext[0] - min[0], ext[1] - min[1], ext[2] - min[2]));
-    vp.reframe([0, (ext[1] - min[1]) * 0.46, 0], Math.max(4.5, span * 1.25), { yaw: 0.65, pitch: -0.32 });
-    $('hud-overlay').innerHTML =
-        '<b>Assembly Bay</b> — Left-click any part or cyan face socket to select &amp; snap.<br>' +
-        'Right-drag: orbit · Middle-drag: pan · Wheel: zoom · Toggle <b>Bench Test</b> or <b>Battle Arena</b>.';
-    $('status').textContent = 'Assembly Bay ready';
+    bay.frameMachine(true);
+    $('status').textContent = 'Assembly Bay ready — click parts or sockets, drag 3D arrows to edit';
 }
 
 $('mode-bay').addEventListener('click', enterBay);
@@ -192,6 +269,15 @@ $('mode-battle').addEventListener('click', launchBattle);
 $('btn-reset-arena').addEventListener('click', launchBattle);
 $('chk-live-stress').addEventListener('change', (e) => arena.setStressOverlay(e.target.checked));
 $('chk-bench').addEventListener('change', (e) => { bay.state.benchTest = e.target.checked; });
+
+for (const btn of $('mood-tabs').querySelectorAll('button')) {
+    btn.addEventListener('click', () => {
+        for (const b of $('mood-tabs').querySelectorAll('button')) b.classList.remove('active');
+        btn.classList.add('active');
+        activeMood = btn.dataset.mood;
+        if (mode === 'bay') applyBayLighting(activeMood);
+    });
+}
 
 for (const btn of $('tier-tabs').querySelectorAll('button')) {
     btn.addEventListener('click', () => {
@@ -211,8 +297,27 @@ for (const btn of $('loadcase-tabs').querySelectorAll('button')) {
     });
 }
 
+for (const btn of $('socket-dpad').querySelectorAll('button')) {
+    btn.addEventListener('click', () => {
+        bay.setSelectedSocket(btn.dataset.face, true);
+        refreshSelectionUI();
+    });
+}
+
+for (const btn of $('alloy-swatches').querySelectorAll('button')) {
+    btn.addEventListener('click', () => {
+        bay.setSelectedAlloy(btn.dataset.alloy);
+        refreshInspector();
+    });
+}
+
+// Show CAD placement wireframe footprint while hovering Snap Unit / Armor Plate
+for (const id of ['btn-attach-unit', 'btn-add-plate']) {
+    $(id).addEventListener('mouseenter', () => { if (mode === 'bay') bay.setGhostPreview(true); });
+    $(id).addEventListener('mouseleave', () => { if (mode === 'bay') bay.setGhostPreview(false); });
+}
+
 $('chk-mirror').addEventListener('change', (e) => { bay.state.mirrorX = e.target.checked; });
-$('btn-apply-alloy').addEventListener('click', () => { bay.setSelectedAlloy($('alloy-select').value); refreshInspector(); });
 $('btn-add-plate').addEventListener('click', () => { bay.addArmorPlate(); refreshInspector(); });
 $('btn-attach-unit').addEventListener('click', () => { bay.attachUnit($('embed-select').value); refreshInspector(); });
 $('btn-delete-part').addEventListener('click', () => { bay.deleteSelected(); refreshInspector(); });
@@ -252,15 +357,46 @@ $('sweep-slider').addEventListener('input', (e) => {
 vp.canvas.addEventListener('mousedown', (e) => {
     if (e.button !== 0) return;
     if (mode === 'battle') { fireQueued = true; return; }
+    if (typeof bro !== 'undefined' && bro.gizmo?.dragging) return;
     const pt = localPoint(vp.canvas, e);
     const ray = pickRay(vp, pt.x, pt.y);
     if (bay.handleClick(ray)) refreshSelectionUI();
 });
 
+let hoverTick = 0;
+vp.canvas.addEventListener('mousemove', (e) => {
+    if (mode !== 'bay' || e.buttons !== 0) return;
+    if ((++hoverTick & 3) !== 0) return;
+    const pt = localPoint(vp.canvas, e);
+    const hit = bay.pickHover(pickRay(vp, pt.x, pt.y));
+    vp.canvas.style.cursor = hit ? 'pointer' : 'default';
+    if (hit) {
+        $('status').textContent = hit.type === 'socket'
+            ? `Hardpoint ${hit.socket} — click to target attachment face`
+            : `Part: ${hit.label} — click to select & drag 3D arrows`;
+    }
+});
+
 window.addEventListener('keydown', (e) => {
+    if (e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT')) return;
     const k = e.key.toLowerCase();
     keys.add(k);
-    if (mode === 'battle') {
+    if (mode === 'bay') {
+        if (k === 'b') {
+            $('chk-bench').checked = !$('chk-bench').checked;
+            bay.state.benchTest = $('chk-bench').checked;
+        } else if (k === 'delete' || k === 'backspace') {
+            bay.deleteSelected(); refreshInspector();
+        } else if (k === 'z' && (e.ctrlKey || e.metaKey)) {
+            e.preventDefault(); bay.undo(); refreshInspector();
+        } else if (k >= '1' && k <= '4') {
+            const map = ['off', 'recoil', 'actuate', 'gravity'];
+            const c = map[+k - 1];
+            bay.state.loadCase = c;
+            for (const b of $('loadcase-tabs').querySelectorAll('button')) b.classList.toggle('active', b.dataset.case === c);
+            bay.render();
+        }
+    } else if (mode === 'battle') {
         if (k === 'r') { spadeLatch = !spadeLatch; clutchQueued = true; }
         else if (k === 'tab') { e.preventDefault(); followCam = !followCam; }
         else if (k === 'v') {
@@ -297,11 +433,17 @@ vp.onFrame((dt, t) => {
         });
         if (stats) {
             if (followCam) Camera.orbitReframe(vp.cam, stats.playerPos, vp.cam.dist);
-            if (++frameCounter % 8 === 0) {
+            if (++frameCounter % 6 === 0) {
+                const pPct = Math.round(stats.playerIntegrity * 100);
+                const ePct = Math.round(stats.enemyIntegrity * 100);
                 $('stat-step').textContent = stats.stepMs.toFixed(2);
-                $('stat-integrity').textContent = `Player ${(stats.playerIntegrity * 100).toFixed(0)}% · Broken ${stats.playerBroken}`;
-                $('stat-enemy').textContent = `${(stats.enemyIntegrity * 100).toFixed(0)}% (broken ${stats.enemyBroken})`;
+                $('stat-integrity').textContent = `Player ${pPct}% · Broken ${stats.playerBroken}`;
+                $('stat-enemy').textContent = `${ePct}% (broken ${stats.enemyBroken})`;
                 $('stat-shells').textContent = String(stats.shells);
+                $('hud-p-pct').textContent = `${pPct}%`;
+                $('hud-e-pct').textContent = `${ePct}%`;
+                $('hud-p-bar').style.width = `${pPct}%`;
+                $('hud-e-bar').style.width = `${ePct}%`;
             }
         }
     }
