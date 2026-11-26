@@ -22,6 +22,8 @@ const JMIN: f32 = 1.0;
 const JALPHA: f32 = 1.0;
 const JBETA: f32 = 100000.0;
 const STRIKE: f32 = 300000.0;
+// How fast (m/s) a thing that does not crush is going while a piece it has its middle in is gone (k_dual).
+const SWALLOW: f32 = 1.0;
 const AHEAD: f32 = 15.0;   // the closing speed (m/s) past which what is held is let go ahead of what comes
 const SHATTER: f32 = 4000000.0;   // the blow (N) a block breaks into its pieces at
 // The speed (m/s) of a thing touching or welded to sleeping rubble that wakes it.
@@ -1681,9 +1683,12 @@ fn k_dual(g: grid<1>, X: rw_store<f32, 1>, X0: read_store<f32, 1>, CI: read_stor
         // stand. Two that both crush, one inside the other, are rubble pressed together, and stay.)
         if (b >= 0 && PAR[w] != -2 && B[8 * w + 3] > 0.0 && max(capa, capb) > 1.0e29) {
             let ot = a + b - w;
+            // (A thing on its way through, that is: what comes down on one lying still, or on the footing,
+            // is rubble on it, and piles up.)
+            let going = B[8 * ot + 3] > 0.0 && length(vec3<f32>(V[8 * ot], V[8 * ot + 1], V[8 * ot + 2])) > SWALLOW;
             let l = qinv_rot(vec4<f32>(X0[8 * ot + 4], X0[8 * ot + 5], X0[8 * ot + 6], X0[8 * ot + 7]),
                              vec3<f32>(X0[8 * w] - X0[8 * ot], X0[8 * w + 1] - X0[8 * ot + 1], X0[8 * w + 2] - X0[8 * ot + 2]));
-            if (abs(l.x) < B[8 * ot] && abs(l.y) < B[8 * ot + 1] && abs(l.z) < B[8 * ot + 2]) { ST[2 * w + 1] = -1.0; }
+            if (going && abs(l.x) < B[8 * ot] && abs(l.y) < B[8 * ot + 1] && abs(l.z) < B[8 * ot + 2]) { ST[2 * w + 1] = -1.0; }
         }
         // (A block pressed as hard as its pieces stand breaks into them, however little that is: what would
         // crush a piece of it is not let through it whole.)
