@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <title>Foundry — Machine Compiler &amp; Arena</title>
+    <link rel="stylesheet" href="/lib/kit/kit.css">
+    <link rel="stylesheet" href="/app/foundry.css">
+</head>
+<body class="k-app">
+    <header class="k-header">
+        <h1>Foundry</h1>
+        <span class="k-sub">Compile intricate mechanisms into bounded units with physical stress overlays, then battle them live in Box3D</span>
+    </header>
+
+    <div class="k-toolbar">
+        <button id="mode-bay" class="small active">Assembly Bay</button>
+        <button id="mode-battle" class="small">Battle Arena</button>
+        <span class="k-sep"></span>
+        <span class="dim">Opponent</span>
+        <select id="enemy-select">
+            <option value="juggernaut_ram">Juggernaut Pile-Bunker</option>
+            <option value="iron_strider">Iron Strider MK-IV</option>
+            <option value="siege_howitzer">Bastion Siege Howitzer</option>
+            <option value="clockwork_catapult">Clockwork Siege Catapult</option>
+            <option value="twin_autocannon_tank" selected>Vanguard Twin-Cannon Tank</option>
+            <option value="biped_titan">Colossus Biped Titan</option>
+        </select>
+        <button id="btn-reset-arena" class="small">Reset Battle</button>
+        <label class="k-field"><input type="checkbox" id="chk-live-stress"> Live Stress [V]</label>
+        <span class="k-spacer"></span>
+        <span id="stat-integrity" class="dim">Integrity 100%</span>
+    </div>
+
+    <div class="foundry-layout">
+        <aside class="foundry-side">
+            <div class="f-card">
+                <h3>Catalog <span id="catalog-count" class="dim">18</span></h3>
+                <div class="f-tabs" id="tier-tabs">
+                    <button data-tier="3" class="active">Machines (T3)</button>
+                    <button data-tier="2">Subsystems (T2)</button>
+                    <button data-tier="1">Parts (T1)</button>
+                </div>
+                <div class="f-list" id="catalog-list"></div>
+                <div id="catalog-desc" class="dim" style="font-size:11px;line-height:1.35"></div>
+            </div>
+
+            <div class="f-card">
+                <h3>Assemble &amp; Modify</h3>
+                <div class="f-controls-row">
+                    <select id="mount-slot">
+                        <option value="top">Mount: Top Deck</option>
+                        <option value="front">Mount: Front Prow</option>
+                        <option value="rear">Mount: Rear Stern</option>
+                        <option value="side" selected>Mount: Side (Mirror)</option>
+                        <option value="under">Mount: Undercarriage</option>
+                    </select>
+                </div>
+                <label class="k-field"><input type="checkbox" id="chk-mirror" checked> Mirror X Symmetry</label>
+                <div class="f-controls-row">
+                    <select id="alloy-select">
+                        <option value="aluminum">Aluminum 7075 (Light)</option>
+                        <option value="steel">Rolled Steel (Cheap)</option>
+                        <option value="titanium" selected>Titanium Ti-6Al-4V</option>
+                        <option value="tungsten">Tungsten (Heavy/Armored)</option>
+                        <option value="spring_steel">Spring Steel</option>
+                    </select>
+                    <button id="btn-apply-alloy" class="small">Apply</button>
+                </div>
+                <div class="f-controls-row">
+                    <button id="btn-add-plate" class="small" style="flex:1">+ Armor Beam</button>
+                    <button id="btn-attach-unit" class="small" style="flex:1">+ Embed Unit</button>
+                </div>
+                <div class="f-controls-row">
+                    <select id="embed-select"></select>
+                </div>
+                <div class="f-controls-row">
+                    <button id="btn-undo" class="small" style="flex:1">Undo</button>
+                    <button id="btn-revert" class="small" style="flex:1">Revert Preset</button>
+                </div>
+            </div>
+
+            <div class="f-card">
+                <h3>Compile Into Reusable Unit</h3>
+                <div class="f-controls-row">
+                    <input type="text" id="custom-unit-name" placeholder="My Custom Rig">
+                    <button id="btn-save-unit" class="small primary">Compile &amp; Save</button>
+                </div>
+                <div class="dim" style="font-size:11px">Saved units appear in the catalog and can be embedded inside larger machines.</div>
+            </div>
+        </aside>
+
+        <main class="k-main">
+            <div class="k-viewport">
+                <canvas id="stage"></canvas>
+                <div class="f-hud" id="hud-overlay">
+                    <b>Assembly Bay</b><br>
+                    Right-drag: orbit · Middle-drag: pan · Wheel: zoom<br>
+                    Toggle <b>Battle Arena</b> to drive, aim &amp; test against live opponents.
+                </div>
+            </div>
+        </main>
+
+        <aside class="foundry-right">
+            <div class="f-card">
+                <h3>
+                    <span>Compiled Nameplate</span>
+                    <span id="np-rating" class="f-badge rate-A">A</span>
+                </h3>
+                <div id="np-name" style="font-weight:700;font-size:14px;color:#fff">—</div>
+                <div class="f-grid2">
+                    <div class="f-stat"><span>Mass</span><b id="np-mass">—</b></div>
+                    <div class="f-stat"><span>Build Cost</span><b id="np-cost">—</b></div>
+                    <div class="f-stat"><span>Parts / Clusters</span><b id="np-parts">—</b></div>
+                    <div class="f-stat"><span>Live DOFs</span><b id="np-dofs">—</b></div>
+                    <div class="f-stat"><span>Tip Margin</span><b id="np-tip">—</b></div>
+                    <div class="f-stat"><span>Peak Stress</span><b id="np-util">—</b></div>
+                </div>
+            </div>
+
+            <div class="f-card">
+                <h3>Physical Form Overlay</h3>
+                <div class="f-tabs" id="loadcase-tabs">
+                    <button data-case="recoil" class="active">Recoil</button>
+                    <button data-case="actuate">Actuate</button>
+                    <button data-case="gravity">Gravity</button>
+                    <button data-case="off">Alloy</button>
+                </div>
+                <div class="dim" style="font-size:11px">Green/amber/red shades parts &amp; force paths; floor hull shows COM vs support polygon.</div>
+            </div>
+
+            <div class="f-card">
+                <h3>Solved Joint Extents Sweep</h3>
+                <div class="f-controls-row">
+                    <select id="sweep-joint"></select>
+                </div>
+                <div class="f-controls-row">
+                    <input type="range" id="sweep-slider" min="-1" max="1" step="0.01" value="0">
+                    <span id="sweep-val" style="min-width:46px;text-align:right">0.00</span>
+                </div>
+                <div id="sweep-info" class="dim" style="font-size:11px">—</div>
+            </div>
+
+            <div class="f-card">
+                <h3>Exposed Ports</h3>
+                <div id="np-ports" style="display:flex;flex-direction:column;gap:3px"></div>
+            </div>
+
+            <div class="f-card">
+                <h3>Boundaries &amp; Engineering Hints</h3>
+                <div id="np-hints" style="display:flex;flex-direction:column;gap:4px"></div>
+            </div>
+        </aside>
+    </div>
+
+    <footer class="k-statusbar">
+        <span id="status">Bay ready — compile, inspect stress boundaries, then launch Battle Arena</span>
+        <span class="k-spacer"></span>
+        <span>enemy <b id="stat-enemy">—</b></span>
+        <span>shells <b id="stat-shells">0</b></span>
+        <span>step <b id="stat-step">—</b> ms</span>
+        <span>fps <b id="stat-fps">—</b></span>
+    </footer>
+
+    <script type="module" src="/app/main.js"></script>
+</body>
+</html>
