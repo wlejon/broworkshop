@@ -390,6 +390,28 @@ for (const subId of ['gearbox_4to1', 'flywheel_bank', 'cam_oscillator']) {
     w.destroy();
 }
 
+// Verify BOTH walkers (biped_titan & iron_strider) maintain FULL standing height over 8s of continuous walking + firing!
+for (const id of ['biped_titan', 'iron_strider']) {
+    const { w, inst } = spawnFresh(id);
+    stepN(w, inst, 30, {});
+    const standY = w.pose(inst.rootBody)[1];
+    let minY = standY, minUp = 1;
+    for (let i = 0; i < 480; i++) {
+        stepMachine(inst, 1 / 60, { throttle: 1.0, fire: i % 100 === 50 });
+        w.step(1 / 60, 4);
+        const rp = w.pose(inst.rootBody);
+        const up = qRot([rp[3], rp[4], rp[5], rp[6]], [0, 1, 0]);
+        if (rp[1] < minY) minY = rp[1];
+        if (up[1] < minUp) minUp = up[1];
+    }
+    const rp = w.pose(inst.rootBody);
+    const dz = -rp[2];
+    const tallOk = inst.brokenCount === 0 && minY >= standY - 0.35 && rp[1] >= standY - 0.25 && minUp >= 0.92 && dz >= 6.0;
+    check(id, 'walker_8s_standing_height', tallOk,
+        `standY=${standY.toFixed(2)} endY=${rp[1].toFixed(2)} minY=${minY.toFixed(2)} minUpY=${minUp.toFixed(2)} dz=${dz.toFixed(2)}m broken=${inst.brokenCount}`);
+    w.destroy();
+}
+
 console.log(`\n=== OPERATIONAL PROVING SUMMARY: ${results.length - failCount}/${results.length} PASSED (${failCount} FAILED) ===`);
 if (failCount > 0) {
     throw new Error(`OPERATIONAL_TESTS_FAILED: ${failCount} check(s) failed`);
