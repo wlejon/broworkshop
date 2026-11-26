@@ -44,13 +44,15 @@ export function createStage(scene) {
             block.push(band);
         }
     };
-    // Behind it and out to its sides, clear of where the camera starts.
-    tower(-78, 70, 30, 30, 28, 0.52);
-    tower(-34, 96, 34, 28, 42, 0.46);
-    tower(18, 104, 36, 34, 105, 0.40);
-    tower(74, 84, 28, 30, 63, 0.44);
-    tower(118, 40, 30, 40, 24.5, 0.50);
-    tower(-124, 30, 26, 26, 17.5, 0.56);
+    // A ring of them well out, so the camera can go all the way round the machine inside it.
+    tower(-150, 150, 30, 30, 28, 0.52);
+    tower(-60, 205, 34, 28, 42, 0.46);
+    tower(40, 215, 36, 34, 105, 0.40);
+    tower(150, 165, 28, 30, 63, 0.44);
+    tower(215, 40, 30, 40, 24.5, 0.50);
+    tower(-215, 20, 26, 26, 17.5, 0.56);
+    tower(190, -130, 32, 32, 49, 0.48);
+    tower(-170, -150, 30, 36, 77, 0.42);
 
     let offset = 0;
     return {

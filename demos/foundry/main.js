@@ -178,7 +178,7 @@ const snap = [0, 0, 0];
 function attachGizmo() {
     bro.gizmo.detach();
     const seg = sel.seg && segs()[sel.seg];
-    if (!seg) return;
+    if (!seg || armed) return;          // with a module in hand every click places it: no handles in the way
     if (mode === 'frame' && seg.parent) {
         bro.gizmo.setMode(gizmoMode);
         bro.gizmo.attach({
@@ -281,7 +281,7 @@ window.addEventListener('keydown', (e) => {
     const tag = (e.target && e.target.tagName) || '';
     if (tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA' || e.ctrlKey || e.metaKey) return;
     const k = e.key.toLowerCase();
-    if (k === 'escape') { if (armed) { armed = null; ghost = null; renderModePanel(); dirty.overlays = true; } else select_(null); }
+    if (k === 'escape') { if (armed) { armed = null; ghost = null; renderModePanel(); dirty.overlays = true; attachGizmo(); } else select_(null); }
     else if ((k === 'delete' || k === 'backspace') && mode === 'bays' && sel.mod) deleteModule();
     else if (mode === 'frame' && 'wer'.includes(k) && k.length === 1) { gizmoMode = { w: 'translate', e: 'rotate', r: 'scale' }[k]; attachGizmo(); renderModePanel(); }
 });
@@ -340,7 +340,7 @@ function renderModePanel() {
             const row = h('div.f-palette');
             for (const [type, fam] of Object.entries(MODULES)) {
                 if (fam.group !== g) continue;
-                row.append(h('button' + (armed === type ? '.active' : ''), { title: fam.note, onclick: () => { armed = armed === type ? null : type; ghost = null; renderModePanel(); dirty.overlays = true; } },
+                row.append(h('button' + (armed === type ? '.active' : ''), { title: fam.note, onclick: () => { armed = armed === type ? null : type; ghost = null; renderModePanel(); dirty.overlays = true; attachGizmo(); } },
                     h('i', { style: { background: `rgb(${fam.color.map((c) => Math.round(c * 255)).join(',')})` } }), fam.label));
             }
             el.append(row);
@@ -364,6 +364,7 @@ function renderModePanel() {
         el.append(h('h2', null, 'Armour'),
             h('div.k-row', null, ...[['paint', 'Paint'], ['thickness', 'Thickness']].map(([v, label]) =>
                 h('button.small' + (armorView === v ? '.active' : ''), { onclick: () => { armorView = v; dirty.mesh = true; renderModePanel(); } }, label))),
+            armorView === 'thickness' ? h('div.f-legend', null, h('i'), h('div', null, ...['10', '25', '60', '160', '400 mm'].map((t) => h('span', null, t)))) : null,
             h('div.k-row.f-gap', null, button('All plate −20%', () => scaleAll(0.8)), button('+25%', () => scaleAll(1.25))),
             h('div.k-cap', null, 'paint'), colors,
             h('div.f-note', null, `Armour is ${tonnes(report.mass.armor)} of ${tonnes(report.mass.total)}. Every millimetre is weight the legs carry and the jets lift.`));
@@ -642,8 +643,8 @@ vp.onFrame((dt) => {
         renderSummary($('#summary'), report);
         renderRegimes($('#regimes'), report);
         renderIssues($('#issues'), $('#issueCount'), report, pickSeg);
-        for (const fn of live) fn();
-        if (!dirty.inspector) dirty.tree = true;
+        // An inspector about to be rebuilt may speak of what is no longer there.
+        if (!dirty.inspector) { for (const fn of live) fn(); dirty.tree = true; }
         clearTimeout(failTimer);
         failTimer = setTimeout(() => { report.failures = evaluate(design).failures; renderFailures($('#failures'), report, pickSeg); }, 350);
         if (dirty.pose && !dirty.mesh) { view.update(design, report); dirty.pose = false; }
@@ -680,7 +681,7 @@ globalThis.__foundry = {
     vp, view, stage, history, project,
     get design() { return design; }, get report() { return report; }, get mode() { return mode; }, get sel() { return sel; },
     setMode, select: select_, touch, flush,
-    arm(type) { armed = type; renderModePanel(); },
+    arm(type) { armed = type; renderModePanel(); attachGizmo(); },
     setGait(g) { gait = g; gaitT = 0; renderModePanel(); dirty.overlays = true; },
     setArmorView(v) { armorView = v; dirty.mesh = true; },
 };

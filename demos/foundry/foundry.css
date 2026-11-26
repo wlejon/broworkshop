@@ -56,8 +56,13 @@
 
 .f-line { display: grid; grid-template-columns: 10px 54px 62px 30px 48px 1fr; gap: 5px; align-items: center; margin: 4px 0; font-size: 12px; }
 .f-line .f-num { width: 100%; }
+.f-line > * { min-width: 0; }
+.f-line > div { overflow: hidden; }
 .f-face { display: grid; grid-template-columns: 50px 1fr 96px; gap: 6px; align-items: center; padding: 2px 4px; border-radius: 3px; font-size: 12px; }
 .f-face.on { background: rgba(90, 160, 255, 0.2); }
+.f-legend { margin-top: 8px; }
+.f-legend i { display: block; height: 9px; border-radius: 2px; background: linear-gradient(90deg, rgb(38, 89, 242), rgb(26, 204, 191), rgb(89, 217, 64), rgb(250, 209, 38), rgb(242, 64, 38)); }
+.f-legend div { display: flex; justify-content: space-between; font-size: 10.5px; color: #8d97a6; margin-top: 2px; }
 .f-colors { display: flex; gap: 10px; font-size: 11px; color: #8d97a6; }
 .f-colors label { display: flex; flex-direction: column; align-items: center; gap: 2px; }
 .k-kv .err b { color: #ff6b5e; }
