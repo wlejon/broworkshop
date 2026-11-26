@@ -1,5 +1,6 @@
 // Tumble run phase — marbles drop from the spout, pieces push them along,
-// the first marble in the cup clears the level. Scene + Physics only.
+// the first marble in the cup clears the level. Scene + run.world (a
+// bro.dynamics World, stepped here at STEP seconds a step) only.
 //
 // run.mode is "build" (placing pieces), "run" (marbles live) or "complete"
 // (cleared; the board is frozen under the complete screen).
@@ -8,6 +9,8 @@ import { cellKey } from "/app/board.js";
 import { rotY, quatY, boosterDir, rampDownhill } from "/app/pieces.js";
 
 const MARBLE_R = 0.17;
+const MARBLE_MASS = 1000 * 4 / 3 * Math.PI * MARBLE_R * MARBLE_R * MARBLE_R;   // solid, 1000 kg/m³
+const STEP = 1 / 60;
 const EMPTY_FAIL_MS = 400;   // every marble gone: short grace, then fail
 
 /** Back to building: clear live marbles and run clocks. */
@@ -31,6 +34,7 @@ export function freeze(run) {
 }
 
 function resetClock(run) {
+    run.stepAcc = 0;
     run.runtime = 0;
     run.resultMs = null;
     run.nextSpawnAt = 0;
@@ -42,7 +46,7 @@ function resetClock(run) {
 
 function clearMarbles(run) {
     for (const m of run.marbles) {
-        Physics.destroyBody(m.body);
+        run.world.removeBody(m.body);
         run.scene.destroyNode(m.node);
     }
     run.marbles.length = 0;
@@ -64,12 +68,23 @@ export function stepRun(run, dt) {
         run.nextSpawnAt = run.runtime + level.spawnInterval;
     }
 
+    // The world, in whole steps; each one's new touches are kept for handleContacts.
+    const touches = [];
+    run.stepAcc += dt / 1000;
+    for (let n = 0; run.stepAcc >= STEP - 1e-9 && n < 4; n++) {
+        run.stepAcc -= STEP;
+        spinSpinners(run, STEP);
+        run.world.step(STEP, 4);
+        const t = run.world.touched();
+        for (let i = 0; i < t.length; i++) touches.push(t[i]);
+    }
+    if (run.stepAcc > STEP) run.stepAcc = 0;
+
     const b = level.bounds;
     for (let i = run.marbles.length - 1; i >= 0; i--) {
         const m = run.marbles[i];
-        const tf = Physics.getTransform(m.body);
-        if (!tf) { run.marbles.splice(i, 1); continue; }
-        const p = tf.position;
+        const pose = run.world.pose(m.body);
+        const p = { x: pose[0], y: pose[1], z: pose[2] };
         m.node.x = p.x;
         m.node.y = p.y;
         m.node.z = p.z;
@@ -85,17 +100,16 @@ export function stepRun(run, dt) {
     }
 
     assistMarbles(run, dt);
-    spinSpinners(run, dt);
-    handleContacts(run);
+    handleContacts(run, touches);
     return checkFail(run);
 }
 
 function spawnMarble(run) {
     const sp = run.level.spawner;
     // Snappy marble: low friction, lively bounce, light damping.
-    const body = Physics.createBody({
-        shape: "sphere", radius: MARBLE_R,
-        position: { x: sp.x, y: sp.y, z: sp.z },
+    const body = run.world.addSphere({
+        radius: MARBLE_R, mass: MARBLE_MASS,
+        position: [sp.x, sp.y, sp.z],
         friction: 0.05, restitution: 0.48, linearDamping: 0.02, angularDamping: 0.04,
     });
     const node = run.scene.createMesh({
@@ -112,7 +126,7 @@ function spawnMarble(run) {
 function removeMarble(run, i) {
     const m = run.marbles[i];
     run.marbleBodies.delete(m.body);
-    Physics.destroyBody(m.body);
+    run.world.removeBody(m.body);
     run.scene.destroyNode(m.node);
     run.marbles.splice(i, 1);
     run.marblesRemoved += 1;
@@ -131,9 +145,8 @@ function inGoal(level, p) {
 function assistMarbles(run, dt) {
     const k = Math.min(1.2, (dt || 16) / 16);
     for (const m of run.marbles) {
-        const tf = Physics.getTransform(m.body);
-        if (!tf) continue;
-        const cx = Math.floor(tf.position.x), cy = Math.floor(tf.position.y), cz = Math.floor(tf.position.z);
+        const p = run.world.pose(m.body);
+        const cx = Math.floor(p[0]), cy = Math.floor(p[1]), cz = Math.floor(p[2]);
         let rec = null;
         for (let dy = 0; dy >= -1 && !rec; dy--) {
             const cand = run.placed.get(cellKey(cx, cy + dy, cz));
@@ -142,50 +155,58 @@ function assistMarbles(run, dt) {
         if (!rec) continue;
         if (rec.type === "ramp") {
             const d = rampDownhill(rec.rot);
-            Physics.addImpulse(m.body, d.x * 0.1 * k, 0.015 * k, d.z * 0.1 * k);
+            push(run, m.body, d.x * 0.1 * k, 0.015 * k, d.z * 0.1 * k);
         } else {
             const d = boosterDir(rec.rot);
-            Physics.addImpulse(m.body, d.x * 0.22 * k, 0.025 * k, d.z * 0.22 * k);
+            push(run, m.body, d.x * 0.22 * k, 0.025 * k, d.z * 0.22 * k);
         }
     }
 }
 
-function spinSpinners(run, dt) {
+/** An impulse through a body's centre. */
+function push(run, body, x, y, z) {
+    const p = run.world.pose(body);
+    run.world.applyImpulse(body, [x, y, z], [p[0], p[1], p[2]]);
+}
+
+/** Send each spinner to where the step about to run should leave it (4 rad/s). */
+function spinSpinners(run, step) {
     for (const key of run.spinners) {
         const rec = run.placed.get(key);
         if (!rec) continue;
-        rec.anim.phase += dt * 0.004;
+        rec.anim.phase += step * 4;
         const yaw = rotY(rec.anim.rot) + rec.anim.phase;
         const q = quatY(yaw);
-        Physics.setRotation(rec.body, q.x, q.y, q.z, q.w);
+        const at = rec.anim.at;
+        run.world.moveTo(rec.body, [at[0], at[1], at[2], q[0], q[1], q[2], q[3]], step);
         rec.node.rotationY = yaw;
     }
 }
 
 /** Contact kicks: boosters shove, spinners fling, bumpers and boosters clink. */
-function handleContacts(run) {
-    for (const ev of Physics.getContacts()) {
-        if (ev.type !== "added") continue;
+function handleContacts(run, touches) {
+    for (let i = 0; i < touches.length; i += 2) {
         let marble, other;
-        if (run.marbleBodies.has(ev.body1)) { marble = ev.body1; other = ev.body2; }
-        else if (run.marbleBodies.has(ev.body2)) { marble = ev.body2; other = ev.body1; }
+        if (run.marbleBodies.has(touches[i])) { marble = touches[i]; other = touches[i + 1]; }
+        else if (run.marbleBodies.has(touches[i + 1])) { marble = touches[i + 1]; other = touches[i]; }
         else continue;
+        if (!run.world.hasBody(marble)) continue;   // culled since the step that touched it
         const key = run.bodyToCell.get(other);
         const rec = key && run.placed.get(key);
         if (!rec) continue;
         if (rec.type === "booster") {
             const d = boosterDir(rec.rot);
-            Physics.addImpulse(marble, d.x * 0.38, 0.06, d.z * 0.38);
+            push(run, marble, d.x * 0.38, 0.06, d.z * 0.38);
             run.play("clink");
         } else if (rec.type === "spinner") {
-            const v = Physics.getVelocity(marble);
-            if (v) Physics.addImpulse(marble, v.linear.x * 0.55, 0.12, v.linear.z * 0.55);
+            const v = run.world.velocity(marble);
+            push(run, marble, v[0] * 0.55, 0.12, v[2] * 0.55);
             run.play("clink");
         } else if (rec.type === "bumper") {
             run.play("clink");
         } else if (rec.type === "ramp") {
             const d = rampDownhill(rec.rot);
-            Physics.addImpulse(marble, d.x * 0.1, 0.03, d.z * 0.1);
+            push(run, marble, d.x * 0.1, 0.03, d.z * 0.1);
         }
     }
 }
@@ -208,8 +229,8 @@ function checkFail(run) {
 export function marblePositions(run) {
     const out = [];
     for (const m of run.marbles) {
-        const tf = Physics.getTransform(m.body);
-        if (tf) out.push({ x: +tf.position.x.toFixed(3), y: +tf.position.y.toFixed(3), z: +tf.position.z.toFixed(3) });
+        const p = run.world.pose(m.body);
+        out.push({ x: +p[0].toFixed(3), y: +p[1].toFixed(3), z: +p[2].toFixed(3) });
     }
     return out;
 }

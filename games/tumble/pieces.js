@@ -5,8 +5,9 @@
 // piece fills exactly that cell (ramps overshoot slightly so neighbours
 // join). `rot` is 0..3, a multiple of 90° about +Y.
 //
-// build(scene, cellCentre, rot) creates the meshes + static Jolt bodies and
-// returns { node, body, extras?, extraBodies?, anim? }.
+// build(scene, world, cellCentre, rot) creates the meshes + the fixed bodies
+// in `world` (a bro.dynamics World) and returns
+// { node, body, extras?, extraBodies?, anim? }.
 
 import { Camera } from "/lib/kit/camera.js";
 
@@ -15,10 +16,9 @@ const RAD2DEG = 180 / Math.PI;
 
 export function rotY(rot) { return rot * Math.PI / 2; }
 
-/** Quaternion about +Y as the {x,y,z,w} object Jolt wants. */
+/** Quaternion about +Y, [x, y, z, w]. */
 export function quatY(angle) {
-    const s = Math.sin(angle * 0.5), c = Math.cos(angle * 0.5);
-    return { x: 0, y: s, z: 0, w: c };
+    return [0, Math.sin(angle * 0.5), 0, Math.cos(angle * 0.5)];
 }
 
 /** Booster shove direction (unit XZ) for rot 0..3: +X, +Z, -X, -Z. */
@@ -36,8 +36,6 @@ export function rampDownhill(rot) {
     return { x: 0, z: 1 };
 }
 
-function quatArrToObj(q) { return { x: q[0], y: q[1], z: q[2], w: q[3] }; }
-
 // The scene node takes Euler angles applied as Z·Y·X, so "tilt in the body
 // frame, then yaw" cannot be written as ry=yaw, rz=tilt (the tilt would stay
 // in the world frame and vanish when the long axis yaws onto Z). Compose the
@@ -54,9 +52,9 @@ function tiltThenYaw(tilt, yaw) {
     return quatMul(quatFromAxis(0, 1, 0, yaw), quatFromAxis(0, 0, 1, tilt));
 }
 
-function staticBox(half, pos, extra) {
-    return Physics.createBody(Object.assign({
-        shape: "box", static: true, halfExtents: half, position: pos,
+function staticBox(world, half, pos, extra) {
+    return world.addBox(Object.assign({
+        mass: 0, half: [half.x, half.y, half.z], position: [pos.x, pos.y, pos.z],
     }, extra));
 }
 
@@ -64,14 +62,14 @@ export const PIECES = {
     block: {
         label: "Block", key: "1", color: "#5a6375", rotatable: false,
         describe: "Solid 1×1 cube. The staple floor/wall unit.",
-        build(scene, cw) {
+        build(scene, world, cw) {
             const node = scene.createMesh({
                 mesh: "box", halfW: 0.5, halfH: 0.5, halfD: 0.5,
                 x: cw.x, y: cw.y, z: cw.z,
                 color: "#5a6375", metallic: 0.05, roughness: 0.82,
             });
             // Slightly slick so marbles keep rolling across tops.
-            const body = staticBox({ x: 0.5, y: 0.5, z: 0.5 }, cw, { friction: 0.22, restitution: 0.18 });
+            const body = staticBox(world, { x: 0.5, y: 0.5, z: 0.5 }, cw, { friction: 0.22, restitution: 0.18 });
             return { node, body };
         },
     },
@@ -79,7 +77,7 @@ export const PIECES = {
     ramp: {
         label: "Ramp", key: "2", color: "#6a8dbf", rotatable: true,
         describe: "Sloped plank. Rotation picks which way it points down.",
-        build(scene, cw, rot) {
+        build(scene, world, cw, rot) {
             // Steep and slick so marbles pick up speed instead of parking.
             const q = tiltThenYaw(34 * Math.PI / 180, rotY(rot));
             const e = quatToEuler(q);
@@ -88,8 +86,8 @@ export const PIECES = {
                 x: cw.x, y: cw.y, z: cw.z, rx: e.rx, ry: e.ry, rz: e.rz,
                 color: "#6a8dbf", metallic: 0.1, roughness: 0.6,
             });
-            const body = staticBox({ x: 0.58, y: 0.04, z: 0.45 }, cw,
-                { rotation: quatArrToObj(q), friction: 0.06, restitution: 0.2 });
+            const body = staticBox(world, { x: 0.58, y: 0.04, z: 0.45 }, cw,
+                { rotation: q, friction: 0.06, restitution: 0.2 });
             return { node, body };
         },
     },
@@ -97,7 +95,7 @@ export const PIECES = {
     wall: {
         label: "Wall", key: "3", color: "#8b6ec4", rotatable: true,
         describe: "Thin vertical panel. Blocks one side of a cell.",
-        build(scene, cw, rot) {
+        build(scene, world, cw, rot) {
             // rot picks the cell face: 0 = +X, 1 = +Z, 2 = -X, 3 = -Z.
             const o = [{ x: 0.45, z: 0 }, { x: 0, z: 0.45 }, { x: -0.45, z: 0 }, { x: 0, z: -0.45 }][rot & 3];
             const alongX = (rot & 1) === 1;
@@ -108,7 +106,7 @@ export const PIECES = {
                 x: pos.x, y: pos.y, z: pos.z,
                 color: "#8b6ec4", metallic: 0.1, roughness: 0.7,
             });
-            const body = staticBox(half, pos, { friction: 0.5, restitution: 0.25 });
+            const body = staticBox(world, half, pos, { friction: 0.5, restitution: 0.25 });
             return { node, body };
         },
     },
@@ -116,16 +114,16 @@ export const PIECES = {
     bumper: {
         label: "Bumper", key: "4", color: "#e25a8f", rotatable: false,
         describe: "Springy sphere. Bounces marbles in lively directions.",
-        build(scene, cw) {
+        build(scene, world, cw) {
             const node = scene.createMesh({
                 mesh: "sphere", radius: 0.32, segments: 20, rings: 16,
                 x: cw.x, y: cw.y, z: cw.z,
                 color: "#e25a8f", metallic: 0.15, roughness: 0.35,
                 emissive: 0.6, emissiveColor: [1.0, 0.4, 0.7],
             });
-            const body = Physics.createBody({
-                shape: "sphere", static: true, radius: 0.32,
-                position: cw, friction: 0.1, restitution: 0.92,
+            const body = world.addSphere({
+                mass: 0, radius: 0.32,
+                position: [cw.x, cw.y, cw.z], friction: 0.1, restitution: 0.92,
             });
             return { node, body };
         },
@@ -134,25 +132,24 @@ export const PIECES = {
     spinner: {
         label: "Spinner", key: "5", color: "#5acc88", rotatable: true,
         describe: "Kinematic paddle. Whacks marbles along.",
-        build(scene, cw, rot) {
-            // A static body re-rotated every tick (see marbles.js); Jolt treats
-            // it as moving, which is plenty at this scale.
+        build(scene, world, cw, rot) {
+            // A kinematic body sent to its next angle every tick (see marbles.js).
             const node = scene.createMesh({
                 mesh: "box", halfW: 0.46, halfH: 0.15, halfD: 0.07,
                 x: cw.x, y: cw.y, z: cw.z, ry: rot * 90,
                 color: "#5acc88", metallic: 0.25, roughness: 0.45,
                 emissive: 0.25, emissiveColor: [0.5, 1.0, 0.7],
             });
-            const body = staticBox({ x: 0.46, y: 0.15, z: 0.07 }, cw,
-                { rotation: quatY(rotY(rot)), friction: 0.5, restitution: 0.5 });
-            return { node, body, anim: { kind: "spinner", rot, phase: 0 } };
+            const body = staticBox(world, { x: 0.46, y: 0.15, z: 0.07 }, cw,
+                { kinematic: true, rotation: quatY(rotY(rot)), friction: 0.5, restitution: 0.5 });
+            return { node, body, anim: { kind: "spinner", rot, phase: 0, at: [cw.x, cw.y, cw.z] } };
         },
     },
 
     booster: {
         label: "Booster", key: "6", color: "#ffc34a", rotatable: true,
         describe: "Conveyor pad. Any marble on top is shoved along its arrow.",
-        build(scene, cw, rot) {
+        build(scene, world, cw, rot) {
             const pos = { x: cw.x, y: cw.y - 0.42, z: cw.z };
             const node = scene.createMesh({
                 mesh: "box", halfW: 0.45, halfH: 0.05, halfD: 0.45,
@@ -160,7 +157,7 @@ export const PIECES = {
                 color: "#ffc34a", metallic: 0.05, roughness: 0.35,
                 emissive: 0.5, emissiveColor: [1.0, 0.75, 0.2],
             });
-            const body = staticBox({ x: 0.45, y: 0.05, z: 0.45 }, pos,
+            const body = staticBox(world, { x: 0.45, y: 0.05, z: 0.45 }, pos,
                 { rotation: quatY(rotY(rot)), friction: 0.35, restitution: 0.08 });
             // Dark stripe on top shows the shove direction.
             const arrow = scene.createMesh({
@@ -175,7 +172,7 @@ export const PIECES = {
     chute: {
         label: "Chute", key: "7", color: "#4ec2d6", rotatable: false,
         describe: "Downward funnel — four angled ramps converging to the centre.",
-        build(scene, cw) {
+        build(scene, world, cw) {
             // Four slabs, outer edge up, yawed to face N/E/S/W: an inverted pyramid.
             const nodes = [], bodies = [];
             const half = { x: 0.48, y: 0.03, z: 0.22 };
@@ -189,8 +186,8 @@ export const PIECES = {
                     x: pos.x, y: pos.y, z: pos.z, rx: e.rx, ry: e.ry, rz: e.rz,
                     color: "#4ec2d6", metallic: 0.2, roughness: 0.4,
                 }));
-                bodies.push(staticBox(half, pos,
-                    { rotation: quatArrToObj(q), friction: 0.22, restitution: 0.1 }));
+                bodies.push(staticBox(world, half, pos,
+                    { rotation: q, friction: 0.22, restitution: 0.1 }));
             }
             return { node: nodes[0], extras: nodes.slice(1), body: bodies[0], extraBodies: bodies.slice(1) };
         },

@@ -1,7 +1,8 @@
 // Tumble board — one level's playfield: environment, piece budget and the
-// cell grid. Scene + Physics only; no DOM. State lives on the run:
+// cell grid. Scene + bro.dynamics only; no DOM. State lives on the run:
 //
 //   run.level / run.levelIdx
+//   run.world      the level's bro.dynamics World, stepped by marbles.stepRun
 //   run.budget     { type: { used, limit } }
 //   run.placed     Map cellKey -> { type, rot, cell, node, body, extras, extraBodies, furniture }
 //   run.meshToCell Map node id -> cellKey   (right-click removal by raycast)
@@ -15,15 +16,16 @@ import { LEVELS, goalCenter } from "/app/levels.js";
 export function cellKey(cx, cy, cz) { return cx + "," + cy + "," + cz; }
 
 /**
- * Wipe the scene and physics world and build level `idx` fresh: lights,
- * floor, spout, cup, budget and furniture. The caller adds the build aids.
+ * Wipe the scene and the world and build level `idx` fresh: lights, floor,
+ * spout, cup, budget and furniture. The caller adds the build aids.
  */
 export function resetBoard(run, idx) {
     const scene = run.scene;
     const level = LEVELS[idx];
     scene.clear();
-    Physics.createWorld({ maxBodies: 4096 });
-    Physics.setGravity(0, level.gravity, 0);
+    if (run.world) run.world.destroy();
+    run.world = bro.dynamics.createWorld({ gravity: [0, level.gravity, 0] });
+    run.stepAcc = 0;
 
     run.level = level;
     run.levelIdx = idx;
@@ -33,7 +35,7 @@ export function resetBoard(run, idx) {
     run.spinners = [];
     run.marbles = [];
     run.marbleBodies = new Set();
-    run.env = buildEnvironment(scene, level);
+    run.env = buildEnvironment(scene, run.world, level);
 
     run.budget = {};
     for (const t of PIECE_ORDER) run.budget[t] = { used: 0, limit: level.budget[t] || 0 };
@@ -64,13 +66,13 @@ export function framing(level) {
 const RIM_GLOW = 2.2;   // cup rim emissive at rest
 const FILL_GLOW = 0.6;  // cup floor emissive at rest
 
-function staticBox(half, pos, friction, restitution) {
-    return Physics.createBody({
-        shape: "box", static: true, halfExtents: half, position: pos, friction, restitution,
+function staticBox(world, half, pos, friction, restitution) {
+    return world.addBox({
+        mass: 0, half: [half.x, half.y, half.z], position: [pos.x, pos.y, pos.z], friction, restitution,
     });
 }
 
-function buildEnvironment(scene, level) {
+function buildEnvironment(scene, world, level) {
     scene.setAmbient([0.05, 0.055, 0.065]);
     scene.setToneMap({ mode: "aces" });
     scene.setExposure({ compensation: 0.14 });
@@ -87,7 +89,7 @@ function buildEnvironment(scene, level) {
         mesh: "plane", halfW: w * 0.5, halfD: d * 0.5, x: cx, y: -0.02, z: cz,
         color: "#1a2236", metallic: 0.0, roughness: 0.92, name: "ground",
     });
-    staticBox({ x: w * 0.5, y: 0.02, z: d * 0.5 }, { x: cx, y: -0.02, z: cz }, 0.18, 0.15);
+    staticBox(world, { x: w * 0.5, y: 0.02, z: d * 0.5 }, { x: cx, y: -0.02, z: cz }, 0.18, 0.15);
 
     // Spout: glowing disc on a thin post.
     const sp = level.spawner;
@@ -122,7 +124,7 @@ function buildEnvironment(scene, level) {
         mesh: "box", halfW: ghw, halfH: 0.02, halfD: ghd, x: gc.x, y: g.min[1] + 0.02, z: gc.z,
         color: "#0a3a1e", emissive: FILL_GLOW, emissiveColor: [0.2, 0.9, 0.5], metallic: 0.0, roughness: 0.8,
     });
-    staticBox({ x: ghw, y: 0.02, z: ghd }, { x: gc.x, y: g.min[1] + 0.02, z: gc.z }, 0.8, 0.1);
+    staticBox(world, { x: ghw, y: 0.02, z: ghd }, { x: gc.x, y: g.min[1] + 0.02, z: gc.z }, 0.8, 0.1);
     const lipH = 0.1, lipY = g.min[1] + lipH * 0.5;
     const lips = [
         { x: g.min[0], z: gc.z, hw: 0.035, hd: ghd + 0.03 },
@@ -131,7 +133,7 @@ function buildEnvironment(scene, level) {
         { x: gc.x, z: g.max[2], hw: ghw + 0.03, hd: 0.035 },
     ];
     for (const l of lips) {
-        staticBox({ x: l.hw, y: lipH * 0.5, z: l.hd }, { x: l.x, y: lipY, z: l.z }, 0.35, 0.15);
+        staticBox(world, { x: l.hw, y: lipH * 0.5, z: l.hd }, { x: l.x, y: lipY, z: l.z }, 0.35, 0.15);
         scene.createMesh({
             mesh: "box", halfW: l.hw, halfH: lipH * 0.5, halfD: l.hd, x: l.x, y: lipY, z: l.z,
             color: "#1e4a2e", emissive: 0.35, emissiveColor: [0.2, 0.9, 0.5], metallic: 0.05, roughness: 0.7,
@@ -193,7 +195,7 @@ export function placePiece(run, type, cx, cy, cz, rot, opts) {
     const blocker = placeBlocker(run, type, cx, cy, cz);
     if (blocker && !(furniture && blocker === "budget")) return false;
     const key = cellKey(cx, cy, cz);
-    const built = def.build(run.scene, { x: cx + 0.5, y: cy + 0.5, z: cz + 0.5 }, rot | 0);
+    const built = def.build(run.scene, run.world, { x: cx + 0.5, y: cy + 0.5, z: cz + 0.5 }, rot | 0);
     const rec = {
         type, rot: rot | 0, cell: [cx, cy, cz], furniture,
         node: built.node, body: built.body,
@@ -220,7 +222,7 @@ export function removePiece(run, key) {
     for (const b of [rec.body].concat(rec.extraBodies)) {
         if (b == null) continue;
         run.bodyToCell.delete(b);
-        Physics.destroyBody(b);
+        run.world.removeBody(b);
     }
     const i = run.spinners.indexOf(key);
     if (i >= 0) run.spinners.splice(i, 1);
