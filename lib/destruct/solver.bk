@@ -1676,6 +1676,15 @@ fn k_dual(g: grid<1>, X: rw_store<f32, 1>, X0: read_store<f32, 1>, CI: read_stor
         // block is no harder than its pieces, but it is they that go: it breaks into them first.)
         let through = -(c.x + min(CF[o + 9], 0.0) * alpha) > reach_along(w, n, X, B);
         if (through && PAR[w] != -2 && ln <= -cap && B[8 * w + 3] > 0.0) { ST[2 * w + 1] = -1.0; }
+        // (And one the step began with its middle inside a thing that does not crush: an overlap that deep is
+        // one crushed into, which nothing takes out again (k_primal_part), so there is no more of it there to
+        // stand. Two that both crush, one inside the other, are rubble pressed together, and stay.)
+        if (b >= 0 && PAR[w] != -2 && B[8 * w + 3] > 0.0 && max(capa, capb) > 1.0e29) {
+            let ot = a + b - w;
+            let l = qinv_rot(vec4<f32>(X0[8 * ot + 4], X0[8 * ot + 5], X0[8 * ot + 6], X0[8 * ot + 7]),
+                             vec3<f32>(X0[8 * w] - X0[8 * ot], X0[8 * w + 1] - X0[8 * ot + 1], X0[8 * w + 2] - X0[8 * ot + 2]));
+            if (abs(l.x) < B[8 * ot] && abs(l.y) < B[8 * ot + 1] && abs(l.z) < B[8 * ot + 2]) { ST[2 * w + 1] = -1.0; }
+        }
         // (A block pressed as hard as its pieces stand breaks into them, however little that is: what would
         // crush a piece of it is not let through it whole.)
         // (DRV: what pressed it that hard, and when; its pieces come into the world with that already in them.)
