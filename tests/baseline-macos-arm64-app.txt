@@ -34,13 +34,6 @@ PASS test demos/anim-lab/tests/test_blend.js
 PASS test demos/anim-lab/tests/test_clips.js 
 PASS test demos/anim-lab/tests/test_machine.js 
 PASS test demos/anim-lab/tests/test_ui.js 
-PASS smoke demos/character-lab 
-PASS test demos/character-lab/tests/test_controller.js 
-PASS test demos/character-lab/tests/test_crowd_ball.js 
-PASS test demos/character-lab/tests/test_physics_node.js 
-PASS test demos/character-lab/tests/test_sensing.js 
-PASS test demos/character-lab/tests/test_terrain.js 
-PASS test demos/character-lab/tests/test_ui.js 
 PASS smoke demos/clipmap-terrain 
 PASS test demos/clipmap-terrain/tests/test_main.js 
 SKIP smoke demos/cluster-diar-lab ml (use --ml)
@@ -94,9 +87,6 @@ SKIP smoke demos/listen-lab ml (use --ml)
 SKIP test demos/listen-lab/tests/test_main.js ml (use --ml)
 SKIP smoke demos/lm-playground ml (use --ml)
 SKIP test demos/lm-playground/tests/test_main.js ml (use --ml)
-PASS smoke demos/mechanical-sandbox 
-PASS test demos/mechanical-sandbox/tests/test_controls.js 
-PASS test demos/mechanical-sandbox/tests/test_machines.js 
 PASS smoke demos/mic-chunks 
 PASS test demos/mic-chunks/tests/test_main.js 
 PASS smoke demos/nav-carving 
@@ -119,12 +109,6 @@ SKIP test demos/omnivoice-lab/tests/test_interaction.js ml (use --ml)
 SKIP test demos/omnivoice-lab/tests/test_smoke.js ml (use --ml)
 SKIP smoke demos/parakeet-lab ml (use --ml)
 SKIP test demos/parakeet-lab/tests/test_smoke.js ml (use --ml)
-PASS smoke demos/physics-playground 
-PASS test demos/physics-playground/tests/test_bodies.js 
-PASS test demos/physics-playground/tests/test_effects.js 
-PASS test demos/physics-playground/tests/test_machines.js 
-PASS test demos/physics-playground/tests/test_physics_node.js 
-PASS test demos/physics-playground/tests/test_rigid.js 
 SKIP smoke demos/pixart-lab ml (use --ml)
 SKIP test demos/pixart-lab/tests/test_generate.js ml (use --ml)
 PASS smoke demos/plant-recipes 
@@ -152,8 +136,6 @@ SKIP test demos/qwen-image-lab/tests/test_x0.js ml (use --ml)
 SKIP smoke demos/qwen-tts-lab ml (use --ml)
 SKIP test demos/qwen-tts-lab/tests/test_live_stream.js ml (use --ml)
 SKIP test demos/qwen-tts-lab/tests/test_smoke.js ml (use --ml)
-PASS smoke demos/ragdoll-blender 
-PASS test demos/ragdoll-blender/tests/test_blend.js 
 PASS smoke demos/range-selection-lab 
 PASS test demos/range-selection-lab/tests/test_range.js 
 PASS test demos/range-selection-lab/tests/test_tools.js 
@@ -281,10 +263,6 @@ PASS test games/stompworld/tests/test_play.js
 PASS test games/stompworld/tests/test_sim.js 
 PASS smoke games/tilehaven 
 PASS test games/tilehaven/tests/test_session.js 
-PASS smoke games/torque 
-PASS test games/torque/tests/test_car.js 
-PASS test games/torque/tests/test_garage.js 
-PASS test games/torque/tests/test_pad.js 
 PASS smoke games/touchdown 
 PASS test games/touchdown/tests/test_main.js 
 PASS smoke games/tumble 
@@ -298,7 +276,6 @@ PASS smoke launcher
 PASS test launcher/tests/test_launcher.js 
 PASS smoke lib-tests 
 PASS test lib-tests/test_history.js 
-PASS test lib-tests/test_physics.js 
 PASS test lib-tests/test_polygon.js 
 PASS test lib-tests/test_project.js 
 PASS test lib-tests/test_scene_anim.js 

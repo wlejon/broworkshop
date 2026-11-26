@@ -34,13 +34,6 @@ PASS test demos/anim-lab/tests/test_blend.js
 PASS test demos/anim-lab/tests/test_clips.js 
 PASS test demos/anim-lab/tests/test_machine.js 
 PASS test demos/anim-lab/tests/test_ui.js 
-PASS smoke demos/character-lab 
-PASS test demos/character-lab/tests/test_controller.js 
-PASS test demos/character-lab/tests/test_crowd_ball.js 
-PASS test demos/character-lab/tests/test_physics_node.js 
-PASS test demos/character-lab/tests/test_sensing.js 
-PASS test demos/character-lab/tests/test_terrain.js 
-PASS test demos/character-lab/tests/test_ui.js 
 PASS smoke demos/clipmap-terrain 
 PASS test demos/clipmap-terrain/tests/test_main.js 
 PASS smoke demos/cluster-diar-lab 
@@ -94,9 +87,6 @@ PASS smoke demos/listen-lab
 PASS test demos/listen-lab/tests/test_main.js 
 PASS smoke demos/lm-playground 
 FAIL test demos/lm-playground/tests/test_main.js rc=1: evalScriptFileJit: uncaught Error: timed out waiting for model loaded (status: loading qwen35…) (600000 ms)
-PASS smoke demos/mechanical-sandbox 
-PASS test demos/mechanical-sandbox/tests/test_controls.js 
-PASS test demos/mechanical-sandbox/tests/test_machines.js 
 PASS smoke demos/mic-chunks 
 PASS test demos/mic-chunks/tests/test_main.js 
 PASS smoke demos/nav-carving 
@@ -119,12 +109,6 @@ PASS test demos/omnivoice-lab/tests/test_interaction.js
 PASS test demos/omnivoice-lab/tests/test_smoke.js 
 PASS smoke demos/parakeet-lab 
 PASS test demos/parakeet-lab/tests/test_smoke.js 
-PASS smoke demos/physics-playground 
-PASS test demos/physics-playground/tests/test_bodies.js 
-PASS test demos/physics-playground/tests/test_effects.js 
-PASS test demos/physics-playground/tests/test_machines.js 
-PASS test demos/physics-playground/tests/test_physics_node.js 
-PASS test demos/physics-playground/tests/test_rigid.js 
 PASS smoke demos/pixart-lab 
 FAIL test demos/pixart-lab/tests/test_generate.js rc=1: evalScriptFileJit: uncaught Error: check failed: run started
 PASS smoke demos/plant-recipes 
@@ -152,8 +136,6 @@ FAIL test demos/qwen-image-lab/tests/test_x0.js rc=1: ASSERTION FAILED: model lo
 PASS smoke demos/qwen-tts-lab 
 FAIL test demos/qwen-tts-lab/tests/test_live_stream.js rc=1: evalScriptFileJit: uncaught Error: loadQwen: brosoundml: QwenTts::load: no config.json under '/Users/j/projects/brosoundml/weights/qwen-tts/0.6B-customvoice'
 FAIL test demos/qwen-tts-lab/tests/test_smoke.js rc=1: evalScriptFileJit: uncaught Error: loadQwen: brosoundml: QwenTts::load: no config.json under '/Users/j/projects/brosoundml/weights/qwen-tts/0.6B-customvoice'
-PASS smoke demos/ragdoll-blender 
-PASS test demos/ragdoll-blender/tests/test_blend.js 
 PASS smoke demos/range-selection-lab 
 PASS test demos/range-selection-lab/tests/test_range.js 
 PASS test demos/range-selection-lab/tests/test_tools.js 
@@ -281,10 +263,6 @@ PASS test games/stompworld/tests/test_play.js
 PASS test games/stompworld/tests/test_sim.js 
 PASS smoke games/tilehaven 
 PASS test games/tilehaven/tests/test_session.js 
-PASS smoke games/torque 
-PASS test games/torque/tests/test_car.js 
-PASS test games/torque/tests/test_garage.js 
-PASS test games/torque/tests/test_pad.js 
 PASS smoke games/touchdown 
 PASS test games/touchdown/tests/test_main.js 
 PASS smoke games/tumble 
@@ -298,7 +276,6 @@ PASS smoke launcher
 PASS test launcher/tests/test_launcher.js 
 PASS smoke lib-tests 
 PASS test lib-tests/test_history.js 
-PASS test lib-tests/test_physics.js 
 PASS test lib-tests/test_polygon.js 
 PASS test lib-tests/test_project.js 
 PASS test lib-tests/test_scene_anim.js 

@@ -1,7 +1,0 @@
-{
-    "app": ".",
-    "title": "Mechanical Sandbox",
-    "width": 1280,
-    "height": 720,
-    "lib": "../../lib"
-}

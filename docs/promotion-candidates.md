@@ -31,7 +31,7 @@ re-exports app, dom, ui, params, prefs and weights for another 18 apps.
 | arcade `scene3d.js` | 9 | 3D stage: orbit camera, picking, taps |
 | `system-menu.js` | 7 (+ every `boot()` app) | `bro.menu` File / View / Debug bar |
 | kit `gauges.js` | 7 | `fitCanvas`, `levelMeter`, `historyPlot` |
-| kit `physics3d.js` | 5 | body + mesh pairing, event fan-out, pick ray, grabber |
+| kit `dynamics3d.js` | 2 | body + mesh pairing, moved bodies onto nodes, pick ray |
 | kit `history.js` / `project.js` / `editor.js` | 5 / 4 / 5 | undo stack, document bundle, menu wiring |
 | kit `math3d.js` | 4 | quaternion / vector helpers |
 | kit `kokoro.js` | 4 | find + load Kokoro TTS with its G2P assets |
@@ -56,18 +56,13 @@ arcade `rayAt` / `toScreen` now wrap them. The pure `screenRay` /
 `flyControls` (right-drag orbit, middle pan, wheel zoom, damping). The kit
 then keeps only layout sugar.
 
-### 2. Physics body ↔ scene node pairing and event fan-out → `Physics` / `bro.scene`
+### 2. Body ↔ scene node pairing → `bro.dynamics` / `bro.scene`
 
-`physics3d.js` `addBody` / `BodyGroup` build a mesh per shape and copy the
-body pose onto the node every frame; `physicsEvents()` exists because
-`getContacts()` / `getBrokenConstraints()` drain on read, so only one
-reader may call them. The engine already has `createPhysicsNode`, and
-contacts now accumulate until drained (bro 8abffa5a).
-**Promote:** a debug-mesh option on `createPhysicsNode` (shape → mesh in
-the engine, where the shape data lives), and a subscription form
-(`Physics.onContact(fn)`) so several systems can listen without a
-hand-rolled drain owner. `grabber` (a mouse spring) could follow as a
-`Physics.createMouseJoint`-style constraint.
+`dynamics3d.js` `addBody` builds a mesh per shape and `applyMoved` copies
+the rows of `World.moved()` onto scene nodes in script every step.
+**Promote:** a binding in the engine (a world's bodies named to scene
+nodes, written from the step's moved list without a script loop), and a
+mesh made from a body's shape where the shape data lives.
 
 ### 3. Weights and model-path resolution → `bro.models`
 
@@ -116,10 +111,10 @@ size polling in `sceneViewport` and the arcade view.
 
 `math3d.js` (`q`, `v3`, `quatFromEuler`, `quatMul`, `quatYTo`) duplicates
 what bromath has natively: `bro.math` exposes bromath types, but the scene
-and Physics APIs take plain arrays / `{x,y,z,w}`, so apps convert by hand.
+and `bro.dynamics` take plain arrays, so apps convert by hand.
 **Promote:** free functions on `bro.math` that take and return arrays
 (`quat.fromEuler`, `quat.mul`, `quat.fromTo`), matching what the scene and
-Physics accept.
+`bro.dynamics` accept.
 
 ### 8. Undo history → not an engine feature
 

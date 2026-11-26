@@ -12,8 +12,7 @@
 //   lib/kit/humanoid.js
 //               Fourteen clips — idle, the four compass gaits, run, the crouch
 //               pair, jump, three gestures and two root-motion gaits —
-//               authored as keyframe DATA and compiled to bromesh Animations
-//               (shared with demos/character-lab's auto-rigged avatar).
+//               authored as keyframe DATA and compiled to bromesh Animations.
 //   masks.js    Named bone-mask presets, packed to the arrays playLayer wants.
 //   player.js   A facade over the skinned mesh's built-in player: clips,
 //               crossfades, 1D/2D blend spaces, masked layers, root motion.

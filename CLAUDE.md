@@ -9,7 +9,7 @@ Guidance for agents working in broworkshop: the showcase apps for the
 
 | Path | Contents |
 |------|----------|
-| `games/` | games on the arcade shell (`lib/arcade/`); `torque` has its own chrome |
+| `games/` | games on the arcade shell (`lib/arcade/`) |
 | `demos/` | engine / graphics / ML demos and labs |
 | `tools/` | editors and utilities |
 | `ai/` | agent and pipeline experiments |

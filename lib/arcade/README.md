@@ -215,8 +215,8 @@ The stage gives right-drag orbit / middle-drag pan / wheel zoom (kit
 `orbitControls`), `reframe(pivot, dist)`, `rayAt` (screen → world ray),
 `planeHit(ray, y)`, `pick` (scene raycast) and `onTap`, a press + release
 that did not drag, so right-click actions do not fire at the end of an
-orbit. Rebuild a level with `scene.clear()` + `Physics.createWorld()`
-rather than tracking every node and body. Fixed-view board games pass
+orbit. Rebuild a level with `scene.clear()` + a fresh
+`bro.dynamics.createWorld()` rather than tracking every node and body. Fixed-view board games pass
 `iso` instead of `orbit`; **`games/hexfront`** shows picking a TileWorld
 cell with `stage.rayAt` + `world.raycastCell`, and `stage.toScreen` for
 tests that click a cell.
@@ -254,7 +254,7 @@ Do not call `getContext("scene")` or touch the DOM from `sim.js`.
 ## Games on this foundation
 
 Every folder under `games/` boots via `main.js` + `boot(game)` (or
-`bootScene`) except `torque`, a physics driving sandbox with its own chrome.
+`bootScene`).
 Import modules directly; there is no arcade `index.js`.
 
 | Cluster | Games |

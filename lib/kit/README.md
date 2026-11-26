@@ -38,12 +38,11 @@ Widgets take "a selector or an element already in the page" (resolved with
 | File | What |
 |------|------|
 | `camera.js` | `Camera`: orbit and fly camera math (quaternion, gimbal-free) → `scene.setCamera` options |
-| `math3d.js` | quaternion / vector helpers: `q`, `v3`, `QI` ({x,y,z,w} objects, for `Physics`), `quatFromEuler`, `quatMul`, `quatYTo` ([x,y,z,w] arrays, for nodes), `toArr` |
+| `math3d.js` | quaternion / vector helpers: `q`, `v3`, `QI` ({x,y,z,w} objects), `quatFromEuler`, `quatMul`, `quatYTo` ([x,y,z,w] arrays, for nodes and `bro.dynamics`), `toArr` |
 | `viewport3d.js` | `sceneViewport`: `bro.scene` canvas + orbit camera + standard mouse controls, `ray(px, py)` / `toScreen(world)`; `orbitControls`, `orbitRotation`, `screenRay`, `worldToScreen`, `localPoint`; re-exports `Camera` |
 | `flycam.js` | free-fly camera (WASD / Space / C / Shift, drag- or pointer-lock look, optional roll, ground clearance) for terrain-scale scenes |
 | `sky.js` | HDRI sky (`skyEnvironment`), sun direction + sliders (`sunControls`), a time-of-day rig (`daylight`) |
-| `physics3d.js` | Jolt + scene plumbing: body + mesh pairs, `BodyGroup`, `rod`, the contact/break event drain, `pickRay` / `raycast`, a mouse `grabber` |
-| `ragdoll.js` | a 12-part humanoid `Physics.createRagdoll` rig: poses as per-joint deltas, FK, blend, error metrics |
+| `dynamics3d.js` | a `bro.dynamics` world in a scene: body + mesh pairs, `applyMoved`, `rod`, `pickRay` / `raycast` |
 | `skeletal.js` | clip authoring for skinned meshes: bone frames, keyframe compile, bone overlay |
 | `humanoid.js` | a humanoid clip library (idle/walk/run/crouch/...) + the autoRig bone map |
 | `nav3d.js` | `bro.ai.game` navmesh labs: slab/ramp levels, walkable overlays, route ribbons, markers, capsule agents, waypoint walking, link beads, surface picking |
@@ -250,39 +249,24 @@ order, emissiveGain, sun }`; call `update(dt)` each frame (night fireflies)
 and `setScale` with the scene's size so fog and shadows fit. Used by
 demos/plant-recipes and demos/flora-lab.
 
-**physics3d.js** — for 3D Jolt demos (global `Physics` + a `bro.scene`):
-- `addBody(scene, body, look)` → `{ tag, node }` (a PhysicsNode + a mesh built
-  from the same shape: box / sphere / capsule / cylinder / compound, or
-  `look.mesh(scene)`; `look.velocity` launches it); `addStatic` → `{ tag, mesh }`;
-  `removeBody(e)`; `shapeMesh(scene, shape, look)`.
-- `new BodyGroup(scene | () => scene)`: `add(body, look, extra)`, `get`,
-  `has`, `size`, `values()`, `remove(tag)`, `clear()` — the registry behind
-  select / clear-all.
+**dynamics3d.js** — a `bro.dynamics` world (`docs/dynamics-api.js`) in a
+`bro.scene`. A body spec is what `World.addBox` / `addSphere` / `addCapsule` /
+`addCylinder` take, plus `shape` naming which:
+- `addBody(world, scene, spec, look)` → `{ body, node }` (a mesh built from
+  the same shape, or `look.mesh(scene)`); `addStatic` → `{ body, mesh }`;
+  `createBody(world, spec)`; `shapeMesh(scene, spec, look)`.
+- `applyMoved(world, nodes)`: after a step, puts the nodes of the bodies it
+  moved (a Map from body to node) where their bodies are.
 - `rod(scene, color, opts)` → `{ set(a, b), visible, destroy() }`: a
-  cylinder spanning two points (cables, ropes, normals).
-- `physicsEvents()` → `{ onContacts(fn), onBroken(fn), off(fn), pump() }`:
-  the ONE drain of `getContacts` / `getBrokenConstraints` (both drain on
-  read); call `pump()` once a frame and subscribe everything else.
+  cylinder spanning two points (cables, normals, tethers).
 - `pickRay(vp, lx, ly)` (a sceneViewport + canvas-local pixel, e.g. from
-  `localPoint`) → `{ o, d }` in Physics' {x,y,z} form; `raycast(ray,
-  maxDist)` → the closest hit plus the ray.
-- `grabber(vp, { stiffness, damping, rodColor, onRelease })` →
-  `{ begin(hit), end(), setRay(ray), update(dt), grabbed }`: mouse-drag a
-  body with a mass-scaled spring; the app decides what to grab.
+  `localPoint`) → `{ origin, dir }`; `raycast(world, ray, maxDist, mask)` →
+  the nearest hit plus the ray.
 
 **math3d.js** — `q` ({x,y,z,w}: `mul conj axis rot angle slerp yaw`), `v3`
 ({x,y,z}: `add sub scale lerp len dist`), `QI`, `toArr`; array quaternions
 for nodes and bromesh: `quatFromEuler(x, y, z)`, `quatMul(a, b)`,
 `quatYTo(dx, dy, dz)` (+Y onto a direction: cylinders, rods).
-
-**ragdoll.js** — `PARTS` / `PART_NAMES` / `partIndex(name)`; a pose is
-`{ partName: localDelta }` (`{}` = standing). `buildPose(deltas, rootPos,
-rootRot)` → the flat 7-floats-per-part array the ragdoll drives take;
-`lerpPose(a, b, t)`, `posePart`; `poseError(rd, deltas)` (mean joint-angle
-error, radians), `jointResidual(rd)` (worst pivot separation, m).
-`spawnRagdoll(scene, { position, rotation, layer, motor, colors, pose })` →
-`{ rd, nodes, meshes, tags, destroy() }`. Used by demos/physics-playground
-and demos/ragdoll-blender.
 
 **skeletal.js** — authoring clips for `createSkinnedMesh` / the animation
 player (`docs/animation-api.js`, `docs/rigging-api.js`) without per-rig code:
