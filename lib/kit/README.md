@@ -42,7 +42,7 @@ Widgets take "a selector or an element already in the page" (resolved with
 | `viewport3d.js` | `sceneViewport`: `bro.scene` canvas + orbit camera + standard mouse controls, `ray(px, py)` / `toScreen(world)`; `orbitControls`, `orbitRotation`, `screenRay`, `worldToScreen`, `localPoint`; re-exports `Camera` |
 | `flycam.js` | free-fly camera (WASD / Space / C / Shift, drag- or pointer-lock look, optional roll, ground clearance) for terrain-scale scenes |
 | `sky.js` | HDRI sky (`skyEnvironment`), sun direction + sliders (`sunControls`), a time-of-day rig (`daylight`) |
-| `dynamics3d.js` | a `bro.dynamics` world in a scene: body + mesh pairs, `applyMoved`, `rod`, `pickRay` / `raycast` |
+| `dynamics3d.js` | a `bro.dynamics` world in a scene: body + mesh pairs, `applyMoved`, `structureView`, `rod`, `pickRay` / `raycast` |
 | `skeletal.js` | clip authoring for skinned meshes: bone frames, keyframe compile, bone overlay |
 | `humanoid.js` | a humanoid clip library (idle/walk/run/crouch/...) + the autoRig bone map |
 | `nav3d.js` | `bro.ai.game` navmesh labs: slab/ramp levels, walkable overlays, route ribbons, markers, capsule agents, waypoint walking, link beads, surface picking |
@@ -259,6 +259,11 @@ demos/plant-recipes and demos/flora-lab.
   moved (a Map from body to node) where their bodies are.
 - `rod(scene, color, opts)` → `{ set(a, b), visible, destroy() }`: a
   cylinder spanning two points (cables, normals, tethers).
+- `structureView(scene, structure, { color(member, cell) })` →
+  `{ node, update(), hide(cells), destroy() }`: a `World.addStructure`
+  structure as one instanced box a cell; `update()` after each step puts the
+  loose cells on their bodies and takes the crushed ones away
+  (`demos/wrecking-lab`).
 - `pickRay(vp, lx, ly)` (a sceneViewport + canvas-local pixel, e.g. from
   `localPoint`) → `{ origin, dir }`; `raycast(world, ray, maxDist, mask)` →
   the nearest hit plus the ray.

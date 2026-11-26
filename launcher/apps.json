@@ -120,6 +120,7 @@
         { "dir": "demos/voxeldag-world" },
         { "dir": "demos/waapi-lab" },
         { "dir": "demos/window-lab" },
+        { "dir": "demos/wrecking-lab" },
         { "dir": "demos/yue2-lab" },
 
         { "dir": "ai/ardy-motion" },

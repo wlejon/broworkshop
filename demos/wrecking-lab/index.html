@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <title>Wrecking Lab</title>
+    <link rel="stylesheet" href="/lib/kit/kit.css">
+</head>
+<body class="k-app">
+    <header class="k-header">
+        <h1>Wrecking Lab</h1>
+        <span class="k-sub">bro.dynamics structures: a building that stands with no bodies, breaks where it is hit, and falls when what is left cannot carry it</span>
+    </header>
+
+    <div class="k-toolbar">
+        <span class="dim">build</span>
+        <button id="build-tower" class="small">Tower</button>
+        <button id="build-block" class="small">Block</button>
+        <button id="build-wall" class="small">Wall</button>
+        <span class="k-sep"></span>
+        <span class="dim">throw</span>
+        <select id="shot">
+            <option value="ball">ball · 400 kg</option>
+            <option value="wrecker" selected>wrecking ball · 5 t</option>
+            <option value="mech">mech-sized box · 20 t</option>
+            <option value="truck">slab · 60 t</option>
+        </select>
+        <span class="dim">at</span>
+        <select id="speed">
+            <option value="10">10 m/s</option>
+            <option value="20">20 m/s</option>
+            <option value="30" selected>30 m/s</option>
+            <option value="40">40 m/s</option>
+            <option value="80">80 m/s</option>
+        </select>
+        <span class="k-sep"></span>
+        <label class="k-field"><input type="checkbox" id="slow"> quarter speed</label>
+        <span class="k-spacer"></span>
+        <button id="reset" class="small">Rebuild</button>
+    </div>
+
+    <div class="k-body">
+        <main class="k-main">
+            <div class="k-viewport"><canvas id="stage"></canvas></div>
+        </main>
+    </div>
+
+    <footer class="k-statusbar">
+        <span id="status">click the building to throw at it</span>
+        <span class="k-spacer"></span>
+        <span>standing <b id="stat-standing">—</b></span>
+        <span>loose bodies <b id="stat-pieces">—</b></span>
+        <span>bodies <b id="stat-bodies">—</b></span>
+        <span>step <b id="stat-step">—</b> ms</span>
+        <span>fps <b id="stat-fps">—</b></span>
+        <span class="dim">click: throw · right-drag: orbit · middle-drag: pan · wheel: zoom</span>
+    </footer>
+
+    <script type="module" src="/app/main.js"></script>
+</body>
+</html>
