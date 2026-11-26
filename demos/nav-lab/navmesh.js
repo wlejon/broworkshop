@@ -1,7 +1,7 @@
 // navmesh.js — bake, draw, query and cache the polygon navmesh.
 //
-// Baked with `fromPhysics`: the walkable surface comes from the same static
-// Jolt bodies the level collides with, so AI and collision cannot disagree.
+// Baked with `fromDynamics`: the walkable surface comes from the same fixed
+// bodies the level collides with, so AI and collision cannot disagree.
 //
 // The overlay is SAMPLED (kit walkableOverlay): bro has no polygon read-back
 // (brogameagent's NavMesh has no accessor either), so a lattice is snapped
@@ -17,7 +17,7 @@
 // links are left out; the HUD says which is live.
 
 import { walkableOverlay, routeOf } from "/lib/kit/nav3d.js";
-import { bounds, storeys } from "/app/level.js";
+import { bounds, storeys, level } from "/app/level.js";
 
 /** Bake parameters, all on HUD controls. Defaults are the API's own. */
 export const bakeParams = {
@@ -54,14 +54,14 @@ export const navState = {
 // --- bake ----------------------------------------------------------------------------
 
 /**
- * Re-bake from the live physics world. A bake can legitimately fail (erode the
+ * Re-bake from the level's world. A bake can legitimately fail (erode the
  * level away with a huge radius); that returns null with navState.lastError
  * set rather than killing the app.
  */
 export function bake() {
     const t0 = performance.now();
     const opts = {
-        fromPhysics: Physics, physicsLayers: ['static'],
+        fromDynamics: level.world,
         agentRadius: bakeParams.agentRadius, agentHeight: bakeParams.agentHeight,
         agentMaxClimb: bakeParams.agentMaxClimb, agentMaxSlopeDeg: bakeParams.agentMaxSlopeDeg,
         cellSize: bakeParams.cellSize, cellHeight: 0.2,
@@ -99,9 +99,9 @@ export function bake() {
 export function bakeGrid() {
     navState.grid = bro.ai.game.createNavGrid({
         minX: bounds.minX, maxX: bounds.maxX, minZ: bounds.minZ, maxZ: bounds.maxZ,
-        cellSize: 0.4, fromPhysics: Physics, physicsLayers: ['static'],
-        physicsMinY: 0.05,   // above the ground slab's top face...
-        physicsMaxY: 2.5,    // ...and below the mezzanine's underside
+        cellSize: 0.4, fromDynamics: level.world,
+        dynamicsMinY: 0.05,   // above the ground slab's top face...
+        dynamicsMaxY: 2.5,    // ...and below the mezzanine's underside
         padding: bakeParams.agentRadius,
     });
     return navState.grid;

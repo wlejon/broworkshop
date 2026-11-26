@@ -1,9 +1,9 @@
 // level.js — the building a NavGrid cannot describe.
 //
 // Every piece is one kit `slab` descriptor (an oriented box). One list feeds
-// both the render meshes and the Jolt static bodies (kit buildSlabs), and the
-// navmesh is baked from the physics (`fromPhysics`), so what the bake walks on
-// is provably the surface that is drawn and collided with.
+// both the render meshes and the fixed bro.dynamics bodies (kit buildSlabs),
+// and the navmesh is baked from those bodies (`fromDynamics`), so what the bake
+// walks on is provably the surface that is drawn and collided with.
 //
 // The layout breaks a flat 2D grid four ways:
 //
@@ -127,10 +127,14 @@ export const CHOKE = { x: 4, z: 0, halfZ: DOOR_HALF };
 export const bounds = { minX: -22, maxX: 22, minZ: -22, maxZ: 22 };
 export const storeys = [0, 3, 4, 8];
 
-/** Create the physics world and build every slab. Returns [{ node, tag, slab }]. */
+/** The level's bro.dynamics world: what the bakes, the ground follow and the picking ray read. */
+export const level = { world: null };
+
+/** A fresh world and every slab in it. Returns [{ node, body, slab }]. */
 export function buildLevel(scene) {
-    Physics.createWorld({});
-    return buildSlabs(scene, slabs);
+    if (level.world) level.world.destroy();
+    level.world = bro.dynamics.createWorld();
+    return buildSlabs(level.world, scene, slabs);
 }
 
 /** One shadow-casting sun plus a cool fill, so the mezzanine reads as hanging. */

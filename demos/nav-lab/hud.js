@@ -80,7 +80,7 @@ function readBake() {
     put('stQuads', navState.overlayQuads);
     put('stBake', `${navState.bakeMs.toFixed(0)} ms / ${navState.blobBytes} B`);
     if (navState.lastError) hint('bakeHint', 'Bake failed: ' + navState.lastError, 'err');
-    else if (!stale) hint('bakeHint', `Baked from ${lab.levelNodes.length} static bodies via fromPhysics.`, 'ok');
+    else if (!stale) hint('bakeHint', `Baked from ${lab.levelNodes.length} static bodies via fromDynamics.`, 'ok');
     readGrid();
 }
 

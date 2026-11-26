@@ -7,10 +7,10 @@
 //   roof 7         reached by the ladder from the mezzanine or the lift; a
 //                  bridge runs east to an island pad
 //
-// Static slabs are kit `slab` descriptors built as render mesh + Jolt static
-// body, so the tiled bake (`fromPhysics`) walks exactly what is drawn. The
-// three DYNAMIC pieces are not physics at all: each is a navmesh obstacle
-// (a dtTileCache box) plus a visual.
+// Static slabs are kit `slab` descriptors built as render mesh + fixed
+// bro.dynamics body, so the tiled bake (`fromDynamics`) walks exactly what is
+// drawn. The three DYNAMIC pieces are not bodies at all: each is a navmesh
+// obstacle (a dtTileCache box) plus a visual.
 //
 //   gate       fills the doorway while closed: the vault is unreachable
 //   barricade  crates across the ramp foot: the mezzanine is lift-only
@@ -98,10 +98,14 @@ export const bounds = { minX: -11, maxX: 11, minZ: -10, maxZ: 10 };
 
 export function floorOf(y) { return y > 5.2 ? 2 : y > 1.75 ? 1 : 0; }
 
-/** Physics world + static slabs. Returns [{ node, tag, slab }]. */
+/** The level's bro.dynamics world: what the bake and the picking ray read. */
+export const level = { world: null };
+
+/** A fresh world + its fixed slabs. Returns [{ node, body, slab }]. */
 export function buildLevel(scene) {
-    Physics.createWorld({});
-    return buildSlabs(scene, slabs);
+    if (level.world) level.world.destroy();
+    level.world = bro.dynamics.createWorld();
+    return buildSlabs(level.world, scene, slabs);
 }
 
 export function buildLights(scene) {

@@ -9,7 +9,7 @@
 <body class="k-app">
     <header class="k-header">
         <h1>Navigation Lab</h1>
-        <span class="k-sub">bro.ai.game NavMesh: Recast/Detour baked from this level's physics, with off-mesh links, dynamic obstacles, ORCA avoidance and the steering kernels</span>
+        <span class="k-sub">bro.ai.game NavMesh: Recast/Detour baked from this level's bodies, with off-mesh links, dynamic obstacles, ORCA avoidance and the steering kernels</span>
     </header>
 
     <div class="k-toolbar">
@@ -44,7 +44,7 @@
                 <div class="kv"><span>bake / blob</span><b id="stBake">—</b></div>
                 <div class="kv"><span>NavGrid walkable cells</span><b id="stGridCells">—</b></div>
                 <div class="kv"><span>of probed</span><b id="stGridTested">—</b></div>
-                <p class="hint">bro exposes no polygon read-back, so the cyan surface samples the bake through <code>nearestPoint</code>. The magenta NavGrid comes from the same bodies via <code>createNavGrid({ fromPhysics })</code>: one flat sheet at y 0, and a square hole under every ramp, because a grid obstacle is the body's AABB.</p>
+                <p class="hint">bro exposes no polygon read-back, so the cyan surface samples the bake through <code>nearestPoint</code>. The magenta NavGrid comes from the same bodies via <code>createNavGrid({ fromDynamics })</code>: one flat sheet at y 0, and a square hole under every ramp, because a grid obstacle is the body's AABB.</p>
             </div>
 
             <div class="k-panel fold">
@@ -114,7 +114,7 @@
 
             <div class="k-panel fold">
                 <h2><label><input type="checkbox" id="followOn" checked> Ground follow</label></h2>
-                <p class="hint">Two agents, identical except for <code>groundFollow: { mode: 'raycast' }</code>, steered straight up the link-yard ramp. The grey one keeps a constant Y and slides through the slope; the green one's down-probe puts it on the surface.</p>
+                <p class="hint">Two agents, identical except for <code>groundFollow: { mode: 'raycast', world }</code>, steered straight up the link-yard ramp. The grey one keeps a constant Y and slides through the slope; the green one's down-probe puts it on the surface.</p>
                 <div class="k-row">
                     <button id="btnWalkRamp" class="small">Walk the ramp</button>
                     <button id="btnFollowReset" class="small">Reset</button>

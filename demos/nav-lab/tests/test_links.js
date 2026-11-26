@@ -1,10 +1,10 @@
 // Off-mesh links carry a binding walker over a gap nothing else crosses;
 // requireFullPath splits partial from none; the NavGrid baked from the same
-// physics; groundFollow as the only variable between two agents.
+// bodies; groundFollow as the only variable between two agents.
 //
 //   scripts/validate.sh demos/nav-lab
 import { check, test, done, text } from "/lib/kit/test.js";
-import { marks, linkMarks } from "/app/level.js";
+import { marks, linkMarks, level } from "/app/level.js";
 import { navState } from "/app/navmesh.js";
 import { LINK_DEFS, linkState, linkIsLive, linkSegmentsOf, sendLinkWalkers, comparePartial, setSealed } from "/app/links.js";
 import { gridState, gridWalkable, setGridOverlayVisible, walkTheRamp, resetFollowers, followerSpread, followerOf } from "/app/grid.js";
@@ -18,7 +18,7 @@ test('the static bake carries three live links; links + obstacles is refused', (
     check(navState.linksBaked === 3, navState.linksBaked + ' links');
     let refused = false;
     try {
-        bro.ai.game.bakeNavMesh({ fromPhysics: Physics, dynamicObstacles: true,
+        bro.ai.game.bakeNavMesh({ fromDynamics: level.world, dynamicObstacles: true,
             offMeshLinks: [{ start: { x: 0, y: 0, z: 0 }, end: { x: 1, y: 0, z: 0 } }] });
     } catch (e) { refused = /offMeshLinks/.test(e.message); }
     check(refused, 'bakeNavMesh throws rather than dropping links');
@@ -91,7 +91,7 @@ test('sealing the pad splits requireFullPath:false from true', () => {
     check(navState.linksBaked === 3, 'jump back in the bake');
 });
 
-test('the NavGrid bakes from the same physics and blocks the ramp', () => {
+test('the NavGrid bakes from the same bodies and blocks the ramp', () => {
     setGridOverlayVisible(true);
     check(gridState.cells > 1000 && gridState.cells < gridState.tested * 0.9, `${gridState.cells} of ${gridState.tested}`);
     for (const [label, x, z] of [['divider wall', 4, -10], ['pillar', 10, -6], ['chamber wall', 12, -18]]) check(!gridWalkable(x, z), label + ' blocked');

@@ -3,12 +3,12 @@
 // falsifiable.
 //
 //   level.js      the building: stacked floors, ramps, stairs, a choke, the link yard
-//   navmesh.js    bake (fromPhysics), sampled surface overlay, queries, save/load
+//   navmesh.js    bake (fromDynamics), sampled surface overlay, queries, save/load
 //   agents.js     route walkers on the kit's JS waypoint follower
 //   obstacles.js  the tiled dtTileCache bake: crates that carve the surface
 //   crowd.js      ORCA avoidance scored by an overlap counter
 //   links.js      off-mesh links (jump / drop / ladder), binding walkers, partial paths
-//   grid.js       the NavGrid from the same physics, and the groundFollow contrast
+//   grid.js       the NavGrid from the same bodies, and the groundFollow contrast
 //   steering.js   the five steer.* kernels and computeLeadAim's turret
 //   lab.js        this: scene, path markers, bake pipeline, picking, frame loop
 //   hud.js        the controls and readouts
@@ -26,7 +26,7 @@
 import { sceneViewport, orbitRotation, localPoint } from "/lib/kit/viewport3d.js";
 import { fixedStep } from "/lib/kit/ui.js";
 import { ribbon, marker, pipPool, pickSurface } from "/lib/kit/nav3d.js";
-import { buildLevel, buildLights, marks } from "/app/level.js";
+import { buildLevel, buildLights, marks, level } from "/app/level.js";
 import { bakeParams, navState, bake, bakeGrid, rebuildOverlay, findPath, findGridPath } from "/app/navmesh.js";
 import { createAgentWorld, spawnAgent, retargetAll, tickAgents, repathAll } from "/app/agents.js";
 import { bindObstacleScene, obstacleState, clearObstacles, pumpObstacles, toggleObstacleAt } from "/app/obstacles.js";
@@ -67,7 +67,7 @@ export function startLab(canvas) {
     });
     const scene = vp.scene;
     Object.assign(lab, { vp, scene });
-    lab.levelNodes = buildLevel(scene);   // before the first bake: fromPhysics sees only what exists
+    lab.levelNodes = buildLevel(scene);   // before the first bake: fromDynamics sees only what exists
     lab.lights = buildLights(scene);
     bindObstacleScene(scene); bindCrowdScene(scene); bindLinkScene(scene); bindGridScene(scene);
 
@@ -194,9 +194,9 @@ export function setShellVisible(on) {
 
 // --- picking -------------------------------------------------------------------------
 
-/** The walkable point under a canvas-local pixel (a physics ray, snapped onto the mesh). */
+/** The walkable point under a canvas-local pixel (a ray against the level, snapped onto the mesh). */
 export function pickLevel(lx, ly) {
-    return pickSurface(lab.vp, lx, ly, { mesh: navState.mesh });
+    return pickSurface(level.world, lab.vp, lx, ly, { mesh: navState.mesh });
 }
 
 // Left button: set the start; shift: the goal; ctrl: retarget the walkers;

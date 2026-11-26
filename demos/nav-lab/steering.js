@@ -20,7 +20,7 @@
 // crossing target with and without lead and measure each shot's closest
 // approach.
 
-import { rod } from "/lib/kit/physics3d.js";
+import { rod } from "/lib/kit/dynamics3d.js";
 import { marker, capsule } from "/lib/kit/nav3d.js";
 
 // South-west hall: clear of the crate lane (z -8), the funnel lane (z 0) and

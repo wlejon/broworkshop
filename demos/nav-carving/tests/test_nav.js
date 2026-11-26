@@ -3,7 +3,7 @@
 //
 //   scripts/validate.sh demos/nav-carving
 import { check, test, done } from "/lib/kit/test.js";
-import { TARGETS, LINKS, OBSTACLES, DOOR, BRIDGE, LANDINGS } from "/app/level.js";
+import { TARGETS, LINKS, OBSTACLES, DOOR, BRIDGE, LANDINGS, level } from "/app/level.js";
 import { navState, generation, walkableAt, findRoute } from "/app/nav.js";
 import { plan, linksOf, planStats } from "/app/plan.js";
 import { doors, setDoor } from "/app/lab.js";
@@ -12,7 +12,7 @@ advanceTime(100);
 const mesh = () => navState.mesh;
 const SOUTH = TARGETS.south;
 
-test('one tiled bake from the physics, booted with the gate and barricade carved', () => {
+test('one tiled bake from the level bodies, booted with the gate and barricade carved', () => {
     check(mesh() && mesh().valid && mesh().supportsObstacles, navState.lastError);
     check(navState.handles.gate > 0 && navState.handles.barricade > 0 && !navState.handles.bridge, JSON.stringify(navState.handles));
     check(mesh().obstacleCount === 2, 'obstacleCount ' + mesh().obstacleCount);
@@ -22,7 +22,7 @@ test('one tiled bake from the physics, booted with the gate and barricade carved
     LANDINGS.forEach((p, i) => check(walkableAt(p), 'lift landing F' + i + ' on the surface'));
     let threw = false;
     try {
-        bro.ai.game.bakeNavMesh({ fromPhysics: Physics, dynamicObstacles: true,
+        bro.ai.game.bakeNavMesh({ fromDynamics: level.world, dynamicObstacles: true,
             offMeshLinks: [{ start: { x: 0, y: 0, z: 0 }, end: { x: 1, y: 0, z: 0 } }] });
     } catch (e) { threw = /offMeshLinks/.test(e.message); }
     check(threw, 'bakeNavMesh refuses links on a tiled bake (why the links live in plan.js)');

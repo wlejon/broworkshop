@@ -1,11 +1,11 @@
 // nav.js — the tiled navmesh and the three obstacles that carve it.
 //
-// One bake at boot (`dynamicObstacles: true`, from the level's physics). After
+// One bake at boot (`dynamicObstacles: true`, from the level's bodies). After
 // that the surface only changes through `addObstacle` / `removeObstacle`,
 // which rebuild the handful of tiles they touch and bump `mesh.generation`;
 // everything that caches a route (plan.js, agents.js) compares that integer.
 
-import { OBSTACLES, bounds, FLOOR_Y } from "/app/level.js";
+import { OBSTACLES, bounds, FLOOR_Y, level } from "/app/level.js";
 
 export const AGENT_RADIUS = 0.35;
 export const EXTENTS = { x: 1.5, y: 1.2, z: 1.5 };
@@ -22,7 +22,7 @@ export function bake() {
     const t0 = Date.now();
     try {
         navState.mesh = bro.ai.game.bakeNavMesh({
-            fromPhysics: Physics, physicsLayers: ['static'],
+            fromDynamics: level.world,
             agentRadius: AGENT_RADIUS, agentHeight: 1.8, agentMaxClimb: 0.4, agentMaxSlopeDeg: 40,
             cellSize: 0.2, cellHeight: 0.1,
             dynamicObstacles: true, tileSize: 32, maxObstacles: 32,

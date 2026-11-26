@@ -1,8 +1,8 @@
-// grid.js — the NavGrid baked from the same physics, drawn next to the mesh,
+// grid.js — the NavGrid baked from the same bodies, drawn next to the mesh,
 // and the groundFollow contrast.
 //
-// The grid comes from the SAME static bodies (`createNavGrid({ fromPhysics,
-// physicsMinY, physicsMaxY })`, no hand-authored rectangles). Drawn beside the
+// The grid comes from the SAME fixed bodies (`createNavGrid({ fromDynamics,
+// dynamicsMinY, dynamicsMaxY })`, no hand-authored rectangles). Drawn beside the
 // sampled navmesh the difference is a shape, not an argument:
 //   - one flat magenta sheet at y 0; the cyan mesh stacks at 3, 4 and 8;
 //   - a square hole under every ramp: a grid obstacle is the body's AABB
@@ -10,14 +10,14 @@
 //   - square wall corners (cells eroded) against rounded ones (polygons).
 //
 // Ground follow: agents plan in XZ. `attachAgent({ groundFollow: { mode:
-// 'raycast' } })` makes the bound node's Y track the ground under the agent
-// via a native down-raycast. Two agents, identical but for that option, are
+// 'raycast', world } })` makes the bound node's Y track the ground under the
+// agent via a native down-raycast through that world. Two agents, identical but for that option, are
 // steered straight up the link-yard ramp with setTarget() — no navmesh, no
 // grid — so the probe is the only difference: one climbs, the other slides
 // through the slope at a constant height.
 
 import { quadSheet, capsule } from "/lib/kit/nav3d.js";
-import { bounds, linkMarks } from "/app/level.js";
+import { bounds, linkMarks, level } from "/app/level.js";
 import { navState } from "/app/navmesh.js";
 import { agentState } from "/app/agents.js";
 
@@ -84,7 +84,7 @@ export function spawnFollowers() {
         const color = follow ? '#7bed9f' : '#9aa7b4';
         const node = capsule(sceneRef, at, { name: follow ? 'follower.ground' : 'follower.flat', color, emissive: follow ? 0.9 : 0.25 });
         const opts = { yOffset: 0.76, capabilities: ['hold'] };
-        if (follow) opts.groundFollow = { mode: 'raycast', layers: ['static'] };
+        if (follow) opts.groundFollow = { mode: 'raycast', world: level.world };
         node.attachAgent(agentState.world, agent, opts);
         node.visible = gridState.followOn;
         gridState.followers.push({ agent, node, follow, lane, yMin: Infinity, yMax: -Infinity });

@@ -14,7 +14,7 @@
 import { sceneViewport, orbitRotation, localPoint } from "/lib/kit/viewport3d.js";
 import { fixedStep } from "/lib/kit/ui.js";
 import { walkableOverlay, ribbon, linkBeads, pickSurface } from "/lib/kit/nav3d.js";
-import { buildLevel, buildLights, OBSTACLES, LINKS, SHAFT, FLOOR_Y, BRIDGE, SPAWN, TARGETS } from "/app/level.js";
+import { buildLevel, buildLights, level, OBSTACLES, LINKS, SHAFT, FLOOR_Y, BRIDGE, SPAWN, TARGETS } from "/app/level.js";
 import { navState, bake, setObstacle, overlayOpts, generation, AGENT_RADIUS } from "/app/nav.js";
 import { polylineOf } from "/app/plan.js";
 import { lift, tickLift } from "/app/elevator.js";
@@ -186,7 +186,7 @@ export function setView(key, on) {
 
 /** The walkable point under a canvas-local pixel. */
 export function pickLevel(lx, ly) {
-    return pickSurface(lab.vp, lx, ly, { mesh: navState.mesh, extents: { x: 1.5, y: 1.5, z: 1.5 } });
+    return pickSurface(level.world, lab.vp, lx, ly, { mesh: navState.mesh, extents: { x: 1.5, y: 1.5, z: 1.5 } });
 }
 
 // Click: send everyone there. Shift-click: spawn one there.
