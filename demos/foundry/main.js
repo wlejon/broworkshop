@@ -364,7 +364,7 @@ function renderModePanel() {
         el.append(h('h2', null, 'Armour'),
             h('div.k-row', null, ...[['paint', 'Paint'], ['thickness', 'Thickness']].map(([v, label]) =>
                 h('button.small' + (armorView === v ? '.active' : ''), { onclick: () => { armorView = v; dirty.mesh = true; renderModePanel(); } }, label))),
-            armorView === 'thickness' ? h('div.f-legend', null, h('i'), h('div', null, ...['10', '25', '60', '160', '400 mm'].map((t) => h('span', null, t)))) : null,
+            ...(armorView === 'thickness' ? [h('div.f-legend', null, h('i'), h('div', null, ...['10', '25', '60', '160', '400 mm'].map((t) => h('span', null, t))))] : []),
             h('div.k-row.f-gap', null, button('All plate −20%', () => scaleAll(0.8)), button('+25%', () => scaleAll(1.25))),
             h('div.k-cap', null, 'paint'), colors,
             h('div.f-note', null, `Armour is ${tonnes(report.mass.armor)} of ${tonnes(report.mass.total)}. Every millimetre is weight the legs carry and the jets lift.`));

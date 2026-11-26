@@ -13,6 +13,7 @@ export function createStage(scene) {
     rig.apply('day');
     rig.setScale(12);
     scene.setToneMap({ mode: 'aces' });
+    if (scene.setMSAA) scene.setMSAA(4);        // thin frames and far floor rules shimmer without it
     scene.setSSAO({ enabled: true, radius: 1.6, intensity: 1.1, bias: 0.03 });
     scene.setBloom({ threshold: 1.3, intensity: 0.22, radius: 0.7, iterations: 4 });
 
@@ -23,11 +24,11 @@ export function createStage(scene) {
     const STEP = 10, SPAN = 300;
     const across = [], rule = [0.30, 0.32, 0.35];
     for (let x = -SPAN; x <= SPAN; x += STEP) {
-        const n = scene.createMesh({ mesh: 'box', halfW: 0.07, halfH: 0.01, halfD: SPAN, color: rule, roughness: 0.9, castsShadow: false });
+        const n = scene.createMesh({ mesh: 'box', halfW: 0.14, halfH: 0.01, halfD: SPAN, color: rule, roughness: 0.9, castsShadow: false });
         n.position = [x, 0, 0];
     }
     for (let z = -SPAN; z <= SPAN; z += STEP) {
-        const n = scene.createMesh({ mesh: 'box', halfW: SPAN, halfH: 0.01, halfD: z % 50 === 0 ? 0.16 : 0.07, color: rule, roughness: 0.9, castsShadow: false });
+        const n = scene.createMesh({ mesh: 'box', halfW: SPAN, halfH: 0.01, halfD: z % 50 === 0 ? 0.26 : 0.14, color: rule, roughness: 0.9, castsShadow: false });
         n.position = [0, 0, z];
         across.push({ n, z });
     }

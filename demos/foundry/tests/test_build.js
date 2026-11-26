@@ -63,6 +63,32 @@ check(F.report.dps > dps0, 'two more guns, fed: more fire');
 shot('build-armed');
 F.setMode('armor'); frames(5); shot('build-armed-armour', '#stage');
 
+// --- one side only, then both again, from the inspector's checkbox ------------------------------
+F.setMode('frame'); F.select(pod); frames(3);
+const both = () => [...document.querySelectorAll('#inspector .k-field')].find((f) => f.firstChild.textContent === 'both sides').querySelector('input');
+const mass2 = F.report.mass.total;
+both().click(); frames(4);
+check(!seg(pod).mirror && F.report.insts.length === n0 + 1, 'unticked, the pod is on one side only');
+check(F.report.mass.total < mass2, 'and the machine is lighter by one pod');
+console.log('one pod: balance side-to-side', F.report.com[0].toFixed(2), 'm off centre; problems:', F.report.issues.map((i) => i.text).join(' | ') || 'none');
+check(Math.abs(F.report.com[0]) > 0.01, 'its centre of mass is off to that side');
+both().click(); frames(4);
+check(seg(pod).mirror && F.report.insts.length === n0 + 2, 'ticked, it is back on both');
+
+// --- thicken the plate on the face that was clicked ------------------------------------------
+F.setMode('armor');
+click(...page(centre('torso'))); frames(4);
+check(F.sel.seg === 'torso' && F.sel.face, 'a click in the armour mode picks a face of the torso');
+check(faceName(seg('torso'), F.sel.face, 1) === 'front', 'the one facing the camera: the front');
+const faceRow = document.querySelector('#inspector .f-face.on');
+check(faceRow && faceRow.querySelector('.nm').textContent === 'front', 'and its row is the lit one');
+const t0 = seg('torso').armor[F.sel.face].t, am0 = F.report.mass.armor;
+const plate = faceRow.querySelector('input[type=range]');
+plate.value = 200; plate.dispatchEvent(new Event('input', { bubbles: true })); frames(4);
+check(seg('torso').armor[F.sel.face].t === 0.2 && F.report.mass.armor > am0, 'its slider thickens that plate and the armour weighs more');
+console.log(`torso front ${(t0 * 1000).toFixed(0)} -> 200 mm: armour ${(am0 / 1e3).toFixed(0)} -> ${(F.report.mass.armor / 1e3).toFixed(0)} t, thrust/weight ${F.report.flight.tw.toFixed(2)}`);
+shot('build-thick-front', '#stage');
+
 // --- take the pod off ------------------------------------------------------------------------
 F.setMode('frame'); F.select(pod); frames(3);
 button('#modePanel', 'Remove segment').click(); frames(5);
