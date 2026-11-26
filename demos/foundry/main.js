@@ -14,7 +14,7 @@ import { sceneViewport, orbitRotation, localPoint } from "/lib/kit/viewport3d.js
 import { starterBiped } from "/lib/mech/starter.js";
 import { evaluate, autoLines, autoActuators, autoFrames, settle } from "/lib/mech/evaluate.js";
 import { normalize, addSegment, removeSegment, addModule, removeModule, moduleFault, findPlace, hintForFace,
-         SEGMENT_PRESETS, descendants } from "/lib/mech/design.js";
+         SEGMENT_PRESETS, setLength, setBone as aimBone } from "/lib/mech/design.js";
 import { segMap, hullBasis, hullToLocal, localToHull, bay, moduleBox, faceName, FACES, skinPoint } from "/lib/mech/skeleton.js";
 import { MODULES, MODULE_GROUPS, STRUCTURE, ARMOR, ACTUATOR, LINES, LINE_KINDS, CELL, REGIMES, fmt } from "/lib/mech/catalog.js";
 import { add, mul, norm, qrot, clamp, RAD } from "/lib/mech/vec.js";
@@ -153,18 +153,21 @@ function redrawOverlays() {
         if (m) view.showCells(m.seg, m.cell, m.size, [1.0, 0.82, 0.2, 0.38], 0.1);
         if (ghost) view.showCells(ghost.seg, ghost.cell, ghost.size, ghost.ok ? [0.3, 1.0, 0.45, 0.45] : [1.0, 0.25, 0.2, 0.45], 0.04);
     } else if (mode === 'lines') view.showLines(lineKind);
-    if (mode === 'frame' || mode === 'test' || mode === 'lines') {
+    const flying = mode === 'test' && (gait === 'hover' || gait === 'burn');
+    if ((mode === 'frame' || mode === 'test' || mode === 'lines') && !flying) {
         view.showMarker(report.com, 0.9, [1.0, 0.85, 0.1]);
         const b = report.move.balance;
         if (b && mode !== 'lines') view.showLoop(b.hull.map((p) => [p[0], 0.15, p[1]]), [0.3, 0.9, 1.0], 0.12);
         if (mode !== 'lines') view.showArrow([report.com[0], 0.2, report.com[2]], [0, report.com[1] - 1.2, 0], [1.0, 0.85, 0.1], 0.08);
     }
-    if (mode === 'test' && (gait === 'hover' || gait === 'burn')) {
-        const scale = report.height * 0.35 / Math.max(1, report.weight);
+    if (flying) {
+        // What each jet throws out behind it, riding with the segment it is in.
+        const scale = report.height * 0.5 / Math.max(1, report.weight);
         report.flight.jets.forEach((j, i) => {
             const thr = gait === 'burn' ? 1 : report.flight.hover.each[i] || 0;
             const f = gait === 'hover' && report.flight.hover.f[i] ? report.flight.hover.f[i] : mul(j.axis, j.thrust * thr);
-            view.showArrow(add(j.pos, [0, 7, 0]), mul(f, -scale), [1.0, 0.5, 0.15], 0.3);
+            const at = [j.pos[0] - report.rest.pos[j.inst][0], j.pos[1] - report.rest.pos[j.inst][1], j.pos[2] - report.rest.pos[j.inst][2]];
+            view.showArrow(at, mul(f, -scale), [1.0, 0.5, 0.15], 0.35, j.inst);
         });
     }
 }
@@ -185,14 +188,14 @@ function attachGizmo() {
                 if (!seg.mirror && !isMirrored(seg) && Math.abs(seg.attach[0]) < 0.3) seg.attach[0] = 0;
                 touch('Move ' + seg.name, { light: true });
             },
-            rotate: (x, y, z, w) => { seg.bone = norm(qrot([x, y, z, w], seg.bone)); touch('Aim ' + seg.name); },
+            rotate: (x, y, z, w) => { aimBone(design, seg, qrot([x, y, z, w], seg.bone)); touch('Aim ' + seg.name); },
             scale: (sx, sy, sz) => {
                 const B = hullBasis(seg), f = [sx, sy, sz];
                 for (let a = 0; a < 3; a++) {
                     if (Math.abs(f[a] - 1) < 1e-6) continue;
                     const d = [Math.abs(B.U[a]), Math.abs(B.V[a]), Math.abs(B.W[a])];
                     if (d[0] >= d[1] && d[0] >= d[2]) seg.hu = seg.hu.map((v) => clamp(v * f[a], 0.8, 20));
-                    else if (d[1] >= d[2]) seg.len = clamp(seg.len * f[a], 1.5, 60);
+                    else if (d[1] >= d[2]) setLength(design, seg, clamp(seg.len * f[a], 1.5, 60));
                     else seg.hw = seg.hw.map((v) => clamp(v * f[a], 0.8, 20));
                 }
                 touch('Size ' + seg.name);
@@ -428,11 +431,11 @@ function inspectFrame(el, seg) {
     const aim = { pitch, splay };
     const setBone = () => {
         const p = aim.pitch * RAD, s = aim.splay * RAD;
-        seg.bone = [Math.sin(s), Math.cos(s) * Math.cos(p), -Math.cos(s) * Math.sin(p)];
+        aimBone(design, seg, [Math.sin(s), Math.cos(s) * Math.cos(p), -Math.cos(s) * Math.sin(p)]);
         T('Aim');
     };
     el.append(
-        field('length', slider(seg.len, { min: 1.5, max: 40, step: 0.1, unit: ' m' }, (v) => { seg.len = v; T('Size'); })),
+        field('length', slider(seg.len, { min: 1.5, max: 40, step: 0.1, unit: ' m' }, (v) => { setLength(design, seg, v); T('Size'); })),
         field('behind joint', slider(seg.back, { min: 0, max: 12, step: 0.1, unit: ' m' }, (v) => { seg.back = v; T('Size'); })),
         field('width, root', slider(seg.hu[0] * 2, { min: 1.6, max: 30, step: 0.1, unit: ' m' }, (v) => { seg.hu[0] = v / 2; T('Size'); })),
         field('width, tip', slider(seg.hu[1] * 2, { min: 1.6, max: 30, step: 0.1, unit: ' m' }, (v) => { seg.hu[1] = v / 2; T('Size'); })),

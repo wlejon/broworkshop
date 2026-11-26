@@ -150,11 +150,12 @@ export function createMechView(scene) {
     }
 
     /** An arrow from a world point along `v` (its length), as a thin box and a head. */
-    function showArrow(p, v, color, width) {
+    function showArrow(p, v, color, width, instId) {
         const l = Math.hypot(v[0], v[1], v[2]);
         if (!(l > 1e-3)) return;
         const d = [v[0] / l, v[1] / l, v[2] / l];
-        const node = overlayIn(null, { mesh: 'cylinder', radius: width || 0.25, height: l, segments: 8, color, emissive: 1.2, roughness: 1,
+        // With an instance, p and v are in its own space and the arrow rides with it.
+        const node = overlayIn(instId || null, { mesh: 'cylinder', radius: width || 0.25, height: l, segments: 8, color, emissive: 1.2, roughness: 1,
             position: [p[0] + v[0] / 2, p[1] + v[1] / 2, p[2] + v[2] / 2] });
         // A cylinder lies along y; turn y onto d.
         const c = [d[2], 0, -d[0]], s = Math.hypot(c[0], c[2]), w = 1 + d[1];
