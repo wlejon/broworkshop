@@ -111,6 +111,7 @@
         { "dir": "demos/tensor-lab" },
         { "dir": "demos/terrain" },
         { "dir": "demos/text-lab" },
+        { "dir": "demos/tree-lab" },
         { "dir": "demos/triposplat" },
         { "dir": "demos/urban-mobility" },
         { "dir": "demos/video_demo" },

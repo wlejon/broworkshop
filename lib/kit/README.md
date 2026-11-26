@@ -287,7 +287,7 @@ walkBack, walkStrafeL/R, crouchIdle, crouchWalk, wave, point, nod, jump,
 root-motion walkRM/runRM), `compileClips(defs, frames,
 { only })` → `{ name: clip }`, `HUMANOID_BONES` (the logical names), and
 `AUTORIG_HUMANOID` (`{ map, rest }` for the 22-bone `Rig.autoRig` humanoid).
-Used by demos/anim-lab and demos/character-lab (`avatar.js`).
+Used by demos/anim-lab.
 
 **history.js** — `new History({ limit, onChange })`: `do(label, doFn,
 undoFn)`, `record(...)` (already applied), `transaction(label, fn)` /
