@@ -1,0 +1,7 @@
+{
+    "title": "Foundry",
+    "width": 1680,
+    "height": 1000,
+    "lib": "../../lib",
+    "permissions": ["files"]
+}

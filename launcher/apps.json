@@ -61,6 +61,7 @@
         { "dir": "demos/engine" },
         { "dir": "demos/evo-biosphere" },
         { "dir": "demos/flora-lab" },
+        { "dir": "demos/foundry" },
         { "dir": "demos/fresnel" },
         { "dir": "demos/gaia-phase-space" },
         { "dir": "demos/gpu-fabric-swarm" },

@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Foundry</title>
+<link rel="stylesheet" href="/lib/kit/kit.css">
+<link rel="stylesheet" href="/app/foundry.css">
+</head>
+<body class="k-app">
+  <header class="k-header">
+    <h1>Foundry</h1>
+    <input id="name" class="f-name" type="text" spellcheck="false">
+    <div class="k-spacer"></div>
+    <div class="f-headline" id="headline"></div>
+  </header>
+  <div class="k-toolbar">
+    <div id="modes" class="f-modes"></div>
+    <div class="k-sep"></div>
+    <button id="undo" title="Undo (Ctrl+Z)">Undo</button>
+    <button id="redo" title="Redo (Ctrl+Y)">Redo</button>
+    <div class="k-sep"></div>
+    <label class="k-chip" title="Armour plates"><input type="checkbox" id="showArmor"> armour</label>
+    <label class="k-chip" title="Module bodies inside the bays"><input type="checkbox" id="showInner"> internals</label>
+    <label class="k-chip" title="The hull each segment's bay sits in"><input type="checkbox" id="showHull"> hulls</label>
+    <label class="k-chip" title="Buildings for scale"><input type="checkbox" id="showBlock"> city block</label>
+    <div class="k-spacer"></div>
+    <button id="settle" title="Rate every actuator, gauge every frame and size every line to the machine as it is laid out">Size everything to load</button>
+  </div>
+  <div class="k-body">
+    <aside class="k-side f-left">
+      <div class="k-panel"><h2>Segments</h2><div id="tree" class="f-tree"></div><div id="treeTools" class="k-row f-tools"></div></div>
+      <div class="k-panel" id="modePanel"></div>
+    </aside>
+    <main class="k-main">
+      <div class="k-viewport">
+        <canvas id="stage"></canvas>
+        <div class="k-hud" id="hint"></div>
+      </div>
+    </main>
+    <aside class="k-side right f-right">
+      <div class="k-panel fold" id="inspectorPanel"><h2>Selection</h2><div id="inspector"></div></div>
+      <div class="k-panel fold"><h2>Machine</h2><div id="summary"></div></div>
+      <div class="k-panel fold"><h2>What each regime asks</h2><div id="regimes"></div></div>
+      <div class="k-panel fold"><h2>Problems <span class="dim" id="issueCount"></span></h2><div id="issues"></div></div>
+      <div class="k-panel fold folded"><h2>If it is shot away</h2><div id="failures"></div></div>
+    </aside>
+  </div>
+  <footer class="k-statusbar">
+    <span id="status">starting…</span>
+    <span class="k-stats" id="stats"></span>
+  </footer>
+  <script type="module" src="/app/main.js"></script>
+</body>
+</html>
