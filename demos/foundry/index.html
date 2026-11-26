@@ -9,12 +9,12 @@
 <body class="k-app">
     <header class="k-header">
         <h1>Foundry</h1>
-        <span class="k-sub">Compile intricate mechanisms into bounded units with physical stress overlays, then battle them live in Box3D</span>
+        <span class="k-sub">Assemble mechanisms into bounded compiled units, inspect physical stress &amp; extents, then fight live in Box3D</span>
     </header>
 
     <div class="k-toolbar">
         <button id="mode-bay" class="small active">Assembly Bay</button>
-        <button id="mode-battle" class="small">Battle Arena</button>
+        <button id="mode-battle" class="small primary">Battle Arena</button>
         <span class="k-sep"></span>
         <span class="dim">Opponent</span>
         <select id="enemy-select">
@@ -26,6 +26,7 @@
             <option value="biped_titan">Colossus Biped Titan</option>
         </select>
         <button id="btn-reset-arena" class="small">Reset Battle</button>
+        <label class="k-field"><input type="checkbox" id="chk-bench"> Bench Test</label>
         <label class="k-field"><input type="checkbox" id="chk-live-stress"> Live Stress [V]</label>
         <span class="k-spacer"></span>
         <span id="stat-integrity" class="dim">Integrity 100%</span>
@@ -45,33 +46,14 @@
             </div>
 
             <div class="f-card">
-                <h3>Assemble &amp; Modify</h3>
-                <div class="f-controls-row">
-                    <select id="mount-slot">
-                        <option value="top">Mount: Top Deck</option>
-                        <option value="front">Mount: Front Prow</option>
-                        <option value="rear">Mount: Rear Stern</option>
-                        <option value="side" selected>Mount: Side (Mirror)</option>
-                        <option value="under">Mount: Undercarriage</option>
-                    </select>
-                </div>
+                <h3>Attach at Socket <span id="sel-socket-badge" class="ptype">+Y</span></h3>
                 <label class="k-field"><input type="checkbox" id="chk-mirror" checked> Mirror X Symmetry</label>
                 <div class="f-controls-row">
-                    <select id="alloy-select">
-                        <option value="aluminum">Aluminum 7075 (Light)</option>
-                        <option value="steel">Rolled Steel (Cheap)</option>
-                        <option value="titanium" selected>Titanium Ti-6Al-4V</option>
-                        <option value="tungsten">Tungsten (Heavy/Armored)</option>
-                        <option value="spring_steel">Spring Steel</option>
-                    </select>
-                    <button id="btn-apply-alloy" class="small">Apply</button>
-                </div>
-                <div class="f-controls-row">
-                    <button id="btn-add-plate" class="small" style="flex:1">+ Armor Beam</button>
-                    <button id="btn-attach-unit" class="small" style="flex:1">+ Embed Unit</button>
-                </div>
-                <div class="f-controls-row">
                     <select id="embed-select"></select>
+                </div>
+                <div class="f-controls-row">
+                    <button id="btn-attach-unit" class="small primary" style="flex:1">+ Snap Unit</button>
+                    <button id="btn-add-plate" class="small" style="flex:1">+ Armor Plate</button>
                 </div>
                 <div class="f-controls-row">
                     <button id="btn-undo" class="small" style="flex:1">Undo</button>
@@ -80,12 +62,31 @@
             </div>
 
             <div class="f-card">
-                <h3>Compile Into Reusable Unit</h3>
+                <h3>Selected Part <span id="sel-part-name" class="dim">hull</span></h3>
                 <div class="f-controls-row">
-                    <input type="text" id="custom-unit-name" placeholder="My Custom Rig">
+                    <select id="alloy-select">
+                        <option value="aluminum">Aluminum 7075 (Light)</option>
+                        <option value="steel">Rolled Steel (Cheap)</option>
+                        <option value="titanium" selected>Titanium Ti-6Al-4V</option>
+                        <option value="tungsten">Tungsten (Heavy/Armored)</option>
+                        <option value="spring_steel">Spring Steel</option>
+                    </select>
+                    <button id="btn-apply-alloy" class="small">Set Alloy</button>
+                </div>
+                <div class="f-nudge">
+                    <button id="nudge-xm">-X</button><button id="nudge-xp">+X</button>
+                    <button id="nudge-ym">-Y</button><button id="nudge-yp">+Y</button>
+                    <button id="nudge-zm">-Z</button><button id="nudge-zp">+Z</button>
+                </div>
+                <button id="btn-delete-part" class="small">Remove Selected</button>
+            </div>
+
+            <div class="f-card">
+                <h3>Compile Reusable Unit</h3>
+                <div class="f-controls-row">
+                    <input type="text" id="custom-unit-name" placeholder="My Custom Unit">
                     <button id="btn-save-unit" class="small primary">Compile &amp; Save</button>
                 </div>
-                <div class="dim" style="font-size:11px">Saved units appear in the catalog and can be embedded inside larger machines.</div>
             </div>
         </aside>
 
@@ -93,9 +94,8 @@
             <div class="k-viewport">
                 <canvas id="stage"></canvas>
                 <div class="f-hud" id="hud-overlay">
-                    <b>Assembly Bay</b><br>
-                    Right-drag: orbit · Middle-drag: pan · Wheel: zoom<br>
-                    Toggle <b>Battle Arena</b> to drive, aim &amp; test against live opponents.
+                    <b>Assembly Bay</b> — Left-click any part or cyan face socket to select &amp; snap.<br>
+                    Right-drag: orbit · Middle-drag: pan · Wheel: zoom · Toggle <b>Bench Test</b> or <b>Battle Arena</b>.
                 </div>
             </div>
         </main>
@@ -104,7 +104,7 @@
             <div class="f-card">
                 <h3>
                     <span>Compiled Nameplate</span>
-                    <span id="np-rating" class="f-badge rate-A">A</span>
+                    <span id="np-rating" class="f-badge rate-S">S</span>
                 </h3>
                 <div id="np-name" style="font-weight:700;font-size:14px;color:#fff">—</div>
                 <div class="f-grid2">
@@ -120,12 +120,12 @@
             <div class="f-card">
                 <h3>Physical Form Overlay</h3>
                 <div class="f-tabs" id="loadcase-tabs">
-                    <button data-case="recoil" class="active">Recoil</button>
+                    <button data-case="off" class="active">Alloy</button>
+                    <button data-case="recoil">Recoil</button>
                     <button data-case="actuate">Actuate</button>
                     <button data-case="gravity">Gravity</button>
-                    <button data-case="off">Alloy</button>
                 </div>
-                <div class="dim" style="font-size:11px">Green/amber/red shades parts &amp; force paths; floor hull shows COM vs support polygon.</div>
+                <div class="dim" style="font-size:11px">Inspect real PBR alloys or switch to Recoil / Actuate / Gravity stress heatmaps &amp; COM hull.</div>
             </div>
 
             <div class="f-card">
@@ -146,14 +146,14 @@
             </div>
 
             <div class="f-card">
-                <h3>Boundaries &amp; Engineering Hints</h3>
+                <h3>Boundaries &amp; Hints</h3>
                 <div id="np-hints" style="display:flex;flex-direction:column;gap:4px"></div>
             </div>
         </aside>
     </div>
 
     <footer class="k-statusbar">
-        <span id="status">Bay ready — compile, inspect stress boundaries, then launch Battle Arena</span>
+        <span id="status">Bay ready — click parts/sockets to customize, or launch Battle Arena</span>
         <span class="k-spacer"></span>
         <span>enemy <b id="stat-enemy">—</b></span>
         <span>shells <b id="stat-shells">0</b></span>

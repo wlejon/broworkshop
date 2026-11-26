@@ -1,9 +1,12 @@
-// demos/foundry/main.js — Wires the Foundry Assembly Bay UI, Compiled Nameplate
-// inspector, Joint Extents Scrubber, and Live Battle Arena.
+// demos/foundry/main.js — Wires the sunlit Foundry Assembly Bay, 3D part/socket
+// picking, Nameplate Inspector, and full-viewport HDR Battle Arena.
 
 import { boot } from "/lib/kit/app.js";
-import { sceneViewport, orbitRotation, Camera } from "/lib/kit/viewport3d.js";
+import { sceneViewport, orbitRotation, localPoint, Camera } from "/lib/kit/viewport3d.js";
+import { pickRay } from "/lib/kit/dynamics3d.js";
+import { skyEnvironment, sunDirection } from "/lib/kit/sky.js";
 import { fixedStep, fpsMeter } from "/lib/kit/ui.js";
+import { compileMachine } from "/lib/machine/compiler.js";
 import { createFoundryBay } from "/app/bay.js";
 import { createArena } from "/app/arena.js";
 
@@ -11,23 +14,24 @@ boot();
 
 const $ = (id) => document.getElementById(id);
 const vp = sceneViewport('#stage', {
-    orbit: { target: [0, 1.5, 0], dist: 11, fov: 48, near: 0.3, far: 1200, rot: orbitRotation(0.65, -0.32) },
-    controls: { minDist: 2.5, maxDist: 160 },
+    orbit: { target: [0, 1.5, 0], dist: 9.5, fov: 46, near: 0.3, far: 1200, rot: orbitRotation(0.65, -0.32) },
+    controls: { minDist: 2.0, maxDist: 160 },
 });
 
 const scene = vp.scene;
-scene.setAmbient([0.14, 0.16, 0.20]);
-const sun = scene.createLight({ type: 'directional', direction: [-0.45, -1.0, -0.35], color: [1.0, 0.96, 0.90], intensity: 3.1 });
+skyEnvironment(scene, { hdri: 'kloofendal_43d_clear_puresky', intensity: 1.05, fallbackAmbient: [0.22, 0.25, 0.30] });
+scene.setSSAO({ enabled: true, radius: 0.65, intensity: 0.85, bias: 0.02 });
+const sun = scene.createLight({ type: 'directional', direction: sunDirection(42, 130), color: [1.0, 0.96, 0.90], intensity: 2.8 });
 sun.castsShadow = true;
-scene.createLight({ type: 'directional', direction: [0.6, -0.35, 0.55], color: [0.48, 0.65, 0.95], intensity: 0.9 });
+scene.createLight({ type: 'directional', direction: [-0.6, -0.3, -0.5], color: [0.55, 0.72, 0.98], intensity: 0.75 });
 
 const bay = createFoundryBay(scene, vp);
 const arena = createArena(scene);
 
-let mode = 'bay'; // 'bay' | 'battle'
+let mode = 'bay';
 let activeTier = 3;
-let followCam = false;
-let turretYaw = 0, turretPitch = 0.18;
+let followCam = true;
+let turretYaw = 0, turretPitch = 0.16;
 let spadeLatch = false, fireQueued = false, clutchQueued = false;
 const keys = new Set();
 
@@ -65,6 +69,13 @@ function refreshCatalogUI() {
     $('catalog-desc').textContent = cur ? cur.description : '';
 }
 
+function refreshSelectionUI() {
+    const cn = bay.selectedCompiledNode();
+    $('sel-part-name').textContent = cn ? `${cn.rawId} (${cn.material})` : '—';
+    $('sel-socket-badge').textContent = bay.state.selectedSocket || '+Y';
+    if (cn && cn.material) $('alloy-select').value = cn.material;
+}
+
 function refreshInspector() {
     const c = bay.state.compiled;
     if (!c) return;
@@ -80,17 +91,17 @@ function refreshInspector() {
     $('np-tip').textContent = `${np.tipMargin >= 0 ? '+' : ''}${np.tipMargin.toFixed(2)} m`;
     $('np-util').textContent = `${(np.peakUtil * 100).toFixed(0)}%`;
 
-    // Ports
+    refreshSelectionUI();
+
     const pDiv = $('np-ports');
     pDiv.innerHTML = '';
-    for (const p of c.ports.slice(0, 8)) {
+    for (const p of c.ports.slice(0, 7)) {
         const row = document.createElement('div');
         row.className = 'f-port';
         row.innerHTML = `<span>${p.id}</span><span class="ptype">${p.type}</span>`;
         pDiv.appendChild(row);
     }
 
-    // Hints
     const hDiv = $('np-hints');
     hDiv.innerHTML = '';
     for (const h of c.hints) {
@@ -100,7 +111,6 @@ function refreshInspector() {
         hDiv.appendChild(el);
     }
 
-    // Joint extents dropdown
     const jSel = $('sweep-joint');
     jSel.innerHTML = '';
     if (!c.joints.length) {
@@ -144,49 +154,44 @@ function syncSweepReadout() {
 
 function launchBattle() {
     mode = 'battle';
+    document.body.classList.add('battle-mode');
     bay.setVisible(false);
     $('mode-bay').classList.remove('active');
     $('mode-battle').classList.add('active');
     const enemyBp = bay.resolver($('enemy-select').value);
-    const enemyCompiled = bay.loadPreset ? (() => {
-        const tmp = bay.state.compiled;
-        // Compile enemy without disturbing bay's active blueprint.
-        return import('/lib/machine/compiler.js').then((m) => m.compileMachine(enemyBp, bay.resolver));
-    })() : null;
-
-    Promise.resolve(enemyCompiled).then((ec) => {
-        arena.spawnMatch(bay.state.compiled, ec);
-        followCam = false;
-        vp.reframe([0, 4, 18], 38, { yaw: 0.45, pitch: -0.30 });
-        $('hud-overlay').innerHTML =
-            '<b>Battle Arena (Live Box3D + Destructible Bunkers)</b><br>' +
-            'W/S: drive/walk · A/D: turn · Q/E: turret · Z/C: elevate<br>' +
-            'Space / Click: fire / ram · R: spades / flywheel clutch · Tab: follow cam · V: stress';
-        $('status').textContent = `Battle live: ${bay.state.compiled.name} vs ${ec.name}`;
-    });
+    const enemyCompiled = compileMachine(enemyBp, bay.resolver);
+    arena.spawnMatch(bay.state.compiled, enemyCompiled);
+    followCam = true;
+    spadeLatch = false;
+    vp.reframe([0, 2.5, 22], 24, { yaw: 0.35, pitch: -0.26 });
+    $('hud-overlay').innerHTML =
+        `<b>Battle Arena: ${bay.state.compiled.name} vs ${enemyCompiled.name}</b><br>` +
+        'W/S: drive/walk · A/D: turn · Q/E: turret · Z/C: elevate · Space / Click: fire / ram<br>' +
+        'R: spades / flywheel clutch · Tab: follow/free cam · V: live stress';
+    $('status').textContent = `Battle live: ${bay.state.compiled.name} vs ${enemyCompiled.name}`;
 }
 
 function enterBay() {
     mode = 'bay';
+    document.body.classList.remove('battle-mode');
     arena.cleanup();
     bay.setVisible(true);
     $('mode-battle').classList.remove('active');
     $('mode-bay').classList.add('active');
     const ext = bay.state.compiled.bounds.max, min = bay.state.compiled.bounds.min;
-    const span = Math.max(4, Math.hypot(ext[0] - min[0], ext[1] - min[1], ext[2] - min[2]));
-    vp.reframe([0, (ext[1] - min[1]) * 0.45, 0], Math.max(8, span * 1.45), { yaw: 0.65, pitch: -0.32 });
+    const span = Math.max(3.5, Math.hypot(ext[0] - min[0], ext[1] - min[1], ext[2] - min[2]));
+    vp.reframe([0, (ext[1] - min[1]) * 0.46, 0], Math.max(4.5, span * 1.25), { yaw: 0.65, pitch: -0.32 });
     $('hud-overlay').innerHTML =
-        '<b>Assembly Bay</b><br>' +
-        'Right-drag: orbit · Middle-drag: pan · Wheel: zoom<br>' +
-        'Inspect solved stress &amp; extents, modify parts/alloys, then enter Battle Arena.';
+        '<b>Assembly Bay</b> — Left-click any part or cyan face socket to select &amp; snap.<br>' +
+        'Right-drag: orbit · Middle-drag: pan · Wheel: zoom · Toggle <b>Bench Test</b> or <b>Battle Arena</b>.';
     $('status').textContent = 'Assembly Bay ready';
 }
 
-// Toolbar & Catalog wiring
 $('mode-bay').addEventListener('click', enterBay);
 $('mode-battle').addEventListener('click', launchBattle);
-$('btn-reset-arena').addEventListener('click', () => { if (mode === 'battle') launchBattle(); else launchBattle(); });
+$('btn-reset-arena').addEventListener('click', launchBattle);
 $('chk-live-stress').addEventListener('change', (e) => arena.setStressOverlay(e.target.checked));
+$('chk-bench').addEventListener('change', (e) => { bay.state.benchTest = e.target.checked; });
 
 for (const btn of $('tier-tabs').querySelectorAll('button')) {
     btn.addEventListener('click', () => {
@@ -206,13 +211,21 @@ for (const btn of $('loadcase-tabs').querySelectorAll('button')) {
     });
 }
 
-$('mount-slot').addEventListener('change', (e) => { bay.state.mountSlot = e.target.value; });
 $('chk-mirror').addEventListener('change', (e) => { bay.state.mirrorX = e.target.checked; });
-$('btn-apply-alloy').addEventListener('click', () => { bay.applyAlloyToFrame($('alloy-select').value); refreshInspector(); });
+$('btn-apply-alloy').addEventListener('click', () => { bay.setSelectedAlloy($('alloy-select').value); refreshInspector(); });
 $('btn-add-plate').addEventListener('click', () => { bay.addArmorPlate(); refreshInspector(); });
 $('btn-attach-unit').addEventListener('click', () => { bay.attachUnit($('embed-select').value); refreshInspector(); });
+$('btn-delete-part').addEventListener('click', () => { bay.deleteSelected(); refreshInspector(); });
 $('btn-undo').addEventListener('click', () => { bay.undo(); refreshInspector(); });
 $('btn-revert').addEventListener('click', () => { bay.loadPreset(bay.state.presetId); refreshInspector(); });
+
+$('nudge-xm').addEventListener('click', () => { bay.nudgeSelected(-0.25, 0, 0); refreshInspector(); });
+$('nudge-xp').addEventListener('click', () => { bay.nudgeSelected(0.25, 0, 0); refreshInspector(); });
+$('nudge-ym').addEventListener('click', () => { bay.nudgeSelected(0, -0.25, 0); refreshInspector(); });
+$('nudge-yp').addEventListener('click', () => { bay.nudgeSelected(0, 0.25, 0); refreshInspector(); });
+$('nudge-zm').addEventListener('click', () => { bay.nudgeSelected(0, 0, -0.25); refreshInspector(); });
+$('nudge-zp').addEventListener('click', () => { bay.nudgeSelected(0, 0, 0.25); refreshInspector(); });
+
 $('btn-save-unit').addEventListener('click', () => {
     const saved = bay.saveAsCustomUnit($('custom-unit-name').value);
     $('custom-unit-name').value = '';
@@ -236,7 +249,14 @@ $('sweep-slider').addEventListener('input', (e) => {
     if (mode === 'bay') bay.render();
 });
 
-// Keyboard & click controls for Battle Arena
+vp.canvas.addEventListener('mousedown', (e) => {
+    if (e.button !== 0) return;
+    if (mode === 'battle') { fireQueued = true; return; }
+    const pt = localPoint(vp.canvas, e);
+    const ray = pickRay(vp, pt.x, pt.y);
+    if (bay.handleClick(ray)) refreshSelectionUI();
+});
+
 window.addEventListener('keydown', (e) => {
     const k = e.key.toLowerCase();
     keys.add(k);
@@ -251,15 +271,16 @@ window.addEventListener('keydown', (e) => {
     }
 });
 window.addEventListener('keyup', (e) => keys.delete(e.key.toLowerCase()));
-vp.canvas.addEventListener('mousedown', (e) => { if (mode === 'battle' && e.button === 0) fireQueued = true; });
 
 const fps = fpsMeter();
 const stepFixed = fixedStep(1 / 60, 4);
 let frameCounter = 0;
 
-vp.onFrame((dt) => {
+vp.onFrame((dt, t) => {
     fps.tick();
-    if (mode === 'battle' && arena.active) {
+    if (mode === 'bay') {
+        bay.tick(t);
+    } else if (mode === 'battle' && arena.active) {
         const throttle = (keys.has('w') ? 1 : 0) - (keys.has('s') ? 1 : 0);
         const steer = (keys.has('d') ? 1 : 0) - (keys.has('a') ? 1 : 0);
         if (keys.has('q')) turretYaw = Math.min(3.0, turretYaw + 1.6 * dt);
