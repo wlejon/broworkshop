@@ -84,7 +84,7 @@ export function renderSummary(el, r) {
     const kv = (k, v, cls) => h('div' + (cls ? '.' + cls : ''), null, h('span', null, k), h('b', null, v));
     const ground = h('div.k-kv');
     if (mv.stands) {
-        ground.append(kv('walk / run', kmh(mv.walk) + ' / ' + kmh(mv.sprint)), kv('run held back by', mv.limit),
+        ground.append(kv('walk / run', kmh(mv.walk) + ' / ' + kmh(mv.sprint)), kv('run limit', mv.limit),
             kv('jump', mv.jump.toFixed(0) + ' m'), kv('turns', mv.turn.toFixed(0) + ' °/s'),
             kv('under each foot', mv.footPressure.toFixed(0) + ' kPa standing, ' + mv.stepPressure.toFixed(0) + ' striding'),
             kv('tips past', b.tip.toFixed(0) + '° (' + b.least.toFixed(1) + ' m to the edge of its feet)'));
@@ -94,7 +94,7 @@ export function renderSummary(el, r) {
     if (fl.tw >= 1) {
         air.append(kv('hover', fl.hover.ok ? Math.round(fl.hover.throttle * 100) + '% throttle, for ' + secs(fl.endurance.hover) : fl.hover.lifts ? 'tumbles' : 'cannot hold still', fl.hover.ok ? '' : 'err'),
             kv('full burn', 'climbs at ' + (fl.climb / 9.81).toFixed(2) + ' g, for ' + secs(fl.endurance.burn)),
-            kv('top speed', kmh(Math.min(fl.topSpeed, 340))),
+            kv('top speed', kmh(fl.topSpeed) + (fl.topSpeed >= 290 ? ', held by the sound barrier' : '')),
             kv('pitch / yaw / roll', fl.authority.map((v) => v.toFixed(0)).join(' / ') + ' °/s²'));
     }
     el.append(rows, h('div.k-cap', null, 'on the ground'), ground, h('div.k-cap', null, 'in the air'), air,

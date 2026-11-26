@@ -25,7 +25,7 @@ import { field, slider, number, select, button, bar, tonnes, renderHeadline, ren
 
 const MODES = { frame: 'Frame', bays: 'Bays', lines: 'Lines', armor: 'Armour', test: 'Test stand' };
 const LAYER_DEFAULTS = {
-    frame: { armor: false, inner: true, hull: true },
+    frame: { armor: false, inner: false, hull: true },
     bays:  { armor: false, inner: true, hull: true },
     lines: { armor: false, inner: false, hull: true },
     armor: { armor: true, inner: false, hull: false },
@@ -146,7 +146,7 @@ function select_(segId, modId, face) {
 let ghost = null;      // { seg, cell, size, ok } under the cursor while a module is armed
 function redrawOverlays() {
     view.clearOverlays();
-    view.focus(mode === 'test' ? null : sel.seg);
+    view.focus(mode === 'test' ? null : sel.seg, mode === 'frame');
     if (mode === 'bays') {
         if (sel.seg) view.showBay(sel.seg);
         const m = sel.mod && design.modules.find((x) => x.id === sel.mod);

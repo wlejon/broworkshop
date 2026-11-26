@@ -93,12 +93,14 @@ export function createMechView(scene) {
     }
 
     /** Dims everything but the instances of `segId` (null: nothing dimmed). */
-    function focus(segId) {
+    function focus(segId, solid) {
         for (const id in nodes) {
             const on = !segId || nodes[id].inst.seg.id === segId;
             const c = on ? [1, 1, 1] : [0.32, 0.34, 0.38];
             for (const layer of ['frame', 'armor', 'inner', 'outer']) if (nodes[id][layer]) nodes[id][layer].color = c;
-            if (nodes[id].hull) nodes[id].hull.color = on && segId ? [0.30, 0.50, 0.80, 0.10] : [0.25, 0.35, 0.50, 0.05];
+            // `solid`: the hulls are what is being worked on (the frame mode), so they read as bodies.
+            if (nodes[id].hull) nodes[id].hull.color = solid ? (on && segId ? [0.42, 0.62, 0.92, 0.50] : [0.34, 0.42, 0.54, 0.30])
+                : on && segId ? [0.30, 0.50, 0.80, 0.10] : [0.25, 0.35, 0.50, 0.05];
         }
     }
 
