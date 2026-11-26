@@ -566,14 +566,20 @@ fn rows_c(a: i32, b: i32, n: vec3<f32>, ra: vec3<f32>, rb: vec3<f32>, c0: f32, X
 // harder than the weaker of its two bodies stands, over the quarter of the side it turns to the push (a
 // face's contact is four points): past that they pass into each other, and one passed half through is gone.
 const DENT: f32 = 0.05;
-fn crush_cap(i: i32, n: vec3<f32>, X: rw_store<f32, 1>, B: read_store<f32, 1>, ST: rw_store<f32, 1>) -> f32 {
+fn crush_cap(i: i32, n: vec3<f32>, X: rw_store<f32, 1>, B: read_store<f32, 1>, ST: rw_store<f32, 1>, D: read_store<f32, 1>) -> f32 {
     if (i < 0) { return 1.0e30; }
     let s = ST[2 * i];
     if (s <= 0.0) { return 1.0e30; }
     let o = 8 * i;
     let nb = qinv_rot(vec4<f32>(X[o + 4], X[o + 5], X[o + 6], X[o + 7]), n);
+    // (A block stands what one of its pieces would: a point presses on a piece of it, not on all its side.)
+    var hs = vec3<f32>(B[o], B[o + 1], B[o + 2]);
+    if (ST[2 * i + 1] > 0.0) {
+        let enc = (D[4 * i + 3] + 0.5) as i32;
+        hs = hs / vec3<f32>(f32(max(enc % 32, 1)), f32(max((enc / 32) % 32, 1)), f32(max((enc / 1024) % 32, 1)));
+    }
     // (Twice over: it is gone passed half through, and crushing it takes what crushing all of it would.)
-    return 2.0 * s * (B[o + 1] * B[o + 2] * abs(nb.x) + B[o] * B[o + 2] * abs(nb.y) + B[o] * B[o + 1] * abs(nb.z));
+    return 2.0 * s * (hs.y * hs.z * abs(nb.x) + hs.x * hs.z * abs(nb.y) + hs.x * hs.y * abs(nb.z));
 }
 // (How far it reaches along n from its middle.)
 fn reach_along(i: i32, n: vec3<f32>, X: rw_store<f32, 1>, B: read_store<f32, 1>) -> f32 {
@@ -1037,12 +1043,26 @@ fn k_wgroups(g: grid<1>, WA: read_store<i32, 1>, G: rw_store<i32, 1>, at: i32, n
 @kernel @grid(1)
 fn k_split_pieces(g: grid<1>, X: rw_store<f32, 1>, X0: rw_store<f32, 1>, R: read_store<f32, 1>, V: rw_store<f32, 1>, B: rw_store<f32, 1>,
                   D: read_store<f32, 1>, PAR: rw_store<i32, 1>, SPL: read_store<i32, 1>, SUP: rw_store<i32, 1>, REL: rw_store<i32, 1>, SL: rw_store<i32, 1>,
-                  XP: rw_store<f32, 1>, ST: rw_store<f32, 1>) {
+                  XP: rw_store<f32, 1>, ST: rw_store<f32, 1>, DRV: read_store<i32, 1>, tick: i32) {
     let i = g.x();
     let p = PAR[i];
     if (p < 0) { return; }
     if (SPL[p] != 1) { return; }
     ST[2 * i] = ST[2 * p + 1]; ST[2 * i + 1] = 0.0;
+    // (Its block gave way pressed as hard as a piece stands, by a body that has passed into it since: a piece
+    // whose middle that body has reached is crushed as it comes into the world. Nothing presses such a piece
+    // out again: a contact that begins deep is not made to part what it finds overlapping.)
+    let dv = DRV[2 * p] - 1;
+    var born_crushed = false;
+    if (dv >= 0 && tick - DRV[2 * p + 1] <= 8) {
+        let bo = 8 * p;
+        let offp = vec3<f32>(R[8 * i] - R[bo], R[8 * i + 1] - R[bo + 1], R[8 * i + 2] - R[bo + 2]);
+        let rib = vec4<f32>(-R[bo + 4], -R[bo + 5], -R[bo + 6], R[bo + 7]);
+        let at = vec3<f32>(X[bo], X[bo + 1], X[bo + 2]) + qrot(qmul(vec4<f32>(X[bo + 4], X[bo + 5], X[bo + 6], X[bo + 7]), rib), offp);
+        let vo = 8 * dv;
+        let l = qinv_rot(vec4<f32>(X[vo + 4], X[vo + 5], X[vo + 6], X[vo + 7]), at - vec3<f32>(X[vo], X[vo + 1], X[vo + 2]));
+        born_crushed = abs(l.x) < B[vo] && abs(l.y) < B[vo + 1] && abs(l.z) < B[vo + 2];
+    }
     let o = 8 * i;
     let po = 8 * p;
     let off = vec3<f32>(R[o] - R[po], R[o + 1] - R[po + 1], R[o + 2] - R[po + 2]);
@@ -1080,6 +1100,8 @@ fn k_split_pieces(g: grid<1>, X: rw_store<f32, 1>, X0: rw_store<f32, 1>, R: read
     REL[i] = REL[p];
     SL[i] = 0;
     PAR[i] = -1;
+    // (Let go as it goes: what is taken out of the world is what has mass.)
+    if (born_crushed) { ST[2 * i + 1] = -1.0; B[o + 3] = D[4 * i + 3]; B[o + 7] = 0.0; }
 }
 @kernel @grid(1)
 fn k_split_welds(g: grid<1>, JI: rw_store<i32, 1>, JF: rw_store<f32, 1>, JA: read_store<f32, 1>, ORG: read_store<i32, 1>, SPL: read_store<i32, 1>,
@@ -1424,7 +1446,7 @@ fn k_primal_part(g: grid<1>, X: rw_store<f32, 1>, X0: read_store<f32, 1>, B: rea
                  CI: read_store<i32, 1>, CF: read_store<f32, 1>, BC: read_store<i32, 1>, BR: read_store<i32, 1>, COL: read_store<i32, 1>,
                  JI: read_store<i32, 1>, JF: rw_store<f32, 1>, JC: read_store<i32, 1>, JR: read_store<i32, 1>,
                  RB: read_store<i32, 1>, M: read_store<f32, 1>, S: write_store<f32, 1>, alpha: f32, colour: i32,
-                 LN: read_store<i32, 1>, rslot: i32, rcap: i32, ST: rw_store<f32, 1>) {
+                 LN: read_store<i32, 1>, rslot: i32, rcap: i32, ST: rw_store<f32, 1>, D: read_store<f32, 1>) {
     if (g.x() >= min(LN[rslot], rcap)) { return; }
     let i = RB[2 * g.x()];
     let part = RB[2 * g.x() + 1];
@@ -1474,7 +1496,7 @@ fn k_primal_part(g: grid<1>, X: rw_store<f32, 1>, X0: read_store<f32, 1>, B: rea
             // (Nothing pushes harder than the weaker of the two can be pressed before it crushes. And a held
             // piece pushes back no harder than it can stand: past that it is let go, not a wall, and what
             // struck it has its motion still, for the piece once it is free.)
-            var nlo = -min(crush_cap(i, n, X, B, ST), crush_cap(ot, n, X, B, ST));
+            var nlo = -min(crush_cap(i, n, X, B, ST, D), crush_cap(ot, n, X, B, ST, D));
             let soft = nlo > -1.0e29;
             if (ot >= 0) { if (B[8 * ot + 3] <= 0.0 && B[8 * ot + 7] > 0.0) { nlo = max(nlo, -STRIKE); } }
             // (An overlap is taken out by the stabilizing pass alone, and one crushed into, deeper than DENT,
@@ -1624,7 +1646,8 @@ fn k_primal(g: grid<1>, X: rw_store<f32, 1>, X0: read_store<f32, 1>, Y: read_sto
 @kernel @grid(1)
 fn k_dual(g: grid<1>, X: rw_store<f32, 1>, X0: read_store<f32, 1>, CI: read_store<i32, 1>, CF: rw_store<f32, 1>,
           NC: read_store<i32, 1>, REL: rw_store<i32, 1>, B: read_store<f32, 1>, V: read_store<f32, 1>, SUP: read_store<i32, 1>, GR: rw_store<i32, 1>,
-          PAR: read_store<i32, 1>, SPL: rw_store<i32, 1>, alpha: f32, tick: i32, ST: rw_store<f32, 1>) {
+          PAR: read_store<i32, 1>, SPL: rw_store<i32, 1>, alpha: f32, tick: i32, ST: rw_store<f32, 1>, D: read_store<f32, 1>,
+          DRV: rw_store<i32, 1>) {
     let k = g.x();
     if (k >= NC[0]) { return; }
     let o = 20 * k;
@@ -1643,8 +1666,8 @@ fn k_dual(g: grid<1>, X: rw_store<f32, 1>, X0: read_store<f32, 1>, CI: read_stor
     // (Pressed past what the weaker of the two stands, it crushes: the force stops there, they pass into
     // each other, and passed half through it is gone.)
     let n = vec3<f32>(CF[o], CF[o + 1], CF[o + 2]);
-    let capa = crush_cap(a, n, X, B, ST);
-    let capb = crush_cap(b, n, X, B, ST);
+    let capa = crush_cap(a, n, X, B, ST, D);
+    let capb = crush_cap(b, n, X, B, ST, D);
     let cap = min(capa, capb);
     if (cap < 1.0e29) {
         var w = a;
@@ -1653,6 +1676,13 @@ fn k_dual(g: grid<1>, X: rw_store<f32, 1>, X0: read_store<f32, 1>, CI: read_stor
         // block is no harder than its pieces, but it is they that go: it breaks into them first.)
         let through = -(c.x + min(CF[o + 9], 0.0) * alpha) > reach_along(w, n, X, B);
         if (through && PAR[w] != -2 && ln <= -cap && B[8 * w + 3] > 0.0) { ST[2 * w + 1] = -1.0; }
+        // (A block pressed as hard as its pieces stand breaks into them, however little that is: what would
+        // crush a piece of it is not let through it whole.)
+        // (DRV: what pressed it that hard, and when; its pieces come into the world with that already in them.)
+        if (ln <= -cap && PAR[w] == -2) {
+            SPL[w] = 1;
+            if (b >= 0) { DRV[2 * w] = a + b - w + 1; DRV[2 * w + 1] = tick; }
+        }
         ln = max(ln, -cap);
     }
     if (held && ln <= -min(STRIKE, cap)) {
