@@ -198,7 +198,7 @@
 .f-op-j .b i.warn { background: var(--f-warn); }
 .f-op-j .b i.bad { background: var(--f-bad); }
 
-.f-deck { position: absolute; left: 12px; right: 12px; bottom: 12px; display: flex; justify-content: center; pointer-events: none; }
+.f-deck { position: absolute; left: 12px; right: 12px; bottom: 12px; display: flex; justify-content: flex-start; pointer-events: none; }
 .f-deck > * { pointer-events: auto; }
 .f-dk-empty { background: #0d1014e6; border: 1px solid var(--f-line); border-radius: 9px; padding: 10px 14px; color: var(--f-dim); max-width: 440px; }
 .f-dk-row { display: flex; gap: 10px; align-items: flex-start; }
