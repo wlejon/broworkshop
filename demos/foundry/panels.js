@@ -1,347 +1,370 @@
-// demos/foundry/panels.js — Engineering Spec Sheet, Live Dyno Curve Plot,
-// Parameter Inspector, Immediate Out-of-Spec Ticker, and Repair Autopsy.
+// demos/foundry/panels.js — the foundry's side panels: units, the library,
+// the flow strip, goal, contract, output curve, problems and inspector.
 
 import { h, clear } from "/lib/kit/dom.js";
-import { fitCanvas } from "/lib/kit/gauges.js";
-import { MATERIALS, MATERIAL_IDS } from "/lib/foundry/materials.js";
-import { PRIMITIVES } from "/lib/foundry/primitives.js";
+import { PARTS, PART_CATEGORIES } from "/lib/foundry/parts.js";
+import { MATERIALS } from "/lib/foundry/materials.js";
 
-const GRADE_CLS = { SAFE: 'ok', NOMINAL: 'ok', WEAR_RISK: 'warn', UNPROTECTED: 'err', INVALID: 'err' };
+const RPM = (2 * Math.PI) / 60;
 
-export function fmtSize(sz) {
-    const m = Math.max(...sz);
-    if (m < 1.0) return sz.map((v) => (v * 100).toFixed(0)).join('×') + ' cm';
-    return sz.map((v) => v.toFixed(2)).join('×') + ' m';
+// --- units -------------------------------------------------------------------
+
+function si(v, unit, digits = 3) {
+    const a = Math.abs(v);
+    if (!isFinite(v)) return '∞';
+    const pre = a >= 1e9 ? ['G', 1e9] : a >= 1e6 ? ['M', 1e6] : a >= 1e3 ? ['k', 1e3] : ['', 1];
+    const x = v / pre[1];
+    const d = Math.abs(x) >= 100 ? 0 : Math.abs(x) >= 10 ? 1 : 2;
+    return `${x.toFixed(Math.min(d, digits))} ${pre[0]}${unit}`;
 }
 
-export function fmtTorque(nm) {
-    return nm >= 1000 ? (nm / 1000).toFixed(1) + ' kN·m' : nm.toFixed(0) + ' N·m';
+export function fmtEffort(domain, v) {
+    if (domain === 'rot') return si(v, 'N·m');
+    if (domain === 'lin') return si(v, 'N');
+    if (domain === 'hyd') return `${(v / 1e5).toFixed(0)} bar`;
+    return si(v, 'W');
 }
 
-/** Render the Certified Spec Sheet card (including live Motion Interaction Audit findings). */
-export function renderSpecSheet(el, compiled, onSelectTopNode = null) {
+export function fmtFlow(domain, v) {
+    if (domain === 'rot') { const r = v / RPM; return r >= 100 ? `${r.toFixed(0)} rpm` : `${r.toFixed(r >= 10 ? 1 : 2)} rpm`; }
+    if (domain === 'lin') return v >= 1 ? `${v.toFixed(2)} m/s` : `${(v * 1000).toFixed(v >= 0.1 ? 0 : 1)} mm/s`;
+    if (domain === 'hyd') return `${(v * 60000).toFixed(1)} L/min`;
+    return si(v, 'A');
+}
+
+export function fmtLen(m) {
+    return m >= 1 ? `${m.toFixed(2)} m` : m >= 0.1 ? `${(m * 100).toFixed(1)} cm` : `${(m * 1000).toFixed(0)} mm`;
+}
+
+export function fmtMass(kg) { return kg >= 1000 ? `${(kg / 1000).toFixed(2)} t` : kg >= 10 ? `${kg.toFixed(1)} kg` : `${kg.toFixed(2)} kg`; }
+export function fmtBox(sz) {
+    const top = Math.max(...sz);
+    const [unit, k] = top >= 1 ? ['m', 1] : top >= 0.1 ? ['cm', 100] : ['mm', 1000];
+    return sz.map((v) => (v * k).toFixed(unit === 'mm' ? 0 : unit === 'cm' ? 1 : 2)).join(' × ') + ' ' + unit;
+}
+
+const DOMAIN_NAME = { rot: 'rotary', lin: 'linear', hyd: 'hydraulic', elec: 'electric' };
+export function paintCss(p) { return p ? `rgb(${p.map((v) => Math.round(v * 255)).join(',')})` : '#777'; }
+
+export function statusOf(c) {
+    if (!c.ok) return 'err';
+    if (!c.goal) return 'pass';
+    return c.goal.pass ? 'pass' : 'fail';
+}
+
+// --- library -----------------------------------------------------------------
+
+export function renderLibrary(el, lib, cache, currentId, onOpen, onUse) {
     clear(el);
-    if (!compiled) return;
-    const sp = compiled.spec;
-    const badge = h('span.k-badge.' + (GRADE_CLS[sp.grade] || ''), null, sp.grade.replace('_', ' '));
-    const head = h('div.f-spec-head', null,
-        h('div', null, h('b', null, compiled.name), h('span.dim', null, ` · ${compiled.scale}`)),
-        badge);
-
-    const kv = h('div.k-kv', null,
-        row('Bounding box', fmtSize(sp.boundingBox)),
-        row('Mass / Cost', `${sp.massKg.toFixed(1)} kg · $${sp.cost.toFixed(0)}`),
-        row('Parts', `${sp.partCount} (${sp.subAssemblyCount} modules)`),
-        row('Compile time', `${sp.compileMs.toFixed(2)} ms`),
-    );
-    if (compiled.primaryChain) {
-        kv.append(
-            row('Ratio / Eff', `${sp.primaryRatio.toFixed(2)}:1 · ${(sp.primaryEfficiency * 100).toFixed(0)}%`),
-            row('No-load RPM', `${sp.primaryNoLoadRpm.toFixed(0)} rpm`),
-            row('Torque (cont/peak)', `${fmtTorque(sp.primaryContTorqueNm)} / ${fmtTorque(sp.primaryPeakTorqueNm)}`),
-            row('Rated power', sp.primaryPowerW >= 1000 ? `${(sp.primaryPowerW / 1000).toFixed(1)} kW` : `${sp.primaryPowerW.toFixed(0)} W`),
-        );
+    const byLevel = new Map();
+    for (const d of Object.values(lib)) (byLevel.get(d.level) || byLevel.set(d.level, []).get(d.level)).push(d);
+    for (const lvl of [...byLevel.keys()].sort((a, b) => a - b)) {
+        el.append(h('div', { class: 'f-lvl' }, `Level ${lvl}`));
+        for (const d of byLevel.get(lvl)) {
+            const c = cache.get(d.id);
+            const row = h('div', { class: 'f-design' + (d.id === currentId ? ' cur' : ''), 'data-id': d.id },
+                h('span', { class: 'f-swatch', style: `background:${paintCss(d.paint)}` }),
+                h('span', { class: 'name' }, d.name),
+                d.id !== currentId ? h('button', { class: 'use small', title: `Add ${d.name} to the open design` }, 'use') : null,
+                h('span', { class: 'f-dot ' + (c ? statusOf(c) : 'err') }),
+            );
+            row.addEventListener('click', (e) => {
+                if (e.target.classList.contains('use')) onUse(d.id); else onOpen(d.id);
+            });
+            el.append(row);
+        }
     }
-    if (sp.topSpeedMs > 0) kv.append(row('Drive speed', `${sp.topSpeedMs.toFixed(1)} m/s (${(sp.topSpeedMs * 3.6).toFixed(0)} km/h)`));
-    if (sp.weaponEnergyJ > 0) kv.append(row('Weapon KE', `${(sp.weaponEnergyJ / 1000).toFixed(2)} kJ`));
+}
 
-    const verdicts = h('div.f-verdicts');
-    // Live Motion Interaction Audit summary + clickable findings
-    const ma = compiled.motionAudit;
-    if (ma) {
-        if (ma.counts.errors === 0 && ma.counts.warnings === 0) {
-            verdicts.append(h('div.f-verdict.ok', null,
-                h('span.f-tag', null, 'MOTION AUDIT'), ' CLEAN — 0 swept clashes, 0 frame clips, 0 shaft obstructions'));
+export function renderPalette(el, onAdd) {
+    clear(el);
+    for (const cat of PART_CATEGORIES) {
+        const types = Object.entries(PARTS).filter(([, d]) => d.cat === cat);
+        if (!types.length) continue;
+        el.append(h('div', { class: 'cat' }, cat));
+        const row = h('div', { class: 'row' });
+        for (const [type, d] of types) {
+            const b = h('button', { class: 'small', title: d.note, 'data-part': type }, d.label);
+            b.addEventListener('click', () => onAdd(type));
+            row.append(b);
+        }
+        el.append(row);
+    }
+}
+
+// --- title, flow strip ------------------------------------------------------------
+
+export function renderTitle(el, c) {
+    clear(el);
+    el.append(
+        h('div', { class: 'lvl' }, `Level ${c.level} · ${c.partCount} parts`),
+        h('div', { class: 'nm' }, c.name),
+        h('div', { class: 'note' }, c.note),
+    );
+}
+
+/** The power path into the goal's output, upstream to downstream, each stage's limit at the output. */
+export function renderFlow(el, c, outId, opEffort) {
+    clear(el);
+    const out = c.ports.find((p) => p.id === outId);
+    if (!out) return;
+    const src = c.sources.find((s) => s.port === outId);
+    const path = c.paths.find((p) => p.to === outId);
+    const chain = src || path;
+    if (!chain) return;
+    const dom = out.domain;
+    const tr = c.traces[outId];
+    const arrow = () => h('div', { class: 'f-arrow' }, '›');
+    if (src) {
+        const root = c.children.find((ch) => ch.id === tr.root.child);
+        const rl = root.el.kind === 'contract' ? root.el.name : root.el.label;
+        const rp = root.el.ports.find((p) => p.id === tr.root.src.port);
+        const rd = rp ? rp.domain : dom;
+        el.append(h('div', { class: 'f-stage-chip src' },
+            h('div', { class: 't' }, rl),
+            h('div', { class: 's' }, root.el.summary || `${fmtEffort(rd, tr.root.src.cont)} cont · ${fmtFlow(rd, tr.root.src.noLoad)}`),
+        ));
+    } else {
+        const inp = c.ports.find((p) => p.id === path.from);
+        el.append(h('div', { class: 'f-stage-chip io' }, h('div', { class: 't' }, inp ? inp.label : path.from), h('div', { class: 's' }, 'input')));
+    }
+    for (const s of chain.stages) {
+        el.append(arrow());
+        const weak = chain.weakest && s.label === chain.weakest.label;
+        const guard = chain.guarded && s.label === chain.guarded.label;
+        const load = opEffort > 0 && isFinite(s.peak) ? Math.min(1, opEffort / s.peak) : 0;
+        const ratio = s.k !== 1 ? `×${s.k >= 10 ? s.k.toFixed(0) : s.k.toFixed(2)}` : '';
+        el.append(h('div', { class: 'f-stage-chip' + (weak ? ' weak' : '') + (guard ? ' guard' : ''), title: `${s.label}: ${s.mode} at ${fmtEffort(dom, s.peak)} at the output` },
+            h('div', { class: 't' }, shortLabel(s.label)),
+            h('div', { class: 's' }, [ratio, `${Math.round(s.eff * 100)}%`, `${s.role === 'limiter' ? 'slips' : s.role === 'fuse' ? 'breaks' : 'holds'} ${fmtEffort(dom, s.peak)}`].filter(Boolean).join(' · ')),
+            h('div', { class: 'bar' }, h('i', { style: `width:${(load * 100).toFixed(1)}%` })),
+        ));
+    }
+    el.append(arrow(), h('div', { class: 'f-stage-chip io' }, h('div', { class: 't' }, out.label), h('div', { class: 's' }, DOMAIN_NAME[dom] + ' out')));
+}
+
+function shortLabel(l) {
+    const parts = l.split(' › ');
+    return parts.length > 1 ? parts[0] : l.replace(/ \((\w+)\)$/, '');
+}
+
+// --- goal ----------------------------------------------------------------------
+
+export function renderGoal(el, c, pill) {
+    clear(el);
+    const g = c.goal;
+    pill.className = 'f-pill ' + statusOf(c);
+    pill.textContent = !c.ok ? 'Does not build' : !g ? 'No goal' : g.pass ? 'Goal met' : 'Goal not met';
+    if (!g) { el.append(h('div', { class: 'f-empty' }, 'This design has no goal.')); return; }
+    const out = c.ports.find((p) => p.id === g.out);
+    const dom = out ? out.domain : 'rot';
+    if (g.given) el.append(h('div', { class: 'f-given' }, `Given ${fmtEffort('rot', g.given.effort)} at ${fmtFlow('rot', g.given.flow)} in`));
+    for (const k of g.checks) {
+        let label = k.label, got = '', want = '', frac = 0, mark = 0;
+        if (k.kind === 'effort' || k.kind === 'flow') {
+            const f = k.kind === 'effort' ? (v) => fmtEffort(dom, v) : (v) => fmtFlow(dom, v);
+            got = f(k.got); want = f(k.want);
+            const top = Math.max(k.got, k.want) * 1.15 || 1;
+            frac = k.got / top; mark = k.want / top;
+            if (k.kind === 'effort' && c.sources.some((s) => s.port === g.out)) label = `at ${fmtFlow(dom, g.need.flow)}`;
+        } else if (k.kind === 'box') {
+            const top = Math.max(...k.want);
+            const [unit, sc] = top >= 2 ? ['m', 1] : top >= 0.1 ? ['cm', 100] : ['mm', 1000];
+            const compact = (v) => v.map((x) => Math.round(x * sc * (unit === 'm' ? 10 : 1)) / (unit === 'm' ? 10 : 1)).join('×');
+            got = compact(k.got); want = compact(k.want) + ' ' + unit;
+            label = 'box';
+            const a = k.got.slice().sort((x, y) => x - y), b = k.want.slice().sort((x, y) => x - y);
+            const worst = Math.max(...a.map((v, i) => v / b[i]));
+            frac = Math.min(1, worst / Math.max(1.15, worst * 1.05)); mark = 1 / Math.max(1.15, worst * 1.05);
+        } else if (k.kind === 'mass') {
+            got = fmtMass(k.got); want = fmtMass(k.want);
+            const top = Math.max(k.got, k.want) * 1.15; frac = k.got / top; mark = k.want / top;
         } else {
-            for (const f of ma.findings.slice(0, 6)) {
-                const cls = f.severity === 'error' ? 'err' : 'warn';
-                const item = h('div.f-verdict.' + cls, {
-                    style: onSelectTopNode && f.topNodeA ? { cursor: 'pointer' } : null,
-                    onclick: () => { if (onSelectTopNode && f.topNodeA) onSelectTopNode(f.topNodeA); },
-                }, h('span.f-tag', null, f.kind.replace('_', ' ')), ' ', f.text);
-                verdicts.append(item);
+            got = `${k.got} errors`; want = '0';
+        }
+        el.append(h('div', { class: 'f-check' + (k.pass ? '' : ' bad') },
+            h('span', { class: 'k' }, label),
+            h('span', { class: 'v' }, h('b', {}, got), `  /  ${k.kind === 'mass' ? 'max ' : ''}${want}`),
+            h('div', { class: 'meter' }, h('i', { style: `width:${Math.max(0, Math.min(1, frac)) * 100}%` }), h('u', { style: `left:${Math.max(0, Math.min(1, mark)) * 100}%` })),
+        ));
+    }
+}
+
+// --- contract ------------------------------------------------------------------
+
+export function renderContract(el, c) {
+    clear(el);
+    el.append(h('div', { class: 'f-kv' },
+        h('span', { class: 'k' }, 'Box'), h('span', { class: 'v' }, fmtBox(c.size)),
+        h('span', { class: 'k' }, 'Mass'), h('span', { class: 'v' }, fmtMass(c.massKg)),
+        h('span', { class: 'k' }, 'Parts'), h('span', { class: 'v' }, `${c.partCount} in ${c.children.length} children`),
+    ));
+    const ports = h('div', { class: 'f-ports' });
+    for (const p of c.ports) {
+        let spec = '';
+        const src = c.sources.find((s) => s.port === p.id);
+        const path = c.paths.find((x) => x.to === p.id);
+        const sup = c.supplies.find((s) => s.port === p.id);
+        if (src) spec = `${fmtEffort(p.domain, src.cont)} cont · ${fmtFlow(p.domain, src.noLoad)}`;
+        else if (path) spec = `×${path.k >= 10 ? path.k.toFixed(0) : path.k.toFixed(2)} · holds ${fmtEffort(p.domain, path.cont)}`;
+        else if (sup) spec = `${si(sup.power, 'W')} · ${sup.energyWh} Wh`;
+        else if (p.dir === 'in') {
+            const user = c.sources.find((s) => s.draw && s.draw.port === p.id);
+            spec = user ? `draws ${si(user.power / user.draw.eff, 'W')}` : 'input';
+        }
+        ports.append(h('div', { class: 'f-port' },
+            h('span', { class: 'd d-' + p.domain }), h('span', { class: 'dir' }, p.dir), h('span', {}, p.label), h('span', { class: 'spec' }, spec)));
+    }
+    el.append(ports);
+}
+
+// --- output curve -------------------------------------------------------------------
+
+export function drawCurve(canvas, c, outId, op) {
+    const dpr = window.devicePixelRatio || 1;
+    const w = canvas.clientWidth, hgt = canvas.clientHeight;
+    if (canvas.width !== Math.round(w * dpr)) { canvas.width = Math.round(w * dpr); canvas.height = Math.round(hgt * dpr); }
+    const ctx = canvas.getContext('2d');
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, w, hgt);
+    const out = c.ports.find((p) => p.id === outId);
+    const src = c.sources.find((s) => s.port === outId);
+    const path = c.paths.find((p) => p.to === outId);
+    if (!out || (!src && !path)) return;
+    const dom = out.domain;
+    const L = 46, R = 10, T = 10, B = 22;
+    const pw = w - L - R, ph = hgt - T - B;
+    let maxF, maxE, curve;
+    if (src) {
+        maxF = src.noLoad * 1.05;
+        maxE = Math.max(src.stall, src.peak === Infinity ? 0 : src.peak, c.goal ? c.goal.need.effort : 0) * 1.12;
+        curve = (f) => Math.max(0, Math.min(src.stall * (1 - f / src.noLoad), f > 0 ? src.power / f : Infinity));
+    } else {
+        const given = c.goal && c.goal.given;
+        const fIn = given ? given.flow : 1;
+        maxF = (fIn / path.k) * 1.6;
+        maxE = Math.max(path.peak, given ? given.effort * path.k * path.eff : 0) * 1.12;
+        curve = null;
+    }
+    const X = (f) => L + (f / maxF) * pw, Y = (e) => T + ph - (e / maxE) * ph;
+    ctx.strokeStyle = '#252b33'; ctx.lineWidth = 1;
+    for (let k = 0; k <= 4; k++) { const y = T + (k / 4) * ph; ctx.beginPath(); ctx.moveTo(L, y); ctx.lineTo(L + pw, y); ctx.stroke(); }
+    ctx.fillStyle = '#5d6672'; ctx.font = '10px system-ui'; ctx.textAlign = 'right';
+    ctx.fillText(fmtEffort(dom, maxE), L - 4, T + 8);
+    ctx.fillText('0', L - 4, T + ph);
+    ctx.textAlign = 'left'; ctx.fillText('0', L, T + ph + 14);
+    ctx.textAlign = 'right'; ctx.fillText(fmtFlow(dom, maxF), L + pw, T + ph + 14);
+    // Limits: continuous and breaking.
+    const lim = src || path;
+    for (const [v, col, label] of [[lim.cont, '#3ccf8e', 'cont'], [lim.peak, '#ff5a4f', lim.weakest && lim.weakest.role === 'limiter' ? 'slips' : 'breaks']]) {
+        if (!isFinite(v) || v > maxE) continue;
+        ctx.strokeStyle = col; ctx.setLineDash([4, 4]); ctx.beginPath(); ctx.moveTo(L, Y(v)); ctx.lineTo(L + pw, Y(v)); ctx.stroke(); ctx.setLineDash([]);
+        ctx.fillStyle = col; ctx.textAlign = 'left'; ctx.fillText(label, L + 4, Y(v) - 3);
+    }
+    if (curve) {
+        ctx.strokeStyle = '#f08a24'; ctx.lineWidth = 2; ctx.beginPath();
+        for (let k = 0; k <= 64; k++) { const f = (k / 64) * src.noLoad; const y = Y(curve(f)); if (k) ctx.lineTo(X(f), y); else ctx.moveTo(X(f), y); }
+        ctx.stroke();
+    }
+    if (c.goal) {
+        const g = c.goal.need;
+        ctx.strokeStyle = '#e8edf2'; ctx.lineWidth = 1.5;
+        ctx.strokeRect(X(g.flow) - 4, Y(g.effort) - 4, 8, 8);
+    }
+    if (op) {
+        ctx.fillStyle = '#ffffff'; ctx.beginPath(); ctx.arc(X(op.flow), Y(op.effort), 4.5, 0, Math.PI * 2); ctx.fill();
+    }
+}
+
+// --- problems ---------------------------------------------------------------------
+
+export function renderProblems(el, c) {
+    clear(el);
+    if (!c.errors.length && !c.warnings.length) { el.append(h('div', { class: 'f-prob none' }, 'None.')); return; }
+    for (const e of c.errors) el.append(h('div', { class: 'f-prob err' }, e));
+    for (const w of c.warnings) el.append(h('div', { class: 'f-prob warn' }, w));
+}
+
+// --- inspector ----------------------------------------------------------------------
+
+/**
+ * The selected child: its parameters (a part) or its contract (a design),
+ * its ports and what each links to. `api` carries the edits:
+ *   setParam(key, value), open(), remove(), link(port, otherRef), unlink(port),
+ *   spin(port), expose(port), unexpose(port)
+ */
+export function renderInspector(el, title, design, c, childId, api) {
+    clear(el);
+    const ch = c.children.find((x) => x.id === childId);
+    const spec = design.children.find((x) => x.id === childId);
+    if (!ch || !spec) {
+        title.textContent = 'Selected';
+        el.append(h('div', { class: 'f-empty' }, 'Click a part in the view, or a stage in the flow, to change it.'));
+        return;
+    }
+    const isPart = ch.el.kind === 'part';
+    title.textContent = `${childId} · ${isPart ? ch.el.label : ch.el.name}`;
+    el.append(h('div', { class: 'f-insp-sum' }, isPart ? ch.el.summary : `${ch.el.partCount} parts · ${fmtBox(ch.el.size)} · ${fmtMass(ch.el.massKg)}`));
+    if (isPart) {
+        const def = PARTS[spec.part];
+        for (const [key, sc] of Object.entries(def.schema)) {
+            const val = ch.el.params[key];
+            let input;
+            if (sc.kind === 'material') {
+                input = h('select', { 'data-param': key }, ...Object.values(MATERIALS).map((m) => h('option', { value: m.id, selected: m.id === val ? '' : null }, m.label)));
+                input.addEventListener('change', () => api.setParam(key, input.value));
+                el.append(h('div', { class: 'f-param' }, h('label', {}, sc.label), input, h('span', {})));
+            } else if (sc.options) {
+                input = h('select', { 'data-param': key }, ...Object.entries(sc.options).map(([v, l]) => h('option', { value: v, selected: String(v) === String(val) ? '' : null }, l)));
+                input.addEventListener('change', () => api.setParam(key, input.value));
+                el.append(h('div', { class: 'f-param' }, h('label', {}, sc.label), input, h('span', {})));
+            } else {
+                const range = h('input', { type: 'range', min: sc.min, max: sc.max, step: sc.step, value: val, 'data-param': key });
+                const num = h('input', { type: 'number', min: sc.min, max: sc.max, step: sc.step, value: val });
+                range.addEventListener('input', () => { num.value = range.value; });
+                range.addEventListener('change', () => api.setParam(key, +range.value));
+                num.addEventListener('change', () => api.setParam(key, +num.value));
+                el.append(h('div', { class: 'f-param' }, h('label', { title: sc.unit }, `${sc.label}${sc.unit ? ' (' + sc.unit + ')' : ''}`), range, num));
             }
         }
     }
-
-    for (const v of sp.failSafeVerdicts) {
-        verdicts.append(h('div.f-verdict.' + (v.safe ? 'ok' : 'err'), null,
-            h('span.f-tag', null, v.chainLabel), ' ', v.text));
-    }
-    for (const w of sp.warnings.slice(0, 4)) {
-        verdicts.append(h('div.f-verdict.warn', null, w.text));
-    }
-
-    el.append(head, kv, verdicts);
-}
-
-/** Render the parameter editor + 3D spatial placement controls for the selected Blueprint node. */
-export function renderInspector(el, node, library, compiled, onMutate, onDrillDown, onDelete, runtime = null) {
-    clear(el);
-    if (!node) {
-        el.append(h('div.dim', null, 'Click any component or module in the Blueprint to tune its physical specs & 3D position. Double-click a Compiled Module to drill inside.'));
-        return;
-    }
-
-    const addPlacementControls = (parent) => {
-        if (!node.pos3d) node.pos3d = [0, 0.12, 0];
-        const span = Math.max(0.8, compiled?.bounds?.size ? Math.max(...compiled.bounds.size) * 1.4 : 1.0);
-        const stepM = span > 2.5 ? 0.05 : 0.01;
-        const unit = span > 2.5 ? 'm' : 'cm';
-        const scale = unit === 'cm' ? 100 : 1;
-        const form3d = h('div.f-form');
-        ['X', 'Y', 'Z'].forEach((ax, idx) => {
-            const val = node.pos3d[idx] || 0;
-            const out = h('span.k-val', null, (val * scale).toFixed(unit === 'cm' ? 0 : 2) + ' ' + unit);
-            const rng = h('input', { type: 'range', min: (-span).toFixed(2), max: span.toFixed(2), step: stepM, value: val });
-            rng.addEventListener('input', () => {
-                const nv = +rng.value;
-                node.pos3d[idx] = nv;
-                out.textContent = (nv * scale).toFixed(unit === 'cm' ? 0 : 2) + ' ' + unit;
-                onMutate(`Move ${node.label} ${ax}`);
-            });
-            form3d.append(h('label.k-field', null, h('span', null, `Pos ${ax}`), rng, out));
-        });
-        const yawDeg = Math.round(((node.yaw3d || 0) * 180) / Math.PI);
-        const yawOut = h('span.k-val', null, yawDeg + '°');
-        const yawRng = h('input', { type: 'range', min: -180, max: 180, step: 15, value: yawDeg });
-        yawRng.addEventListener('input', () => {
-            const deg = +yawRng.value;
-            node.yaw3d = (deg * Math.PI) / 180;
-            yawOut.textContent = deg + '°';
-            onMutate(`Rotate ${node.label}`);
-        });
-        form3d.append(h('label.k-field', null, h('span', null, 'Yaw'), yawRng, yawOut));
-        parent.append(h('div.k-cap', null, '3D Placement'), form3d);
-    };
-
-    if (node.type === 'assembly') {
-        const sub = library[node.ref];
-        el.append(
-            h('div.f-insp-title', null, h('b', null, node.label), h('span.k-badge', null, 'COMPILED MODULE')),
-            h('div.k-note', null, sub?.description || 'Nested compiled sub-assembly.'),
-        );
-        addPlacementControls(el);
-        el.append(
-            h('div.k-row.f-gap', null,
-                h('button.primary.small', { onclick: () => onDrillDown(node.ref, node) }, 'Open Sub-Assembly ›'),
-                h('button.danger.small', { onclick: () => onDelete(node.id) }, 'Remove')),
-        );
-        return;
-    }
-
-    const def = PRIMITIVES[node.type];
-    if (!def) return;
-    const part = compiled?.parts.find((p) => p.path === node.id);
-    const ps = runtime?.partState?.get(node.id) || null;
-
-    el.append(
-        h('div.f-insp-title', null, h('b', null, node.label), h('span.dim', null, def.cat)),
-        h('div.k-note', null, def.note),
-    );
-
-    const form = h('div.f-form');
-    for (const [key, sc] of Object.entries(def.schema || {})) {
-        const val = node.params[key] ?? def.defaults[key];
-        if (sc.kind === 'material') {
-            const sel = h('select', null, MATERIAL_IDS.map((mid) => h('option', { value: mid }, MATERIALS[mid].label)));
-            sel.value = val;
-            sel.addEventListener('change', () => { node.params[key] = sel.value; onMutate(`Set ${node.label} material`); });
-            form.append(h('label.k-field', null, h('span', null, sc.label), sel));
-        } else if (sc.options) {
-            const sel = h('select', null, Object.entries(sc.options).map(([k, lbl]) => h('option', { value: k }, lbl)));
-            sel.value = val;
-            sel.addEventListener('change', () => { node.params[key] = sel.value; onMutate(`Set ${node.label} ${sc.label}`); });
-            form.append(h('label.k-field', null, h('span', null, sc.label), sel));
+    // Ports and links.
+    const links = h('div', { class: 'f-links' });
+    const linkedTo = new Map();
+    for (const l of c.links) { linkedTo.set(l.out, l); linkedTo.set(l.in, l); }
+    const exposedAt = new Map(design.ports.map((p) => [p.at, p]));
+    for (const p of ch.el.ports) {
+        const ref = `${childId}.${p.id}`;
+        const l = linkedTo.get(ref);
+        const ex = exposedAt.get(ref);
+        const row = h('div', { class: 'f-link' }, h('span', { class: 'd d-' + p.domain, style: 'width:8px;height:8px;border-radius:2px;flex:none' }), h('span', { class: 'lbl' }, `${p.label}`));
+        if (l) {
+            const other = l.out === ref ? l.in : l.out;
+            row.append(h('span', { class: 'to' }, `${p.dir === 'out' ? '→' : '←'} ${other}`));
+            if (l.mech) { const b = h('button', { class: 'small', title: 'Turn what this brings into place a quarter turn about the shaft', 'data-spin': p.id }, '⟳'); b.addEventListener('click', () => api.spin(p.id)); row.append(b); }
+            const u = h('button', { class: 'small', title: 'Unlink', 'data-unlink': p.id }, '×'); u.addEventListener('click', () => api.unlink(p.id)); row.append(u);
+        } else if (ex) {
+            row.append(h('span', { class: 'to' }, `exposed as “${ex.label}”`));
+            const u = h('button', { class: 'small', title: 'Stop exposing' }, '×'); u.addEventListener('click', () => api.unexpose(p.id)); row.append(u);
         } else {
-            const out = h('span.k-val', null, formatNum(val, sc));
-            const rng = h('input', { type: 'range', min: sc.min, max: sc.max, step: sc.step, value: val });
-            rng.addEventListener('input', () => {
-                const nv = +rng.value;
-                node.params[key] = nv;
-                out.textContent = formatNum(nv, sc);
-                onMutate(`Tune ${node.label} ${sc.label}`);
-            });
-            form.append(h('label.k-field', null, h('span', null, sc.label), rng, out));
+            const sel = h('select', { 'data-link': p.id }, h('option', { value: '' }, p.dir === 'out' ? 'drive…' : 'driven by…'));
+            for (const o of c.children) {
+                if (o.id === childId) continue;
+                for (const q of o.el.ports) {
+                    const oref = `${o.id}.${q.id}`;
+                    if (q.domain !== p.domain || q.dir === p.dir || linkedTo.has(oref) || exposedAt.has(oref)) continue;
+                    sel.append(h('option', { value: oref }, `${o.id} · ${q.label}`));
+                }
+            }
+            sel.addEventListener('change', () => { if (sel.value) api.link(p.id, sel.value); });
+            row.append(sel);
+            const x = h('button', { class: 'small', title: 'Expose this port on the design' }, 'expose'); x.addEventListener('click', () => api.expose(p.id)); row.append(x);
         }
+        links.append(row);
     }
-    el.append(form);
-    addPlacementControls(el);
-
-    if (part) {
-        const a = part.analysis;
-        el.append(
-            h('div.k-cap', null, 'Computed Spec'),
-            h('div.k-kv', null,
-                row('Mass / Cost', `${a.massKg.toFixed(2)} kg · $${a.cost.toFixed(1)}`),
-                row('Dimensions', fmtSize(a.size)),
-                ...(a.rated.torqueContNm ? [row('Torque cont/peak', `${fmtTorque(a.rated.torqueContNm)} / ${fmtTorque(a.rated.torquePeakNm)}`)] : []),
-                ...(a.rated.radialContN ? [row('Radial cont/peak', `${(a.rated.radialContN / 1000).toFixed(1)} / ${(a.rated.radialPeakN / 1000).toFixed(1)} kN`)] : []),
-                ...(ps ? [row('Live State', `${ps.rpm.toFixed(0)} rpm · ${ps.tempC.toFixed(0)}°C · W:${(ps.wear * 100).toFixed(0)}%`)] : []),
-                row('Failure mode', a.failureMode + (a.isSacrificial ? ' (SACRIFICIAL FUSE)' : a.isLimiter ? ' (TORQUE LIMITER)' : '')),
-            ),
-        );
-    }
-
-    el.append(h('div.k-row.f-gap', null, h('button.danger.small', { onclick: () => onDelete(node.id) }, 'Remove Component')));
-}
-
-/** Draw the live Torque-Speed & Power Dyno Curve with real-time operating point! */
-export function drawDynoPlot(canvas, compiled, runtime) {
-    const { ctx, w, h } = fitCanvas(canvas);
-    if (!(w > 10 && h > 10)) return;
-    ctx.fillStyle = '#0a0f18';
-    ctx.fillRect(0, 0, w, h);
-
-    const ch = compiled?.primaryChain;
-    if (!ch || !ch.curve.length) {
-        ctx.fillStyle = '#64748b';
-        ctx.font = '11px system-ui, sans-serif';
-        ctx.fillText('No rotational powertrain in this assembly', 12, h * 0.5);
-        return;
-    }
-
-    const pad = { l: 38, r: 12, t: 16, b: 22 };
-    const pw = w - pad.l - pad.r, ph = h - pad.t - pad.b;
-    const maxRpm = Math.max(10, ch.noLoadRpmOut * 1.08);
-    const maxTau = Math.max(10, ch.stallTorqueOut * 1.15, ch.peakTorqueOut * 1.1);
-    const maxP = Math.max(10, ...ch.curve.map((c) => c.powerW)) * 1.15;
-
-    const X = (rpm) => pad.l + (rpm / maxRpm) * pw;
-    const Yt = (tau) => pad.t + ph - Math.min(1, tau / maxTau) * ph;
-    const Yp = (pwr) => pad.t + ph - Math.min(1, pwr / maxP) * ph;
-
-    // Grid
-    ctx.strokeStyle = 'rgba(148,163,184,0.12)';
-    ctx.lineWidth = 1;
-    for (let k = 0; k <= 4; k++) {
-        const y = pad.t + (ph * k) / 4;
-        ctx.beginPath(); ctx.moveTo(pad.l, y); ctx.lineTo(w - pad.r, y); ctx.stroke();
-    }
-
-    // Continuous safe ceiling line (amber dashed)
-    if (isFinite(ch.contTorqueOut) && ch.contTorqueOut < maxTau) {
-        const y = Yt(ch.contTorqueOut);
-        ctx.strokeStyle = 'rgba(234, 179, 8, 0.7)';
-        ctx.setLineDash([4, 4]);
-        ctx.beginPath(); ctx.moveTo(pad.l, y); ctx.lineTo(w - pad.r, y); ctx.stroke();
-        ctx.fillStyle = '#eab308';
-        ctx.font = '9px monospace';
-        ctx.fillText(`CONT ${fmtTorque(ch.contTorqueOut)}`, pad.l + 4, y - 3);
-    }
-
-    // Peak failure ceiling line (red dashed)
-    if (isFinite(ch.peakTorqueOut) && ch.peakTorqueOut < maxTau) {
-        const y = Yt(ch.peakTorqueOut);
-        ctx.strokeStyle = 'rgba(239, 68, 68, 0.8)';
-        ctx.setLineDash([3, 3]);
-        ctx.beginPath(); ctx.moveTo(pad.l, y); ctx.lineTo(w - pad.r, y); ctx.stroke();
-        ctx.fillStyle = '#ef4444';
-        ctx.font = '9px monospace';
-        ctx.fillText(`LIMIT ${fmtTorque(ch.peakTorqueOut)}`, w - pad.r - 86, y - 3);
-    }
-    ctx.setLineDash([]);
-
-    // Power curve (cyan)
-    ctx.strokeStyle = '#38bdf8';
-    ctx.lineWidth = 1.6;
-    ctx.beginPath();
-    ch.curve.forEach((pt, i) => {
-        const x = X(pt.rpm), y = Yp(pt.powerW);
-        if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
-    });
-    ctx.stroke();
-
-    // Torque curve (amber)
-    ctx.strokeStyle = '#f59e0b';
-    ctx.lineWidth = 2.2;
-    ctx.beginPath();
-    ch.curve.forEach((pt, i) => {
-        const x = X(pt.rpm), y = Yt(pt.torque);
-        if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
-    });
-    ctx.stroke();
-
-    // Live operating dot from runtime!
-    if (runtime) {
-        const cs = runtime.chainState.get(ch.id);
-        if (cs) {
-            const rpm = Math.abs(cs.omegaOut * 60 / (2 * Math.PI));
-            const tau = Math.abs(cs.torqueOut);
-            const dx = X(Math.min(maxRpm, rpm)), dy = Yt(Math.min(maxTau, tau));
-            ctx.fillStyle = cs.broken ? '#ef4444' : cs.slipping ? '#e879f9' : '#4ade80';
-            ctx.beginPath(); ctx.arc(dx, dy, 5, 0, Math.PI * 2); ctx.fill();
-            ctx.strokeStyle = '#fff'; ctx.lineWidth = 1.5; ctx.stroke();
-        }
-    }
-
-    // Axis labels
-    ctx.fillStyle = '#94a3b8';
-    ctx.font = '9.5px monospace';
-    ctx.fillText(fmtTorque(maxTau), 3, pad.t + 8);
-    ctx.fillText('0', 24, pad.t + ph);
-    ctx.fillText(`0 rpm`, pad.l, h - 6);
-    ctx.fillText(`${maxRpm.toFixed(0)} rpm`, w - pad.r - 48, h - 6);
-}
-
-/** Render live Immediate Out-Of-Spec Alert Feed & Per-Part Wear/Repair Autopsy. */
-export function renderLiveTelemetry(eventsEl, partsEl, autopsyEl, runtimes) {
-    // 1. Immediate Out-of-Spec Events (newest first!)
-    const allEv = [];
-    for (const rt of runtimes) {
-        for (const ev of rt.events) allEv.push(ev);
-    }
-    allEv.sort((a, b) => b.t - a.t);
-    clear(eventsEl);
-    if (!allEv.length) {
-        eventsEl.append(h('div.dim', null, 'All parts within spec. Run Dyno or Combat Arena to stress-test bounds.'));
-    } else {
-        for (const ev of allEv.slice(0, 18)) {
-            eventsEl.append(h('div.f-ev.' + ev.severity, null,
-                h('span.f-ev-t', null, `${ev.t.toFixed(2)}s`),
-                h('b', null, `${ev.machine ? ev.machine.split(' ')[0] + ' · ' : ''}${ev.partName}`),
-                ' ',
-                h('span', null, ev.reason),
-                ev.cascade ? h('div.f-ev-cas', null, ev.cascade + (ev.repairCost > 0 ? ` · $${ev.repairCost.toFixed(0)}` : '')) : null,
-            ));
-        }
-    }
-
-    // 2. Per-Part Live Health / Stress / Wear Table (worst parts sorted to top!)
-    clear(partsEl);
-    const primaryRt = runtimes[0];
-    if (primaryRt) {
-        const list = [...primaryRt.partState.values()].sort((a, b) =>
-            (b.failed ? 10 : b.stressRatio + b.wear) - (a.failed ? 10 : a.stressRatio + a.wear));
-        for (const ps of list.slice(0, 14)) {
-            const cls = ps.failed ? 'err' : ps.status === 'slipping' ? 'slip' : ps.status === 'overstress' ? 'err' : ps.status === 'warn' ? 'warn' : 'ok';
-            partsEl.append(h('div.f-part-row.' + cls, null,
-                h('span.f-part-nm', { title: ps.path }, ps.label),
-                h('span.f-part-stat', null, ps.failed ? ps.failReason : `${Math.round(ps.stressRatio * 100)}% · W:${Math.round(ps.wear * 100)}% · ${ps.tempC.toFixed(0)}°C`),
-            ));
-        }
-    }
-
-    // 3. Post-Run Autopsy & Repair Bill
-    clear(autopsyEl);
-    for (const rt of runtimes) {
-        const aut = rt.getAutopsy();
-        const box = h('div.f-autopsy', null,
-            h('div.f-aut-head', null,
-                h('b', null, rt.label),
-                h('span.' + (aut.repairCost > 25 ? 'err' : aut.repairCost > 0 ? 'warn' : 'ok'), null, `Repair: $${aut.repairCost.toFixed(0)}`)),
-            aut.savedCost > 0 ? h('div.ok', null, `Fail-safe fuse saved ~$${aut.savedCost.toFixed(0)} of upstream machinery!`) : null,
-            ...aut.failed.map((f) => h('div.err', null, `✗ ${f.label}: ${f.reason} ($${f.cost.toFixed(0)})`)),
-            ...aut.worn.slice(0, 3).map((w) => h('div.warn', null, `⚠ ${w.label}: ${(w.wear * 100).toFixed(0)}% worn ($${w.cost.toFixed(0)})`)),
-        );
-        autopsyEl.append(box);
-    }
-}
-
-function row(k, v) {
-    return h('div', null, h('span', null, k), h('b', null, String(v)));
-}
-function formatNum(v, sc) {
-    const d = sc.step < 1 ? (sc.step < 0.1 ? 2 : 1) : 0;
-    return (+v).toFixed(d) + (sc.unit ? ' ' + sc.unit : '');
+    el.append(links);
+    const actions = h('div', { class: 'f-actions' });
+    if (!isPart) { const o = h('button', { class: 'small primary', id: 'openChild' }, `Open ${ch.el.name}`); o.addEventListener('click', api.open); actions.append(o); }
+    const r = h('button', { class: 'small danger', id: 'removeChild' }, 'Remove'); r.addEventListener('click', api.remove); actions.append(r);
+    el.append(actions);
 }

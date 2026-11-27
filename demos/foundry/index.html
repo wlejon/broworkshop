@@ -2,141 +2,66 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<title>Foundry — Mechanical Compiler &amp; Combat Arena</title>
+<title>Foundry</title>
 <link rel="stylesheet" href="/lib/kit/kit.css">
 <link rel="stylesheet" href="/app/foundry.css">
 </head>
-<body class="k-app">
+<body class="k-app f-app">
 
-<header class="k-header">
-  <h1>Foundry</h1>
-  <span class="k-sub" id="scaleTag">Recursive Mechanical Compiler &amp; Quantized Physics Seam</span>
-  <div id="modes" class="f-modes"></div>
+<header class="f-head">
+  <div class="f-brand"><span class="f-mark"></span>Foundry</div>
+  <nav id="crumbs" class="f-crumbs"></nav>
   <span class="k-spacer"></span>
-  <select id="presetSelect" class="f-preset" title="Browse all 32 blueprints across Tier 1 (Mechanisms), Tier 2 (Machines), and Tier 3 (Titan Scale)"></select>
+  <div id="goalPill" class="f-pill"></div>
   <button id="undo" class="small" disabled title="Undo (Ctrl+Z)">Undo</button>
   <button id="redo" class="small" disabled title="Redo (Ctrl+Y)">Redo</button>
 </header>
 
-<div class="f-hangar" id="hangarBar" title="One-click prebuilt operational machines"></div>
-
-<div class="k-toolbar f-subbar">
-  <div id="breadcrumbs" class="f-crumbs"></div>
-  <span class="k-spacer"></span>
-  <!-- Blueprint / Bench controls -->
-  <div id="benchBar" class="k-row k-nowrap">
-    <button id="btnSpin" class="small primary">Pause Bench</button>
-    <label class="k-field">Throttle <input type="range" id="dynoThrottle" min="0" max="1" step="0.05" value="0.75"><span class="k-val" id="dynoThrottleVal">75%</span></label>
-    <label class="k-field">Brake <input type="range" id="dynoLoad" min="0" max="200" step="2" value="12"><span class="k-val" id="dynoLoadVal">12 N·m</span></label>
-    <button id="btnHitMod" class="small" title="Inject a glancing shock spike (tests clutch/belt/relief valve)">Shock 60 N·m</button>
-    <button id="btnHitJam" class="small danger" title="Inject a catastrophic jam (snaps shear pin vs strips gearbox!)">Jam 150 N·m</button>
-    <button id="btnRepair" class="small">Repair All</button>
-    <span class="k-sep"></span>
-    <label class="k-field"><input type="checkbox" id="chkXray" checked> Cutaway</label>
-    <label class="k-field"><input type="checkbox" id="chkBounds" checked> Bounds</label>
-    <span class="k-sep"></span>
-    <button id="btnBattleMine" class="small f-cta" title="Send your active Blueprint machine directly into the Box3D Combat Arena!">⚔ Battle This Machine</button>
-  </div>
-  <!-- Arena controls: battles YOUR current Blueprint vs chosen opponent! -->
-  <div id="arenaBar" class="k-row k-nowrap" hidden>
-    <button id="btnBackEdit" class="small" title="Return to Blueprint + 3D to modify parts & rematch">← Edit Blueprint</button>
-    <span class="f-your-tag" id="arenaYourTag">YOUR DESIGN: Fused Shredder Mk1</span>
-    <span class="dim">vs</span>
-    <select id="arenaMatch" title="Choose opponent for your Blueprint machine">
-      <option value="bot_iron_wedge">Iron Wedge Bulwark</option>
-      <option value="mach_excavator_crawler">Tracked Hydraulic Excavator</option>
-      <option value="mach_mech_walker">Strider Mk1 Bipedal Mech</option>
-      <option value="mach_haul_tractor">Diesel Haul Tractor &amp; Winch</option>
-      <option value="mach_rotary_drill">Tracked Core-Boring Drill Rig</option>
-      <option value="bot_atlas_forklift">Atlas Hydraulic Lifter (Forklift)</option>
-      <option value="bot_kodiak_grapple">Kodiak Grapple Crawler (Sumo)</option>
-      <option value="bot_ballista_catapult">Ballista Torsion Catapult</option>
-      <option value="bot_battering_bull">Diesel Battering Bull (Dozer)</option>
-      <option value="bot_fang_crusher">Iron Fang (Tracked Crusher)</option>
-      <option value="bot_catapult_flipper">Catapult Mk1 (Flipper)</option>
-      <option value="bot_piledriver_crank">Piledriver (Crank-Hammer)</option>
-      <option value="bot_anvil_hammer">Anvil Striker</option>
-      <option value="bot_mauler_drum">Mauler Mk2 (Drum)</option>
-      <option value="bot_twin_saw_mantis">Mantis Bevel-Interceptor</option>
-      <option value="bot_goliath_twin_v4">Goliath Twin-V4 (Diff Drum)</option>
-      <option value="bot_ripper_gas">Ripper 250cc (Gas Chain)</option>
-      <option value="bot_shredder_raw">Glass Cannon Mk1</option>
-      <option value="mirror">Mirror Match (Your Design)</option>
-      <option value="pillar_smash">Pillar Smash (Metropolis Seam)</option>
-    </select>
-    <button id="btnArenaControl" class="small" title="Toggle autonomous tactical AI vs manual WASD + Space driving">AI Auto</button>
-    <button id="btnArenaRun" class="small primary">Pause</button>
-    <button id="btnArenaStep" class="small" title="Fast-forward 1 second of 60 Hz Box3D combat">Fast +1s</button>
-    <button id="btnArenaReset" class="small">Rematch</button>
-  </div>
-</div>
-
-<div class="k-body f-body">
-  <aside class="k-side f-left" id="leftRail">
-    <div class="k-panel">
-      <h2>Inspector &amp; 3D Placement</h2>
-      <div id="inspector"></div>
-    </div>
-    <div class="k-panel">
-      <div class="f-pal-head">
-        <h2>Catalog</h2>
-        <div id="palTabs" class="f-pal-tabs"></div>
-      </div>
-      <div id="palette"></div>
-    </div>
+<div class="f-body">
+  <aside class="f-left">
+    <section class="f-card">
+      <h2>Library</h2>
+      <div id="library" class="f-lib"></div>
+      <button id="newDesign" class="small f-wide">New design from this one's level</button>
+    </section>
+    <section class="f-card f-grow">
+      <h2>Add to this design</h2>
+      <div id="palette" class="f-palette"></div>
+    </section>
   </aside>
 
-  <main class="k-main f-stage-wrap">
-    <div class="f-split" id="splitPane">
-      <div class="f-pane f-bp-pane" id="bpPane">
-        <div class="f-pane-bar">
-          <span>BLUEPRINT · LIVE STRESS &amp; FLOW</span>
-          <span class="k-spacer"></span>
-          <button id="btnFitBp" class="small">Fit</button>
-        </div>
-        <canvas id="bpCanvas"></canvas>
-      </div>
-      <div class="f-pane f-3d-pane" id="viewPane">
-        <div class="f-pane-bar">
-          <span id="view3dTitle">3D MECHANICAL REPRESENTATION</span>
-          <span class="k-spacer"></span>
-          <span id="view3dHint" class="dim">Right-drag orbit · Wheel zoom</span>
-        </div>
-        <canvas id="stage3d"></canvas>
-        <div id="arenaHud" class="f-arena-hud" hidden></div>
-      </div>
-    </div>
+  <main class="f-center">
+    <canvas id="stage3d" class="f-stage"></canvas>
+    <div class="f-title" id="title"></div>
+    <div class="f-flow" id="flow"></div>
   </main>
 
-  <aside class="k-side right f-right">
-    <div class="k-panel">
-      <h2>Certified Spec Sheet</h2>
-      <div id="specSheet"></div>
-    </div>
-    <div class="k-panel">
-      <h2>Torque–Speed Dyno</h2>
-      <canvas id="dynoPlot" class="f-plot"></canvas>
-    </div>
-    <div class="k-panel">
-      <h2>Immediate Out-of-Spec Alerts</h2>
-      <div id="eventsFeed" class="f-feed"></div>
-    </div>
-    <div class="k-panel">
-      <h2>Live Part Health &amp; Wear</h2>
-      <div id="partsTable" class="f-parts"></div>
-    </div>
-    <div class="k-panel">
-      <h2>Autopsy &amp; Repair Bill</h2>
-      <div id="autopsyBox"></div>
-    </div>
+  <aside class="f-right">
+    <section class="f-card" id="goalCard">
+      <h2>Goal</h2>
+      <div id="goal"></div>
+    </section>
+    <section class="f-card">
+      <h2>Contract <span class="f-hint">what the level above sees</span></h2>
+      <div id="contract"></div>
+    </section>
+    <section class="f-card">
+      <h2>Output <span class="f-hint" id="outHint"></span></h2>
+      <canvas id="curve" class="f-curve"></canvas>
+      <label class="f-slider">Load <input type="range" id="load" min="0" max="1" step="0.01" value="0.45"><span id="loadVal"></span></label>
+    </section>
+    <section class="f-card" id="problemsCard">
+      <h2>Problems</h2>
+      <div id="problems"></div>
+    </section>
+    <section class="f-card f-grow">
+      <h2 id="inspTitle">Selected</h2>
+      <div id="inspector"></div>
+    </section>
   </aside>
 </div>
 
-<footer class="k-statusbar">
-  <span id="status">ready</span>
-  <span class="k-spacer"></span>
-  <span class="k-stats" id="stats"></span>
-</footer>
+<footer class="k-statusbar f-status"><span id="status"></span><span class="k-spacer"></span><span id="stats"></span></footer>
 
 <script type="module" src="/app/main.js"></script>
 </body>

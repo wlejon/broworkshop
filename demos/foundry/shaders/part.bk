@@ -1,0 +1,132 @@
+// demos/foundry/shaders/part.bk — the foundry's materials.
+//
+// Vertex streams from geom.js: uv = (material id, edge weight), colour rgb =
+// linear albedo (or paint, or light for glow), colour a = baked ambient
+// occlusion. `detail` is 1 / the part's size, so the grain of a surface is
+// the same on a 2 cm pinion and a 2 m gear.
+//
+//   0 steel   1 paint   2 cast   3 brass   4 copper
+//   5 rubber  6 alu     7 glow   8 chrome
+
+module hook;
+import mesh;
+import scene;
+
+struct PartParams {
+    detail: f32,     // 1 / characteristic size (m)
+    selected: f32,   // 0..1 highlight
+    time: f32,
+    pad0: f32,
+}
+
+@binding(4, 0) var params: uniform<PartParams>;
+
+fn hash3(p: vec3<f32>) -> f32 {
+    let q = fract(p * vec3<f32>(0.1031, 0.1030, 0.0973));
+    let r = q + dot(q, q.yzx + vec3<f32>(33.33));
+    return fract((r.x + r.y) * r.z);
+}
+
+fn vnoise(p: vec3<f32>) -> f32 {
+    let i = floor(p);
+    let f = fract(p);
+    let u = f * f * (vec3<f32>(3.0) - 2.0 * f);
+    let a = mix(mix(hash3(i), hash3(i + vec3<f32>(1.0, 0.0, 0.0)), u.x), mix(hash3(i + vec3<f32>(0.0, 1.0, 0.0)), hash3(i + vec3<f32>(1.0, 1.0, 0.0)), u.x), u.y);
+    let b = mix(mix(hash3(i + vec3<f32>(0.0, 0.0, 1.0)), hash3(i + vec3<f32>(1.0, 0.0, 1.0)), u.x), mix(hash3(i + vec3<f32>(0.0, 1.0, 1.0)), hash3(i + vec3<f32>(1.0, 1.0, 1.0)), u.x), u.y);
+    return mix(a, b, u.z);
+}
+
+fn fbm(p: vec3<f32>) -> f32 {
+    return 0.55 * vnoise(p) + 0.3 * vnoise(p * 2.13 + vec3<f32>(5.1)) + 0.15 * vnoise(p * 4.37 + vec3<f32>(1.7));
+}
+
+pub fn vertex(v_in: mesh::Vertex) -> mesh::Vertex {
+    var v = v_in;
+    v.v0 = vec4<f32>(v_in.pos, v_in.color.w);
+    v.v1 = vec4<f32>(v_in.uv.x, v_in.uv.y, 0.0, 0.0);
+    v.vi = vec4<i32>(floor(v_in.uv.x + 0.5) as i32, 0, 0, 0);
+    v.color = vec4<f32>(v_in.color.xyz, 1.0);
+    return v;
+}
+
+pub fn fragment(v: mesh::Vertex, s: mesh::Surface) -> mesh::Surface {
+    var out = s;
+    let p = v.v0.xyz * params.detail;
+    let ao = clamp(v.v0.w, 0.0, 1.0);
+    let edge = clamp(v.v1.y, 0.0, 1.0);
+    let mat = v.vi.x;
+
+    var col = v.color.xyz;
+    var rough = 0.4;
+    var metal = 1.0;
+    var emis = vec3<f32>(0.0);
+
+    if (mat == 0) {
+        // Machined steel: fine directional grain and a little tone drift.
+        let grain = vnoise(p * vec3<f32>(220.0, 220.0, 9.0));
+        let drift = fbm(p * 6.0);
+        col = col * (0.9 + 0.12 * drift + 0.05 * grain);
+        rough = 0.26 + 0.12 * grain + 0.06 * drift;
+    } else if (mat == 1) {
+        // Paint over steel: orange peel, darker in recesses, worn off the sharp edges.
+        let peel = vnoise(p * 140.0);
+        let blot = fbm(p * 9.0);
+        col = col * (0.93 + 0.07 * blot) * (0.98 + 0.04 * peel);
+        rough = 0.42 + 0.1 * peel;
+        metal = 0.0;
+        // Worn through to bright steel only where an edge meets a scuff, and lightly.
+        let wear = 0.75 * smoothstep(0.78, 0.98, edge * (0.25 + 0.9 * fbm(p * 22.0)));
+        col = mix(col, vec3<f32>(0.62, 0.63, 0.65), wear);
+        rough = mix(rough, 0.32, wear);
+        metal = mix(metal, 1.0, wear);
+    } else if (mat == 2) {
+        // Cast iron / black oxide: speckled and dull.
+        let sp = vnoise(p * 180.0);
+        col = col * (0.82 + 0.3 * sp);
+        rough = 0.62 + 0.18 * sp;
+        metal = 0.75;
+    } else if (mat == 3) {
+        let t = fbm(p * 12.0);
+        col = col * (0.9 + 0.15 * t);
+        rough = 0.28 + 0.1 * t;
+    } else if (mat == 4) {
+        rough = 0.3;
+    } else if (mat == 5) {
+        let t = vnoise(p * 90.0);
+        col = col * (0.85 + 0.25 * t);
+        rough = 0.8 + 0.12 * t;
+        metal = 0.0;
+    } else if (mat == 6) {
+        let bead = vnoise(p * 300.0);
+        col = col * (0.94 + 0.08 * bead);
+        rough = 0.46 + 0.1 * bead;
+    } else if (mat == 7) {
+        rough = 0.3;
+        metal = 0.0;
+        emis = col * 4.0;
+        col = col * 0.2;
+    } else {
+        rough = 0.06 + 0.04 * vnoise(p * 60.0);
+        col = col * 1.05;
+    }
+
+    if (mat != 7) {
+        // Machined edges catch the light; recesses go dark.
+        col = mix(col, min(col * 1.35 + vec3<f32>(0.02), vec3<f32>(1.0)), edge * 0.35 * metal);
+        rough = clamp(rough - 0.08 * edge, 0.04, 1.0);
+        col = col * mix(0.45, 1.0, ao * ao * (3.0 - 2.0 * ao));
+        out.sky_visibility = mix(0.3, 1.0, ao);
+    }
+
+    let sel = clamp(params.selected, 0.0, 1.0);
+    if (sel > 0.0) {
+        emis += vec3<f32>(0.10, 0.45, 1.0) * sel * (0.08 + 0.55 * edge);
+    }
+
+    out.base_color = col;
+    out.roughness = rough;
+    out.metallic = metal;
+    out.emissive = emis;
+    out.alpha = 1.0;
+    return out;
+}

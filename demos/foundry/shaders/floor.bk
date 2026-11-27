@@ -1,0 +1,53 @@
+// demos/foundry/shaders/floor.bk — the bench the foundry's machines stand on:
+// a dark steel deck with a measuring grid (minor lines every `step`, major
+// every ten), fading into the backdrop between fadeStart and fadeEnd.
+
+module hook;
+import mesh;
+import scene;
+
+struct FloorParams {
+    step: f32,
+    radius: f32,
+    fadeStart: f32,
+    fadeEnd: f32,
+}
+
+@binding(4, 0) var params: uniform<FloorParams>;
+
+fn hash2(p: vec2<f32>) -> f32 {
+    let q = fract(p * vec2<f32>(0.1031, 0.1030));
+    let r = q + dot(q, q.yx + vec2<f32>(33.33));
+    return fract((r.x + r.y) * r.x);
+}
+
+fn line(c: f32, step: f32, w: f32) -> f32 {
+    let d = abs(fract(c / step + 0.5) - 0.5) * step;
+    return 1.0 - smoothstep(w * 0.5, w * 1.5, d);
+}
+
+pub fn vertex(v_in: mesh::Vertex) -> mesh::Vertex {
+    return v_in;
+}
+
+pub fn fragment(v: mesh::Vertex, s: mesh::Surface) -> mesh::Surface {
+    var out = s;
+    let p = v.world_pos.xz;
+    let st = params.step;
+    let px = max(fwidth(p.x), fwidth(p.y));
+    let minor = max(line(p.x, st, px), line(p.y, st, px)) * clamp(st / (px * 6.0) - 0.3, 0.0, 1.0);
+    let major = max(line(p.x, st * 10.0, px * 1.4), line(p.y, st * 10.0, px * 1.4));
+    let axis = max(1.0 - smoothstep(px, px * 2.5, abs(p.x)), 1.0 - smoothstep(px, px * 2.5, abs(p.y)));
+    let grain = hash2(floor(p / (st * 0.05)));
+    var col = vec3<f32>(0.030, 0.033, 0.038) * (0.92 + 0.16 * grain);
+    col = col + vec3<f32>(0.020, 0.028, 0.036) * minor + vec3<f32>(0.05, 0.075, 0.10) * major + vec3<f32>(0.10, 0.07, 0.03) * axis;
+    let r = length(p);
+    let fade = smoothstep(params.fadeStart, params.fadeEnd, r);
+    col = mix(col, vec3<f32>(0.018, 0.02, 0.026), fade);
+    out.base_color = col;
+    out.roughness = mix(0.38 + 0.2 * grain, 1.0, fade);
+    out.metallic = 0.0;
+    out.emissive = vec3<f32>(0.0);
+    out.alpha = 1.0;
+    return out;
+}
