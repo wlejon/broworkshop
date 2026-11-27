@@ -419,15 +419,20 @@ export function createFoundryView(vp) {
         }
     }
 
-    const COLORS = { crate: [0.45, 0.33, 0.2], person: [0.95, 0.42, 0.08], load: [0.3, 0.32, 0.36] };
+    const COLORS = {
+        crate: [0.45, 0.33, 0.2], person: [0.95, 0.42, 0.08], load: [0.3, 0.32, 0.36],
+        pad: [0.16, 0.42, 0.3], padDone: [0.25, 0.75, 0.42], hook: [0.85, 0.65, 0.1], hooked: [0.95, 0.3, 0.15],
+    };
     /**
-     * Draw the world's other bodies where they are: `props` from the machine
-     * ({ kind, half | radius + height, pose [x y z qx qy qz qw], from (a rope's top) }).
-     * A body seen for the first time gets a mesh; one gone loses it.
+     * Draw the world's other bodies where they are: `props` from the site
+     * ({ kind, id?, half | radius + height, pose [x y z qx qy qz qw], from (a line's top) }):
+     * crates, people, pads marked on the ground (lit when a delivery is done), test loads,
+     * and each machine's hook on its line. A thing seen for the first time gets a mesh;
+     * one gone loses it.
      */
     function setProps(props) {
         if (!operating) return;
-        const key = (p) => `${p.kind}:${p.body ?? 'load'}:${p.half ? p.half[0].toFixed(4) : ''}`;
+        const key = (p) => p.id || (p.kind === 'hook' ? `hook:${p.machine.name}` : `${p.kind}:${p.body ?? 'load'}:${p.half ? p.half[0].toFixed(4) : ''}`);
         const want = new Set(props.map(key));
         yard = yard.filter((y) => { if (want.has(y.key)) return true; y.node.destroy(); if (y.rope) y.rope.destroy(); return false; });
         for (const p of props) {
@@ -435,20 +440,25 @@ export function createFoundryView(vp) {
             if (!y) {
                 const node = p.kind === 'person'
                     ? scene.createMesh({ mesh: 'capsule', radius: p.radius, height: p.height, color: COLORS.person, castsShadow: true, receivesShadow: true })
-                    : scene.createMesh({ mesh: 'box', halfW: p.half[0], halfH: p.half[1], halfD: p.half[2], color: COLORS[p.kind] || COLORS.crate, castsShadow: true, receivesShadow: true });
+                    : p.kind === 'hook'
+                        ? scene.createMesh({ mesh: 'sphere', radius: p.radius, color: COLORS.hook, castsShadow: true })
+                        : scene.createMesh({ mesh: 'box', halfW: p.half[0], halfH: p.half[1], halfD: p.half[2], color: COLORS[p.kind] || COLORS.crate, castsShadow: p.kind !== 'pad', receivesShadow: true });
                 node.name = p.kind;
-                y = { key: key(p), node, rope: null };
+                y = { key: key(p), node, rope: null, lit: null };
                 if (p.from) {
-                    y.rope = scene.createMesh({ mesh: 'cylinder', radius: Math.max(0.004, p.half[0] * 0.06), halfHeight: 0.5, color: [0.08, 0.08, 0.09], castsShadow: true });
+                    const r = p.kind === 'hook' ? p.radius * 0.25 : Math.max(0.004, p.half[0] * 0.06);
+                    y.rope = scene.createMesh({ mesh: 'cylinder', radius: r, halfHeight: 0.5, color: [0.08, 0.08, 0.09], castsShadow: true });
                     y.rope.name = 'rope';
                 }
                 yard.push(y);
             }
             y.node.position = [p.pose[0], p.pose[1], p.pose[2]];
             y.node.quaternion = [p.pose[3], p.pose[4], p.pose[5], p.pose[6]];
+            if (p.kind === 'pad' && y.lit !== !!p.done) { y.lit = !!p.done; y.node.color = y.lit ? COLORS.padDone : COLORS.pad; }
+            if (p.kind === 'hook' && y.lit !== !!p.hooked) { y.lit = !!p.hooked; y.node.color = y.lit ? COLORS.hooked : COLORS.hook; }
             if (y.rope && p.from) {
-                // From the tip to the middle of the block's top face.
-                const top = qRot([p.pose[3], p.pose[4], p.pose[5], p.pose[6]], [0, p.half[1], 0]).map((v, i) => v + p.pose[i]);
+                // From the tip to the hook, or to the middle of a block's top face.
+                const top = p.kind === 'hook' ? p.pose.slice(0, 3) : qRot([p.pose[3], p.pose[4], p.pose[5], p.pose[6]], [0, p.half[1], 0]).map((v, i) => v + p.pose[i]);
                 const d = top.map((v, i) => p.from[i] - v), len = Math.max(1e-3, Math.hypot(...d));
                 y.rope.position = top.map((v, i) => v + d[i] / 2);
                 y.rope.quaternion = quatYTo(d.map((v) => v / len));

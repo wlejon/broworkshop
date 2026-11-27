@@ -12,7 +12,7 @@ import { compileLibrary, invalidate, reachingSpin } from "/lib/foundry/compile.j
 import { starterLibrary } from "/lib/foundry/designs.js";
 import { createFoundryView } from "/app/view.js";
 import * as P from "/app/panels.js";
-import { machineOf } from "/lib/foundry/operate.js";
+import { machineOf } from "/lib/foundry/site.js";
 import { renderDeck, updateDeck } from "/app/deck.js";
 
 const fs = require('fs');
