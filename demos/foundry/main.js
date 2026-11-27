@@ -797,10 +797,12 @@ function runCrew(on) {
     if (yard.crew) for (const p of yard.crew.pilots.values()) p.stop();
     yard.crew = null;
     if (on) {
-        drive(null);
-        yard.crew = crewOf(yard.site).assign();
+        // The machine being driven stays the player's: the crew plans with it and tells them its part.
+        yard.crew = crewOf(yard.site, { player: yard.driven }).assign();
+        yard.goal = null;
+        const who = (m) => m === yard.driven ? `${m.name} (you)` : m.name;
         const failed = yard.crew.jobs.filter((j) => j.failed).map((j) => j.failed);
-        status.set(failed.length ? `The crew cannot do it all: ${failed.join('; ')}.` : `The crew is on it: ${yard.crew.jobs.map((j) => `${j.task.label} by ${j.legs.map((l) => l.machine.name).join(j.tandem ? ' and ' : ', then ')}${j.tandem ? ' together' : ''}`).join('; ')}.`);
+        status.set(failed.length ? `The crew cannot do it all: ${failed.join('; ')}.` : `The crew is on it: ${yard.crew.jobs.map((j) => `${j.task.label} by ${j.legs.map((l) => who(l.machine)).join(j.tandem ? ' and ' : ', then ')}${j.tandem ? ' together' : ''}`).join('; ')}.`);
     }
     $('yardRun').classList.toggle('on', !!yard.crew);
     $('yardRun').textContent = yard.crew ? 'Stop the crew' : 'Run the crew';
@@ -809,14 +811,15 @@ function runCrew(on) {
 /** Take machine `m` of the yard by hand (null: none): its deck, and its hook. */
 function drive(m) {
     if (!yard) return;
-    if (m && yard.crew) runCrew(false);
+    // Another machine (or none) than the one the crew works with you on: the crew stops.
+    if (yard.crew && (m ? m !== yard.crew.player : yard.crew.player)) runCrew(false);
     yard.driven = m;
     held.clear();
     view.selectMachine(m);
     const el = $('deck');
     clear(el);
     if (!m) {
-        el.append(h('div', { class: 'f-dk-empty' }, 'Click a machine (or press Tab) to drive it: its deck is compiled from what it is made of, its winch\'s Hoist with the rest. Let the hook down onto a crate and press Space to take it; Space again lets it go.'));
+        el.append(h('div', { class: 'f-dk-empty' }, 'Click a machine (or press Tab) to drive it: its deck is compiled from what it is made of, its winch\'s Hoist with the rest. Let the hook down onto a crate and press Space to take it; Space again lets it go. Run the crew while you drive one and the others work with you: it tells you your part and marks where to go.'));
         renderYardLists();
         frameDriven(null);
         return;
@@ -890,7 +893,8 @@ function updateYardLists() {
         if (!el) continue;
         const p = yard.crew && yard.crew.pilots.get(m);
         const broken = m.status.includes('broken');
-        const doing = broken ? 'broken' : p && p.busy ? p.doing : yard.driven === m ? 'yours to drive' : m.hook && m.hook.crate ? `holding ${m.hook.crate.name}` : 'standing by';
+        const mine = yard.crew && yard.crew.player === m;
+        const doing = broken ? 'broken' : p && p.busy ? p.doing : mine ? (yard.goal ? 'yours: ' + yard.goal.text : 'yours: your part is done') : yard.driven === m ? 'yours to drive' : m.hook && m.hook.crate ? `holding ${m.hook.crate.name}` : 'standing by';
         el.className = 'f-yard-item machine' + (yard.driven === m ? ' sel' : '') + (broken ? ' bad' : p && p.busy ? ' busy' : '');
         el.querySelector('.d').textContent = doing;
     }
@@ -928,7 +932,14 @@ vp.onFrame((dt) => {
     if (!yard) return;
     const d = Math.min(dt, 0.1);
     if (yard.crew) {
+        if (yard.driven) rampKeys(yard.driven, d);
         yard.crew.step(d);
+        // Your part, as the crew sees it now: said once each time it changes.
+        if (yard.crew.player) {
+            const g = yard.crew.goal(), text = g ? g.text : null;
+            if (text !== (yard.goal && yard.goal.text)) { if (text) status.set(`${yard.crew.player.name} (you): ${text}`); }
+            yard.goal = g;
+        }
         if (!yard.crew.busy) {
             const all = yard.site.tasks.every((t) => t.done);
             status.set(all ? 'Every task is done.' : yard.crew.failed || 'The crew has stopped.');

@@ -510,6 +510,44 @@ test('a carrier drives a crate between two cranes too far apart to hand it over,
     f.yard(false); frames(1);
 });
 
+test('the player drives the carrier in the crew: told their part, the spot marked, the cranes working with them', () => {
+    const q = (s) => document.querySelector(s), f = window.foundry;
+    f.yard(true, 'haul'); frames(1);
+    const v = f.site.machines.find((m) => m.name === 'Carrier');
+    [...document.querySelectorAll('#yardMachines .machine')].find((e) => /Carrier/.test(e.textContent)).click(); frames(1);
+    q('#yardRun').click(); frames(1);
+    check(f.crew && f.crew.player === v && !f.crew.pilots.has(v), 'running the crew keeps the Carrier the player\'s, with no pilot of its own');
+    check(/Carrier \(you\)/.test(q('#status').textContent), `the plan names the player's part (${q('#status').textContent})`);
+    // The player follows the box marked on the ground, the way it points (a pilot stands in for their hands).
+    const hands = pilotOf(f.site, v);
+    let t = 0, target = '', told = new Set(), marked = 0, shotTaken = false;
+    while (f.crew && t < 200) {
+        const g = f.crew.goal();
+        if (g) told.add(g.text.split(':')[0]);
+        if (g && /^Drive Crate into/.test(g.text) && !shotTaken) { frames(1); shot('yard-player'); shotTaken = true; }
+        const mark = f.site.marks.find((m) => m.kind === 'goal');
+        if (g && g.at && mark && Math.hypot(mark.at[0] - g.at[0], mark.at[2] - g.at[1]) < 1e-6) marked++;
+        // A player drives into the box the way it points, and eases along when told the crane does not reach.
+        const e = g && /ease (forward|back) about ([\d.]+) m/.exec(g.text);
+        const key = e ? g.text : g && g.heading ? g.at.join() : "";
+        if (key && key !== target && !hands.busy) {
+            const hd = v.heading(), s = e ? (e[1] === "forward" ? 1 : -1) * +e[2] : 0;
+            hands.stop();
+            if (e) hands.driveTo([v.mid[0] + hd[0] * s, v.mid[1] + hd[1] * s], hd, "the player", { exact: true }); else hands.driveTo(g.at, g.heading, "the player");
+            target = key;
+        }
+        for (let k = 0; k < 15; k++) { hands.tick(1 / 60); f.crew.step(1 / 60); }
+        t += 0.25;
+        if (Math.round(t * 4) % 40 === 0) frames(1);
+    }
+    frames(2);
+    check(told.has('Drive into the marked box by Depot Crane to be loaded with Crate.') && told.has('Hold still') && [...told].some((s) => /^Drive Crate into the marked box by Site Crane/.test(s)),
+        `the player is told each part in turn (${[...told].join(' / ')})`);
+    check(marked > 20, 'the box they are to drive into is marked on the ground');
+    check(f.site.tasks[0].done && /Every task is done/.test(q('#status').textContent), `the cranes load and unload them and the crate stands on the pad (${t} s; ${f.crew ? [...f.crew.pilots.values()].map((p) => p.doing).join(' | ') + ' / you: ' + (f.crew.goal() || {}).text : q('#status').textContent})`);
+    f.yard(false); frames(1);
+});
+
 test('a depot crane, a carrier and two site cranes build the frame from pieces fourteen metres off', () => {
     const q = (s) => document.querySelector(s), f = window.foundry;
     f.yard(true, 'build'); frames(2);

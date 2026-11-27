@@ -422,7 +422,7 @@ export function createFoundryView(vp) {
 
     const COLORS = {
         crate: [0.45, 0.33, 0.2], concrete: [0.58, 0.58, 0.56], target: [0.2, 0.45, 0.75], person: [0.95, 0.42, 0.08], load: [0.3, 0.32, 0.36],
-        pad: [0.16, 0.42, 0.3], padDone: [0.25, 0.75, 0.42], spot: [0.7, 0.55, 0.15], hook: [0.85, 0.65, 0.1], hooked: [0.95, 0.3, 0.15], drop: [0.15, 0.95, 0.35], reach: [0.45, 0.5, 0.58], reachOn: [0.95, 0.55, 0.15],
+        pad: [0.16, 0.42, 0.3], padDone: [0.25, 0.75, 0.42], spot: [0.7, 0.55, 0.15], goal: [0.95, 0.85, 0.2], goalSide: [0.95, 0.45, 0.1], goalWay: [0.95, 0.85, 0.2], hook: [0.85, 0.65, 0.1], hooked: [0.95, 0.3, 0.15], drop: [0.15, 0.95, 0.35], reach: [0.45, 0.5, 0.58], reachOn: [0.95, 0.55, 0.15],
     };
     /**
      * Draw the world's other bodies where they are: `props` from the site
@@ -443,7 +443,7 @@ export function createFoundryView(vp) {
                     ? scene.createMesh({ mesh: 'capsule', radius: p.radius, height: p.height, color: COLORS.person, castsShadow: true, receivesShadow: true })
                     : p.kind === 'hook'
                         ? scene.createMesh({ mesh: 'sphere', radius: p.radius, color: COLORS.hook, castsShadow: true })
-                        : scene.createMesh({ mesh: 'box', halfW: p.half[0], halfH: p.half[1], halfD: p.half[2], color: COLORS[p.material === 'concrete' ? 'concrete' : p.kind] || COLORS.crate, castsShadow: p.kind !== 'pad' && p.kind !== 'spot' && p.kind !== 'target', receivesShadow: true });
+                        : scene.createMesh({ mesh: 'box', halfW: p.half[0], halfH: p.half[1], halfD: p.half[2], color: COLORS[p.material === 'concrete' ? 'concrete' : p.kind] || COLORS.crate, castsShadow: p.kind !== 'pad' && p.kind !== 'spot' && p.kind !== 'target' && p.kind !== 'goal' && p.kind !== 'goalSide' && p.kind !== 'goalWay', receivesShadow: true });
                 node.name = p.kind;
                 y = { key: key(p), node, rope: null, lit: null };
                 if (p.from) {
