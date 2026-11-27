@@ -352,7 +352,10 @@ export class Geo {
                 for (let k = at; k < this.i.length; k++) keep.push(this.i[k]);
                 probe = new bro.mesh.Mesh({ positions: mesh.positions, normals: mesh.normals, colors: mesh.colors, indices: new Uint32Array(keep) });
             }
-            probe.bakeAmbientOcclusion(o.ao, o.aoDist || 0);
+            // Fewer rays on a dense mesh: its vertices sit close, so their noise averages out on the
+            // surface, and the bake stays bounded (a 600-tooth ring would otherwise take a second).
+            const rays = Math.max(8, Math.min(o.ao, Math.round((o.ao * 24000) / this.count)));
+            probe.bakeAmbientOcclusion(rays, o.aoDist || 0);
             const ao = probe.colors;
             const cols = mesh.colors;
             for (let k = 0; k < this.count; k++) cols[k * 4 + 3] = Math.min(1, ao[k * 4] * 1.08);

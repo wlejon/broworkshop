@@ -301,7 +301,12 @@ test('a machine built from nothing by clicks, aimed at a goal, and built on', ()
         pn.value = String(pinions); pn.dispatchEvent(new Event('change', { bubbles: true })); frames(1);
         const mo = q('#inspector [data-param="mount"]');
         mo.value = mount; mo.dispatchEvent(new Event('change', { bubbles: true })); frames(1);
-        for (let i = 0; i < pods; i++) f.useDesign('drivePod');
+        if (pods === pinions && pods > 1) {
+            // A drive on every pinion at once, from the ring's inspector.
+            f.select('slew1'); frames(1);
+            const fw = q('#fillWith');
+            fw.value = 'design:drivePod'; fw.dispatchEvent(new Event('change', { bubbles: true })); frames(1);
+        } else for (let i = 0; i < pods; i++) f.useDesign('drivePod');
         f.addPart('boom'); frames(1);
         return f.contract(f.current);
     };

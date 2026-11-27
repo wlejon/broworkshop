@@ -59,9 +59,12 @@ export function createFoundryView(vp) {
         let built = meshCache.get(key);
         if (!built) {
             const m = meshPart(el, lin(paint));
+            // Movers that share a geometry (a ring's pinions) are baked and uploaded once.
+            const once = new Map();
+            const geometryOf = (geo) => once.get(geo) || once.set(geo, scene.createGeometry(geo.finish({ ao: 32 }))).get(geo);
             built = {
                 body: m.body.count ? { geometry: scene.createGeometry(m.body.finish({ ao: 48 })) } : null,
-                movers: m.movers.map((mv) => ({ ...mv, mesh: { geometry: scene.createGeometry(mv.geo.finish({ ao: 32 })) }, geo: null })),
+                movers: m.movers.map((mv) => ({ ...mv, mesh: { geometry: geometryOf(mv.geo) }, geo: null })),
                 shaftR: m.shaftR,
             };
             meshCache.set(key, built);

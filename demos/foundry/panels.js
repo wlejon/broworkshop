@@ -598,6 +598,14 @@ export function renderInspector(el, title, design, c, childId, api) {
             actions.append(sel);
         }
     }
+    // Many inputs of one kind (a slewing ring's pinions): a drive on every free one, in one go.
+    const F = api.fillOptions();
+    if (F && F.options.length) {
+        const sel = h('select', { id: 'fillWith', title: `Add one on each of ${F.ports.map((p) => p.label).join(', ')}, each wired in, each with its own power line` },
+            h('option', { value: '' }, `Drive all ${F.ports.length} free inputs with…`), ...F.options.map((o) => h('option', { value: o.value }, o.label)));
+        sel.addEventListener('change', () => { if (sel.value) api.fill(sel.value); });
+        actions.append(sel);
+    }
     const r = h('button', { class: 'small danger', id: 'removeChild' }, 'Remove'); r.addEventListener('click', api.remove); actions.append(r);
     el.append(actions);
 }

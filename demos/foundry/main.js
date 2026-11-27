@@ -407,6 +407,55 @@ function inspectorApi() {
                 if (ex) ex.at = tail;
             });
         },
+        /**
+         * The selected child's free inputs that a drive can go on: unlinked (or only
+         * exposed) mechanical inputs of one kind, when there are two or more of it,
+         * as on a slewing ring's pinions. { domain, ports, options } or null; options
+         * are the designs and parts with an output of that kind.
+         */
+        fillOptions() {
+            const c = contract(currentId), ch = c.children.find((x) => x.id === selected);
+            if (!ch) return null;
+            const d = lib[currentId], linked = new Set(d.links.flatMap((l) => [l.a, l.b]));
+            const free = ch.el.ports.filter((p) => p.dir === 'in' && ['rot', 'lin', 'hyd'].includes(p.domain) && !linked.has(`${selected}.${p.id}`));
+            const byDom = new Map();
+            for (const p of free) byDom.set(p.domain, [...(byDom.get(p.domain) || []), p]);
+            const [domain, ports] = [...byDom].sort((a, b) => b[1].length - a[1].length)[0] || [];
+            if (!ports || ports.length < 2) return null;
+            const designs = Object.keys(lib).filter((k) => k !== currentId && canUse(k))
+                .filter((k) => { const o = contract(k); return o.ok && o.ports.some((q) => q.dir === 'out' && q.domain === domain); })
+                .map((k) => ({ value: `design:${k}`, label: lib[k].name }));
+            const parts = Object.entries(PARTS).filter(([t]) => buildPart(t).ports.some((q) => q.dir === 'out' && q.domain === domain && !buildPart(t).ports.some((r) => r.dir === 'in' && r.domain === domain)))
+                .map(([t, def]) => ({ value: `part:${t}`, label: def.label }));
+            return { domain, ports, options: [...designs, ...parts] };
+        },
+        /** A new `what` ('design:<id>' or 'part:<type>') on each of the selected child's free inputs, in one edit. */
+        fill(what) {
+            const F = inspectorApi().fillOptions();
+            if (!F) return;
+            const [kind, ref] = what.split(':');
+            const proto = kind === 'design' ? contract(ref) : buildPart(ref);
+            const out = proto.ports.find((q) => q.dir === 'out' && q.domain === F.domain);
+            const name = kind === 'design' ? lib[ref].name : PARTS[ref].label, id0 = selected;
+            edit(`Drive ${F.ports.length} inputs of ${id0} with ${name}`, (d) => {
+                const base = kind === 'design' ? (name.replace(/[^A-Za-z]/g, '').slice(0, 3).toLowerCase() || 'd') : ref.replace(/[A-Z].*/, '').slice(0, 4);
+                for (const p of F.ports) {
+                    const at = `${id0}.${p.id}`;
+                    // An input given out by the design is driven here now instead.
+                    d.ports = d.ports.filter((x) => x.at !== at);
+                    const id = freshId(d, base);
+                    d.children.push(kind === 'design' ? { id, design: ref } : { id, part: ref, params: partDefaults(ref) });
+                    d.links.push({ a: `${id}.${out.id}`, b: at });
+                    // Each drive's power comes in on its own line.
+                    for (const q of proto.ports) {
+                        if (q.dir !== 'in' || q.domain !== 'elec') continue;
+                        let pid = q.id, j = 2;
+                        while (d.ports.some((x) => x.id === pid)) pid = `${q.id}${j++}`;
+                        d.ports.push({ id: pid, label: `${q.label} (${id})`, at: `${id}.${q.id}` });
+                    }
+                }
+            });
+        },
         remove() {
             const id = selected;
             const c = contract(currentId);
