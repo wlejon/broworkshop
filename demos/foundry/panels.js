@@ -347,6 +347,10 @@ function drawLiftCurve(ctx, c, outId, op, { L, T, pw, ph }) {
     ctx.stroke();
     ctx.strokeStyle = '#3ccf8e'; ctx.setLineDash([4, 4]); ctx.beginPath(); ctx.moveTo(X(lc.tipS), T); ctx.lineTo(X(lc.tipS), T + ph); ctx.stroke(); ctx.setLineDash([]);
     ctx.fillStyle = '#3ccf8e'; ctx.textAlign = 'left'; ctx.fillText('tip', X(lc.tipS) + 4, T + 10);
+    if (lift(lc.tipS) <= 0) {
+        ctx.fillStyle = '#ff5a4f'; ctx.textAlign = 'center';
+        ctx.fillText(`${shortLabel(lc.mount.weakest || 'a joint')} cannot hold up its own arm`, L + pw / 2, T + ph / 2);
+    }
     if (want) { ctx.strokeStyle = '#e8edf2'; ctx.lineWidth = 1.5; ctx.strokeRect(X(want.reachM) - 4, Y(want.payloadKg) - 4, 8, 8); }
     if (op && op.payloadKg != null) { ctx.fillStyle = '#ffffff'; ctx.beginPath(); ctx.arc(X(lc.tipS), Y(op.payloadKg), 4.5, 0, Math.PI * 2); ctx.fill(); }
 }
