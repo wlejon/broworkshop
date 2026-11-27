@@ -194,6 +194,12 @@ const BUILD = {
         }
         g.lathe([[0, hz], [rOut * 2.3, hz], [rOut * 2.3, hz + wall * 1.6], [rOut * 1.9, hz + wall * 2.2], [rOut * 1.1, hz + wall * 2.2]], { color: paint, mat: M.PAINT, segs: 48 });
         g.boltCircle(rOut * 2.0, 6, hz + wall * 1.6, wall * 0.5, { axis: 'z' });
+        // A base flange on the end, when it bolts down there: below the worm's bearing cap.
+        if (s.onEnd) {
+            const fh = Math.max(m * 3, Math.min(rw * 0.75, cd - rq * 1.75 - m)), fz = hz * 0.92, x0 = half - 0.0001, x1 = half + s.flange;
+            g.cbox([x0, -fh, -fz], [x1, fh, fz], { color: mix(paint, DARK, 0.25), mat: M.PAINT, bevel: s.flange * 0.3 });
+            for (const y of [-fh * 0.72, fh * 0.72]) for (const z of [-fz * 0.68, fz * 0.68]) g.bolt([x1, y, z], 'x', Math.min(fh, fz) * 0.16);
+        }
         // Oil sight glass and breather.
         g.lathe([[0, half], [rq * 0.5, half], [rq * 0.5, half + wall * 0.4], [0, half + wall * 0.4]], { at: [0, yMin + (cd - yMin) * 0.25, 0], axis: 'x', color: lin([1.0, 0.55, 0.12]), mat: M.GLOW, segs: 20 });
         const inR = new Geo();

@@ -8,7 +8,7 @@ import { sceneViewport } from "/lib/kit/viewport3d.js";
 import { History } from "/lib/kit/history.js";
 import { h, clear } from "/lib/kit/dom.js";
 import { PARTS, partDefaults, buildPart } from "/lib/foundry/parts.js";
-import { compileLibrary, invalidate } from "/lib/foundry/compile.js";
+import { compileLibrary, invalidate, reachingSpin } from "/lib/foundry/compile.js";
 import { starterLibrary } from "/lib/foundry/designs.js";
 import { createFoundryView } from "/app/view.js";
 import * as P from "/app/panels.js";
@@ -220,13 +220,24 @@ function autoLink(d, c, childId, ports) {
     const portOf = (ref) => { const [cid, pid] = splitRef(ref); const ch = c.children.find((x) => x.id === cid); return ch && ch.el.ports.find((x) => x.id === pid); };
     const linked = new Set(d.links.flatMap((l) => [l.a, l.b]));
     const ins = ports.filter((p) => p.dir === 'in'), outs = ports.filter((p) => p.dir === 'out');
-    const link = (a, b) => { d.links.push({ a, b }); linked.add(a); linked.add(b); };
+    // A mount joined to a mount turns to carry the two furthest: an arm of segments runs on, not coils.
+    const specOf = (cid) => d.children.find((x) => x.id === cid);
+    const link = (a, b, dom) => {
+        const l = { a, b };
+        if (dom === 'mnt') {
+            // The turn of the link that placed `a`, if one did: the next turn answers it, so a chain runs straight.
+            const [ca, pa] = splitRef(a), [cb, pb] = splitRef(b);
+            const into = d.links.find((x) => x.b === `${ca}.${pb}` || x.a === `${ca}.${pb}`);
+            l.spin = reachingSpin(lib, cache, specOf(ca), pa, specOf(cb), pb, into ? into.spin || 0 : null);
+        }
+        d.links.push(l); linked.add(a); linked.add(b);
+    };
     let chained = false;
     for (const ex of d.ports) {
         const q = portOf(ex.at);
         const p = q && q.dir === 'out' && ins.find((x) => x.domain === q.domain && !linked.has(`${childId}.${x.id}`));
         if (!p) continue;
-        link(ex.at, `${childId}.${p.id}`);
+        link(ex.at, `${childId}.${p.id}`, q.domain);
         const next = outs.find((x) => x.domain === q.domain) || outs.find((x) => x.domain !== 'elec');
         if (next) { ex.at = `${childId}.${next.id}`; ex.label = next.label; linked.add(ex.at); }
         else d.ports.splice(d.ports.indexOf(ex), 1);
@@ -239,7 +250,7 @@ function autoLink(d, c, childId, ports) {
         if (linked.has(ref)) continue;
         for (const o of c.children) {
             const q = o.el.ports.find((x) => x.domain === p.domain && x.dir === 'out' && !linked.has(`${o.id}.${x.id}`) && !exposed.has(`${o.id}.${x.id}`));
-            if (q) { link(`${o.id}.${q.id}`, ref); break; }
+            if (q) { link(`${o.id}.${q.id}`, ref, p.domain); break; }
         }
     }
     if (!chained) {
@@ -251,7 +262,7 @@ function autoLink(d, c, childId, ports) {
                 if (!q) continue;
                 const oref = `${o.id}.${q.id}`;
                 d.ports = d.ports.filter((x) => x.at !== oref);
-                link(ref, oref);
+                link(ref, oref, p.domain);
                 break;
             }
         }
@@ -326,6 +337,72 @@ function inspectorApi() {
             });
         },
         open() { drillInto(selected); },
+        /** Designs that can stand in for the selected one: they have every port it is wired by, the same way round. */
+        swapOptions() {
+            const spec = lib[currentId].children.find((x) => x.id === selected);
+            if (!spec || !spec.design) return [];
+            const c = contract(currentId), el = c.children.find((x) => x.id === selected).el;
+            const used = new Set([...lib[currentId].links.flatMap((l) => [l.a, l.b]), ...lib[currentId].ports.map((p) => p.at)]
+                .filter((r) => splitRef(r)[0] === selected).map((r) => splitRef(r)[1]));
+            const need = el.ports.filter((p) => used.has(p.id));
+            return Object.keys(lib)
+                .filter((k) => k !== spec.design && canUse(k))
+                .filter((k) => { const o = contract(k); return o.ok && need.every((p) => o.ports.some((q) => q.id === p.id && q.domain === p.domain && q.dir === p.dir)); })
+                .map((k) => ({ id: k, name: lib[k].name }));
+        },
+        swap(designId) {
+            const id = selected;
+            edit(`Swap ${id} for ${lib[designId].name}`, (d) => { d.children.find((x) => x.id === id).design = designId; });
+        },
+        /**
+         * Chain `n` more of the selected design after it, each one's output into the
+         * next one's input of the same kind (a tip into a base, a shaft into a shaft).
+         * What the selected one fed, and the port it gave out, move to the last.
+         * Each copy's power comes in on its own exposed line.
+         */
+        chain(n) {
+            const id0 = selected, spec0 = lib[currentId].children.find((x) => x.id === id0);
+            if (!spec0 || !spec0.design || !(n >= 1)) return;
+            const X = contract(spec0.design);
+            const pairOf = (dom) => { const o = X.ports.find((p) => p.dir === 'out' && p.domain === dom); const i = X.ports.find((p) => p.dir === 'in' && p.domain === dom); return o && i ? [o, i] : null; };
+            const pair = pairOf('mnt') || pairOf('rot') || pairOf('lin') || pairOf('hyd');
+            if (!pair) { status.warn(`${X.name} has no output that goes into an input of its own kind, so it does not chain.`); return; }
+            const [o, i] = pair;
+            // Each link's turn answers the one before it (see reachingSpin); the copies are all
+            // alike, so the answers repeat and four probes cover a chain of any length.
+            const into0 = lib[currentId].links.find((l) => l.b === `${id0}.${i.id}` || l.a === `${id0}.${i.id}`);
+            const answers = new Map();
+            const nextSpin = (before) => {
+                if (!answers.has(before)) answers.set(before, reachingSpin(lib, cache, spec0, o.id, { design: spec0.design }, i.id, before));
+                return answers.get(before);
+            };
+            let spin = into0 ? into0.spin || 0 : null;
+            n = Math.min(500, Math.round(n));
+            edit(`Chain ${n} more ${X.name}`, (d) => {
+                const tail0 = `${id0}.${o.id}`;
+                const onward = d.links.find((l) => l.a === tail0 || l.b === tail0);
+                const ex = d.ports.find((p) => p.at === tail0);
+                if (onward) d.links.splice(d.links.indexOf(onward), 1);
+                const base = id0.replace(/\d+$/, '');
+                let prev = id0;
+                for (let k = 0; k < n; k++) {
+                    const id = freshId(d, base);
+                    d.children.push({ id, design: spec0.design });
+                    spin = nextSpin(spin);
+                    d.links.push({ a: `${prev}.${o.id}`, b: `${id}.${i.id}`, spin });
+                    for (const p of X.ports) {
+                        if (p.dir !== 'in' || p.domain !== 'elec') continue;
+                        let pid = p.id, j = 2;
+                        while (d.ports.some((x) => x.id === pid)) pid = `${p.id}${j++}`;
+                        d.ports.push({ id: pid, label: `${p.label} (${id})`, at: `${id}.${p.id}` });
+                    }
+                    prev = id;
+                }
+                const tail = `${prev}.${o.id}`;
+                if (onward) d.links.push(onward.a === tail0 ? { ...onward, a: tail } : { ...onward, b: tail });
+                if (ex) ex.at = tail;
+            });
+        },
         remove() {
             const id = selected;
             const c = contract(currentId);

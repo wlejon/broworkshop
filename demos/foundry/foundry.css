@@ -169,7 +169,9 @@
 .f-link .to { color: var(--f-dim); flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .f-link select { flex: 1; min-width: 0; }
 .f-link button { padding: 1px 7px; font-size: 11px; }
-.f-actions { display: flex; gap: 6px; margin-top: 10px; }
+.f-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; align-items: center; }
+.f-chain { display: flex; gap: 4px; align-items: center; }
+.f-chain-n { width: 56px; }
 .f-empty { color: var(--f-faint); font-size: 12px; }
 
 .f-status { border-top: 1px solid var(--f-line); }

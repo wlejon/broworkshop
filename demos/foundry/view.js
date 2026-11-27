@@ -217,11 +217,14 @@ export function createFoundryView(vp) {
         collectMovers(drawn, (ref) => ref);
         for (const [cid, rec] of drawn.byChild) selectNodes.set(cid, rec.shaded);
         const placed = new Map(c.children.map((ch) => [ch.id, ch]));
-        // Exposed ports: a ring in the domain's colour.
+        // Exposed ports: a ring in the domain's colour, sized to the child it is on (a hundred
+        // segments' power lines are a hundred small rings, not a tube the length of the arm).
+        const size = Math.max(...c.size);
         for (const p of c.ports) {
             const g = new Geo();
-            const size = Math.max(...c.size);
-            const r = Math.max(0.006, size * 0.03);
+            const on = p.at && placed.get(p.at.slice(0, p.at.lastIndexOf('.')));
+            const scale = on ? Math.max(...on.el.box.max.map((v, i) => v - on.el.box.min[i])) : size;
+            const r = Math.max(0.006, Math.min(size * 0.03, scale * 0.08));
             g.lathe([[r * 0.78, 0], [r, 0], [r, r * 0.18], [r * 0.78, r * 0.18]], { color: lin(DOMAIN_COLOR[p.domain] || [1, 1, 1]), mat: M.GLOW, segs: 40 });
             const n = meshNode(g.finish({ ao: 0 }), 1 / size, `port ${p.id}`);
             n.position = p.pos.slice();

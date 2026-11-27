@@ -248,6 +248,15 @@ test('a machine built from nothing by clicks, aimed at a goal, and built on', ()
     check(chain.joints.length === 3 && chain.joints.every((J) => J.cont > 0), 'every joint is driven');
     check(document.querySelectorAll('#flow [data-child]').length === 3, 'the flow shows the three joints');
     shot('built-chain');
+    // Seven more from the inspector: one edit, and the ten run on in a line.
+    f.select('arm3'); frames(1);
+    q('#chainCount').value = '7';
+    clickOn('#chainMore'); frames(2);
+    const ten = f.contract(f.current), sz = ten.size.slice().sort((a, b) => b - a);
+    check(f.lib[f.current].children.length === 10 && ten.ports.filter((p) => p.domain === 'elec').length === 10, 'chain more adds seven, each powered');
+    check(sz[0] > 12 && sz[1] < 1, `ten segments run straight (${ten.size.map((v) => v.toFixed(2))})`);
+    f.history.undo(); frames(1);
+    check(f.lib[f.current].children.length === 3, 'one undo takes the seven back');
     // Removing the middle segment closes the chain up.
     f.select('arm2'); frames(1);
     clickOn('#removeChild'); frames(1);
@@ -258,6 +267,19 @@ test('a machine built from nothing by clicks, aimed at a goal, and built on', ()
     f.cache.clear();
     const dark = f.contract(f.current);
     check(dark.joints.some((J) => J.cont === 0), 'a segment with no power drives nothing');
+    // A variant: copy the pod, then swap the copy into the actuator in place of the original.
+    f.reset(); frames(1);
+    clickOn(rowOf('Drive Pod')); frames(1);
+    clickOn('#copyDesign'); frames(1);
+    const podCopy = f.current;
+    clickOn(rowOf('Joint Actuator')); frames(1);
+    f.select('pod'); frames(1);
+    const sw = q('#swapFor');
+    check([...sw.options].some((o) => o.value === podCopy), 'the copy is offered in the pod\'s place');
+    sw.value = podCopy; sw.dispatchEvent(new Event('change', { bubbles: true })); frames(1);
+    const ja = f.lib.jointActuator;
+    check(ja.children.find((x) => x.id === 'pod').design === podCopy && ja.links.some((l) => l.a === 'pod.out' && l.b === 'wrm.in'), 'swapped, and still driving the worm');
+    check(f.contract('jointActuator').ok, 'the actuator builds on the copy');
     f.reset();
 });
 

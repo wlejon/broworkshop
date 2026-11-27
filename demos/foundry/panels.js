@@ -350,6 +350,7 @@ export function renderContract(el, c) {
         h('span', { class: 'k' }, 'Parts'), h('span', { class: 'v' }, `${c.partCount} in ${c.children.length} children`),
     ));
     const ports = h('div', { class: 'f-ports' });
+    const rows = new Map();
     for (const p of c.ports) {
         let spec = '';
         const src = c.sources.find((s) => s.port === p.id);
@@ -366,8 +367,16 @@ export function renderContract(el, c) {
             const user = c.sources.find((s) => s.draw && s.draw.port === p.id);
             spec = user ? `draws ${si(user.power / user.draw.eff, 'W')}` : 'input';
         }
+        // Ports alike but for the child they come from (a power line per segment) read as one, counted.
+        const key = `${p.dir}|${p.domain}|${p.label.replace(/ \([^)]*\)$/, '')}`;
+        const row = rows.get(key);
+        if (row) { row.n++; continue; }
+        rows.set(key, { p, spec, n: 1 });
+    }
+    for (const { p, spec, n } of rows.values()) {
+        const label = n > 1 ? `${p.label.replace(/ \([^)]*\)$/, '')} ×${n}` : p.label;
         ports.append(h('div', { class: 'f-port' },
-            h('span', { class: 'd d-' + p.domain }), h('span', { class: 'dir' }, p.dir), h('span', {}, p.label), h('span', { class: 'spec' }, spec)));
+            h('span', { class: 'd d-' + p.domain }), h('span', { class: 'dir' }, p.dir), h('span', {}, label), h('span', { class: 'spec' }, n > 1 && spec === 'input' ? 'inputs' : spec)));
     }
     el.append(ports);
 }
@@ -565,7 +574,22 @@ export function renderInspector(el, title, design, c, childId, api) {
     }
     el.append(links);
     const actions = h('div', { class: 'f-actions' });
-    if (!isPart) { const o = h('button', { class: 'small primary', id: 'openChild' }, `Open ${ch.el.name}`); o.addEventListener('click', api.open); actions.append(o); }
+    if (!isPart) {
+        const o = h('button', { class: 'small primary', id: 'openChild' }, `Open ${ch.el.name}`); o.addEventListener('click', api.open); actions.append(o);
+        // Many of it, end to end: a chain of a design is how an arm gets long.
+        const n = h('input', { type: 'number', min: 1, max: 500, step: 1, value: 9, id: 'chainCount', class: 'f-chain-n', title: 'How many more' });
+        const b = h('button', { class: 'small', id: 'chainMore', title: `Add copies of ${ch.el.name} after this one, each into the next` }, 'Chain more');
+        b.addEventListener('click', () => api.chain(+n.value));
+        actions.append(h('span', { class: 'f-chain' }, b, n));
+        // Another design in its place, kept wired: a variant (a copy changed) goes where the original was.
+        const opts = api.swapOptions();
+        if (opts.length) {
+            const sel = h('select', { id: 'swapFor', title: 'Put another design in its place; its links stay' },
+                h('option', { value: '' }, 'Swap for…'), ...opts.map((o) => h('option', { value: o.id }, o.name)));
+            sel.addEventListener('change', () => { if (sel.value) api.swap(sel.value); });
+            actions.append(sel);
+        }
+    }
     const r = h('button', { class: 'small danger', id: 'removeChild' }, 'Remove'); r.addEventListener('click', api.remove); actions.append(r);
     el.append(actions);
 }
