@@ -55,7 +55,7 @@ function liftChain(c, outId) {
 }
 
 /** What a payload of `kg` at the tip asks of joint J, as a fraction of what it holds. */
-function jointLoad(J, kg, tipS) { return J.cont > 0 ? (J.hold + kg * G * (tipS - J.s)) / J.cont : Infinity; }
+function jointLoad(J, kg, tipS) { return J.upright ? 0 : J.cont > 0 ? (J.hold + kg * G * (tipS - J.s)) / J.cont : Infinity; }
 
 export function fmtKg(v) { return !isFinite(v) ? '∞' : v >= 1000 ? `${(v / 1000).toFixed(v >= 1e4 ? 0 : 1)} t` : `${v.toFixed(v >= 10 ? 0 : 1)} kg`; }
 export function fmtM(v) { return v >= 10 ? `${v.toFixed(0)} m` : v >= 1 ? `${v.toFixed(2)} m` : `${(v * 100).toFixed(0)} cm`; }
@@ -163,7 +163,7 @@ export function renderFlow(el, c, outId, opEffort) {
             const load = Math.min(1, jointLoad(J, opEffort || 0, lc.tipS));
             el.append(h('div', { class: 'f-stage-chip' + (weak ? ' weak' : ''), 'data-child': J.child || null, title: `${J.label}: ${J.limit} ${J.mode} past ${fmtEffort('rot', J.cont)}${J.lock != null ? `; locks at ${fmtEffort('rot', J.lock)} with the power off` : ''}` },
                 h('div', { class: 't' }, (dup.has(shortLabel(J.label)) && J.child ? `${J.child} · ` : '') + shortLabel(J.label) + (J.lock != null ? ' 🔒' : '')),
-                h('div', { class: 's' }, `drives ${fmtEffort('rot', J.cont)} · carries ${fmtEffort('rot', J.hold)} · ${fmtM(lc.tipS - J.s)} out`),
+                h('div', { class: 's' }, J.upright ? `drives ${fmtEffort('rot', J.cont)} · turns it all round level, carrying no weight` : `drives ${fmtEffort('rot', J.cont)} · carries ${fmtEffort('rot', J.hold)} · ${fmtM(lc.tipS - J.s)} out`),
                 h('div', { class: 'bar' }, h('i', { style: `width:${(load * 100).toFixed(1)}%` })),
             ));
         }
@@ -455,9 +455,9 @@ function drawLiftCurve(ctx, c, outId, op, { L, T, pw, ph }) {
     if (!lc || !lc.joints.length) return;
     const last = lc.joints[lc.joints.length - 1].s;
     const r0 = last + (lc.tipS - last) * 0.35, r1 = lc.tipS * 1.6;
-    const lift = (r) => Math.min(...lc.joints.map((J) => Math.max(0, J.cont - J.hold) / (G * Math.max(1e-6, r - J.s))));
+    const lift = (r) => Math.min(...lc.joints.filter((J) => !J.upright).map((J) => Math.max(0, J.cont - J.hold) / (G * Math.max(1e-6, r - J.s))));
     const want = c.goal && c.goal.lift;
-    const maxKg = Math.max(lift(lc.tipS) * 2.2, want ? want.payloadKg * 1.3 : 0) || 1;
+    const l0 = lift(lc.tipS), maxKg = Math.max(Number.isFinite(l0) ? l0 * 2.2 : 0, want ? want.payloadKg * 1.3 : 0) || 1;
     const X = (r) => L + ((r - r0) / (r1 - r0)) * pw, Y = (kg) => T + ph - (Math.min(kg, maxKg) / maxKg) * ph;
     ctx.strokeStyle = '#252b33'; ctx.lineWidth = 1;
     for (let k = 0; k <= 4; k++) { const y = T + (k / 4) * ph; ctx.beginPath(); ctx.moveTo(L, y); ctx.lineTo(L + pw, y); ctx.stroke(); }

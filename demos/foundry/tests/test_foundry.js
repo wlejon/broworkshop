@@ -280,6 +280,18 @@ test('a machine built from nothing by clicks, aimed at a goal, and built on', ()
     const ja = f.lib.jointActuator;
     check(ja.children.find((x) => x.id === 'pod').design === podCopy && ja.links.some((l) => l.a === 'pod.out' && l.b === 'wrm.in'), 'swapped, and still driving the worm');
     check(f.contract('jointActuator').ok, 'the actuator builds on the copy');
+    // A crane: a worm set to slew from behind its wheel turns a boom round level, an arm segment on its tip.
+    f.reset(); frames(1);
+    clickOn('#newDesign'); frames(1);
+    f.useDesign('drivePod'); f.addPart('worm'); frames(1);
+    f.select(f.lib[f.current].children.find((x) => x.part === 'worm').id); frames(1);
+    const mt = q('#inspector [data-param="mount"]');
+    mt.value = 'back'; mt.dispatchEvent(new Event('change', { bubbles: true })); frames(1);
+    f.addPart('boom'); f.useDesign('armSegment'); frames(1);
+    const crane = f.contract(f.current), slew = crane.joints.find((J) => J.upright);
+    check(slew && slew.load === 0 && slew.hold > slew.cont, `the turntable carries no weight though it could not hold the arm level (${slew && slew.hold.toFixed(0)} N·m)`);
+    check(crane.ok && !crane.warnings.length && crane.mounts[0].payloadKg > 100, `the crane lifts ${crane.mounts[0].payloadKg.toFixed(0)} kg, the arm segment's own`);
+    check(f.contract('jointActuator').joints.every((J) => !J.upright), 'a joint on a base that does not face its axis still carries its weight');
     f.reset();
 });
 

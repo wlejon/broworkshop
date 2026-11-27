@@ -200,6 +200,12 @@ const BUILD = {
             g.cbox([x0, -fh, -fz], [x1, fh, fz], { color: mix(paint, DARK, 0.25), mat: M.PAINT, bevel: s.flange * 0.3 });
             for (const y of [-fh * 0.72, fh * 0.72]) for (const z of [-fz * 0.68, fz * 0.68]) g.bolt([x1, y, z], 'x', Math.min(fh, fz) * 0.16);
         }
+        // A slewing base behind the wheel: a square plate the housing's width, bolted round the wheel's axis.
+        if (s.onBack) {
+            const z1 = -hz + 0.0001, z0 = -hz - s.flange, sx = Math.min(half, rw + m * 2), sy0 = yMin * 0.98, sy1 = Math.min(cd, rw + m * 2);
+            g.cbox([-sx, sy0, z0], [sx, sy1, z1], { color: mix(paint, DARK, 0.25), mat: M.PAINT, bevel: s.flange * 0.3 });
+            for (const x of [-sx * 0.8, sx * 0.8]) for (const y of [sy0 * 0.8, sy1 * 0.8]) g.bolt([x, y, z0], 'z', Math.min(sx, sy1) * 0.08);
+        }
         // Oil sight glass and breather.
         g.lathe([[0, half], [rq * 0.5, half], [rq * 0.5, half + wall * 0.4], [0, half + wall * 0.4]], { at: [0, yMin + (cd - yMin) * 0.25, 0], axis: 'x', color: lin([1.0, 0.55, 0.12]), mat: M.GLOW, segs: 20 });
         const inR = new Geo();

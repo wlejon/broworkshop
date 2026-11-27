@@ -50,6 +50,8 @@ export function createFoundryView(vp) {
     let movers = [];         // { node, axis, speed, angle, slide, s, dir, base }
     let selectNodes = new Map();
     let shown = null;
+    // How the shown design stands (a quaternion on the root), and its box so stood.
+    let stand = [0, 0, 0, 1], seen = null;
     let visScale = 1;
 
     function partNode(el, paint, detail) {
@@ -211,8 +213,18 @@ export function createFoundryView(vp) {
         const o = opts || {};
         clear();
         shown = c;
-        stage(c);
+        // A design is drawn in its own frame, its joints straight out and level: the pose its
+        // statics are worked in. One whose base carries a turntable (an upright joint) knows
+        // which way is down, and stands on its base.
+        const base = c.base && c.joints && c.joints.some((J) => J.upright) && c.ports.find((p) => p.id === c.base);
+        stand = base ? qMul(quatZTo([0, -1, 0]), qConj(quatZTo(base.axis))) : [0, 0, 0, 1];
+        const corners = [];
+        for (let k = 0; k < 8; k++) corners.push(qRot(stand, [0, 1, 2].map((i) => ((k >> i) & 1 ? c.box.max[i] : c.box.min[i]))));
+        const min = [0, 1, 2].map((i) => Math.min(...corners.map((p) => p[i]))), max = [0, 1, 2].map((i) => Math.max(...corners.map((p) => p[i])));
+        seen = { box: { min, max }, size: max.map((v, i) => v - min[i]) };
+        stage(seen);
         root = scene.createNode({ name: 'contract' });
+        root.quaternion = stand;
         const drawn = drawContract(c, root);
         collectMovers(drawn, (ref) => ref);
         // Children that run into one another are drawn red.
@@ -251,16 +263,17 @@ export function createFoundryView(vp) {
 
     function frame() {
         if (!shown) return;
-        const s = shown.size;
+        const s = seen.size;
         const size = Math.max(...s, 0.05);
         // Fit the bounding sphere, not the longest side, so long machines fill the view too.
         const radius = Math.max(0.025, 0.5 * Math.hypot(s[0], s[1], s[2]));
-        const c = shown.box.min.map((v, i) => (v + shown.box.max[i]) / 2);
+        const c = seen.box.min.map((v, i) => (v + seen.box.max[i]) / 2);
         // Look at the face the output comes out of, from three-quarters on.
         const outId = shown.goal ? shown.goal.out : (shown.ports.find((p) => p.dir === 'out') || {}).id;
         const out = shown.ports.find((p) => p.id === outId);
+        const oa = out && qRot(stand, out.axis);
         let yaw = 0.72;
-        if (out && Math.abs(out.axis[1]) < 0.5) yaw = Math.atan2(out.axis[0], out.axis[2]) + 0.72;
+        if (oa && Math.abs(oa[1]) < 0.5) yaw = Math.atan2(oa[0], oa[2]) + 0.72;
         // Pivot a little below the centre: the flow strip covers the bottom of the view.
         vp.reframe([c[0], c[1] - radius * 0.2, c[2]], radius * 2.8, { yaw, pitch: -0.38 });
         vp.cam.near = size * 0.02;
@@ -325,6 +338,13 @@ export function createFoundryView(vp) {
     }
 
     return { show, frame, setFlows, tick, select, pick, get contract() { return shown; }, get movers() { return movers; } };
+}
+
+function qConj(q) { return [-q[0], -q[1], -q[2], q[3]]; }
+
+function qRot(q, v) {
+    const [x, y, z, w] = q, t = [2 * (y * v[2] - z * v[1]), 2 * (z * v[0] - x * v[2]), 2 * (x * v[1] - y * v[0])];
+    return [v[0] + w * t[0] + y * t[2] - z * t[1], v[1] + w * t[1] + z * t[0] - x * t[2], v[2] + w * t[2] + x * t[1] - y * t[0]];
 }
 
 function qMul(a, b) {
