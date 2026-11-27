@@ -17,6 +17,7 @@
     --f-lin: #bf73ff;
     --f-hyd: #26cbf2;
     --f-elec: #5cb3ff;
+    --f-mnt: #c3ccd6;
     background: var(--f-bg);
     color: var(--f-text);
     font: 13px/1.4 var(--k-font-ui, system-ui, sans-serif);
@@ -125,7 +126,7 @@
 .f-port .d { width: 8px; height: 8px; border-radius: 2px; flex: none; }
 .f-port .dir { color: var(--f-faint); font-size: 10.5px; width: 24px; text-transform: uppercase; }
 .f-port .spec { margin-left: auto; color: var(--f-dim); font-variant-numeric: tabular-nums; }
-.d-rot { background: var(--f-rot); } .d-lin { background: var(--f-lin); } .d-hyd { background: var(--f-hyd); } .d-elec { background: var(--f-elec); }
+.d-rot { background: var(--f-rot); } .d-lin { background: var(--f-lin); } .d-hyd { background: var(--f-hyd); } .d-elec { background: var(--f-elec); } .d-mnt { background: var(--f-mnt); }
 
 .f-curve { width: 100%; height: 150px; display: block; }
 .f-slider { display: flex; align-items: center; gap: 8px; color: var(--f-dim); font-size: 12px; margin-top: 6px; }

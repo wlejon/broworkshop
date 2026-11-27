@@ -46,6 +46,8 @@ function operatingPoint(c) {
     const load = +$('load').value;
     const src = c.sources.find((s) => s.port === outId);
     const path = c.paths.find((p) => p.to === outId);
+    const mount = (c.mounts || []).find((m) => m.port === outId);
+    if (mount) return { payloadKg: isFinite(mount.payloadKg) ? mount.payloadKg * load * 2 : 0 };
     if (src && !src.unpowered) {
         const f = src.noLoad * (1 - load);
         const e = Math.max(0, Math.min(src.stall * (1 - f / src.noLoad), f > 0 ? src.power / f : Infinity));
@@ -84,9 +86,12 @@ function renderBench() {
     const outId = outPort(c);
     const op = operatingPoint(c);
     const out = c.ports.find((p) => p.id === outId);
-    P.renderFlow($('flow'), c, outId, op ? op.effort : 0);
+    P.renderFlow($('flow'), c, outId, op ? (op.payloadKg ?? op.effort) : 0);
     P.drawCurve($('curve'), c, outId, op);
-    if (out && op) {
+    if (out && op && op.payloadKg != null) {
+        $('loadVal').textContent = `${P.fmtKg(op.payloadKg)} at the ${out.label.toLowerCase()}`;
+        $('outHint').textContent = out.label;
+    } else if (out && op) {
         $('loadVal').textContent = `${P.fmtEffort(out.domain, op.effort)} at ${P.fmtFlow(out.domain, op.flow)}`;
         $('outHint').textContent = out.label;
         view.setFlows({ [outId]: op.flow });

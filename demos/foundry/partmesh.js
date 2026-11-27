@@ -521,6 +521,43 @@ function rotateAppend(g, g2, ang, at = [0, 0, 0]) {
     g.append(g2);
 }
 
+// A fabricated boom: a box-section beam welded between cheek plates round its
+// pivot hub, a bolted plate at the tip. The beam stands still in the pose the
+// compiler judged it in; its pivot pin turns with the joint.
+BUILD.boom = function boom(s, paint) {
+    const { L, h, w, t, hub, plate, stub: st } = s;
+    const g = new Geo();
+    const ct = Math.max(t * 1.5, w * 0.07);       // cheek plate thickness
+    const bw = w / 2 - ct;                         // half width of the beam between the cheeks
+    const cap = Math.max(t, h * 0.04);
+    // Beam: painted box section, steel flange strips top and bottom.
+    g.cbox([hub * 0.5, -h / 2 + cap, -bw], [L, h / 2 - cap, bw], { color: paint, mat: M.PAINT, bevel: t * 0.6 });
+    g.cbox([hub * 0.5, h / 2 - cap, -bw - ct * 0.4], [L, h / 2, bw + ct * 0.4], { color: mix(paint, DARK, 0.15), mat: M.PAINT, bevel: cap * 0.3 });
+    g.cbox([hub * 0.5, -h / 2, -bw - ct * 0.4], [L, -h / 2 + cap, bw + ct * 0.4], { color: mix(paint, DARK, 0.15), mat: M.PAINT, bevel: cap * 0.3 });
+    // Cheek plates round the hub, tapering into the beam.
+    const cheek = hullOfCircles([[0, 0, hub], [Math.min(L * 0.45, hub * 3), 0, h * 0.5]]);
+    g.ring(cheek, bw, w / 2, { color: paint, mat: M.PAINT, chamfer: ct * 0.25 });
+    g.ring(cheek, -w / 2, -bw, { color: paint, mat: M.PAINT, chamfer: ct * 0.25 });
+    // The hub between the cheeks, and bronze bushings showing on both faces.
+    g.lathe([[hub * 0.42, -bw], [hub * 0.92, -bw], [hub * 0.92, bw], [hub * 0.42, bw]], { color: mix(paint, DARK, 0.3), mat: M.CAST, segs: 48 });
+    for (const sd of [1, -1]) {
+        const z0 = sd * (w / 2 - ct * 0.3), z1 = sd * (w / 2 + ct * 0.02);
+        g.lathe([[hub * 0.42, z0], [hub * 0.62, z0], [hub * 0.62, z1], [hub * 0.42, z1]], { color: BRONZE, mat: M.BRASS, segs: 40 });
+    }
+    g.boltCircle(hub * 0.78, 6, w / 2, Math.max(0.002, hub * 0.07), { axis: 'z' });
+    g.boltCircle(hub * 0.78, 6, w / 2, Math.max(0.002, hub * 0.07), { axis: '-z' });
+    // Tip plate with its bolts.
+    const py = Math.min(h * 0.6, hub * 0.98), pz = w / 2;
+    g.cbox([L, -py, -pz], [L + plate, py, pz], { color: STEEL, mat: M.STEEL, bevel: plate * 0.2 });
+    for (const [y, z] of [[1, 1], [1, -1], [-1, 1], [-1, -1]]) g.bolt([L + plate, y * py * 0.72, z * pz * 0.7], 'x', Math.max(0.002, Math.min(py, pz) * 0.12));
+    // The pivot pin, turning with the joint.
+    const rs = Math.max(0.003, hub * 0.4);
+    const pin = new Geo();
+    stub(pin, rs, w / 2 - ct * 0.6, -w / 2 - st, { axis: 'z' });      // its far end sunk in the far cheek
+    g.lathe([[hub * 0.42, w / 2 + ct * 0.02], [0, w / 2 + ct * 0.02]], { color: DARK, mat: M.CAST, segs: 40, edges: false });
+    return { body: g, movers: [{ geo: pin, pivot: [0, 0, 0], axis: 'z', port: 'in', sign: 1 }], shaftR: { in: rs } };
+};
+
 export function meshPart(el, paint) {
     const f = BUILD[el.shape.kind];
     if (!f) throw new Error('foundry: no mesh for ' + el.shape.kind);

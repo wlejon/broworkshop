@@ -27,6 +27,18 @@ test('the starter ladder compiles, places cleanly and meets its goals', () => {
     // A parent sees the child only by its contract: the pod's box holds the reducer's.
     const redInPod = pod.children.find((c) => c.id === 'red');
     check(redInPod.el === red, 'the pod uses the compiled reducer');
+    // Statics: the segment's joint is held by the actuator, and a second segment on its tip
+    // loads the shoulder with the whole elbow, stretched out.
+    const seg = cache.get('armSegment'), arm = cache.get('twoLinkArm');
+    const J = seg.joints[0];
+    check(Math.abs(J.cont - cache.get('jointActuator').sources[0].cont) < 1e-6, 'the boom holds what the actuator gives');
+    const segTip = seg.mounts[0], armTip = arm.mounts[0];
+    check(Math.abs(segTip.payloadKg - (J.cont - J.hold) / (9.81 * (segTip.reach - J.s))) < 1e-6, 'payload is spare torque over the lever');
+    check(Math.abs(armTip.reach - 2 * segTip.reach) < 1e-6, 'two segments stretched reach twice as far');
+    const [sh, el] = arm.joints.slice().sort((a, b) => a.s - b.s);
+    check(sh.hold > el.hold * 5, `the shoulder carries the elbow (${sh.hold.toFixed(0)} against ${el.hold.toFixed(0)} N·m)`);
+    check(armTip.weakest === sh.label, 'the shoulder runs out first');
+    check(arm.warnings.length === 0 && seg.warnings.length === 0, `arms have no warnings: ${arm.warnings.concat(seg.warnings).join('; ')}`);
 });
 
 test('the UI shows every design and edits undo', () => {

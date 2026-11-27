@@ -16,7 +16,7 @@ const fs = require('fs');
 const PART_BK = fs.readFileSync(bro.resolvePath('/app/shaders/part.bk'), 'utf8');
 const FLOOR_BK = fs.readFileSync(bro.resolvePath('/app/shaders/floor.bk'), 'utf8');
 
-const DOMAIN_COLOR = { rot: [1.0, 0.62, 0.15], lin: [0.75, 0.45, 1.0], hyd: [0.15, 0.8, 0.95], elec: [0.35, 0.7, 1.0] };
+const DOMAIN_COLOR = { rot: [1.0, 0.62, 0.15], lin: [0.75, 0.45, 1.0], hyd: [0.15, 0.8, 0.95], elec: [0.35, 0.7, 1.0], mnt: [0.75, 0.8, 0.85] };
 
 function qAxisAngle(axis, ang) {
     const s = Math.sin(ang / 2), c = Math.cos(ang / 2);
@@ -126,6 +126,7 @@ export function createFoundryView(vp) {
         };
         out.links = [];
         for (const l of c.links) {
+            if (l.domain === 'mnt') continue;      // a bolted face: the parts draw their own plates
             const A = portWorld(l.out), B = portWorld(l.in);
             if (l.mech) {
                 const r = Math.max(out.shaftR.get(l.out) || 0.004, out.shaftR.get(l.in) || 0.004);

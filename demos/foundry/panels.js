@@ -43,7 +43,22 @@ export function fmtBox(sz) {
     return sz.map((v) => (v * k).toFixed(unit === 'mm' ? 0 : unit === 'cm' ? 1 : 2)).join(' × ') + ' ' + unit;
 }
 
-const DOMAIN_NAME = { rot: 'rotary', lin: 'linear', hyd: 'hydraulic', elec: 'electric' };
+const DOMAIN_NAME = { rot: 'rotary', lin: 'linear', hyd: 'hydraulic', elec: 'electric', mnt: 'mount' };
+const G = 9.81;
+
+/** The joints a mount output hangs from, base outward, and that mount. */
+function liftChain(c, outId) {
+    const mount = (c.mounts || []).find((m) => m.port === outId);
+    if (!mount) return null;
+    const joints = c.joints.filter((J) => J.tips.includes(outId)).sort((a, b) => a.s - b.s);
+    return { mount, joints, tipS: c.stretch ? c.stretch.tips[outId] : mount.reach };
+}
+
+/** What a payload of `kg` at the tip asks of joint J, as a fraction of what it holds. */
+function jointLoad(J, kg, tipS) { return J.cont > 0 ? (J.hold + kg * G * (tipS - J.s)) / J.cont : Infinity; }
+
+export function fmtKg(v) { return !isFinite(v) ? '∞' : v >= 1000 ? `${(v / 1000).toFixed(v >= 1e4 ? 0 : 1)} t` : `${v.toFixed(v >= 10 ? 0 : 1)} kg`; }
+export function fmtM(v) { return v >= 10 ? `${v.toFixed(0)} m` : v >= 1 ? `${v.toFixed(2)} m` : `${(v * 100).toFixed(0)} cm`; }
 export function paintCss(p) { return p ? `rgb(${p.map((v) => Math.round(v * 255)).join(',')})` : '#777'; }
 
 export function statusOf(c) {
@@ -108,13 +123,31 @@ export function renderFlow(el, c, outId, opEffort) {
     clear(el);
     const out = c.ports.find((p) => p.id === outId);
     if (!out) return;
+    const arrow = () => h('div', { class: 'f-arrow' }, '›');
+    if (out.domain === 'mnt') {
+        // A lift: base, each joint it hangs from (what it holds, what it carries), the tip.
+        const lc = liftChain(c, outId);
+        if (!lc) return;
+        el.append(h('div', { class: 'f-stage-chip io' }, h('div', { class: 't' }, 'Base'), h('div', { class: 's' }, 'mount')));
+        for (const J of lc.joints) {
+            el.append(arrow());
+            const weak = lc.mount.weakest === J.label;
+            const load = Math.min(1, jointLoad(J, opEffort || 0, lc.tipS));
+            el.append(h('div', { class: 'f-stage-chip' + (weak ? ' weak' : ''), title: `${J.label}: ${J.limit} ${J.mode} past ${fmtEffort('rot', J.cont)}` },
+                h('div', { class: 't' }, shortLabel(J.label)),
+                h('div', { class: 's' }, `holds ${fmtEffort('rot', J.cont)} · carries ${fmtEffort('rot', J.hold)} · ${fmtM(lc.tipS - J.s)} out`),
+                h('div', { class: 'bar' }, h('i', { style: `width:${(load * 100).toFixed(1)}%` })),
+            ));
+        }
+        el.append(arrow(), h('div', { class: 'f-stage-chip io' }, h('div', { class: 't' }, out.label), h('div', { class: 's' }, `lifts ${fmtKg(lc.mount.payloadKg)} at ${fmtM(lc.mount.reach)}`)));
+        return;
+    }
     const src = c.sources.find((s) => s.port === outId);
     const path = c.paths.find((p) => p.to === outId);
     const chain = src || path;
     if (!chain) return;
     const dom = out.domain;
     const tr = c.traces[outId];
-    const arrow = () => h('div', { class: 'f-arrow' }, '›');
     if (src) {
         const root = c.children.find((ch) => ch.id === tr.root.child);
         const rl = root.el.kind === 'contract' ? root.el.name : root.el.label;
@@ -179,6 +212,11 @@ export function renderGoal(el, c, pill) {
         } else if (k.kind === 'mass') {
             got = fmtMass(k.got); want = fmtMass(k.want);
             const top = Math.max(k.got, k.want) * 1.15; frac = k.got / top; mark = k.want / top;
+        } else if (k.kind === 'payload' || k.kind === 'reach') {
+            const f = k.kind === 'payload' ? fmtKg : fmtM;
+            got = f(k.got); want = f(k.want);
+            const top = (isFinite(k.got) ? Math.max(k.got, k.want) : k.want * 2) * 1.15 || 1;
+            frac = Math.min(1, k.got / top); mark = k.want / top;
         } else {
             got = `${k.got} errors`; want = '0';
         }
@@ -208,6 +246,10 @@ export function renderContract(el, c) {
         if (src) spec = `${fmtEffort(p.domain, src.cont)} cont · ${fmtFlow(p.domain, src.noLoad)}`;
         else if (path) spec = `×${path.k >= 10 ? path.k.toFixed(0) : path.k.toFixed(2)} · holds ${fmtEffort(p.domain, path.cont)}`;
         else if (sup) spec = `${si(sup.power, 'W')} · ${sup.energyWh} Wh`;
+        else if (p.domain === 'mnt') {
+            const m = (c.mounts || []).find((x) => x.port === p.id);
+            spec = m ? `lifts ${fmtKg(m.payloadKg)} at ${fmtM(m.reach)}` : 'mount';
+        }
         else if (p.dir === 'in') {
             const user = c.sources.find((s) => s.draw && s.draw.port === p.id);
             spec = user ? `draws ${si(user.power / user.draw.eff, 'W')}` : 'input';
@@ -228,12 +270,13 @@ export function drawCurve(canvas, c, outId, op) {
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, w, hgt);
     const out = c.ports.find((p) => p.id === outId);
+    const L = 46, R = 10, T = 10, B = 22;
+    const pw = w - L - R, ph = hgt - T - B;
+    if (out && out.domain === 'mnt') { drawLiftCurve(ctx, c, outId, op, { L, T, pw, ph }); return; }
     const src = c.sources.find((s) => s.port === outId);
     const path = c.paths.find((p) => p.to === outId);
     if (!out || (!src && !path)) return;
     const dom = out.domain;
-    const L = 46, R = 10, T = 10, B = 22;
-    const pw = w - L - R, ph = hgt - T - B;
     let maxF, maxE, curve;
     if (src) {
         maxF = src.noLoad * 1.05;
@@ -274,6 +317,36 @@ export function drawCurve(canvas, c, outId, op) {
     if (op) {
         ctx.fillStyle = '#ffffff'; ctx.beginPath(); ctx.arc(X(op.flow), Y(op.effort), 4.5, 0, Math.PI * 2); ctx.fill();
     }
+}
+
+/**
+ * What the arm lifts at each reach: every joint's spare torque over the lever
+ * from it to a payload r out from the base, the least of them. The tip is
+ * marked where it is; a longer arm reaches further and lifts less.
+ */
+function drawLiftCurve(ctx, c, outId, op, { L, T, pw, ph }) {
+    const lc = liftChain(c, outId);
+    if (!lc || !lc.joints.length) return;
+    const last = lc.joints[lc.joints.length - 1].s;
+    const r0 = last + (lc.tipS - last) * 0.35, r1 = lc.tipS * 1.6;
+    const lift = (r) => Math.min(...lc.joints.map((J) => Math.max(0, J.cont - J.hold) / (G * Math.max(1e-6, r - J.s))));
+    const want = c.goal && c.goal.lift;
+    const maxKg = Math.max(lift(lc.tipS) * 2.2, want ? want.payloadKg * 1.3 : 0) || 1;
+    const X = (r) => L + ((r - r0) / (r1 - r0)) * pw, Y = (kg) => T + ph - (Math.min(kg, maxKg) / maxKg) * ph;
+    ctx.strokeStyle = '#252b33'; ctx.lineWidth = 1;
+    for (let k = 0; k <= 4; k++) { const y = T + (k / 4) * ph; ctx.beginPath(); ctx.moveTo(L, y); ctx.lineTo(L + pw, y); ctx.stroke(); }
+    ctx.fillStyle = '#5d6672'; ctx.font = '10px system-ui'; ctx.textAlign = 'right';
+    ctx.fillText(fmtKg(maxKg), L - 4, T + 8);
+    ctx.fillText('0', L - 4, T + ph);
+    ctx.textAlign = 'left'; ctx.fillText(fmtM(r0), L, T + ph + 14);
+    ctx.textAlign = 'right'; ctx.fillText(fmtM(r1) + ' reach', L + pw, T + ph + 14);
+    ctx.strokeStyle = '#f08a24'; ctx.lineWidth = 2; ctx.beginPath();
+    for (let k = 0; k <= 64; k++) { const r = r0 + (k / 64) * (r1 - r0); const y = Y(lift(r)); if (k) ctx.lineTo(X(r), y); else ctx.moveTo(X(r), y); }
+    ctx.stroke();
+    ctx.strokeStyle = '#3ccf8e'; ctx.setLineDash([4, 4]); ctx.beginPath(); ctx.moveTo(X(lc.tipS), T); ctx.lineTo(X(lc.tipS), T + ph); ctx.stroke(); ctx.setLineDash([]);
+    ctx.fillStyle = '#3ccf8e'; ctx.textAlign = 'left'; ctx.fillText('tip', X(lc.tipS) + 4, T + 10);
+    if (want) { ctx.strokeStyle = '#e8edf2'; ctx.lineWidth = 1.5; ctx.strokeRect(X(want.reachM) - 4, Y(want.payloadKg) - 4, 8, 8); }
+    if (op && op.payloadKg != null) { ctx.fillStyle = '#ffffff'; ctx.beginPath(); ctx.arc(X(lc.tipS), Y(op.payloadKg), 4.5, 0, Math.PI * 2); ctx.fill(); }
 }
 
 // --- problems ---------------------------------------------------------------------
