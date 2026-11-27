@@ -69,19 +69,27 @@ export function statusOf(c) {
 
 // --- library -----------------------------------------------------------------
 
-export function renderLibrary(el, lib, cache, currentId, onOpen, onUse) {
+/**
+ * Every design by level. `canUse(id)` says whether a design may go into the
+ * open one (it does not contain the open one); those rows carry “use”.
+ */
+export function renderLibrary(el, lib, cache, currentId, onOpen, onUse, canUse) {
     clear(el);
     const byLevel = new Map();
-    for (const d of Object.values(lib)) (byLevel.get(d.level) || byLevel.set(d.level, []).get(d.level)).push(d);
+    for (const d of Object.values(lib)) {
+        const lvl = cache.get(d.id) ? cache.get(d.id).level : 1;
+        (byLevel.get(lvl) || byLevel.set(lvl, []).get(lvl)).push(d);
+    }
     for (const lvl of [...byLevel.keys()].sort((a, b) => a - b)) {
         el.append(h('div', { class: 'f-lvl' }, `Level ${lvl}`));
         for (const d of byLevel.get(lvl)) {
             const c = cache.get(d.id);
+            const usable = d.id !== currentId && canUse(d.id);
             const row = h('div', { class: 'f-design' + (d.id === currentId ? ' cur' : ''), 'data-id': d.id },
                 h('span', { class: 'f-swatch', style: `background:${paintCss(d.paint)}` }),
                 h('span', { class: 'name' }, d.name),
-                d.id !== currentId ? h('button', { class: 'use small', title: `Add ${d.name} to the open design` }, 'use') : null,
-                h('span', { class: 'f-dot ' + (c ? statusOf(c) : 'err') }),
+                usable ? h('button', { class: 'use small', title: `Add ${d.name} to the open design, as a part` }, '+ use') : null,
+                h('span', { class: 'f-dot ' + (c ? statusOf(c) : 'err'), title: c ? { err: 'does not build', pass: 'meets its goal', fail: 'misses its goal' }[statusOf(c)] : '' }),
             );
             row.addEventListener('click', (e) => {
                 if (e.target.classList.contains('use')) onUse(d.id); else onOpen(d.id);
@@ -109,12 +117,29 @@ export function renderPalette(el, onAdd) {
 
 // --- title, flow strip ------------------------------------------------------------
 
-export function renderTitle(el, c) {
+/** Text that turns into a field when clicked; Enter or leaving it commits, Escape cancels. */
+function editable(cls, text, placeholder, onCommit) {
+    const span = h('div', { class: cls + ' f-editable' + (text ? '' : ' empty'), title: 'Click to edit' }, text || placeholder);
+    span.addEventListener('click', () => {
+        const inp = h('input', { type: 'text', class: cls + ' f-edit', value: text });
+        let done = false;
+        const finish = (keep) => { if (done) return; done = true; if (keep) onCommit(inp.value); else inp.replaceWith(span); };
+        inp.addEventListener('keydown', (e) => { if (e.key === 'Enter') finish(true); if (e.key === 'Escape') finish(false); });
+        inp.addEventListener('blur', () => finish(true));
+        span.replaceWith(inp);
+        inp.focus();
+        inp.select();
+    });
+    return span;
+}
+
+/** The open design's level, name and note; `api`: rename(name), note(text). */
+export function renderTitle(el, c, api) {
     clear(el);
     el.append(
         h('div', { class: 'lvl' }, `Level ${c.level} · ${c.partCount} parts`),
-        h('div', { class: 'nm' }, c.name),
-        h('div', { class: 'note' }, c.note),
+        api ? editable('nm', c.name, 'Untitled', api.rename) : h('div', { class: 'nm' }, c.name),
+        api ? editable('note', c.note, 'Add a note: what it is for…', api.note) : h('div', { class: 'note' }, c.note),
     );
 }
 
@@ -129,12 +154,15 @@ export function renderFlow(el, c, outId, opEffort) {
         const lc = liftChain(c, outId);
         if (!lc) return;
         el.append(h('div', { class: 'f-stage-chip io' }, h('div', { class: 't' }, 'Base'), h('div', { class: 's' }, 'mount')));
+        // Joints of the same name (a chain of one design) are told apart by the child they are in.
+        const seen = new Set(), dup = new Set();
+        for (const J of lc.joints) { const n = shortLabel(J.label); if (seen.has(n)) dup.add(n); seen.add(n); }
         for (const J of lc.joints) {
             el.append(arrow());
             const weak = lc.mount.weakest === J.label;
             const load = Math.min(1, jointLoad(J, opEffort || 0, lc.tipS));
-            el.append(h('div', { class: 'f-stage-chip' + (weak ? ' weak' : ''), title: `${J.label}: ${J.limit} ${J.mode} past ${fmtEffort('rot', J.cont)}${J.lock != null ? `; locks at ${fmtEffort('rot', J.lock)} with the power off` : ''}` },
-                h('div', { class: 't' }, shortLabel(J.label) + (J.lock != null ? ' 🔒' : '')),
+            el.append(h('div', { class: 'f-stage-chip' + (weak ? ' weak' : ''), 'data-child': J.child || null, title: `${J.label}: ${J.limit} ${J.mode} past ${fmtEffort('rot', J.cont)}${J.lock != null ? `; locks at ${fmtEffort('rot', J.lock)} with the power off` : ''}` },
+                h('div', { class: 't' }, (dup.has(shortLabel(J.label)) && J.child ? `${J.child} · ` : '') + shortLabel(J.label) + (J.lock != null ? ' 🔒' : '')),
                 h('div', { class: 's' }, `drives ${fmtEffort('rot', J.cont)} · carries ${fmtEffort('rot', J.hold)} · ${fmtM(lc.tipS - J.s)} out`),
                 h('div', { class: 'bar' }, h('i', { style: `width:${(load * 100).toFixed(1)}%` })),
             ));
@@ -155,7 +183,7 @@ export function renderFlow(el, c, outId, opEffort) {
         const rl = root.el.kind === 'contract' ? root.el.name : root.el.label;
         const rp = root.el.ports.find((p) => p.id === tr.root.src.port);
         const rd = rp ? rp.domain : dom;
-        el.append(h('div', { class: 'f-stage-chip src' },
+        el.append(h('div', { class: 'f-stage-chip src', 'data-child': tr.root.child },
             h('div', { class: 't' }, rl),
             h('div', { class: 's' }, root.el.summary || `${fmtEffort(rd, tr.root.src.cont)} cont · ${fmtFlow(rd, tr.root.src.noLoad)}`),
         ));
@@ -169,7 +197,7 @@ export function renderFlow(el, c, outId, opEffort) {
         const guard = chain.guarded && s.label === chain.guarded.label;
         const load = opEffort > 0 && isFinite(s.peak) ? Math.min(1, opEffort / s.peak) : 0;
         const ratio = s.k !== 1 ? `×${s.k >= 10 ? s.k.toFixed(0) : s.k.toFixed(2)}` : '';
-        el.append(h('div', { class: 'f-stage-chip' + (weak ? ' weak' : '') + (guard ? ' guard' : ''), title: `${s.label}: ${s.mode} at ${fmtEffort(dom, s.peak)} at the output` },
+        el.append(h('div', { class: 'f-stage-chip' + (weak ? ' weak' : '') + (guard ? ' guard' : ''), 'data-child': s.child, title: `${s.label}: ${s.mode} at ${fmtEffort(dom, s.peak)} at the output` },
             h('div', { class: 't' }, shortLabel(s.label) + (s.locks ? ' 🔒' : '')),
             h('div', { class: 's' }, [ratio, `${Math.round(s.eff * 100)}%`, `${s.role === 'limiter' ? 'slips' : s.role === 'fuse' ? 'breaks' : 'holds'} ${fmtEffort(dom, s.peak)}`].filter(Boolean).join(' · ')),
             h('div', { class: 'bar' }, h('i', { style: `width:${(load * 100).toFixed(1)}%` })),
@@ -185,12 +213,80 @@ function shortLabel(l) {
 
 // --- goal ----------------------------------------------------------------------
 
-export function renderGoal(el, c, pill) {
+// Units the goal is edited in: what a value reads as, and its SI scale.
+const EFFORT_UNIT = { rot: ['N·m', 1], lin: ['N', 1], hyd: ['bar', 1e5], elec: ['W', 1] };
+const FLOW_UNIT = { rot: ['rpm', RPM], lin: ['mm/s', 1e-3], hyd: ['L/min', 1 / 60000], elec: ['A', 1] };
+let goalEditing = null;   // the design whose goal form is open
+
+function num(v) { return +(+v).toPrecision(4); }
+
+/** The goal form: every number of `g` in the units it reads in; each change sets a new goal. */
+function goalForm(c, g, api) {
+    const form = h('div', { class: 'f-goal-form' });
+    const outs = c.ports.filter((p) => p.dir === 'out');
+    const out = outs.find((p) => p.id === g.out) || outs[0];
+    const dom = out ? out.domain : 'rot';
+    const put = (fn) => { const n = structuredClone(g); fn(n); api.set(n); };
+    const field = (label, value, unit, onSet, opts = {}) => {
+        const inp = h('input', { type: 'number', step: 'any', min: 0, value: value == null ? '' : num(value), placeholder: opts.placeholder || '', 'data-goal': opts.key || label });
+        inp.addEventListener('change', () => onSet(inp.value === '' ? null : +inp.value));
+        form.append(h('label', { class: 'f-gf' }, h('span', {}, label), inp, h('span', { class: 'u' }, unit)));
+    };
+    if (outs.length > 1) {
+        const sel = h('select', { 'data-goal': 'out' }, ...outs.map((p) => h('option', { value: p.id, selected: p.id === g.out ? '' : null }, p.label)));
+        sel.addEventListener('change', () => { const n = api.draft(sel.value); if (n) api.set(n); });
+        form.append(h('label', { class: 'f-gf' }, h('span', {}, 'Output'), sel, h('span', {})));
+    }
+    if (g.lift) {
+        field('Lifts', g.lift.payloadKg, 'kg', (v) => put((n) => { n.lift.payloadKg = v || 0; }), { key: 'payload' });
+        field('Reach', g.lift.reachM, 'm', (v) => put((n) => { n.lift.reachM = v || 0; }), { key: 'reach' });
+    } else {
+        const [eu, es] = EFFORT_UNIT[dom] || EFFORT_UNIT.rot, [fu, fs] = FLOW_UNIT[dom] || FLOW_UNIT.rot;
+        if (g.given) {
+            field('Given', g.given.effort, 'N·m in', (v) => put((n) => { n.given.effort = v || 0; }), { key: 'givenEffort' });
+            field('at', g.given.flow / RPM, 'rpm in', (v) => put((n) => { n.given.flow = (v || 0) * RPM; }), { key: 'givenFlow' });
+        }
+        field('Holds', g.need.effort / es, eu, (v) => put((n) => { n.need.effort = (v || 0) * es; }), { key: 'effort' });
+        field(g.given ? 'Speed' : 'at speed', g.need.flow / fs, fu, (v) => put((n) => { n.need.flow = (v || 0) * fs; }), { key: 'flow' });
+    }
+    const boxCm = g.box ? g.box.map((v) => v * 100) : [null, null, null];
+    const row = h('label', { class: 'f-gf' }, h('span', {}, 'Fits in'));
+    const bx = boxCm.map((v, i) => {
+        const inp = h('input', { type: 'number', step: 'any', min: 0, value: v == null ? '' : num(v), placeholder: '—', class: 'third', 'data-goal': `box${i}` });
+        inp.addEventListener('change', () => {
+            const vals = bx.map((x) => (x.value === '' ? null : +x.value / 100));
+            put((n) => { if (vals.every((x) => x > 0)) n.box = vals; else delete n.box; });
+        });
+        return inp;
+    });
+    row.append(h('span', { class: 'f-box3' }, ...bx), h('span', { class: 'u' }, 'cm'));
+    form.append(row);
+    field('Mass under', g.massMax, 'kg', (v) => put((n) => { if (v > 0) n.massMax = v; else delete n.massMax; }), { key: 'mass', placeholder: 'any' });
+    return form;
+}
+
+/**
+ * The goal: its checks, met or not, and its form. `api`:
+ *   set(goal | null), draft(outId?) → a goal the design meets as it stands.
+ */
+export function renderGoal(el, c, pill, api) {
     clear(el);
     const g = c.goal;
     pill.className = 'f-pill ' + statusOf(c);
     pill.textContent = !c.ok ? 'Does not build' : !g ? 'No goal' : g.pass ? 'Goal met' : 'Goal not met';
-    if (!g) { el.append(h('div', { class: 'f-empty' }, 'This design has no goal.')); return; }
+    const editing = goalEditing === c.id;
+    const bar = h('div', { class: 'f-goal-bar' });
+    if (!g) {
+        const draft = api && api.draft();
+        el.append(h('div', { class: 'f-empty' }, draft ? 'No goal yet. Set one from what it does now, then ask for more.' : 'No goal: expose an output to aim it at.'));
+        if (draft) {
+            const b = h('button', { class: 'small primary', id: 'setGoal' }, 'Set a goal');
+            b.addEventListener('click', () => { goalEditing = c.id; api.set(draft); });
+            bar.append(b);
+            el.append(bar);
+        }
+        return;
+    }
     const out = c.ports.find((p) => p.id === g.out);
     const dom = out ? out.domain : 'rot';
     if (g.given) el.append(h('div', { class: 'f-given' }, `Given ${fmtEffort('rot', g.given.effort)} at ${fmtFlow('rot', g.given.flow)} in`));
@@ -228,6 +324,18 @@ export function renderGoal(el, c, pill) {
             h('div', { class: 'meter' }, h('i', { style: `width:${Math.max(0, Math.min(1, frac)) * 100}%` }), h('u', { style: `left:${Math.max(0, Math.min(1, mark)) * 100}%` })),
         ));
     }
+    if (!api) return;
+    const raw = { out: g.out, ...(g.lift ? { lift: g.lift } : { need: g.need, ...(g.given ? { given: g.given } : {}) }) };
+    const box = g.checks.find((k) => k.kind === 'box'), mass = g.checks.find((k) => k.kind === 'mass');
+    if (box) raw.box = box.want;
+    if (mass) raw.massMax = mass.want;
+    const edit = h('button', { class: 'small', id: 'editGoal' }, editing ? 'Done' : 'Edit goal');
+    edit.addEventListener('click', () => { goalEditing = editing ? null : c.id; api.refresh(); });
+    const clr = h('button', { class: 'small', id: 'clearGoal' }, 'Clear');
+    clr.addEventListener('click', () => { goalEditing = null; api.set(null); });
+    bar.append(edit, clr);
+    el.append(bar);
+    if (editing) el.append(goalForm(c, raw, api));
 }
 
 // --- contract ------------------------------------------------------------------
@@ -357,11 +465,23 @@ function drawLiftCurve(ctx, c, outId, op, { L, T, pw, ph }) {
 
 // --- problems ---------------------------------------------------------------------
 
-export function renderProblems(el, c) {
+/**
+ * Errors and warnings. A problem that names a child (“… (worm1) …” or
+ * “worm1: …”) selects it when clicked, via `onPick(childId)`.
+ */
+export function renderProblems(el, c, onPick) {
     clear(el);
     if (!c.errors.length && !c.warnings.length) { el.append(h('div', { class: 'f-prob none' }, 'None.')); return; }
-    for (const e of c.errors) el.append(h('div', { class: 'f-prob err' }, e));
-    for (const w of c.warnings) el.append(h('div', { class: 'f-prob warn' }, w));
+    const ids = c.children.map((ch) => ch.id).sort((a, b) => b.length - a.length);
+    const named = (t) => ids.find((id) => t.includes(`(${id})`) || t.startsWith(`${id}:`) || t.startsWith(`${id} `) || t.includes(` ${id}.`) || t.startsWith(`${id}.`));
+    const row = (cls, t) => {
+        const id = onPick && named(t);
+        const r = h('div', { class: `f-prob ${cls}` + (id ? ' pick' : ''), title: id ? `Select ${id}` : '' }, t);
+        if (id) { r.dataset.child = id; r.addEventListener('click', () => onPick(id)); }
+        el.append(r);
+    };
+    for (const e of c.errors) row('err', e);
+    for (const w of c.warnings) row('warn', w);
 }
 
 // --- inspector ----------------------------------------------------------------------

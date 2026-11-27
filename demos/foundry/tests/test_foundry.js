@@ -1,5 +1,5 @@
 // demos/foundry/tests/test_foundry.js — the compiler ladder and the UI.
-import { test, check, frames, shot, done, clickOn, q } from "/lib/kit/test.js";
+import { test, check, frames, shot, done, clickOn, q, press } from "/lib/kit/test.js";
 import { starterLibrary } from "/lib/foundry/designs.js";
 import { compileLibrary } from "/lib/foundry/compile.js";
 import { PARTS, partDefaults } from "/lib/foundry/parts.js";
@@ -53,6 +53,8 @@ test('the starter ladder compiles, places cleanly and meets its goals', () => {
 test('the UI shows every design and edits undo', () => {
     frames(4);
     const f = window.foundry;
+    f.reset();
+    frames(2);
     for (const id of Object.keys(f.lib)) {
         f.open(id);
         frames(6);
@@ -178,6 +180,83 @@ test('every part draws on its own', () => {
         delete f.lib[id];
         f.cache.delete(id);
     }
+});
+
+test('a machine built from nothing by clicks, aimed at a goal, and built on', () => {
+    const f = window.foundry;
+    f.reset();
+    frames(2);
+    const rowOf = (name) => {
+        const r = [...document.querySelectorAll('#library .f-design')].find((x) => x.querySelector('.name').textContent === name);
+        r.scrollIntoView({ block: 'nearest' });
+        flush();
+        return r;
+    };
+    const ports = () => f.lib[f.current].ports.map((p) => p.at);
+    // A pod: motor, the reducer, a clutch, a battery. Each lands wired.
+    clickOn('#newDesign'); frames(2);
+    clickOn('#title .nm'); frames(1);
+    q('#title input.nm').value = '';
+    textInput('Test Pod'); press('Enter'); frames(1);
+    check(f.lib[f.current].name === 'Test Pod', 'the title renames the design');
+    clickOn('#palette button[data-part="motor"]'); frames(1);
+    check(ports().includes('moto1.out') && ports().includes('moto1.pwr'), `a lone motor exposes its shaft and its power (${ports()})`);
+    clickOn(rowOf('Reducer 9:1').querySelector('.use')); frames(1);
+    check(f.contract(f.current).level === 2, 'using a level-1 design makes this level 2');
+    clickOn('#palette button[data-part="clutch"]'); frames(1);
+    clickOn('#palette button[data-part="battery"]'); frames(1);
+    const pod = f.contract(f.current);
+    check(pod.ok && !pod.warnings.length, `the pod builds clean: ${pod.errors.concat(pod.warnings).join('; ')}`);
+    check(pod.ports.length === 1 && pod.sources.length === 1 && pod.sources[0].supply, 'the battery feeds the motor, and only the output is left exposed');
+    // A goal from what it does, then asked for more than it has.
+    clickOn('#setGoal'); frames(1);
+    check(f.contract(f.current).goal.pass, 'a drafted goal is met');
+    const eff = q('#goal input[data-goal="effort"]');
+    eff.value = '400'; eff.dispatchEvent(new Event('change', { bubbles: true })); frames(1);
+    check(!f.contract(f.current).goal.pass && /not met/.test(q('#goalPill').textContent), 'asking 400 N·m of it misses');
+    f.history.undo(); frames(1);
+    check(f.contract(f.current).goal.pass, 'undo puts the goal back');
+    // A level up: the pod and a worm. The default worm strips under the pod; a problem points at it.
+    const podName = 'Test Pod';
+    clickOn('#newDesign'); frames(1);
+    clickOn(rowOf(podName).querySelector('.use')); frames(1);
+    clickOn('#palette button[data-part="worm"]'); frames(1);
+    const prob = document.querySelector('#problems .f-prob.pick');
+    check(prob && prob.dataset.child === 'worm1', 'the worm warning names the worm');
+    clickOn(prob); frames(1);
+    check(f.selected === 'worm1' && /worm1/.test(q('#inspTitle').textContent), 'clicking the problem selects the worm');
+    clickOn('#flow .f-stage-chip.src'); frames(1);
+    check(f.selected === 'tes1' && q('#flow .f-stage-chip.sel'), `a flow stage selects its child (${f.selected})`);
+    // An arm on it: a boom on the wheel, the tip exposed, a lift goal.
+    const actId = f.current;
+    clickOn('#newDesign'); frames(1);
+    clickOn(rowOf(f.lib[actId].name).querySelector('.use')); frames(1);
+    clickOn('#palette button[data-part="boom"]'); frames(2);
+    const arm = f.contract(f.current);
+    check(arm.mounts.length === 1 && arm.mounts[0].payloadKg > 0, 'a boom on the actuator lifts at its tip');
+    clickOn('#setGoal'); frames(1);
+    check(f.contract(f.current).goal.lift, 'the goal drafted for an arm is a lift');
+    check(!arm.ports.some((p) => p.domain === 'elec'), 'its battery rides along: no power line');
+    // Three of the starter segment (powered from outside), tip to base: each gets its own power line.
+    clickOn('#newDesign'); frames(1);
+    for (let k = 0; k < 3; k++) { clickOn(rowOf('Arm Segment').querySelector('.use')); frames(1); }
+    const chain = f.contract(f.current);
+    check(chain.level === 5, `three arms make level 5 (${chain.level})`);
+    check(chain.ports.filter((p) => p.domain === 'elec').length === 3, `every segment has its own power line (${chain.ports.map((p) => p.id)})`);
+    check(chain.joints.length === 3 && chain.joints.every((J) => J.cont > 0), 'every joint is driven');
+    check(document.querySelectorAll('#flow [data-child]').length === 3, 'the flow shows the three joints');
+    shot('built-chain');
+    // Removing the middle segment closes the chain up.
+    f.select('arm2'); frames(1);
+    clickOn('#removeChild'); frames(1);
+    const two = f.lib[f.current];
+    check(two.links.some((l) => l.a === 'arm1.tip' && l.b === 'arm3.base'), `the chain closes up (${two.links.map((l) => l.a + '>' + l.b)})`);
+    // Unpowered, a segment's joint turns nothing.
+    two.ports = two.ports.filter((p) => p.at !== 'arm3.pwr');
+    f.cache.clear();
+    const dark = f.contract(f.current);
+    check(dark.joints.some((J) => J.cont === 0), 'a segment with no power drives nothing');
+    f.reset();
 });
 
 done('foundry');
