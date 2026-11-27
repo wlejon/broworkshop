@@ -4,6 +4,7 @@ import { starterLibrary } from "/lib/foundry/designs.js";
 import { compileLibrary } from "/lib/foundry/compile.js";
 import { PARTS, partDefaults } from "/lib/foundry/parts.js";
 import { pilotOf } from "/lib/foundry/pilot.js";
+import { YARDS } from "/lib/foundry/yards.js";
 
 const RPM = (2 * Math.PI) / 60;
 
@@ -408,6 +409,8 @@ test('a machine runs from a deck compiled from what it is made of', () => {
 
 test('machines in a yard deliver crates together, and any of them can be driven by hand', () => {
     const q = (s) => document.querySelector(s), f = window.foundry;
+    // Every yard stands its machines clear of one another (the site refuses one stood into another).
+    for (const y of YARDS) { let err = null; try { y.build(f.contract).destroy(); } catch (e) { err = e.message; } check(!err, `the ${y.name} yard stands its machines clear (${err || "ok"})`); }
     // Two cranes, neither reaching from the crate to the pad: the crew hands it over between them.
     f.yard(true, 'handover'); frames(2);
     check(document.body.classList.contains('f-yarding') && f.site.machines.length === 2, 'the yard opens with its two cranes');
