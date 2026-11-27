@@ -187,6 +187,27 @@
 .f-operating .f-left .f-grow, .f-operating .f-lib-actions, .f-operating #flow, .f-operating #emptyStage,
 .f-operating #goalCard, .f-operating #outputCard, .f-operating #problemsCard, .f-operating .f-right .f-grow { display: none; }
 .f-op-toggle.on { background: var(--f-accent); color: #111; border-color: var(--f-accent); }
+
+/* --- the yard: machines from the library working together --- */
+.f-app:not(.f-yarding) .f-yard-only { display: none; }
+.f-yarding .f-left, .f-yarding #crumbs, .f-yarding #stats, .f-yarding #flow, .f-yarding #emptyStage, .f-yarding #title, .f-yarding #goalPill, .f-yarding #undo, .f-yarding #redo, .f-yarding #operate,
+.f-yarding .f-right > .f-card:not(#yardCard) { display: none; }
+.f-yarding .f-body { grid-template-columns: 1fr 348px; }
+.f-yard-about { color: var(--f-dim); font-size: 12px; margin: 2px 0 10px; line-height: 1.45; }
+.f-yard-h { font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--f-faint); margin: 12px 0 4px; font-weight: 600; }
+.f-yard-list { display: flex; flex-direction: column; gap: 4px; }
+.f-yard-item { display: grid; grid-template-columns: 16px 1fr; gap: 2px 8px; padding: 6px 8px; border: 1px solid var(--f-line); border-radius: 7px; font-size: 12px; background: var(--f-panel2); }
+.f-yard-item .dot { width: 10px; height: 10px; border-radius: 50%; margin-top: 3px; background: var(--f-line2); }
+.f-yard-item.done .dot { background: var(--f-ok); }
+.f-yard-item.busy .dot { background: var(--f-accent); }
+.f-yard-item.bad .dot { background: var(--f-bad); }
+.f-yard-item .n { font-weight: 600; color: var(--f-text); }
+.f-yard-item .d { grid-column: 2; color: var(--f-dim); }
+.f-yard-item.machine { cursor: pointer; }
+.f-yard-item.machine.sel { border-color: var(--f-accent); }
+.f-hook { display: flex; flex-direction: column; gap: 6px; width: 132px; background: var(--f-panel2); border: 1px solid var(--f-line2); border-radius: 8px; padding: 7px 8px; margin-left: 10px; align-self: flex-start; }
+.f-hook .row { display: flex; gap: 4px; }
+.f-hook button { flex: 1; }
 .f-op-row { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin-bottom: 8px; }
 .f-op-row label { display: flex; gap: 5px; align-items: center; color: var(--f-dim); }
 .f-op-joints { display: flex; flex-direction: column; gap: 4px; margin-top: 6px; }

@@ -12,6 +12,7 @@
   <div class="f-brand"><span class="f-mark"></span>Foundry</div>
   <nav id="crumbs" class="f-crumbs"></nav>
   <span class="k-spacer"></span>
+  <button id="yardBtn" class="small f-op-toggle" title="Machines from the library working together in a yard (Y)">Yard</button>
   <button id="operate" class="small f-op-toggle" title="Run the open design as a machine (O)">Operate</button>
   <div id="goalPill" class="f-pill"></div>
   <button id="undo" class="small" disabled title="Undo (Ctrl+Z)">Undo</button>
@@ -52,6 +53,18 @@
   </main>
 
   <aside class="f-right">
+    <section class="f-card f-yard-only" id="yardCard">
+      <h2>Yard <span class="f-hint" id="yardHint"></span></h2>
+      <div class="f-op-row"><select id="yardPick"></select>
+        <button class="small" id="yardReset" title="Everything back where the yard began">Reset</button></div>
+      <div class="f-yard-about" id="yardAbout"></div>
+      <div class="f-op-row"><button id="yardRun" class="f-op-toggle" title="Let the machines' pilots do the yard's work (R)">Run the crew</button>
+        <label>Speed <select id="yardSpeed"><option value="1">×1</option><option value="2">×2</option><option value="4">×4</option></select></label></div>
+      <h3 class="f-yard-h">Tasks</h3>
+      <div id="yardTasks" class="f-yard-list"></div>
+      <h3 class="f-yard-h">Machines <span class="f-hint">click one to drive it</span></h3>
+      <div id="yardMachines" class="f-yard-list"></div>
+    </section>
     <section class="f-card f-op-only" id="operateCard">
       <h2>Operate <span class="f-hint" id="opHint"></span></h2>
       <div class="f-op-row"><label><input type="checkbox" id="opPower" checked> Power on</label>

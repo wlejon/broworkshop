@@ -14,6 +14,8 @@ import { createFoundryView } from "/app/view.js";
 import * as P from "/app/panels.js";
 import { machineOf } from "/lib/foundry/site.js";
 import { renderDeck, updateDeck } from "/app/deck.js";
+import { YARDS } from "/lib/foundry/yards.js";
+import { crew as crewOf } from "/lib/foundry/pilot.js";
 
 const fs = require('fs');
 const { status } = boot({
@@ -730,7 +732,167 @@ $('opSpeed').addEventListener('change', () => { if (machine) machine.timeScale =
 $('opReset').addEventListener('click', () => { if (machine) { machine.reset(); showMachine(); } });
 $('opLoad').addEventListener('input', () => { if (machine) machine.setPayload(+$('opLoad').value); });
 
+// --- the yard: machines from the library working together ------------------------------------
+
+let yard = null;                // { def, site, crew, driven } while in the yard
+
+function setYard(on) {
+    if (on === !!yard) return;
+    if (on && machine) setOperating(false);
+    document.body.classList.toggle('f-yarding', on);
+    $('yardBtn').classList.toggle('on', on);
+    $('deck').hidden = !on;
+    held.clear();
+    if (on) { openYard($('yardPick').value || YARDS[0].id); return; }
+    yard.site.destroy();
+    yard = null;
+    view.closeYard();
+    clear($('deck'));
+    view.show(contract(currentId));
+    renderAll();
+}
+
+function openYard(id) {
+    const def = YARDS.find((y) => y.id === id) || YARDS[0];
+    if (yard) yard.site.destroy();
+    const site = def.build(contract);
+    site.timeScale = +$('yardSpeed').value;
+    yard = { def, site, crew: null, driven: null };
+    $('yardPick').value = def.id;
+    $('yardAbout').textContent = def.about;
+    $('yardHint').textContent = `${site.machines.length} machines · ${site.tasks.length} task${site.tasks.length === 1 ? '' : 's'}`;
+    view.showYard(site);
+    runCrew(false);
+    drive(null);
+    renderYardLists();
+    status.set('Run the crew to watch the machines do the work together, or click a machine and drive it yourself.');
+}
+
+/** Let the machines' pilots do the yard's open tasks (or stop them, leaving the machines where they are). */
+function runCrew(on) {
+    if (!yard) return;
+    if (yard.crew) for (const p of yard.crew.pilots.values()) p.stop();
+    yard.crew = null;
+    if (on) {
+        drive(null);
+        yard.crew = crewOf(yard.site).assign();
+        const failed = yard.crew.jobs.filter((j) => j.failed).map((j) => j.failed);
+        status.set(failed.length ? `The crew cannot do it all: ${failed.join('; ')}.` : `The crew is on it: ${yard.crew.jobs.map((j) => `${j.task.label} by ${j.legs.map((l) => l.machine.name).join(', then ')}`).join('; ')}.`);
+    }
+    $('yardRun').classList.toggle('on', !!yard.crew);
+    $('yardRun').textContent = yard.crew ? 'Stop the crew' : 'Run the crew';
+}
+
+/** Take machine `m` of the yard by hand (null: none): its deck, and its hook. */
+function drive(m) {
+    if (!yard) return;
+    if (m && yard.crew) runCrew(false);
+    yard.driven = m;
+    held.clear();
+    view.selectMachine(m);
+    const el = $('deck');
+    clear(el);
+    if (!m) {
+        el.append(h('div', { class: 'f-dk-empty' }, 'Click a machine to drive it: its deck is compiled from what it is made of. Space takes or lets go a crate under its hook; Z and X take the line in and pay it out.'));
+        renderYardLists();
+        return;
+    }
+    renderDeck(el, m, (id, u) => m.set(id, u));
+    const row = el.querySelector('.f-dk-row');
+    const hold = (btn, u) => {
+        btn.addEventListener('pointerdown', (ev) => { m.hoist(u); ev.preventDefault(); });
+        for (const t of ['pointerup', 'pointerleave', 'pointercancel']) btn.addEventListener(t, () => m.hoist(0));
+        return btn;
+    };
+    const take = h('button', { class: 'small', id: 'hookTake' }, 'Take (Space)');
+    take.addEventListener('click', () => hookToggle(m));
+    if (row) row.append(h('div', { class: 'f-hook' },
+        h('div', { class: 'f-dk-head' }, h('span', { class: 'f-dk-name' }, `${m.name}: hook`)),
+        take,
+        h('div', { class: 'row' }, hold(h('button', { class: 'small' }, 'In (Z)'), 1), hold(h('button', { class: 'small' }, 'Out (X)'), -1)),
+        h('div', { class: 'f-dk-read' }, h('span', { class: 'st', id: 'hookSt' }), h('span', { class: 'val', id: 'hookVal' }))));
+    renderYardLists();
+}
+
+function hookToggle(m) {
+    if (m.hook.crate) { m.release(); return; }
+    if (!m.grab()) status.set(`${m.name}: no crate under the hook. Put the tip over one and let the line down onto it.`);
+}
+
+function renderYardLists() {
+    if (!yard) return;
+    const tasks = $('yardTasks'), ms = $('yardMachines');
+    clear(tasks); clear(ms);
+    for (const t of yard.site.tasks) tasks.append(h('div', { class: 'f-yard-item', 'data-task': t.id }, h('span', { class: 'dot' }), h('span', { class: 'n' }, t.label), h('span', { class: 'd' })));
+    for (const m of yard.site.machines) {
+        const el = h('div', { class: 'f-yard-item machine' + (yard.driven === m ? ' sel' : ''), 'data-machine': m.name }, h('span', { class: 'dot' }), h('span', { class: 'n' }, m.name), h('span', { class: 'd' }));
+        el.addEventListener('click', () => drive(yard.driven === m ? null : m));
+        ms.append(el);
+    }
+    updateYardLists();
+}
+
+function updateYardLists() {
+    for (const t of yard.site.tasks) {
+        const el = $('yardTasks').querySelector(`[data-task="${t.id}"]`);
+        if (!el) continue;
+        const job = yard.crew && yard.crew.jobs.find((j) => j.task === t);
+        const carrier = yard.site.machines.find((m) => m.hook.crate === t.crate);
+        const text = t.done ? `done: on ${t.pad.name}` : job && job.failed ? job.failed : carrier ? `on ${carrier.name}'s hook` : job ? 'the crew has it' : 'open';
+        el.className = 'f-yard-item' + (t.done ? ' done' : job && job.failed ? ' bad' : carrier || job ? ' busy' : '');
+        el.querySelector('.d').textContent = text;
+    }
+    for (const m of yard.site.machines) {
+        const el = $('yardMachines').querySelector(`[data-machine="${m.name}"]`);
+        if (!el) continue;
+        const p = yard.crew && yard.crew.pilots.get(m);
+        const broken = m.status.includes('broken');
+        const doing = broken ? 'broken' : p && p.busy ? p.doing : yard.driven === m ? 'yours to drive' : m.hook.crate ? `holding ${m.hook.crate.name}` : 'standing by';
+        el.className = 'f-yard-item machine' + (yard.driven === m ? ' sel' : '') + (broken ? ' bad' : p && p.busy ? ' busy' : '');
+        el.querySelector('.d').textContent = doing;
+    }
+    if (yard.driven && $('hookSt')) {
+        const m = yard.driven, cr = m.reachable();
+        $('hookSt').textContent = m.hook.crate ? (m.carrying() ? `lifting ${m.hook.crate.name}` : `on ${m.hook.crate.name}`) : cr ? `over ${cr.name}` : 'empty';
+        $('hookSt').className = 'st ' + (m.hook.crate ? 'ok' : cr ? 'warn' : '');
+        $('hookVal').textContent = `${m.hook.line.toFixed(2)} m`;
+        $('hookTake').textContent = m.hook.crate ? 'Let go (Space)' : 'Take (Space)';
+    }
+}
+
+vp.onFrame((dt) => {
+    if (!yard) return;
+    const d = Math.min(dt, 0.1);
+    if (yard.crew) {
+        yard.crew.step(d);
+        if (!yard.crew.busy) {
+            const all = yard.site.tasks.every((t) => t.done);
+            status.set(all ? 'Every task is done.' : yard.crew.failed || 'The crew has stopped.');
+            yard.crew = null;
+            $('yardRun').classList.remove('on');
+            $('yardRun').textContent = 'Run the crew';
+        }
+    } else yard.site.step(d);
+    view.poseYard(yard.site);
+    if (yard.driven) updateDeck($('deck'), yard.driven);
+    updateYardLists();
+});
+
+for (const y of YARDS) $('yardPick').append(h('option', { value: y.id }, y.name));
+$('yardBtn').addEventListener('click', () => setYard(!yard));
+$('yardPick').addEventListener('change', () => { if (yard) openYard($('yardPick').value); });
+$('yardReset').addEventListener('click', () => { if (yard) openYard(yard.def.id); });
+$('yardRun').addEventListener('click', () => runCrew(!yard.crew));
+$('yardSpeed').addEventListener('change', () => { if (yard) yard.site.timeScale = +$('yardSpeed').value; });
+
 window.addEventListener('keyup', (e) => {
+    if (yard && yard.driven) {
+        const k = e.key.toLowerCase();
+        if (k === 'z' || k === 'x') yard.driven.hoist(0);
+        const id = held.get(k);
+        if (id) { held.delete(k); yard.driven.set(id, 0); }
+        return;
+    }
     const id = held.get(e.key.toLowerCase());
     if (!id || !machine) return;
     held.delete(e.key.toLowerCase());
@@ -740,6 +902,28 @@ window.addEventListener('keyup', (e) => {
 
 window.addEventListener('keydown', (e) => {
     const typing = e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT');
+    if (!typing && !e.ctrlKey && e.key.toLowerCase() === 'y') { setYard(!yard); e.preventDefault(); return; }
+    if (yard) {
+        if (typing || e.ctrlKey) return;
+        const k = e.key.toLowerCase(), m = yard.driven;
+        if (k === 'r') { runCrew(!yard.crew); e.preventDefault(); return; }
+        if (e.key === 'Tab') {
+            const ms = yard.site.machines, i = ms.indexOf(m);
+            drive(ms[(i + (e.shiftKey ? ms.length - 1 : 1)) % ms.length] || ms[0]);
+            e.preventDefault(); return;
+        }
+        if (e.key === 'Escape') { drive(null); return; }
+        if (!m) return;
+        if (k === ' ') { if (!e.repeat) hookToggle(m); e.preventDefault(); return; }
+        if (k === 'z' || k === 'x') { m.hoist(k === 'z' ? 1 : -1); e.preventDefault(); return; }
+        const ct = m.controls.find((x) => x.keys && x.keys.includes(k));
+        if (ct && !ct.dark) {
+            const dir = ct.keys[0] === k ? 1 : -1;
+            if (ct.kind === 'lever' || ct.kind === 'dial') { m.set(ct.id, dir); held.set(k, ct.id); } else m.set(ct.id, ct.u + dir * 0.1);
+            e.preventDefault();
+        }
+        return;
+    }
     if (!typing && !e.ctrlKey && e.key.toLowerCase() === 'o') { setOperating(!machine); e.preventDefault(); return; }
     if (machine && !typing && !e.ctrlKey) {
         const k = e.key.toLowerCase();
@@ -764,6 +948,7 @@ let downAt = null;
 $('stage3d').addEventListener('mousedown', (e) => { downAt = [e.offsetX, e.offsetY]; });
 $('stage3d').addEventListener('mouseup', (e) => {
     if (!downAt || Math.hypot(e.offsetX - downAt[0], e.offsetY - downAt[1]) > 4 || e.button !== 0) return;
+    if (yard) { const m = view.pickMachine(e.offsetX, e.offsetY); if (m) drive(m); return; }
     selectChild(view.pick(e.offsetX, e.offsetY));
 });
 $('flow').addEventListener('click', (e) => {
@@ -771,6 +956,7 @@ $('flow').addEventListener('click', (e) => {
     if (chip) selectChild(chip.dataset.child);
 });
 $('stage3d').addEventListener('dblclick', (e) => {
+    if (yard) return;
     const id = view.pick(e.offsetX, e.offsetY);
     if (id) drillInto(id);
 });
@@ -801,4 +987,9 @@ window.foundry = {
     /** Run the open design as a machine (or back to designing). */
     operate: setOperating,
     get machine() { return machine; },
+    /** Into the yard (id: which one) or out of it. */
+    yard(on, id) { setYard(on); if (on && id) openYard(id); },
+    get site() { return yard && yard.site; },
+    get crew() { return yard && yard.crew; },
+    runCrew, drive,
 };

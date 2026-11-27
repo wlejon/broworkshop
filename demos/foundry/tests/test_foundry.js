@@ -3,6 +3,7 @@ import { test, check, frames, shot, done, clickOn, q, press } from "/lib/kit/tes
 import { starterLibrary } from "/lib/foundry/designs.js";
 import { compileLibrary } from "/lib/foundry/compile.js";
 import { PARTS, partDefaults } from "/lib/foundry/parts.js";
+import { pilotOf } from "/lib/foundry/pilot.js";
 
 const RPM = (2 * Math.PI) / 60;
 
@@ -400,6 +401,54 @@ test('a machine runs from a deck compiled from what it is made of', () => {
     f.operate(false); frames(1);
     check(!document.body.classList.contains('f-operating') && q('#deck').hidden, 'Design closes the deck');
     f.reset();
+});
+
+test('machines in a yard deliver crates together, and any of them can be driven by hand', () => {
+    const q = (s) => document.querySelector(s), f = window.foundry;
+    // Two cranes, neither reaching from the crate to the pad: the crew hands it over between them.
+    f.yard(true, 'handover'); frames(2);
+    check(document.body.classList.contains('f-yarding') && f.site.machines.length === 2, 'the yard opens with its two cranes');
+    f.runCrew(true); frames(1);
+    const job = f.crew.jobs[0];
+    check(job.legs && job.legs.map((l) => l.machine.name).join() === 'Crane A,Crane B', `the crew plans a hand-over (${job.legs && job.legs.map((l) => l.machine.name)})`);
+    const spot = job.legs[0].to;
+    let t = 0, handed = false;
+    while (f.crew && t < 120) {
+        f.crew.step(0.5); t += 0.5;
+        // The crate is set down where both reach before the second takes it.
+        const P = f.site.poseOf(job.task.crate);
+        if (!handed && Math.hypot(P[0] - spot[0], P[2] - spot[1]) < 0.2 && !f.site.machines.some((m) => m.hook.crate)) handed = true;
+    }
+    frames(2);
+    check(handed, 'the first crane set the crate down at the hand-over spot');
+    check(f.site.tasks[0].done && /Every task is done/.test(q('#status').textContent), `the crate stands on the pad, held by nothing (${t} s)`);
+    check(/done/.test(q('#yardTasks .d').textContent), 'the task list says so');
+    // Different machines work together the same way.
+    f.yard(true, 'mixed'); frames(1);
+    f.runCrew(true);
+    t = 0;
+    while (f.crew && t < 120) { f.crew.step(0.5); t += 0.5; }
+    check(f.site.tasks[0].done, `an excavator hands a crate to a crane (${t} s)`);
+    // By hand: click a machine, its deck is its own, and its hook takes a crate let down onto it.
+    f.yard(true, 'handover'); frames(1);
+    q('#yardMachines .machine').click(); frames(1);
+    const m = f.site.machines[0];
+    check(q('#deck').querySelectorAll('[data-ctl]').length === 2 && q('#hookTake'), 'Crane A\'s deck: a dial, a lever, and its hook');
+    // Over the crate (the controls as the pilot would set them), line down, take it, lift it.
+    const p = pilotOf(f.site, m);
+    p.reach([-2.3, 0.8]);
+    for (let k = 0; k < 600 && p.busy; k++) { p.tick(1 / 60); f.site.step(1 / 60); }
+    m.hoist(-1);
+    for (let k = 0; k < 600 && !m.reachable(); k++) f.site.step(1 / 60);
+    m.hoist(0);
+    check(!!m.reachable(), 'the hook comes down over the crate');
+    q('#hookTake').click();
+    m.hoist(1);
+    for (let k = 0; k < 240; k++) f.site.step(1 / 60);
+    m.hoist(0);
+    check(m.hook.crate && m.carrying(), 'Take hooks it, and taking the line in lifts it off the ground');
+    f.yard(false); frames(1);
+    check(!document.body.classList.contains('f-yarding'), 'leaving the yard goes back to designing');
 });
 
 done('foundry');

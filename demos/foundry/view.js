@@ -421,7 +421,7 @@ export function createFoundryView(vp) {
 
     const COLORS = {
         crate: [0.45, 0.33, 0.2], person: [0.95, 0.42, 0.08], load: [0.3, 0.32, 0.36],
-        pad: [0.16, 0.42, 0.3], padDone: [0.25, 0.75, 0.42], hook: [0.85, 0.65, 0.1], hooked: [0.95, 0.3, 0.15],
+        pad: [0.16, 0.42, 0.3], padDone: [0.25, 0.75, 0.42], spot: [0.7, 0.55, 0.15], hook: [0.85, 0.65, 0.1], hooked: [0.95, 0.3, 0.15],
     };
     /**
      * Draw the world's other bodies where they are: `props` from the site
@@ -442,7 +442,7 @@ export function createFoundryView(vp) {
                     ? scene.createMesh({ mesh: 'capsule', radius: p.radius, height: p.height, color: COLORS.person, castsShadow: true, receivesShadow: true })
                     : p.kind === 'hook'
                         ? scene.createMesh({ mesh: 'sphere', radius: p.radius, color: COLORS.hook, castsShadow: true })
-                        : scene.createMesh({ mesh: 'box', halfW: p.half[0], halfH: p.half[1], halfD: p.half[2], color: COLORS[p.kind] || COLORS.crate, castsShadow: p.kind !== 'pad', receivesShadow: true });
+                        : scene.createMesh({ mesh: 'box', halfW: p.half[0], halfH: p.half[1], halfD: p.half[2], color: COLORS[p.kind] || COLORS.crate, castsShadow: p.kind !== 'pad' && p.kind !== 'spot', receivesShadow: true });
                 node.name = p.kind;
                 y = { key: key(p), node, rope: null, lit: null };
                 if (p.from) {
@@ -467,7 +467,89 @@ export function createFoundryView(vp) {
         }
     }
 
-    return { show, frame, setFlows, tick, select, pick, pose, setOperate, setProps, get contract() { return shown; }, get movers() { return movers; } };
+    // --- a yard: several machines in one world ------------------------------------------
+
+    let yardMachines = [];      // { m, node, drawn, shaded }
+    /**
+     * Draw `site` (site.js): each of its machines from its contract, stood where the
+     * site placed it, the ground under them all, and the yard's things (setProps).
+     * The camera takes in the lot.
+     */
+    function showYard(site) {
+        clear();
+        for (const y of yardMachines) y.node.destroy();
+        yardMachines = [];
+        for (const y of yard) { y.node.destroy(); if (y.rope) y.rope.destroy(); }
+        yard = [];
+        shown = null; drawnTop = null; rings = [];
+        operating = true;
+        const lo = [Infinity, site.ground, Infinity], hi = [-Infinity, site.ground, -Infinity];
+        for (const m of site.machines) {
+            const node = scene.createNode({ name: `machine ${m.name}` });
+            node.position = m.place.t.slice();
+            node.quaternion = m.place.q.slice();
+            const drawn = drawContract(m.contract, node);
+            const hide = (d) => { for (const n of d.lines) n.visible = false; for (const rec of d.byChild.values()) if (rec.inner) hide(rec.inner); };
+            hide(drawn);
+            const shaded = [...drawn.byChild.values()].flatMap((r) => r.shaded);
+            yardMachines.push({ m, node, drawn, shaded });
+            const r = m.size * 0.9;
+            lo[0] = Math.min(lo[0], m.mid[0] - r); hi[0] = Math.max(hi[0], m.mid[0] + r);
+            lo[2] = Math.min(lo[2], m.mid[1] - r); hi[2] = Math.max(hi[2], m.mid[1] + r);
+            hi[1] = Math.max(hi[1], site.ground + m.size * 0.6);
+        }
+        for (const p of [...site.pads, ...site.crates.map((c) => ({ at: [...site.poseOf(c).slice(0, 3)] }))]) {
+            lo[0] = Math.min(lo[0], p.at[0] - 0.5); hi[0] = Math.max(hi[0], p.at[0] + 0.5);
+            lo[2] = Math.min(lo[2], p.at[2] - 0.5); hi[2] = Math.max(hi[2], p.at[2] + 0.5);
+        }
+        seen = { box: { min: lo, max: hi }, size: hi.map((v, i) => v - lo[i]) };
+        stage({ size: [seen.size[0] * 0.25, seen.size[1], seen.size[2] * 0.25], box: { min: [0, site.ground, 0] } });
+        const c = lo.map((v, i) => (v + hi[i]) / 2), span = Math.hypot(seen.size[0], seen.size[2]);
+        vp.reframe([c[0], site.ground + span * 0.05, c[2]], span * 1.15, { yaw: 0.35, pitch: -0.62 });
+        vp.cam.near = span * 0.005;
+        vp.cam.far = span * 40;
+        poseYard(site);
+    }
+
+    /** Pose every machine of the yard where its world has it, and the yard's things. */
+    function poseYard(site) {
+        for (const y of yardMachines) poseLevel(y.m.contract, y.drawn, y.m.frames());
+        setProps(site.props());
+    }
+
+    /** The yard's machine under canvas pixel (px, py), or null. */
+    function pickMachine(px, py) {
+        const r = vp.ray(px, py);
+        if (!r || !yardMachines.length) return null;
+        const hit = scene.raycast(r.origin, r.dir, 1e4);
+        let n = hit && hit.hit ? hit.node : null;
+        while (n) {
+            const y = yardMachines.find((x) => x.node.id === n.id);
+            if (y) return y.m;
+            n = n.parent;
+        }
+        return null;
+    }
+
+    /** Light machine `m` of the yard as the one being driven (null: none). */
+    function selectMachine(m) {
+        for (const y of yardMachines) for (const n of y.shaded) n.setShaderUniform('selected', y.m === m ? 1 : 0);
+    }
+
+    /** Leave the yard: its machines and things are taken down. */
+    function closeYard() {
+        for (const y of yardMachines) y.node.destroy();
+        yardMachines = [];
+        for (const y of yard) { y.node.destroy(); if (y.rope) y.rope.destroy(); }
+        yard = [];
+        operating = false;
+    }
+
+    return {
+        show, frame, setFlows, tick, select, pick, pose, setOperate, setProps,
+        showYard, poseYard, pickMachine, selectMachine, closeYard,
+        get contract() { return shown; }, get movers() { return movers; },
+    };
 }
 
 function qConj(q) { return [-q[0], -q[1], -q[2], q[3]]; }
