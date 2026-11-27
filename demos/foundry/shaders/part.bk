@@ -16,7 +16,7 @@ struct PartParams {
     detail: f32,     // 1 / characteristic size (m)
     selected: f32,   // 0..1 highlight
     time: f32,
-    pad0: f32,
+    clash: f32,      // 0..1: this child runs into another
 }
 
 @binding(4, 0) var params: uniform<PartParams>;
@@ -121,6 +121,13 @@ pub fn fragment(v: mesh::Vertex, s: mesh::Surface) -> mesh::Surface {
     let sel = clamp(params.selected, 0.0, 1.0);
     if (sel > 0.0) {
         emis += vec3<f32>(0.10, 0.45, 1.0) * sel * (0.08 + 0.55 * edge);
+    }
+
+    let hit = clamp(params.clash, 0.0, 1.0);
+    if (hit > 0.0) {
+        // Running into another child: red through the paint, so the overlap is found at a glance.
+        col = mix(col, vec3<f32>(0.6, 0.05, 0.03), 0.6 * hit);
+        emis += vec3<f32>(1.0, 0.12, 0.05) * hit * (0.1 + 0.45 * edge);
     }
 
     out.base_color = col;

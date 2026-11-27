@@ -87,7 +87,7 @@ export function createFoundryView(vp) {
     function meshNode(src, detail, name) {
         const n = scene.createMesh({ ...(src.geometry ? { geometry: src.geometry } : { mesh: src }), color: [1, 1, 1], vertexColorTint: true, castsShadow: true, receivesShadow: true });
         if (name) n.name = name;
-        n.setShader({ module: PART_BK, file: 'shaders/part.bk', uniforms: { detail, selected: 0, time: 0, pad0: 0 } });
+        n.setShader({ module: PART_BK, file: 'shaders/part.bk', uniforms: { detail, selected: 0, time: 0, clash: 0 } });
         return n;
     }
 
@@ -215,7 +215,12 @@ export function createFoundryView(vp) {
         root = scene.createNode({ name: 'contract' });
         const drawn = drawContract(c, root);
         collectMovers(drawn, (ref) => ref);
-        for (const [cid, rec] of drawn.byChild) selectNodes.set(cid, rec.shaded);
+        // Children that run into one another are drawn red.
+        const clashing = new Set((c.clashes || []).flatMap((x) => [x.a, x.b]));
+        for (const [cid, rec] of drawn.byChild) {
+            selectNodes.set(cid, rec.shaded);
+            if (clashing.has(cid)) for (const n of rec.shaded) n.setShaderUniform('clash', 1);
+        }
         const placed = new Map(c.children.map((ch) => [ch.id, ch]));
         // Exposed ports: a ring in the domain's colour, sized to the child it is on (a hundred
         // segments' power lines are a hundred small rings, not a tube the length of the arm).
