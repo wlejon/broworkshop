@@ -421,7 +421,7 @@ export function createFoundryView(vp) {
     }
 
     const COLORS = {
-        crate: [0.45, 0.33, 0.2], person: [0.95, 0.42, 0.08], load: [0.3, 0.32, 0.36],
+        crate: [0.45, 0.33, 0.2], concrete: [0.58, 0.58, 0.56], target: [0.2, 0.45, 0.75], person: [0.95, 0.42, 0.08], load: [0.3, 0.32, 0.36],
         pad: [0.16, 0.42, 0.3], padDone: [0.25, 0.75, 0.42], spot: [0.7, 0.55, 0.15], hook: [0.85, 0.65, 0.1], hooked: [0.95, 0.3, 0.15], drop: [0.15, 0.95, 0.35], reach: [0.45, 0.5, 0.58], reachOn: [0.95, 0.55, 0.15],
     };
     /**
@@ -443,7 +443,7 @@ export function createFoundryView(vp) {
                     ? scene.createMesh({ mesh: 'capsule', radius: p.radius, height: p.height, color: COLORS.person, castsShadow: true, receivesShadow: true })
                     : p.kind === 'hook'
                         ? scene.createMesh({ mesh: 'sphere', radius: p.radius, color: COLORS.hook, castsShadow: true })
-                        : scene.createMesh({ mesh: 'box', halfW: p.half[0], halfH: p.half[1], halfD: p.half[2], color: COLORS[p.kind] || COLORS.crate, castsShadow: p.kind !== 'pad' && p.kind !== 'spot', receivesShadow: true });
+                        : scene.createMesh({ mesh: 'box', halfW: p.half[0], halfH: p.half[1], halfD: p.half[2], color: COLORS[p.material === 'concrete' ? 'concrete' : p.kind] || COLORS.crate, castsShadow: p.kind !== 'pad' && p.kind !== 'spot' && p.kind !== 'target', receivesShadow: true });
                 node.name = p.kind;
                 y = { key: key(p), node, rope: null, lit: null };
                 if (p.from) {
@@ -455,7 +455,7 @@ export function createFoundryView(vp) {
             }
             y.node.position = [p.pose[0], p.pose[1], p.pose[2]];
             y.node.quaternion = [p.pose[3], p.pose[4], p.pose[5], p.pose[6]];
-            if (p.kind === 'pad' && y.lit !== !!p.done) { y.lit = !!p.done; y.node.color = y.lit ? COLORS.padDone : COLORS.pad; }
+            if ((p.kind === 'pad' || p.kind === 'target') && y.lit !== !!p.done) { y.lit = !!p.done; y.node.color = y.lit ? COLORS.padDone : COLORS[p.kind]; }
             if (p.kind === 'hook' && y.lit !== !!p.hooked) { y.lit = !!p.hooked; y.node.color = y.lit ? COLORS.hooked : COLORS.hook; }
             if (p.kind === 'hook') {
                 // Where the hook would come down: a disc on whatever is under it, a crate's top

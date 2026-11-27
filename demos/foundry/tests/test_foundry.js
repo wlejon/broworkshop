@@ -457,6 +457,30 @@ test('machines in a yard deliver crates together, and any of them can be driven 
     check(!document.body.classList.contains('f-yarding'), 'leaving the yard goes back to designing');
 });
 
+test('two cranes build a frame: footings, columns stood up on them, and a lintel too heavy for one lifted by both', () => {
+    const q = (s) => document.querySelector(s), f = window.foundry;
+    f.yard(true, 'frame'); frames(2);
+    f.runCrew(true); frames(1);
+    const jobs = f.crew.jobs, li = jobs.find((j) => /Lintel/.test(j.task.label));
+    check(jobs.every((j) => !j.failed), `the crew plans every piece (${jobs.map((j) => j.failed).filter(Boolean)})`);
+    check(li.tandem && li.legs.map((l) => l.machine.name).sort().join() === 'Crane A,Crane B', 'the lintel, more than either crane lifts, is planned for both together');
+    const cols = f.site.tasks.filter((t) => /Column/.test(t.label));
+    let t = 0, both = false, early = false;
+    while (f.crew && t < 160) {
+        f.crew.step(0.25); t += 0.25;
+        // Both hooks on the lintel at once; no column set down before its footing is in place.
+        if (f.site.machines.every((m) => m.hook.crate === li.task.crate) && f.site.machines[0].carrying()) both = true;
+        for (const c of cols) if (c.done && !c.after.every((d) => d.done)) early = true;
+    }
+    frames(2);
+    check(both, 'both cranes carry the lintel together, off the ground');
+    check(!early, 'a column stands only on a footing in place');
+    const off = f.site.tasks.map((x) => `${x.crate.name} ${(f.site.placed(x).at * 100).toFixed(1)} cm`).join(', ');
+    check(f.site.tasks.every((x) => x.done) && /Every task is done/.test(q('#status').textContent), `every piece stands where it goes, upright and still (${t} s: ${off})`);
+    shot('yard-frame-built');
+    f.yard(false); frames(1);
+});
+
 test('a carrier drives a crate between two cranes too far apart to hand it over, and drives by hand', () => {
     const q = (s) => document.querySelector(s), f = window.foundry;
     f.yard(true, 'haul'); frames(2);

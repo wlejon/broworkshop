@@ -800,7 +800,7 @@ function runCrew(on) {
         drive(null);
         yard.crew = crewOf(yard.site).assign();
         const failed = yard.crew.jobs.filter((j) => j.failed).map((j) => j.failed);
-        status.set(failed.length ? `The crew cannot do it all: ${failed.join('; ')}.` : `The crew is on it: ${yard.crew.jobs.map((j) => `${j.task.label} by ${j.legs.map((l) => l.machine.name).join(', then ')}`).join('; ')}.`);
+        status.set(failed.length ? `The crew cannot do it all: ${failed.join('; ')}.` : `The crew is on it: ${yard.crew.jobs.map((j) => `${j.task.label} by ${j.legs.map((l) => l.machine.name).join(j.tandem ? ' and ' : ', then ')}${j.tandem ? ' together' : ''}`).join('; ')}.`);
     }
     $('yardRun').classList.toggle('on', !!yard.crew);
     $('yardRun').textContent = yard.crew ? 'Stop the crew' : 'Run the crew';
@@ -877,8 +877,11 @@ function updateYardLists() {
         const el = $('yardTasks').querySelector(`[data-task="${t.id}"]`);
         if (!el) continue;
         const job = yard.crew && yard.crew.jobs.find((j) => j.task === t);
-        const carrier = yard.site.machines.find((m) => m.hook && m.hook.crate === t.crate);
-        const text = t.done ? `done: on ${t.pad.name}` : job && job.failed ? job.failed : carrier ? `on ${carrier.name}'s hook` : job ? 'the crew has it' : 'open';
+        const holders = yard.site.machines.filter((m) => m.hook && m.hook.crate === t.crate), carrier = holders[0];
+        const waits = (t.after || []).filter((d) => !d.done);
+        const text = t.done ? (t.kind === 'place' ? 'done: in place' : `done: on ${t.pad.name}`) : job && job.failed ? job.failed
+            : carrier ? `on ${holders.map((m) => `${m.name}'s`).join(' and ')} hook${holders.length > 1 ? 's' : ''}`
+                : waits.length ? `after ${waits.map((d) => d.crate.name).join(' and ')}` : job ? 'the crew has it' : 'open';
         el.className = 'f-yard-item' + (t.done ? ' done' : job && job.failed ? ' bad' : carrier || job ? ' busy' : '');
         el.querySelector('.d').textContent = text;
     }
