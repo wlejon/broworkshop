@@ -42,6 +42,9 @@ export function createFoundryView(vp) {
     scene.createLight({ type: 'directional', direction: [0.7, -0.25, 0.6], color: [0.55, 0.72, 1.0], intensity: 1.1, castsShadow: false });
     scene.createLight({ type: 'directional', direction: [0.1, -0.2, -1.0], color: [1.0, 0.8, 0.6], intensity: 0.8, castsShadow: false });
 
+    // Geometry made once per part (type, params, paint) and per coupling size,
+    // drawn by every node that shows one: a long chain of the same assembly
+    // uploads each of its parts once.
     const meshCache = new Map();
     let root = null, floor = null;
     let movers = [];         // { node, axis, speed, angle, slide, s, dir, base }
@@ -55,8 +58,8 @@ export function createFoundryView(vp) {
         if (!built) {
             const m = meshPart(el, lin(paint));
             built = {
-                body: m.body.count ? m.body.finish({ ao: 48 }) : null,
-                movers: m.movers.map((mv) => ({ ...mv, mesh: mv.geo.finish({ ao: 32 }), geo: null })),
+                body: m.body.count ? { geometry: scene.createGeometry(m.body.finish({ ao: 48 })) } : null,
+                movers: m.movers.map((mv) => ({ ...mv, mesh: { geometry: scene.createGeometry(mv.geo.finish({ ao: 32 })) }, geo: null })),
                 shaftR: m.shaftR,
             };
             meshCache.set(key, built);
@@ -80,8 +83,9 @@ export function createFoundryView(vp) {
         return { group, shaded, movers: mv, shaftR: built.shaftR };
     }
 
-    function meshNode(mesh, detail, name) {
-        const n = scene.createMesh({ mesh, color: [1, 1, 1], vertexColorTint: true, castsShadow: true, receivesShadow: true });
+    /** A shaded node of `src`: a Mesh, or { geometry } made once with scene.createGeometry. */
+    function meshNode(src, detail, name) {
+        const n = scene.createMesh({ ...(src.geometry ? { geometry: src.geometry } : { mesh: src }), color: [1, 1, 1], vertexColorTint: true, castsShadow: true, receivesShadow: true });
         if (name) n.name = name;
         n.setShader({ module: PART_BK, file: 'shaders/part.bk', uniforms: { detail, selected: 0, time: 0, pad0: 0 } });
         return n;
@@ -130,14 +134,20 @@ export function createFoundryView(vp) {
             const A = portWorld(l.out), B = portWorld(l.in);
             if (l.mech) {
                 const r = Math.max(out.shaftR.get(l.out) || 0.004, out.shaftR.get(l.in) || 0.004);
-                const g = new Geo();
-                const len = r * 2.6, R = r * 1.75;
-                g.lathe([[r * 0.9, -len / 2], [R * 0.92, -len / 2], [R, -len / 2 + R * 0.08], [R, len / 2 - R * 0.08], [R * 0.92, len / 2], [r * 0.9, len / 2]], { color: lin([0.24, 0.25, 0.27]), mat: M.CAST, segs: 32 });
-                for (let k = 0; k < 2; k++) g.bolt([R * Math.cos(k * Math.PI), R * Math.sin(k * Math.PI), 0], k ? '-x' : 'x', r * 0.35);
+                const R = r * 1.75, ck = 'coupling' + r.toPrecision(6);
+                let mesh = meshCache.get(ck);
+                if (!mesh) {
+                    const g = new Geo();
+                    const len = r * 2.6;
+                    g.lathe([[r * 0.9, -len / 2], [R * 0.92, -len / 2], [R, -len / 2 + R * 0.08], [R, len / 2 - R * 0.08], [R * 0.92, len / 2], [r * 0.9, len / 2]], { color: lin([0.24, 0.25, 0.27]), mat: M.CAST, segs: 32 });
+                    for (let k = 0; k < 2; k++) g.bolt([R * Math.cos(k * Math.PI), R * Math.sin(k * Math.PI), 0], k ? '-x' : 'x', r * 0.35);
+                    mesh = { geometry: scene.createGeometry(g.finish({ ao: 0 })) };
+                    meshCache.set(ck, mesh);
+                }
                 const pivot = scene.createNode({ name: 'coupling' });
                 pivot.position = A.pos;
                 pivot.quaternion = quatZTo(A.axis);
-                const n = meshNode(g.finish({ ao: 0 }), 1 / Math.max(0.01, R * 6), `coupling ${l.out}`);
+                const n = meshNode(mesh, 1 / Math.max(0.01, R * 6), `coupling ${l.out}`);
                 pivot.add(n);
                 parent.add(pivot);
                 out.movers.push({ node: pivot, base: pivot.quaternion, axis: 'z', ref: l.out, sign: 1, slide: 0, angle: 0, coupling: true });

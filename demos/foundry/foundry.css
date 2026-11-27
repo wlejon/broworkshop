@@ -50,7 +50,7 @@
 .f-pill.err { color: var(--f-bad); border-color: #6b2a26; background: #2a1110; }
 .f-pill::before { content: ''; width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
 
-.f-body { flex: 1; display: grid; grid-template-columns: 252px 1fr 348px; min-height: 0; }
+.f-body { flex: 1; display: grid; grid-template-columns: 252px 1fr 348px; grid-template-rows: minmax(0, 1fr); min-height: 0; }
 .f-left, .f-right { display: flex; flex-direction: column; gap: 8px; padding: 8px; overflow-y: auto; background: var(--f-bg); }
 .f-left { border-right: 1px solid var(--f-line); }
 .f-right { border-left: 1px solid var(--f-line); }

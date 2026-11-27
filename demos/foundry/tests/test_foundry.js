@@ -129,6 +129,33 @@ test('gears turn at their ratios', () => {
     check(s('s1', 'in') === -s('s1', 'out'), 'meshing gears counter-rotate');
 });
 
+test('a hundred arm segments in a chain', () => {
+    const f = window.foundry;
+    const N = 100;
+    const d = { id: 'chain100', name: 'Hundred Segments', level: 6, paint: [0.9, 0.7, 0.15], note: '', children: [], links: [], ports: [] };
+    for (let i = 0; i < N; i++) {
+        d.children.push({ id: `s${i}`, design: 'armSegment' });
+        if (i) d.links.push({ a: `s${i - 1}.tip`, b: `s${i}.base`, spin: 3 });
+    }
+    d.ports.push({ id: 'base', label: 'Base', at: 's0.base' }, { id: 'tip', label: 'Tip', at: `s${N - 1}.tip` });
+    f.lib.chain100 = d;
+    let t = perf.now();
+    compileLibrary(f.lib, f.cache);
+    const compileMs = perf.now() - t;
+    const c = f.cache.get('chain100'), seg = f.cache.get('armSegment');
+    check(c.ok && c.partCount === N * seg.partCount, `it compiles (${c.errors.slice(0, 2).join('; ')})`);
+    check(c.joints.length === N, 'every segment brings its joint');
+    check(Math.abs(c.mounts[0].reach - N * seg.mounts[0].reach) < 1e-6 * N, 'stretched, it reaches a hundred segments');
+    check(c.mounts[0].payloadKg === 0 && c.warnings.some((w) => w.includes('cannot hold up')), 'and its shoulder cannot hold the rest up');
+    t = perf.now();
+    f.open('chain100');
+    frames(2);
+    console.log(`chain100: compile ${compileMs.toFixed(0)} ms, open + 2 frames ${(perf.now() - t).toFixed(0)} ms`);
+    shot('chain100');
+    delete f.lib.chain100;
+    f.cache.delete('chain100');
+});
+
 test('every part draws on its own', () => {
     const f = window.foundry;
     for (const type of Object.keys(PARTS)) {
