@@ -322,6 +322,19 @@ test('a machine built from nothing by clicks, aimed at a goal, and built on', ()
     // On a foot at its rim the ring lifts: twelve drives hang under it, side by side and not touching, and carry the weight.
     const lift = ringWith(12, 12, 'side'), LJ = lift.joints[0];
     check(lift.ok && !LJ.upright && LJ.carry === LJ.cont && LJ.cont > four * 2.9, `twelve drives on a ring on its foot lift with all their torque (${LJ.cont.toFixed(0)} N·m, ${lift.errors.join('; ')})`);
+    // One level up, the joint loses just the drives whose power lines go nowhere: half the lines, half the torque.
+    const joint4 = f.current;
+    clickOn('#newDesign'); frames(1);
+    f.useDesign(joint4); frames(1);
+    const up = f.lib[f.current], user = up.children[0].id;
+    const lines = up.ports.filter((p) => p.at.startsWith(`${user}.pwr`)).map((p) => p.at.split('.')[1]);
+    f.select(user); frames(1);
+    for (const pid of lines.slice(0, 6)) {
+        const row = [...document.querySelectorAll('#inspector .f-link')].find((r) => r.querySelector('.lbl').textContent === f.contract(joint4).ports.find((p) => p.id === pid).label);
+        row.querySelector('button[title="Stop exposing"]').click(); frames(1);
+    }
+    const half = f.contract(f.current).joints[0];
+    check(lines.length === 12 && Math.abs(half.cont / LJ.cont - 0.5) < 0.01 && /no power on/.test(half.limit), `six of twelve lines live, half the torque (${half.cont.toFixed(0)} of ${LJ.cont.toFixed(0)} N·m: ${half.limit})`);
     f.reset();
 });
 
