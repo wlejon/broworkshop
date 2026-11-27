@@ -510,4 +510,31 @@ test('a carrier drives a crate between two cranes too far apart to hand it over,
     f.yard(false); frames(1);
 });
 
+test('a depot crane, a carrier and two site cranes build the frame from pieces fourteen metres off', () => {
+    const q = (s) => document.querySelector(s), f = window.foundry;
+    f.yard(true, 'build'); frames(2);
+    f.runCrew(true); frames(1);
+    const jobs = f.crew.jobs, v = f.site.machines.find((m) => m.name === 'Carrier');
+    check(jobs.every((j) => !j.failed), `the crew plans every piece (${jobs.map((j) => j.failed).filter(Boolean)})`);
+    check(jobs.filter((j) => j.legs && j.legs.some((l) => l.haul)).length === 4, 'the footings and columns each go by carrier');
+    let t = 0;
+    const eye = [Infinity, Infinity];
+    const cols = f.site.crates.filter((c) => /Column/.test(c.name));
+    while (f.crew && t < 450) {
+        f.crew.step(0.25); t += 0.25;
+        // A column rides its deck lying down.
+        for (const c of cols) {
+            const P = f.site.poseOf(c);
+            if (f.site.under(P[0], P[2], P[1], c).machine === v && Math.abs(v.groundSpeed()) > 0.3) eye[cols.indexOf(c)] = Math.min(eye[cols.indexOf(c)], f.site.liftPoint(c)[1] - P[1]);
+        }
+    }
+    frames(2);
+    check(f.site.machines.every((m) => !m.status.includes('broken')), 'nothing breaks');
+    const off = f.site.tasks.map((x) => `${x.crate.name} ${(f.site.placed(x).at * 100).toFixed(1)} cm`).join(', ');
+    check(f.site.tasks.every((x) => x.done) && /Every task is done/.test(q('#status').textContent), `the frame stands (${t} s: ${off}; ${f.crew ? [...f.crew.pilots.values()].map((p) => `${p.machine.name}: ${p.doing} ${p.failed || ''}`).join('; ') : ''})`);
+    check(eye.every((e) => e < 0.1), `each column rides the deck laid down (its eye ${eye.map((e) => e.toFixed(2))} m above its middle)`);
+    shot('yard-build-built');
+    f.yard(false); frames(1);
+});
+
 done('foundry');
