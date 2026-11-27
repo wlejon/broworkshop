@@ -181,3 +181,55 @@
 
 .f-status { border-top: 1px solid var(--f-line); }
 .f-app button.small { min-height: 24px; }
+
+/* --- operating: the design as a machine, on a deck compiled from it --- */
+.f-app:not(.f-operating) .f-op-only { display: none; }
+.f-operating .f-left .f-grow, .f-operating .f-lib-actions, .f-operating #flow, .f-operating #emptyStage,
+.f-operating #goalCard, .f-operating #outputCard, .f-operating #problemsCard, .f-operating .f-right .f-grow { display: none; }
+.f-op-toggle.on { background: var(--f-accent); color: #111; border-color: var(--f-accent); }
+.f-op-row { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin-bottom: 8px; }
+.f-op-row label { display: flex; gap: 5px; align-items: center; color: var(--f-dim); }
+.f-op-joints { display: flex; flex-direction: column; gap: 4px; margin-top: 6px; }
+.f-op-j { display: grid; grid-template-columns: 1fr auto; gap: 2px 8px; font-size: 12px; padding: 4px 0; border-top: 1px solid var(--f-line); }
+.f-op-j .n { color: var(--f-text); }
+.f-op-j .v { color: var(--f-dim); text-align: right; font-variant-numeric: tabular-nums; }
+.f-op-j .b { grid-column: 1 / 3; height: 3px; background: var(--f-line); border-radius: 2px; }
+.f-op-j .b i { display: block; height: 100%; background: var(--f-ok); border-radius: 2px; }
+.f-op-j .b i.warn { background: var(--f-warn); }
+.f-op-j .b i.bad { background: var(--f-bad); }
+
+.f-deck { position: absolute; left: 12px; right: 12px; bottom: 12px; display: flex; justify-content: center; pointer-events: none; }
+.f-deck > * { pointer-events: auto; }
+.f-dk-empty { background: #0d1014e6; border: 1px solid var(--f-line); border-radius: 9px; padding: 10px 14px; color: var(--f-dim); max-width: 440px; }
+.f-dk-row { display: flex; gap: 10px; align-items: flex-start; }
+.f-deck > .f-dk-row { background: #0d1014e6; border: 1px solid var(--f-line); border-radius: 10px; padding: 10px; }
+.f-dk-col { display: flex; flex-direction: column; align-items: center; gap: 0; }
+/* What a control carries hangs under it, on a stem. */
+.f-dk-carried { position: relative; padding-top: 14px; display: flex; justify-content: center; }
+.f-dk-carried::before { content: ''; position: absolute; top: 0; left: 50%; width: 2px; height: 14px; background: var(--f-line2); }
+.f-dk-branch { position: relative; padding-top: 0; border-top: 2px solid var(--f-line2); }
+.f-dk-ctl { width: 132px; background: var(--f-panel2); border: 1px solid var(--f-line2); border-radius: 8px; padding: 7px 8px; user-select: none; }
+.f-dk-ctl.dark { opacity: 0.55; }
+.f-dk-head { display: flex; justify-content: space-between; align-items: baseline; gap: 6px; margin-bottom: 6px; }
+.f-dk-name { font-weight: 600; font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.f-dk-keys { font-size: 10px; color: var(--f-faint); font-family: var(--k-font-mono, monospace); }
+.f-dk-track { position: relative; margin: 0 auto; background: #0b0d10; border: 1px solid var(--f-line2); cursor: grab; touch-action: none; }
+.f-dk-track .knob { position: absolute; width: 18px; height: 18px; margin: -9px 0 0 -9px; border-radius: 50%; background: var(--f-accent); box-shadow: 0 0 0 3px #f08a2433; }
+.f-dk-lever { width: 26px; height: 92px; border-radius: 13px; }
+.f-dk-lever .knob { left: 50%; top: 50%; }
+.f-dk-throttle, .f-dk-slider { width: 112px; height: 22px; border-radius: 11px; margin: 35px auto; }
+.f-dk-throttle .knob, .f-dk-slider .knob { left: 50%; top: 50%; }
+.f-dk-dial { width: 92px; height: 92px; border-radius: 50%; }
+.f-dk-dial .knob { left: 50%; top: 50%; width: 14px; height: 14px; margin: -7px 0 0 -7px; }
+.f-dk-dial .needle { position: absolute; left: calc(50% - 1px); top: 6px; width: 2px; height: 40px; background: var(--f-mnt); transform-origin: 1px 40px; border-radius: 1px; }
+.f-dk-ctl.dark .f-dk-track { cursor: not-allowed; }
+.f-dk-read { display: flex; justify-content: space-between; margin-top: 6px; font-size: 11px; gap: 4px; }
+.f-dk-read .st { color: var(--f-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.f-dk-read .st.ok { color: var(--f-ok); }
+.f-dk-read .st.warn { color: var(--f-warn); }
+.f-dk-read .st.bad { color: var(--f-bad); }
+.f-dk-read .val { color: var(--f-text); font-variant-numeric: tabular-nums; }
+.f-dk-bar { height: 3px; background: var(--f-line); border-radius: 2px; margin-top: 4px; }
+.f-dk-bar i { display: block; height: 100%; width: 0; background: var(--f-ok); border-radius: 2px; }
+.f-dk-bar i.warn { background: var(--f-warn); }
+.f-dk-bar i.bad { background: var(--f-bad); }

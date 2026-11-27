@@ -338,4 +338,55 @@ test('a machine built from nothing by clicks, aimed at a goal, and built on', ()
     f.reset();
 });
 
+test('a machine runs from a deck compiled from what it is made of', () => {
+    const f = window.foundry;
+    f.reset();
+    const deck = () => [...document.querySelectorAll('#deck .f-dk-ctl')];
+    const run = (s) => { const m = f.machine; for (let k = 0; k < s * 20; k++) m.step(0.05); };
+    // A drive pod gives out a shaft: one throttle, and it runs at what the throttle asks.
+    f.operate(true); frames(2);
+    check(document.body.classList.contains('f-operating') && !q('#deck').hidden, 'Operate opens the deck');
+    check(deck().map((d) => d.dataset.kind).join() === 'throttle', `a pod is a throttle (${deck().map((d) => d.dataset.kind)})`);
+    // The crane: a dial for the turntable, and the arm's lever carried under it.
+    f.open('slewingCrane'); frames(2);
+    const m = f.machine;
+    check(m.controls.length === 2 && m.controls[0].kind === 'dial' && m.layout.kids.length === 1 && m.layout.kids[0].kids[0].control.kind === 'lever',
+        `the crane is a dial over a lever (${m.controls.map((x) => x.kind)})`);
+    check(q('#deck .f-dk-carried [data-kind=lever]'), 'the lever hangs under the dial on the deck');
+    check(m.controls[0].joints.length === 1 && m.controls[0].lines.length === 4, 'four slew drives are one control');
+    // Held keys move a joint; the lever raises the arm and the tip goes up.
+    const tip0 = m.tip()[2];
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'w' }));
+    run(1);
+    window.dispatchEvent(new KeyboardEvent('keyup', { key: 'w' }));
+    check(m.tip()[2] > tip0 + 0.3 && m.controls[1].u === 0, `W raises the arm and letting go stops it (${tip0.toFixed(2)} → ${m.tip()[2].toFixed(2)} m)`);
+    // Slewing takes no torque from gravity; the arm feels what it carries and the load.
+    m.set('c0', 1); run(1); m.set('c0', 0);
+    check(Math.abs(m.torque[0]) < 1e-6 && Math.abs(m.angles[0]) > 1, 'the dial swings the boom round, against no weight');
+    m.reset(); m.payloadKg = 0; run(0.2);
+    const empty = Math.abs(m.torque[1]);
+    m.payloadKg = 100; run(0.2);
+    check(Math.abs(m.torque[1]) > empty + 100 * 9.81 * 1.0, `the load hangs on the arm (${empty.toFixed(0)} → ${Math.abs(m.torque[1]).toFixed(0)} N·m)`);
+    // Within what the worm locks at, it holds with the power off.
+    m.powered = false; run(1);
+    check(m.status[1] === 'locked' && Math.abs(m.angles[1]) < 1e-9, `power off, the worm holds 100 kg (${m.status[1]})`);
+    // Past both what the drive stalls at and what the worm locks at, raising it stalls and the load drags it down.
+    m.powered = true; m.payloadKg = 400; m.set('c1', 1); run(0.5);
+    check(m.status[1] === 'stalled' && m.angles[1] * m.joints[1].raise < -0.05, `too heavy to lift, it stalls and slips (${m.status[1]} at ${m.angles[1].toFixed(3)} rad)`);
+    m.set('c1', 0);
+    // A chain of arms: the elbow's lever under the shoulder's, and the elbow comes down to the ground and stops.
+    f.open('twoLinkArm'); frames(2);
+    const a = f.machine;
+    check(a.controls.map((x) => x.label).join() === 'Shoulder,Elbow' && a.layout.kids.length === 1 && a.layout.kids[0].kids[0].control.label === 'Elbow',
+        `the elbow is carried by the shoulder (${a.controls.map((x) => x.label)})`);
+    a.set('c1', -1); a.set('c0', -1); run(6);
+    check(a.status.includes('on the ground'), `driven down, it stops on the ground (${a.status})`);
+    // A design with no drive an operator can work says so.
+    f.open('reducer9'); frames(2);
+    check(deck().length === 0 && /Nothing here to run/.test(q('#deck').textContent), 'a reducer has nothing to run');
+    f.operate(false); frames(1);
+    check(!document.body.classList.contains('f-operating') && q('#deck').hidden, 'Design closes the deck');
+    f.reset();
+});
+
 done('foundry');

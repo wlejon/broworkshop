@@ -12,6 +12,8 @@ import { compileLibrary, invalidate, reachingSpin } from "/lib/foundry/compile.j
 import { starterLibrary } from "/lib/foundry/designs.js";
 import { createFoundryView } from "/app/view.js";
 import * as P from "/app/panels.js";
+import { machineOf } from "/lib/foundry/operate.js";
+import { renderDeck, updateDeck } from "/app/deck.js";
 
 const fs = require('fs');
 const { status } = boot({
@@ -162,6 +164,7 @@ function open(id) {
     trail = [id];
     selected = null;
     renderAll();
+    if (machine) buildMachine();
 }
 
 function drillInto(childId) {
@@ -634,8 +637,114 @@ $('delDesign').addEventListener('click', deleteDesign);
 $('undo').addEventListener('click', () => history.undo());
 $('redo').addEventListener('click', () => history.redo());
 $('load').addEventListener('input', renderBench);
+// --- operating: the open design run as a machine ---------------------------------------------
+
+let machine = null;             // operate.js machine of the open design, while operating
+const held = new Map();         // key → control id it is driving
+
+function setOperating(on) {
+    if (on === !!machine) return;
+    document.body.classList.toggle('f-operating', on);
+    $('operate').classList.toggle('on', on);
+    $('operate').textContent = on ? 'Design' : 'Operate';
+    $('deck').hidden = !on;
+    held.clear();
+    if (on) {
+        selected = null; view.select(null);
+        buildMachine();
+        status.set('Drag a control, or hold its keys. Levers and dials stop when let go.');
+    } else {
+        machine = null;
+        view.setOperate(false);
+        view.show(contract(currentId), { frame: false });
+        renderAll({ view: false });
+    }
+}
+
+function buildMachine() {
+    const c = contract(currentId);
+    machine = machineOf(c);
+    view.show(c, { frame: false });
+    view.setOperate(true);
+    view.pose(machine.angles);
+    renderDeck($('deck'), machine, (id, u) => machine.set(id, u));
+    const mount = (c.mounts || [])[0];
+    const max = mount && isFinite(mount.payloadKg) ? mount.payloadKg : 0;
+    $('opLoadRow').hidden = !(max > 0);
+    $('opLoad').max = String(max > 0 ? Math.ceil(max * 1.6) : 1);
+    $('opLoad').step = String(max > 0 ? Math.max(0.1, max / 200) : 0.01);
+    $('opLoad').value = '0';
+    $('opHint').textContent = `${machine.controls.length} control${machine.controls.length === 1 ? '' : 's'}`;
+    machine.powered = $('opPower').checked;
+    machine.timeScale = +$('opSpeed').value;
+    renderJointRows();
+}
+
+function renderJointRows() {
+    const el = $('opJoints');
+    clear(el);
+    for (const J of machine.joints) {
+        // Named by the control that moves it, which is what the operator knows it by.
+        const ct = machine.controls.find((x) => x.joints.includes(J.j));
+        const name = ct ? ct.label : J.label.split(' › ').at(-1).replace(/ \(\w+\)$/, '');
+        el.append(h('div', { class: 'f-op-j', 'data-j': J.j },
+            h('span', { class: 'n' }, name + (J.upright ? ' (turntable)' : '')),
+            h('span', { class: 'v' }), h('div', { class: 'b' }, h('i', {}))));
+    }
+}
+
+function updateOperate() {
+    if (!machine) return;
+    updateDeck($('deck'), machine);
+    for (const row of $('opJoints').children) {
+        const j = +row.dataset.j, J = machine.joints[j];
+        const t = Math.abs(machine.torque[j]), cap = J.stall || J.cont || 1;
+        row.querySelector('.v').textContent = `${machine.status[j]} · ${P.fmtEffort('rot', t)} of ${P.fmtEffort('rot', cap)}`;
+        const bar = row.querySelector('i');
+        bar.style.width = `${Math.min(100, (t / cap) * 100).toFixed(1)}%`;
+        bar.className = t > cap ? 'bad' : t > cap * 0.85 ? 'warn' : '';
+    }
+    const kg = machine.payloadKg;
+    $('opLoadVal').textContent = kg > 0 ? P.fmtKg(kg) : 'none';
+}
+
+vp.onFrame((dt) => {
+    if (!machine) return;
+    machine.step(Math.min(dt, 0.1));
+    view.pose(machine.angles);
+    for (const ct of machine.controls) if (ct.output) view.setFlows({ [ct.output]: ct.flow || 0 });
+    view.setHook(machine.tip(), machine.payloadKg);
+    updateOperate();
+});
+
+$('operate').addEventListener('click', () => setOperating(!machine));
+$('opPower').addEventListener('change', () => { if (machine) machine.powered = $('opPower').checked; });
+$('opSpeed').addEventListener('change', () => { if (machine) machine.timeScale = +$('opSpeed').value; });
+$('opReset').addEventListener('click', () => { if (machine) { machine.reset(); view.pose(machine.angles); } });
+$('opLoad').addEventListener('input', () => { if (machine) machine.payloadKg = +$('opLoad').value; });
+
+window.addEventListener('keyup', (e) => {
+    const id = held.get(e.key.toLowerCase());
+    if (!id || !machine) return;
+    held.delete(e.key.toLowerCase());
+    const ct = machine.controls.find((x) => x.id === id);
+    if (ct && (ct.kind === 'lever' || ct.kind === 'dial')) machine.set(id, 0);
+});
+
 window.addEventListener('keydown', (e) => {
     const typing = e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT');
+    if (!typing && !e.ctrlKey && e.key.toLowerCase() === 'o') { setOperating(!machine); e.preventDefault(); return; }
+    if (machine && !typing && !e.ctrlKey) {
+        const k = e.key.toLowerCase();
+        const ct = machine.controls.find((x) => x.keys && x.keys.includes(k));
+        if (ct && !ct.dark) {
+            const dir = ct.keys[0] === k ? 1 : -1;
+            if (ct.kind === 'lever' || ct.kind === 'dial') { machine.set(ct.id, dir); held.set(k, ct.id); }
+            else machine.set(ct.id, ct.u + dir * 0.1);
+            e.preventDefault();
+            return;
+        }
+    }
     if (e.key === 'Delete' && !typing && selected) { inspectorApi().remove(); e.preventDefault(); return; }
     if (e.key === 'Escape' && !typing && selected) { selected = null; renderAll({ view: false }); return; }
     if (!e.ctrlKey || typing) return;
@@ -682,4 +791,7 @@ window.foundry = {
     },
     select: selectChild,
     contract,
+    /** Run the open design as a machine (or back to designing). */
+    operate: setOperating,
+    get machine() { return machine; },
 };

@@ -12,6 +12,7 @@
   <div class="f-brand"><span class="f-mark"></span>Foundry</div>
   <nav id="crumbs" class="f-crumbs"></nav>
   <span class="k-spacer"></span>
+  <button id="operate" class="small f-op-toggle" title="Run the open design as a machine (O)">Operate</button>
   <div id="goalPill" class="f-pill"></div>
   <button id="undo" class="small" disabled title="Undo (Ctrl+Z)">Undo</button>
   <button id="redo" class="small" disabled title="Redo (Ctrl+Y)">Redo</button>
@@ -38,6 +39,7 @@
     <canvas id="stage3d" class="f-stage"></canvas>
     <div class="f-title" id="title"></div>
     <div class="f-flow" id="flow"></div>
+    <div class="f-deck" id="deck" hidden></div>
     <div class="f-empty-stage" id="emptyStage" hidden>
       <div class="t">An empty design</div>
       <ol>
@@ -50,6 +52,14 @@
   </main>
 
   <aside class="f-right">
+    <section class="f-card f-op-only" id="operateCard">
+      <h2>Operate <span class="f-hint" id="opHint"></span></h2>
+      <div class="f-op-row"><label><input type="checkbox" id="opPower" checked> Power on</label>
+        <label>Speed <select id="opSpeed"><option value="1">×1</option><option value="4">×4</option><option value="16">×16</option></select></label>
+        <button class="small" id="opReset" title="Every joint back to where it was built">Rest pose</button></div>
+      <label class="f-slider" id="opLoadRow">Load <input type="range" id="opLoad" min="0" max="1.4" step="0.01" value="0"><span id="opLoadVal"></span></label>
+      <div id="opJoints" class="f-op-joints"></div>
+    </section>
     <section class="f-card" id="goalCard">
       <h2>Goal</h2>
       <div id="goal"></div>
@@ -58,7 +68,7 @@
       <h2>Contract <span class="f-hint">what the level above sees</span></h2>
       <div id="contract"></div>
     </section>
-    <section class="f-card">
+    <section class="f-card" id="outputCard">
       <h2>Output <span class="f-hint" id="outHint"></span></h2>
       <div id="outEmpty" class="f-empty" hidden>Nothing comes out yet. Once the design gives out a shaft, a push or a tip, its curve shows here.</div>
       <canvas id="curve" class="f-curve"></canvas>

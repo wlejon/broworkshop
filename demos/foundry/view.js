@@ -9,6 +9,7 @@
 import { skyEnvironment } from "/lib/kit/sky.js";
 import { rotQuat, rotApply } from "/lib/foundry/rot.js";
 import { flowsFor } from "/lib/foundry/compile.js";
+import { poseOf } from "/lib/foundry/operate.js";
 import { Geo, M, lin } from "/app/geom.js";
 import { meshPart } from "/app/partmesh.js";
 
@@ -52,6 +53,8 @@ export function createFoundryView(vp) {
     let shown = null;
     // How the shown design stands (a quaternion on the root), and its box so stood.
     let stand = [0, 0, 0, 1], seen = null;
+    // The top level as drawn (for posing), the exposed-port rings, and whether the machine is being run.
+    let drawnTop = null, rings = [], operating = false;
     let visScale = 1;
 
     function partNode(el, paint, detail) {
@@ -98,12 +101,13 @@ export function createFoundryView(vp) {
 
     // Draw contract `c` into `parent`; returns { movers, shaded per child id, shaftR per 'child.port' }.
     function drawContract(c, parent) {
-        const out = { movers: [], byChild: new Map(), shaftR: new Map() };
+        const out = { movers: [], byChild: new Map(), shaftR: new Map(), nodes: new Map(), lines: [] };
         const paint = c.paint || [0.5, 0.5, 0.52];
         for (const ch of c.children) {
             const g = scene.createNode({ name: ch.id });
             g.position = ch.pos.slice();
             g.quaternion = rotQuat(ch.rot);
+            out.nodes.set(ch.id, { node: g, pos: ch.pos.slice(), quat: rotQuat(ch.rot) });
             parent.add(g);
             let rec;
             if (ch.el.kind === 'part') {
@@ -155,7 +159,7 @@ export function createFoundryView(vp) {
                 const n = meshNode(mesh, 1 / Math.max(0.01, R * 6), `coupling ${l.out}`);
                 pivot.add(n);
                 parent.add(pivot);
-                out.movers.push({ node: pivot, base: pivot.quaternion, axis: 'z', ref: l.out, sign: 1, slide: 0, angle: 0, coupling: true });
+                out.movers.push({ node: pivot, base: pivot.quaternion, axis: 'z', ref: l.out, sign: 1, slide: 0, angle: 0, coupling: true, owner: splitRef(l.out)[0], restPos: A.pos.slice(), restBase: pivot.quaternion });
             } else {
                 const g = new Geo();
                 const span = Math.hypot(B.pos[0] - A.pos[0], B.pos[1] - A.pos[1], B.pos[2] - A.pos[2]);
@@ -174,6 +178,7 @@ export function createFoundryView(vp) {
                 }
                 const n = meshNode(g.finish({ ao: 0 }), 1 / Math.max(0.01, size), `line ${l.out}`);
                 parent.add(n);
+                out.lines.push(n);
             }
         }
         return out;
@@ -229,6 +234,7 @@ export function createFoundryView(vp) {
         root = scene.createNode({ name: 'contract' });
         root.quaternion = stand;
         const drawn = drawContract(c, root);
+        drawnTop = drawn; rings = [];
         collectMovers(drawn, (ref) => ref);
         // Children that run into one another are drawn red.
         const clashing = new Set((c.clashes || []).flatMap((x) => [x.a, x.b]));
@@ -250,6 +256,7 @@ export function createFoundryView(vp) {
             n.position = p.pos.slice();
             n.quaternion = quatZTo(p.axis);
             root.add(n);
+            rings.push(n);
         }
         if (o.frame !== false) frame();
         return placed;
@@ -257,7 +264,7 @@ export function createFoundryView(vp) {
 
     // Flatten movers with the path from the top contract down, so setFlows can find each one's flow.
     function collectMovers(drawn, _ref, prefix = []) {
-        for (const m of drawn.movers) movers.push({ ...m, path: prefix, kind: 'link' });
+        for (const m of drawn.movers) { m.live = { ...m, path: prefix, kind: 'link' }; movers.push(m.live); }
         for (const [cid, rec] of drawn.byChild) {
             for (const m of rec.movers) movers.push({ ...m, path: prefix.concat(cid), kind: 'part' });
             if (rec.inner) collectMovers(rec.inner, _ref, prefix.concat(cid));
@@ -340,7 +347,119 @@ export function createFoundryView(vp) {
         return n && n.parent && shown.children.some((c) => c.id === n.name) ? n.name : null;
     }
 
-    return { show, frame, setFlows, tick, select, pick, get contract() { return shown; }, get movers() { return movers; } };
+    // --- running the machine ------------------------------------------------------------
+
+    /**
+     * Pose the shown design at joint angles `ang` (one per joint of its contract):
+     * every child moved by the joint that carries it, nested designs posed by
+     * their own joints in turn, couplings carried with the child they turn.
+     */
+    function pose(ang) {
+        if (!shown || !drawnTop) return;
+        poseLevel(shown, drawnTop, ang);
+    }
+
+    function poseLevel(c, drawn, ang) {
+        const M = poseOf(c, ang);
+        const at = (carrier, pos, quat) => {
+            const m = carrier != null ? M[carrier] : null;
+            return m ? { pos: qRot(m.q, pos).map((v, i) => v + m.t[i]), quat: qMul(m.q, quat) } : { pos, quat };
+        };
+        for (const ch of c.children) {
+            const n = drawn.nodes.get(ch.id);
+            if (!n) continue;
+            const p = at(ch.carrier, n.pos, n.quat);
+            n.node.position = p.pos;
+            n.node.quaternion = p.quat;
+            const rec = drawn.byChild.get(ch.id);
+            if (rec && rec.inner) {
+                const inner = new Array(ch.el.joints.length).fill(0);
+                c.joints.forEach((J, k) => { if (J.nested && J.nested.child === ch.id) inner[J.nested.index] = ang[k] || 0; });
+                poseLevel(ch.el, rec.inner, inner);
+            }
+        }
+        const carrierOf = new Map(c.children.map((ch) => [ch.id, ch.carrier]));
+        for (const m of drawn.movers) {
+            if (!m.coupling || !m.live) continue;
+            const p = at(carrierOf.get(m.owner), m.restPos, m.restBase);
+            m.live.node.position = p.pos;
+            m.live.base = p.quat;
+            m.live.node.quaternion = qMul(p.quat, qAxisAngle('z', m.live.angle || 0));
+        }
+    }
+
+    // The yard: open ground with things of known size, and a load on the hook.
+    let yard = [], hook = null, hookKg = -1;
+    function setOperate(on) {
+        operating = on;
+        for (const n of rings) n.visible = !on;
+        const hide = (drawn) => {
+            for (const n of drawn.lines) n.visible = !on;
+            for (const rec of drawn.byChild.values()) if (rec.inner) hide(rec.inner);
+        };
+        if (drawnTop) hide(drawnTop);
+        for (const n of yard) n.destroy();
+        yard = [];
+        dropHook();
+        if (!on || !seen) return;
+        // Frame the ground it can sweep, not the pose it was built in: what it carries swings
+        // round and lifts up to about its own length.
+        {
+            const s = seen.size, r = 0.5 * Math.hypot(s[0], s[1], s[2]);
+            const c = seen.box.min.map((v, i) => (v + seen.box.max[i]) / 2);
+            vp.reframe([c[0], seen.box.min[1] + r * 0.45, c[2]], r * 4.2, { yaw: 0.72, pitch: -0.42 });
+            vp.cam.far = Math.max(...s, 0.05) * 80;
+        }
+        // A person for scale beside the machine, and crates about the yard.
+        const floorY = seen.box.min[1];
+        const size = Math.max(...seen.size, 0.5);
+        // Everything stands clear of what the machine can sweep: about its box's diagonal round it.
+        const cx = (seen.box.min[0] + seen.box.max[0]) / 2, cz = (seen.box.min[2] + seen.box.max[2]) / 2;
+        const sweep = Math.hypot(seen.size[0], seen.size[2]) * 1.5 + 0.3;
+        // A person (1.78 m, in a hi-vis orange) behind it, off the camera's line.
+        const person = scene.createMesh({ mesh: 'capsule', radius: 0.2, height: 1.78, color: [0.95, 0.42, 0.08], castsShadow: true, receivesShadow: true });
+        person.name = 'person';
+        person.position = [cx - sweep * 0.8, floorY + 0.89, cz - sweep * 0.6];
+        yard.push(person);
+        for (let k = 0; k < 5; k++) {
+            const s = Math.max(0.3, size * (0.05 + 0.03 * (k % 3)));
+            const a = k * 1.3 + 2.4, r = sweep + s + size * 0.15 * k;
+            const box = scene.createMesh({ mesh: 'box', halfW: s / 2, halfH: s / 2, halfD: s / 2, color: [0.45, 0.33, 0.2], castsShadow: true, receivesShadow: true });
+            box.name = 'crate';
+            box.position = [cx + Math.cos(a) * r, floorY + s / 2, cz + Math.sin(a) * r];
+            yard.push(box);
+        }
+    }
+
+    /** The load on the hook: a steel block of `kg` hanging under the tip (`tip`, in the design's frame), or none. */
+    function setHook(tip, kg) {
+        if (!operating || !tip || !(kg > 0)) { dropHook(); return; }
+        const side = Math.cbrt(kg / 7850);
+        if (!hook || Math.abs(hookKg - kg) > kg * 0.02) {
+            dropHook();
+            hook = scene.createMesh({ mesh: 'box', halfW: side / 2, halfH: side / 2, halfD: side / 2, color: [0.3, 0.32, 0.36], castsShadow: true, receivesShadow: true });
+            hook.name = 'load';
+            cable = scene.createMesh({ mesh: 'cylinder', radius: Math.max(0.004, side * 0.03), halfHeight: 0.5, color: [0.08, 0.08, 0.09], castsShadow: true });
+            cable.name = 'cable';
+            hookKg = kg;
+        }
+        // It hangs a cable's length under the tip, and rests on the ground if the tip comes down that far.
+        const w = qRot(stand, tip), floorY = seen ? seen.box.min[1] : -Infinity;
+        const len = Math.max(0.05, side * 0.8);
+        const top = Math.max(w[1] - len, floorY + side);
+        hook.position = [w[0], top - side / 2, w[2]];
+        const h = Math.max(0.001, w[1] - top);
+        cable.position = [w[0], top + h / 2, w[2]];
+        cable.scale = [1, h, 1];
+    }
+    let cable = null;
+    function dropHook() {
+        if (hook) hook.destroy();
+        if (cable) cable.destroy();
+        hook = cable = null; hookKg = -1;
+    }
+
+    return { show, frame, setFlows, tick, select, pick, pose, setOperate, setHook, get contract() { return shown; }, get movers() { return movers; } };
 }
 
 function qConj(q) { return [-q[0], -q[1], -q[2], q[3]]; }
