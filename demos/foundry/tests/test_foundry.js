@@ -360,27 +360,40 @@ test('a machine runs from a deck compiled from what it is made of', () => {
     run(1);
     window.dispatchEvent(new KeyboardEvent('keyup', { key: 'w' }));
     check(m.tip()[2] > tip0 + 0.3 && m.controls[1].u === 0, `W raises the arm and letting go stops it (${tip0.toFixed(2)} → ${m.tip()[2].toFixed(2)} m)`);
-    // Slewing takes no torque from gravity; the arm feels what it carries and the load.
-    m.set('c0', 1); run(1); m.set('c0', 0);
-    check(Math.abs(m.torque[0]) < 1e-6 && Math.abs(m.angles[0]) > 1, 'the dial swings the boom round, against no weight');
-    m.reset(); m.payloadKg = 0; run(0.2);
+    // The dial swings the boom round, and it is the drive's holding torque that brings it to rest.
+    m.set('c0', 1); run(1); m.set('c0', 0); run(1.5);
+    check(Math.abs(m.angles[0]) > 1 && Math.abs(m.rates[0]) < 0.05, `the dial swings the boom round and it stops (${(m.angles[0] * 57.3).toFixed(0)}°)`);
+    // In the world the load hangs on a rope from the tip, and the arm's motor holds it.
+    m.reset(); run(0.5);
     const empty = Math.abs(m.torque[1]);
-    m.payloadKg = 100; run(0.2);
+    m.setPayload(100); run(1);
     check(Math.abs(m.torque[1]) > empty + 100 * 9.81 * 1.0, `the load hangs on the arm (${empty.toFixed(0)} → ${Math.abs(m.torque[1]).toFixed(0)} N·m)`);
     // Within what the worm locks at, it holds with the power off.
     m.powered = false; run(1);
-    check(m.status[1] === 'locked' && Math.abs(m.angles[1]) < 1e-9, `power off, the worm holds 100 kg (${m.status[1]})`);
-    // Past both what the drive stalls at and what the worm locks at, raising it stalls and the load drags it down.
-    m.powered = true; m.payloadKg = 400; m.set('c1', 1); run(0.5);
-    check(m.status[1] === 'stalled' && m.angles[1] * m.joints[1].raise < -0.05, `too heavy to lift, it stalls and slips (${m.status[1]} at ${m.angles[1].toFixed(3)} rad)`);
+    check(m.status[1] === 'locked' && Math.abs(m.angles[1]) < 0.01, `power off, the worm holds 100 kg (${m.status[1]})`);
+    // Past what the drive stalls at, it cannot raise it.
+    m.powered = true; m.setPayload(400); m.set('c1', 1); run(1);
+    check(m.status[1] === 'stalled' && Math.abs(m.angles[1]) < 0.1, `too heavy to lift, it stalls (${m.status[1]} at ${m.angles[1].toFixed(3)} rad)`);
     m.set('c1', 0);
-    // A chain of arms: the elbow's lever under the shoulder's, and the elbow comes down to the ground and stops.
+    // A chain of arms: the elbow's lever under the shoulder's; driven down, the ground stops it.
     f.open('twoLinkArm'); frames(2);
     const a = f.machine;
     check(a.controls.map((x) => x.label).join() === 'Shoulder,Elbow' && a.layout.kids.length === 1 && a.layout.kids[0].kids[0].control.label === 'Elbow',
         `the elbow is carried by the shoulder (${a.controls.map((x) => x.label)})`);
-    a.set('c1', -1); a.set('c0', -1); run(6);
-    check(a.status.includes('on the ground'), `driven down, it stops on the ground (${a.status})`);
+    a.set('c1', -1); a.set('c0', -1); run(4);
+    check(a.tip()[1] > a.floorY - 0.02 && a.status.includes('stalled'), `driven down, it comes to rest on the ground (tip ${a.tip()[1].toFixed(2)} over ${a.floorY.toFixed(2)}: ${a.status})`);
+    // At city scale the same numbers hold: the Road Boom lifts 100 t off the ground; 300 t is more than
+    // its boom bears, and its load-moment limit lets the boom down rather than break it.
+    f.open('roadBoom'); frames(2);
+    const r = f.machine, loadY = () => r.props().find((p) => p.kind === 'load').pose[1];
+    r.setPayload(100000); run(1);
+    const y0 = loadY();
+    r.set('c0', 1); run(12); r.set('c0', 0); run(1);
+    check(r.status[0] !== 'broken' && loadY() > y0 + 5, `the Road Boom lifts 100 t (${r.status[0]}, ${(loadY() - y0).toFixed(1)} m up)`);
+    r.reset(); r.setPayload(300000); run(1);
+    const y1 = loadY();
+    r.set('c0', 1); run(8); r.set('c0', 0); run(1);
+    check(r.status[0] !== 'broken' && loadY() < y1 + 0.5 && Math.abs(r.torque[0]) <= r.joints[0].bend, `300 t stays down and the boom stands (${r.status[0]}, ${(Math.abs(r.torque[0]) / 1e6).toFixed(0)} of ${(r.joints[0].bend / 1e6).toFixed(0)} MN·m)`);
     // A design with no drive an operator can work says so.
     f.open('reducer9'); frames(2);
     check(deck().length === 0 && /Nothing here to run/.test(q('#deck').textContent), 'a reducer has nothing to run');

@@ -654,6 +654,7 @@ function setOperating(on) {
         buildMachine();
         status.set('Drag a control, or hold its keys. Levers and dials stop when let go.');
     } else {
+        machine.destroy();
         machine = null;
         view.setOperate(false);
         view.show(contract(currentId), { frame: false });
@@ -663,10 +664,11 @@ function setOperating(on) {
 
 function buildMachine() {
     const c = contract(currentId);
+    if (machine) machine.destroy();
     machine = machineOf(c);
     view.show(c, { frame: false });
     view.setOperate(true);
-    view.pose(machine.angles);
+    showMachine();
     renderDeck($('deck'), machine, (id, u) => machine.set(id, u));
     const mount = (c.mounts || [])[0];
     const max = mount && isFinite(mount.payloadKg) ? mount.payloadKg : 0;
@@ -698,7 +700,7 @@ function updateOperate() {
     updateDeck($('deck'), machine);
     for (const row of $('opJoints').children) {
         const j = +row.dataset.j, J = machine.joints[j];
-        const t = Math.abs(machine.torque[j]), cap = J.stall || J.cont || 1;
+        const t = Math.abs(machine.torque[j]), cap = J.limit || J.cont || 1;
         row.querySelector('.v').textContent = `${machine.status[j]} · ${P.fmtEffort('rot', t)} of ${P.fmtEffort('rot', cap)}`;
         const bar = row.querySelector('i');
         bar.style.width = `${Math.min(100, (t / cap) * 100).toFixed(1)}%`;
@@ -708,20 +710,25 @@ function updateOperate() {
     $('opLoadVal').textContent = kg > 0 ? P.fmtKg(kg) : 'none';
 }
 
+/** The machine drawn where its world has it. */
+function showMachine() {
+    view.pose(machine.frames());
+    view.setProps(machine.props());
+}
+
 vp.onFrame((dt) => {
     if (!machine) return;
     machine.step(Math.min(dt, 0.1));
-    view.pose(machine.angles);
+    showMachine();
     for (const ct of machine.controls) if (ct.output) view.setFlows({ [ct.output]: ct.flow || 0 });
-    view.setHook(machine.tip(), machine.payloadKg);
     updateOperate();
 });
 
 $('operate').addEventListener('click', () => setOperating(!machine));
 $('opPower').addEventListener('change', () => { if (machine) machine.powered = $('opPower').checked; });
 $('opSpeed').addEventListener('change', () => { if (machine) machine.timeScale = +$('opSpeed').value; });
-$('opReset').addEventListener('click', () => { if (machine) { machine.reset(); view.pose(machine.angles); } });
-$('opLoad').addEventListener('input', () => { if (machine) machine.payloadKg = +$('opLoad').value; });
+$('opReset').addEventListener('click', () => { if (machine) { machine.reset(); showMachine(); } });
+$('opLoad').addEventListener('input', () => { if (machine) machine.setPayload(+$('opLoad').value); });
 
 window.addEventListener('keyup', (e) => {
     const id = held.get(e.key.toLowerCase());

@@ -9,7 +9,9 @@
 import { skyEnvironment } from "/lib/kit/sky.js";
 import { rotQuat, rotApply } from "/lib/foundry/rot.js";
 import { flowsFor } from "/lib/foundry/compile.js";
-import { poseOf } from "/lib/foundry/operate.js";
+import { standOf, frameApply, frameMul, frameInv } from "/lib/foundry/operate.js";
+
+const IDENT = { q: [0, 0, 0, 1], t: [0, 0, 0] };
 import { Geo, M, lin } from "/app/geom.js";
 import { meshPart } from "/app/partmesh.js";
 
@@ -224,8 +226,7 @@ export function createFoundryView(vp) {
         // A design is drawn in its own frame, its joints straight out and level: the pose its
         // statics are worked in. One whose base carries a turntable (an upright joint) knows
         // which way is down, and stands on its base.
-        const base = c.base && c.joints && c.joints.some((J) => J.upright) && c.ports.find((p) => p.id === c.base);
-        stand = base ? qMul(quatZTo([0, -1, 0]), qConj(quatZTo(base.axis))) : [0, 0, 0, 1];
+        stand = standOf(c);
         const corners = [];
         for (let k = 0; k < 8; k++) corners.push(qRot(stand, [0, 1, 2].map((i) => ((k >> i) & 1 ? c.box.max[i] : c.box.min[i]))));
         const min = [0, 1, 2].map((i) => Math.min(...corners.map((p) => p[i]))), max = [0, 1, 2].map((i) => Math.max(...corners.map((p) => p[i])));
@@ -350,20 +351,21 @@ export function createFoundryView(vp) {
     // --- running the machine ------------------------------------------------------------
 
     /**
-     * Pose the shown design at joint angles `ang` (one per joint of its contract):
-     * every child moved by the joint that carries it, nested designs posed by
-     * their own joints in turn, couplings carried with the child they turn.
+     * Pose the shown design: `frames` holds, per joint of its contract, the rigid
+     * move ({ q, t }, the design's frame) of what that joint carries from where
+     * it was built. Every child moves with its carrier; a nested design's
+     * children move with the joints of the shown design that record its own,
+     * turned into the nested design's frame; couplings go with the child they turn.
      */
-    function pose(ang) {
+    function pose(frames) {
         if (!shown || !drawnTop) return;
-        poseLevel(shown, drawnTop, ang);
+        poseLevel(shown, drawnTop, frames);
     }
 
-    function poseLevel(c, drawn, ang) {
-        const M = poseOf(c, ang);
+    function poseLevel(c, drawn, M) {
         const at = (carrier, pos, quat) => {
             const m = carrier != null ? M[carrier] : null;
-            return m ? { pos: qRot(m.q, pos).map((v, i) => v + m.t[i]), quat: qMul(m.q, quat) } : { pos, quat };
+            return m ? { pos: frameApply(m, pos), quat: qMul(m.q, quat) } : { pos, quat };
         };
         for (const ch of c.children) {
             const n = drawn.nodes.get(ch.id);
@@ -373,8 +375,14 @@ export function createFoundryView(vp) {
             n.node.quaternion = p.quat;
             const rec = drawn.byChild.get(ch.id);
             if (rec && rec.inner) {
-                const inner = new Array(ch.el.joints.length).fill(0);
-                c.joints.forEach((J, k) => { if (J.nested && J.nested.child === ch.id) inner[J.nested.index] = ang[k] || 0; });
+                // Inside the child: Place⁻¹ · F(carrier)⁻¹ · M(k) · Place, Place being where the child sits.
+                const place = { q: n.quat, t: n.pos };
+                const outer = frameInv(ch.carrier != null ? M[ch.carrier] : IDENT);
+                const inner = new Array(ch.el.joints.length).fill(IDENT);
+                c.joints.forEach((J, k) => {
+                    if (!J.nested || J.nested.child !== ch.id) return;
+                    inner[J.nested.index] = frameMul(frameInv(place), frameMul(outer, frameMul(M[k], place)));
+                });
                 poseLevel(ch.el, rec.inner, inner);
             }
         }
@@ -388,8 +396,8 @@ export function createFoundryView(vp) {
         }
     }
 
-    // The yard: open ground with things of known size, and a load on the hook.
-    let yard = [], hook = null, hookKg = -1;
+    // The yard: the world's bodies other than the machine (crates, a person, the load on its rope).
+    let yard = [];
     function setOperate(on) {
         operating = on;
         for (const n of rings) n.visible = !on;
@@ -398,9 +406,8 @@ export function createFoundryView(vp) {
             for (const rec of drawn.byChild.values()) if (rec.inner) hide(rec.inner);
         };
         if (drawnTop) hide(drawnTop);
-        for (const n of yard) n.destroy();
+        for (const y of yard) { y.node.destroy(); if (y.rope) y.rope.destroy(); }
         yard = [];
-        dropHook();
         if (!on || !seen) return;
         // Frame the ground it can sweep, not the pose it was built in: what it carries swings
         // round and lifts up to about its own length.
@@ -410,59 +417,58 @@ export function createFoundryView(vp) {
             vp.reframe([c[0], seen.box.min[1] + reach * 0.45, c[2]], reach * 2.3, { yaw: 0.72, pitch: -0.32 });
             vp.cam.far = Math.max(...s, 0.05) * 80;
         }
-        // A person for scale beside the machine, and crates about the yard.
-        const floorY = seen.box.min[1];
-        const size = Math.max(...seen.size, 0.5);
-        // Everything stands clear of what the machine can sweep: about its box's diagonal round it.
-        const cx = (seen.box.min[0] + seen.box.max[0]) / 2, cz = (seen.box.min[2] + seen.box.max[2]) / 2;
-        const sweep = Math.hypot(seen.size[0], seen.size[2]) * 1.5 + 0.3;
-        // A person (1.78 m, in a hi-vis orange) at the back corner of its footprint, to judge it by.
-        const person = scene.createMesh({ mesh: 'capsule', radius: 0.2, height: 1.78, color: [0.95, 0.42, 0.08], castsShadow: true, receivesShadow: true });
-        person.name = 'person';
-        person.position = [seen.box.min[0] - 0.8, floorY + 0.89, seen.box.min[2] - 0.8];
-        yard.push(person);
-        for (let k = 0; k < 5; k++) {
-            const s = Math.max(0.3, size * (0.05 + 0.03 * (k % 3)));
-            const a = k * 1.3 + 2.4, r = sweep + s + size * 0.15 * k;
-            const box = scene.createMesh({ mesh: 'box', halfW: s / 2, halfH: s / 2, halfD: s / 2, color: [0.45, 0.33, 0.2], castsShadow: true, receivesShadow: true });
-            box.name = 'crate';
-            box.position = [cx + Math.cos(a) * r, floorY + s / 2, cz + Math.sin(a) * r];
-            yard.push(box);
+    }
+
+    const COLORS = { crate: [0.45, 0.33, 0.2], person: [0.95, 0.42, 0.08], load: [0.3, 0.32, 0.36] };
+    /**
+     * Draw the world's other bodies where they are: `props` from the machine
+     * ({ kind, half | radius + height, pose [x y z qx qy qz qw], from (a rope's top) }).
+     * A body seen for the first time gets a mesh; one gone loses it.
+     */
+    function setProps(props) {
+        if (!operating) return;
+        const key = (p) => `${p.kind}:${p.body ?? 'load'}:${p.half ? p.half[0].toFixed(4) : ''}`;
+        const want = new Set(props.map(key));
+        yard = yard.filter((y) => { if (want.has(y.key)) return true; y.node.destroy(); if (y.rope) y.rope.destroy(); return false; });
+        for (const p of props) {
+            let y = yard.find((x) => x.key === key(p));
+            if (!y) {
+                const node = p.kind === 'person'
+                    ? scene.createMesh({ mesh: 'capsule', radius: p.radius, height: p.height, color: COLORS.person, castsShadow: true, receivesShadow: true })
+                    : scene.createMesh({ mesh: 'box', halfW: p.half[0], halfH: p.half[1], halfD: p.half[2], color: COLORS[p.kind] || COLORS.crate, castsShadow: true, receivesShadow: true });
+                node.name = p.kind;
+                y = { key: key(p), node, rope: null };
+                if (p.from) {
+                    y.rope = scene.createMesh({ mesh: 'cylinder', radius: Math.max(0.004, p.half[0] * 0.06), halfHeight: 0.5, color: [0.08, 0.08, 0.09], castsShadow: true });
+                    y.rope.name = 'rope';
+                }
+                yard.push(y);
+            }
+            y.node.position = [p.pose[0], p.pose[1], p.pose[2]];
+            y.node.quaternion = [p.pose[3], p.pose[4], p.pose[5], p.pose[6]];
+            if (y.rope && p.from) {
+                // From the tip to the middle of the block's top face.
+                const top = qRot([p.pose[3], p.pose[4], p.pose[5], p.pose[6]], [0, p.half[1], 0]).map((v, i) => v + p.pose[i]);
+                const d = top.map((v, i) => p.from[i] - v), len = Math.max(1e-3, Math.hypot(...d));
+                y.rope.position = top.map((v, i) => v + d[i] / 2);
+                y.rope.quaternion = quatYTo(d.map((v) => v / len));
+                y.rope.scale = [1, len, 1];
+            }
         }
     }
 
-    /** The load on the hook: a steel block of `kg` hanging under the tip (`tip`, in the design's frame), or none. */
-    function setHook(tip, kg) {
-        if (!operating || !tip || !(kg > 0)) { dropHook(); return; }
-        const side = Math.cbrt(kg / 7850);
-        if (!hook || Math.abs(hookKg - kg) > kg * 0.02) {
-            dropHook();
-            hook = scene.createMesh({ mesh: 'box', halfW: side / 2, halfH: side / 2, halfD: side / 2, color: [0.3, 0.32, 0.36], castsShadow: true, receivesShadow: true });
-            hook.name = 'load';
-            cable = scene.createMesh({ mesh: 'cylinder', radius: Math.max(0.004, side * 0.03), halfHeight: 0.5, color: [0.08, 0.08, 0.09], castsShadow: true });
-            cable.name = 'cable';
-            hookKg = kg;
-        }
-        // It hangs a cable's length under the tip, and rests on the ground if the tip comes down that far.
-        const w = qRot(stand, tip), floorY = seen ? seen.box.min[1] : -Infinity;
-        const len = Math.max(0.05, side * 0.8);
-        const top = Math.max(w[1] - len, floorY + side);
-        hook.position = [w[0], top - side / 2, w[2]];
-        const h = Math.max(0.001, w[1] - top);
-        cable.position = [w[0], top + h / 2, w[2]];
-        cable.scale = [1, h, 1];
-    }
-    let cable = null;
-    function dropHook() {
-        if (hook) hook.destroy();
-        if (cable) cable.destroy();
-        hook = cable = null; hookKg = -1;
-    }
-
-    return { show, frame, setFlows, tick, select, pick, pose, setOperate, setHook, get contract() { return shown; }, get movers() { return movers; } };
+    return { show, frame, setFlows, tick, select, pick, pose, setOperate, setProps, get contract() { return shown; }, get movers() { return movers; } };
 }
 
 function qConj(q) { return [-q[0], -q[1], -q[2], q[3]]; }
+
+// The shortest turn taking +Y to unit vector `d`.
+function quatYTo(d) {
+    const c = d[1];
+    if (c < -0.999999) return [1, 0, 0, 0];
+    const ax = [d[2], 0, -d[0]], s = Math.sqrt((1 + c) * 2);
+    return [ax[0] / s, ax[1] / s, ax[2] / s, s / 2];
+}
 
 function qRot(q, v) {
     const [x, y, z, w] = q, t = [2 * (y * v[2] - z * v[1]), 2 * (z * v[0] - x * v[2]), 2 * (x * v[1] - y * v[0])];

@@ -19,7 +19,7 @@ import { h, clear } from "/lib/kit/dom.js";
 const STATUS = {
     still: ['still', ''], moving: ['moving', 'ok'], holding: ['holding', ''], locked: ['locked off', ''],
     straining: ['straining', 'warn'], stalled: ['stalled: too heavy', 'bad'], falling: ['slipping back', 'bad'],
-    overloaded: ['its boom is overloaded', 'bad'], 'at its stop': ['at its stop', 'warn'], 'on the ground': ['on the ground', 'warn'],
+    overloaded: ['its boom is overloaded', 'bad'], 'at its stop': ['at its stop', 'warn'], broken: ['broken: its boom gave way', 'bad'], 'at its limit': ['at its load limit', 'warn'],
 };
 
 /** Build the deck for machine `m` into `el`; `onSet(controlId, u)` takes each command. */
@@ -82,14 +82,14 @@ export function updateDeck(el, m) {
         const st = box.querySelector('.st'), val = box.querySelector('.val'), bar = box.querySelector('.f-dk-bar i');
         if (ct.joints.length) {
             // The worst of its joints says how it is going.
-            const order = ['overloaded', 'stalled', 'falling', 'straining', 'on the ground', 'at its stop', 'moving', 'holding', 'locked', 'still'];
+            const order = ['broken', 'at its limit', 'stalled', 'falling', 'straining', 'at its stop', 'moving', 'holding', 'locked', 'still'];
             const s = ct.joints.map((j) => m.status[j]).sort((a, b) => order.indexOf(a) - order.indexOf(b))[0];
             const [text, cls] = STATUS[s] || [s, ''];
             st.textContent = text; st.className = 'st ' + cls;
             const j = ct.joints[0], a = m.angles[j] * DEG;
             val.textContent = kind === 'dial' ? `${(((a % 360) + 540) % 360 - 180).toFixed(0)}°` : `${(a * m.joints[j].raise).toFixed(0)}°`;
             if (kind === 'dial') box.querySelector('.needle').style.transform = `rotate(${a.toFixed(1)}deg)`;
-            const J = m.joints[j], load = Math.abs(m.torque[j]) / Math.max(1e-9, J.stall || J.cont || 1);
+            const J = m.joints[j], load = Math.abs(m.torque[j]) / Math.max(1e-9, J.limit || J.cont || 1);
             bar.style.width = `${Math.min(100, load * 100).toFixed(1)}%`;
             bar.className = load > 1 ? 'bad' : load > 0.85 ? 'warn' : '';
         } else {
