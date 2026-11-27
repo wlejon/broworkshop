@@ -357,7 +357,12 @@ export function renderContract(el, c) {
         const path = c.paths.find((x) => x.to === p.id);
         const sup = c.supplies.find((s) => s.port === p.id);
         if (src) spec = `${fmtEffort(p.domain, src.cont)} cont · ${fmtFlow(p.domain, src.noLoad)}`;
-        else if (path) spec = `×${path.k >= 10 ? path.k.toFixed(0) : path.k.toFixed(2)} · holds ${fmtEffort(p.domain, path.cont)}`;
+        else if (path) {
+            // A ratio across a change of motion (rotary in, linear out) is between unlike units: name the change.
+            const conv = (path.stages || []).filter((s) => s.convert);
+            const head = conv.length ? `${DOMAIN_NAME[conv[0].convert.split('>')[0]]} → ${DOMAIN_NAME[p.domain]}` : `×${path.k >= 10 ? path.k.toFixed(0) : path.k.toFixed(2)}`;
+            spec = `${head} · holds ${fmtEffort(p.domain, path.cont)}`;
+        }
         else if (sup) spec = `${si(sup.power, 'W')} · ${sup.energyWh} Wh`;
         else if (p.domain === 'mnt') {
             const m = (c.mounts || []).find((x) => x.port === p.id);
