@@ -405,9 +405,9 @@ export function createFoundryView(vp) {
         // Frame the ground it can sweep, not the pose it was built in: what it carries swings
         // round and lifts up to about its own length.
         {
-            const s = seen.size, r = 0.5 * Math.hypot(s[0], s[1], s[2]);
+            const s = seen.size, reach = Math.hypot(s[0], s[2]);
             const c = seen.box.min.map((v, i) => (v + seen.box.max[i]) / 2);
-            vp.reframe([c[0], seen.box.min[1] + r * 0.45, c[2]], r * 4.2, { yaw: 0.72, pitch: -0.42 });
+            vp.reframe([c[0], seen.box.min[1] + reach * 0.45, c[2]], reach * 2.3, { yaw: 0.72, pitch: -0.32 });
             vp.cam.far = Math.max(...s, 0.05) * 80;
         }
         // A person for scale beside the machine, and crates about the yard.
@@ -416,10 +416,10 @@ export function createFoundryView(vp) {
         // Everything stands clear of what the machine can sweep: about its box's diagonal round it.
         const cx = (seen.box.min[0] + seen.box.max[0]) / 2, cz = (seen.box.min[2] + seen.box.max[2]) / 2;
         const sweep = Math.hypot(seen.size[0], seen.size[2]) * 1.5 + 0.3;
-        // A person (1.78 m, in a hi-vis orange) behind it, off the camera's line.
+        // A person (1.78 m, in a hi-vis orange) at the back corner of its footprint, to judge it by.
         const person = scene.createMesh({ mesh: 'capsule', radius: 0.2, height: 1.78, color: [0.95, 0.42, 0.08], castsShadow: true, receivesShadow: true });
         person.name = 'person';
-        person.position = [cx - sweep * 0.8, floorY + 0.89, cz - sweep * 0.6];
+        person.position = [seen.box.min[0] - 0.8, floorY + 0.89, seen.box.min[2] - 0.8];
         yard.push(person);
         for (let k = 0; k < 5; k++) {
             const s = Math.max(0.3, size * (0.05 + 0.03 * (k % 3)));
