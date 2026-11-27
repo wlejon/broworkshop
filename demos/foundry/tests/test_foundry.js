@@ -457,4 +457,33 @@ test('machines in a yard deliver crates together, and any of them can be driven 
     check(!document.body.classList.contains('f-yarding'), 'leaving the yard goes back to designing');
 });
 
+test('a carrier drives a crate between two cranes too far apart to hand it over, and drives by hand', () => {
+    const q = (s) => document.querySelector(s), f = window.foundry;
+    f.yard(true, 'haul'); frames(2);
+    f.runCrew(true); frames(1);
+    const job = f.crew.jobs[0], cr = job.task.crate, v = f.site.machines.find((m) => m.name === 'Carrier');
+    check(job.legs && job.legs.map((l) => l.machine.name).join() === 'Depot Crane,Carrier,Site Crane', `the crew plans a haul (${job.legs && job.legs.map((l) => l.machine.name)})`);
+    let t = 0, rode = 0;
+    while (f.crew && t < 150) {
+        f.crew.step(0.25); t += 0.25;
+        // On its deck, held by nothing, while it drives.
+        const P = f.site.poseOf(cr);
+        if (f.site.under(P[0], P[2], P[1], cr).machine === v && Math.abs(v.groundSpeed()) > 0.3) rode = Math.max(rode, Math.abs(P[0] - (-2.3)));
+    }
+    frames(2);
+    check(rode > 5, `the crate rides the carrier's deck while it drives (${rode.toFixed(1)} m from where it stood)`);
+    check(f.site.tasks[0].done && /Every task is done/.test(q('#status').textContent), `the crate stands on the pad at the site (${t} s)`);
+    // By hand: its deck is a drive pad on the arrow keys, and the up arrow drives it forward.
+    f.yard(true, 'haul'); frames(1);
+    const w = f.site.machines.find((m) => m.name === 'Carrier');
+    [...document.querySelectorAll('#yardMachines .machine')].find((e) => /Carrier/.test(e.textContent)).click(); frames(1);
+    check(q('#deck [data-kind=drive]') && q('#deckSt'), 'the Carrier\'s deck: a drive pad and what its deck carries');
+    const x0 = w.mid[0], hd = w.heading();
+    keyDown('ArrowUp'); frames(90); keyUp('ArrowUp'); frames(60);
+    const moved = (w.mid[0] - x0) * hd[0];
+    check(moved > 1, `the up arrow drives it forward (${moved.toFixed(2)} m) and it stops when let go (${Math.abs(w.groundSpeed()).toFixed(2)} m/s)`);
+    check(Math.abs(w.groundSpeed()) < 0.1, 'let go, it holds');
+    f.yard(false); frames(1);
+});
+
 done('foundry');

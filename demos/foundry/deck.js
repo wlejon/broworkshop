@@ -42,6 +42,7 @@ export function renderDeck(el, m, onSet) {
 
 function widget(ct, m, onSet) {
     const kind = ct.kind;
+    if (kind === 'drive') return drivePad(ct, m, onSet);
     const keys = ct.keys ? h('span', { class: 'f-dk-keys' }, `${ct.keys[0].toUpperCase()} / ${ct.keys[1].toUpperCase()}`) : null;
     const head = h('div', { class: 'f-dk-head' }, h('span', { class: 'f-dk-name' }, ct.label), keys);
     const track = h('div', { class: `f-dk-track f-dk-${kind}` }, h('i', { class: 'knob' }));
@@ -68,6 +69,31 @@ function widget(ct, m, onSet) {
     return box;
 }
 
+// The drive: a pad, up runs it forward and across turns it, springing back to stop when let
+// go; the arrow keys do the same.
+function drivePad(ct, m, onSet) {
+    const head = h('div', { class: 'f-dk-head' }, h('span', { class: 'f-dk-name' }, ct.label), h('span', { class: 'f-dk-keys' }, '↑ ↓ ← →'));
+    const track = h('div', { class: 'f-dk-track f-dk-drive' }, h('i', { class: 'cross' }), h('i', { class: 'knob' }));
+    const box = h('div', { class: 'f-dk-ctl' + (ct.dark ? ' dark' : ''), 'data-ctl': ct.id, 'data-kind': 'drive', title: `${ct.label}: ${ct.why}` },
+        head, track,
+        h('div', { class: 'f-dk-read' }, h('span', { class: 'st' }), h('span', { class: 'val' })),
+        h('div', { class: 'f-dk-bar' }, h('i', {})));
+    if (ct.dark) { box.querySelector('.st').textContent = ct.why; return box; }
+    const at = (ev) => {
+        const r = track.getBoundingClientRect();
+        const cl = (x) => Math.max(-1, Math.min(1, x));
+        return [cl(((r.top + r.height / 2) - ev.clientY) / (r.height / 2)), cl((ev.clientX - (r.left + r.width / 2)) / (r.width / 2))];
+    };
+    const put = ([u, v]) => { onSet(ct.id, u, 'u'); onSet(ct.id, v, 'v'); };
+    let dragging = false;
+    track.addEventListener('pointerdown', (ev) => { dragging = true; if (track.setPointerCapture) try { track.setPointerCapture(ev.pointerId); } catch (e) { /* none */ } put(at(ev)); ev.preventDefault(); });
+    track.addEventListener('pointermove', (ev) => { if (dragging) put(at(ev)); });
+    const up = () => { if (!dragging) return; dragging = false; put([0, 0]); };
+    track.addEventListener('pointerup', up);
+    track.addEventListener('pointercancel', up);
+    return box;
+}
+
 const DEG = 180 / Math.PI;
 
 /**
@@ -80,6 +106,21 @@ export function updateDeck(el, m, heading) {
         const box = el.querySelector(`[data-ctl="${ct.id}"]`);
         if (!box || ct.dark) continue;
         const knob = box.querySelector('.knob'), kind = ct.kind;
+        if (kind === 'drive') {
+            // The pad's dot where the drive is set; how fast it goes, and how its wheels are doing.
+            knob.style.left = `${(50 + ct.v * 42).toFixed(1)}%`; knob.style.top = `${(50 - ct.u * 42).toFixed(1)}%`;
+            const order = ['broken', 'stalled', 'straining', 'moving', 'stopping', 'holding', 'locked', 'still'];
+            const s = ct.joints.map((j) => m.status[j]).sort((a, b) => order.indexOf(a) - order.indexOf(b))[0];
+            const [text, cls] = s === 'stalled' ? ['stuck: its wheels cannot turn', 'bad'] : s === 'straining' ? ['pulling hard', 'warn'] : STATUS[s] || [s, ''];
+            const st = box.querySelector('.st');
+            st.textContent = text; st.className = 'st ' + cls;
+            const v = m.groundSpeed ? m.groundSpeed() : 0;
+            box.querySelector('.val').textContent = `${v.toFixed(1)} m/s`;
+            const bar = box.querySelector('.f-dk-bar i');
+            bar.style.width = `${Math.min(100, (Math.abs(v) / Math.max(1e-6, ct.speed)) * 100).toFixed(1)}%`;
+            bar.className = '';
+            continue;
+        }
         if (kind === 'lever') knob.style.top = `${(50 - ct.u * 42).toFixed(1)}%`;
         else knob.style.left = `${(50 + ct.u * 42).toFixed(1)}%`;
         const st = box.querySelector('.st'), val = box.querySelector('.val'), bar = box.querySelector('.f-dk-bar i');

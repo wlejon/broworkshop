@@ -235,6 +235,13 @@ function goalForm(c, g, api) {
         inp.addEventListener('change', () => onSet(inp.value === '' ? null : +inp.value));
         form.append(h('label', { class: 'f-gf' }, h('span', {}, label), inp, h('span', { class: 'u' }, unit)));
     };
+    if (g.drive) {
+        field('Top speed', g.drive.speedMs, 'm/s', (v) => put((n) => { n.drive.speedMs = v || 0; }), { key: 'speed' });
+        field('Carries', g.drive.payloadKg, 'kg', (v) => put((n) => { if (v != null) n.drive.payloadKg = v; else delete n.drive.payloadKg; }), { key: 'payload', placeholder: 'any' });
+        field('Climbs, loaded', g.drive.gradePct, '%', (v) => put((n) => { if (v != null) n.drive.gradePct = v; else delete n.drive.gradePct; }), { key: 'grade', placeholder: 'any' });
+        field('Mass under', g.massMax, 'kg', (v) => put((n) => { if (v > 0) n.massMax = v; else delete n.massMax; }), { key: 'mass', placeholder: 'any' });
+        return form;
+    }
     if (outs.length > 1) {
         const sel = h('select', { 'data-goal': 'out' }, ...outs.map((p) => h('option', { value: p.id, selected: p.id === g.out ? '' : null }, p.label)));
         sel.addEventListener('change', () => { const n = api.draft(sel.value); if (n) api.set(n); });
@@ -315,6 +322,11 @@ export function renderGoal(el, c, pill, api) {
         } else if (k.kind === 'mass') {
             got = fmtMass(k.got); want = fmtMass(k.want);
             const top = Math.max(k.got, k.want) * 1.15; frac = k.got / top; mark = k.want / top;
+        } else if (k.kind === 'speed' || k.kind === 'grade' || k.kind === 'push') {
+            const f = k.kind === 'speed' ? (v) => `${v.toFixed(2)} m/s` : k.kind === 'push' ? (v) => (v >= 1000 ? `${(v / 1000).toFixed(1)} kN` : `${v.toFixed(0)} N`) : (v) => `${v.toFixed(0)}%`;
+            got = f(k.got); want = f(k.want);
+            const top = Math.max(k.got, k.want) * 1.15 || 1;
+            frac = Math.max(0, k.got) / top; mark = k.want / top;
         } else if (k.kind === 'payload' || k.kind === 'reach') {
             const f = k.kind === 'payload' ? fmtKg : fmtM;
             got = f(k.got); want = f(k.want);
@@ -330,7 +342,7 @@ export function renderGoal(el, c, pill, api) {
         ));
     }
     if (!api) return;
-    const raw = { out: g.out, ...(g.lift ? { lift: g.lift } : { need: g.need, ...(g.given ? { given: g.given } : {}) }) };
+    const raw = g.drive ? { drive: g.drive } : { out: g.out, ...(g.lift ? { lift: g.lift } : { need: g.need, ...(g.given ? { given: g.given } : {}) }) };
     const box = g.checks.find((k) => k.kind === 'box'), mass = g.checks.find((k) => k.kind === 'mass');
     if (box) raw.box = box.want;
     if (mass) raw.massMax = mass.want;

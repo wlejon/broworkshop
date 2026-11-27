@@ -246,6 +246,9 @@
 .f-dk-dial { width: 92px; height: 92px; border-radius: 50%; }
 .f-dk-dial .knob { left: 50%; top: 50%; width: 14px; height: 14px; margin: -7px 0 0 -7px; }
 .f-dk-dial .needle { position: absolute; left: calc(50% - 1px); top: 6px; width: 2px; height: 40px; background: var(--f-mnt); transform-origin: 1px 40px; border-radius: 1px; }
+.f-dk-drive { width: 92px; height: 92px; border-radius: 14px; }
+.f-dk-drive .knob { left: 50%; top: 50%; }
+.f-dk-drive .cross { position: absolute; inset: 10px; background: linear-gradient(var(--f-line2), var(--f-line2)) center / 1px 100% no-repeat, linear-gradient(var(--f-line2), var(--f-line2)) center / 100% 1px no-repeat; pointer-events: none; }
 .f-dk-ctl.dark .f-dk-track { cursor: not-allowed; }
 .f-dk-read { display: flex; justify-content: space-between; margin-top: 6px; font-size: 11px; gap: 4px; }
 .f-dk-read .st { color: var(--f-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }

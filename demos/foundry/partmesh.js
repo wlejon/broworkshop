@@ -637,6 +637,79 @@ BUILD.winch = function winch(s, paint) {
     return { body: g, movers: [{ geo: drum, pivot: [0, 0, 0], axis: 'z', port: 'in', sign: 1 }], shaftR: { in: D * 0.12 } };
 };
 
+// A planetary wheel hub at the end of its spindle: the ribbed housing, the bracket up to the
+// frame, and the wheel flange with its studs. The drive's stub turns at its input.
+BUILD.hub = function hub(s, paint) {
+    const { R, hz, rs, Ls, drop, top, bw, stub: st, flange } = s;
+    const g = new Geo();
+    const ch = R * 0.05;
+    g.lathe([[rs * 1.1, 0], [R - ch, 0], [R, ch], [R, 2 * hz - ch], [R - ch, 2 * hz], [rs * 1.4, 2 * hz]], { color: paint, mat: M.PAINT, segs: 48, chamfer: ch });
+    for (let k = 0; k < 10; k++) {
+        const g2 = new Geo();
+        g2.cbox([-R * 0.04, R * 0.96, hz * 0.3], [R * 0.04, R * 1.04, hz * 1.7], { color: paint, mat: M.PAINT, bevel: R * 0.01 });
+        rotateAppend(g, g2, (k / 10) * TAU);
+    }
+    g.cyl(rs, -Ls, 0, { color: mix(paint, DARK, 0.35), mat: M.CAST });
+    // The bracket: a plate up from the spindle to the frame, a pad bolted under it.
+    g.cbox([-bw / 2, rs * 0.4, -Ls / 2 - bw * 0.16], [bw / 2, top - s.bt, -Ls / 2 + bw * 0.16], { color: mix(paint, DARK, 0.2), mat: M.PAINT, bevel: s.bt * 0.3 });
+    g.cbox([-bw / 2, top - s.bt, -Ls / 2 - bw / 2], [bw / 2, top, -Ls / 2 + bw / 2], { color: paint, mat: M.PAINT, bevel: s.bt * 0.3 });
+    for (const [x, z] of [[1, 1], [1, -1], [-1, 1], [-1, -1]]) g.bolt([x * bw * 0.35, top, -Ls / 2 + z * bw * 0.35], 'y', Math.max(0.003, s.bt * 0.5));
+    // The wheel flange and its studs.
+    g.lathe([[0, 2 * hz], [R * 0.82, 2 * hz], [R * 0.82, 2 * hz + flange], [0, 2 * hz + flange]], { color: STEEL, mat: M.STEEL, segs: 40 });
+    g.boltCircle(R * 0.6, 6, 2 * hz + flange, R * 0.07, { axis: 'z' });
+    const inR = new Geo();
+    stub(inR, rs * 0.45, -Ls, -Ls - st, {});
+    return { body: g, movers: [{ geo: inR, pivot: [0, 0, 0], axis: 'z', port: 'in', sign: 1 }], shaftR: { in: rs * 0.45, out: R * 0.5 } };
+};
+
+// A wheel: a lugged tyre on a pressed steel rim with its centre disc and stud holes. The
+// whole of it turns with its joint, so none of it is a mover.
+BUILD.wheel = function wheel(s) {
+    const { R, w, rim } = s;
+    const g = new Geo();
+    const sh = (R - rim) * 0.3, lug = (R - rim) * 0.12;
+    g.lathe([[rim, -w / 2], [R - lug - sh, -w / 2], [R - lug, -w / 2 + sh], [R - lug, w / 2 - sh], [R - lug - sh, w / 2], [rim, w / 2]], { color: RUBBER, mat: M.RUBBER, segs: 64, edges: false });
+    // Lugs across the tread, chevroned: each half leans its own way.
+    const n = 26;
+    for (let k = 0; k < n; k++) {
+        for (const sd of [1, -1]) {
+            const g2 = new Geo();
+            g2.cbox([-lug * 1.1, R - lug * 1.2, sd > 0 ? w * 0.04 : -w * 0.44], [lug * 1.1, R, sd > 0 ? w * 0.44 : -w * 0.04], { color: RUBBER, mat: M.RUBBER, bevel: lug * 0.04 });
+            rotateAppend(g, g2, (k / n) * TAU + (sd > 0 ? TAU / n / 2 : 0));
+        }
+    }
+    // The rim's well and the disc across it, the stud holes dark.
+    const rc = lin([0.62, 0.6, 0.52]);
+    g.lathe([[rim * 0.98, -w * 0.47], [rim, -w * 0.47], [rim, w * 0.47], [rim * 0.98, w * 0.47]], { color: rc, mat: M.PAINT, segs: 48 });
+    g.lathe([[rim * 0.98, -w * 0.1], [rim * 0.22, -w * 0.1], [rim * 0.22, -w * 0.02], [rim * 0.98, -w * 0.02]], { color: rc, mat: M.PAINT, segs: 48 });
+    for (let k = 0; k < 6; k++) {
+        const a = (k / 6) * TAU;
+        g.lathe([[rim * 0.06, -w * 0.021], [0, -w * 0.021]], { at: [Math.cos(a) * rim * 0.62, Math.sin(a) * rim * 0.62, 0], axis: 'z', color: DARK, mat: M.RUBBER, segs: 16, edges: false });
+    }
+    g.lathe([[rim * 0.22, -w * 0.1], [rim * 0.22, -w / 2], [0, -w / 2]], { color: STEEL, mat: M.STEEL, segs: 32 });
+    return { body: g, movers: [], shaftR: { in: rim * 0.2 } };
+};
+
+// A chassis: two box rails, cross members between them, a chequer deck plate over the lot.
+BUILD.chassis = function chassis(s, paint) {
+    const { L, W, h, t, rw, zr, xa, cross } = s;
+    const g = new Geo();
+    for (const sd of [1, -1]) g.cbox([-L / 2, 0, sd * zr - rw / 2], [L / 2, h, sd * zr + rw / 2], { color: paint, mat: M.PAINT, bevel: rw * 0.08 });
+    for (let k = 0; k < cross; k++) {
+        const x = -L / 2 + rw / 2 + ((L - rw) * k) / (cross - 1);
+        g.cbox([x - rw * 0.4, h * 0.15, -zr + rw / 2], [x + rw * 0.4, h * 0.85, zr - rw / 2], { color: mix(paint, DARK, 0.2), mat: M.PAINT, bevel: rw * 0.05 });
+    }
+    g.cbox([-L / 2, h, -W / 2], [L / 2, h + t, W / 2], { color: mix(paint, DARK, 0.45), mat: M.PAINT, bevel: t * 0.4 });
+    // Raised diamonds on the deck, a coarse chequer the eye reads as plate.
+    const step = Math.max(0.05, W / 8);
+    for (let x = -L / 2 + step; x < L / 2 - step * 0.5; x += step) for (let z = -W / 2 + step; z < W / 2 - step * 0.5; z += step) {
+        g.cbox([x - step * 0.18, h + t, z - step * 0.05], [x + step * 0.18, h + t * 1.5, z + step * 0.05], { color: mix(paint, DARK, 0.3), mat: M.PAINT, bevel: t * 0.05 });
+    }
+    // Pads under the corners where the hubs bolt on.
+    for (const [x, z] of [[xa, zr], [xa, -zr], [-xa, zr], [-xa, -zr]]) g.cbox([x - rw * 0.7, -t * 1.5, z - rw * 0.7], [x + rw * 0.7, 0, z + rw * 0.7], { color: DARK, mat: M.CAST });
+    return { body: g, movers: [], shaftR: {} };
+};
+
 export function meshPart(el, paint) {
     const f = BUILD[el.shape.kind];
     if (!f) throw new Error('foundry: no mesh for ' + el.shape.kind);

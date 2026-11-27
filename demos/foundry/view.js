@@ -474,6 +474,8 @@ export function createFoundryView(vp) {
                         on = c.kind === 'crate' ? !p.hooked : !!p.hooked;
                     }
                 }
+                // A machine's deck under it: a load can be set down there too.
+                if (p.deck != null && p.deck >= floor) { floor = p.deck; on = !!p.hooked; }
                 y.mark.position = [p.pose[0], floor + 0.003, p.pose[2]];
                 y.mark.color = on ? COLORS.drop : COLORS.hook;
             }
@@ -490,7 +492,8 @@ export function createFoundryView(vp) {
 
     // --- a yard: several machines in one world ------------------------------------------
 
-    let yardMachines = [];      // { m, node, drawn, shaded }
+    let yardMachines = [];      // { m, node, drawn, shaded, label, ring }
+    let follow = null;          // the machine the camera keeps in view as it moves: { m, at }
     /**
      * Draw `site` (site.js): each of its machines from its contract, stood where the
      * site placed it, the ground under them all, and the yard's things (setProps).
@@ -516,7 +519,7 @@ export function createFoundryView(vp) {
             // Its name over it, so the yard says which machine is which.
             const label = scene.createHtmlNode({ width: 240, height: 56, pxPerUnit: 240 / (m.size * 0.45), billboard: "full", worldAnchor: [m.mid[0], m.ground + m.size * 0.42, m.mid[1]], html: "" });
             // How far out its hook goes, as a ring on the ground: where two rings overlap, both reach.
-            const vars = varsOf(m), far = tipAt(m, vars, vars.map(() => 0)), R = Math.hypot(far[0] - m.mid[0], far[2] - m.mid[1]);
+            const vars = varsOf(m), far = m.tipWorld() && tipAt(m, vars, vars.map(() => 0)), R = far ? Math.hypot(far[0] - m.mid[0], far[2] - m.mid[1]) : 0;
             const ring = R > 0.05 ? scene.createMesh({ mesh: "torus", majorRadius: R, minorRadius: Math.max(0.01, m.size * 0.006), majorSegments: 128, minorSegments: 6, color: COLORS.reach, castsShadow: false, receivesShadow: false }) : null;
             if (ring) { ring.position = [m.mid[0], m.ground + 0.004, m.mid[1]]; ring.scale = [1, 0.2, 1]; }
             yardMachines.push({ m, node, drawn, shaded, label, ring });
@@ -548,9 +551,12 @@ export function createFoundryView(vp) {
         const R = vp.canvas.getBoundingClientRect();
         if (!R.width || !R.height) return;
         const f = free || { left: 0, top: 0, width: R.width, height: R.height };
+        follow = m ? { m, at: [m.mid[0], m.mid[1]] } : null;
         let pivot, r;
         if (m) {
-            r = m.size * 1.1; pivot = [m.mid[0], m.ground + m.size * 0.1, m.mid[1]];
+            // A machine on wheels goes places: take in the ground round it, not just itself.
+            r = m.contract.vehicle ? Math.max(m.size * 2.5, 6) : m.size * 1.1;
+            pivot = [m.mid[0], m.ground + m.size * 0.1, m.mid[1]];
             // Driving, look down steeply from the same heading: over what the hook hangs
             // reads straight off the ground, not guessed through the perspective.
             if (!angles) { const f = qRot(vp.cam.rot, [0, 0, -1]); angles = { yaw: Math.atan2(-f[0], -f[2]), pitch: -1.0 }; }
@@ -574,7 +580,26 @@ export function createFoundryView(vp) {
 
     /** Pose every machine of the yard where its world has it, and the yard's things. */
     function poseYard(site) {
-        for (const y of yardMachines) poseLevel(y.m.contract, y.drawn, y.m.frames());
+        for (const y of yardMachines) {
+            const m = y.m;
+            // A machine on wheels goes where they take it: its node, its name and its ring with it.
+            if (m.contract.vehicle) {
+                y.node.position = m.place.t.slice();
+                y.node.quaternion = m.place.q.slice();
+                y.label.worldAnchor = [m.mid[0], m.ground + m.size * 0.42, m.mid[1]];
+                if (y.ring) y.ring.position = [m.mid[0], m.ground + 0.004, m.mid[1]];
+            }
+            poseLevel(m.contract, y.drawn, m.frames());
+        }
+        // The camera keeps the driven machine where it was in the view as it goes.
+        if (follow) {
+            const d = [follow.m.mid[0] - follow.at[0], 0, follow.m.mid[1] - follow.at[1]];
+            if (d[0] || d[2]) {
+                vp.cam.pos = vp.cam.pos.map((v, i) => v + d[i]);
+                if (vp.cam.pivot) vp.cam.pivot = vp.cam.pivot.map((v, i) => v + d[i]);
+                follow.at = [follow.m.mid[0], follow.m.mid[1]];
+            }
+        }
         setProps(site.props());
     }
 

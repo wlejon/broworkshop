@@ -645,16 +645,26 @@ let machine = null;             // operate.js machine of the open design, while 
 // Keys held on a lever or dial: key → { id, dir, t }. A held key starts its control slow and
 // brings it up to full over KEY_RAMP seconds, so a tap nudges and a hold runs: a hanging
 // load can be brought over a spot by hand without flinging it.
+// The drive comes up faster: there is no hanging load to fling, and a machine on wheels that
+// crawls for a second before it goes feels broken. A drive key sets one axis of the drive
+// (`u` throttle, `v` steer); every other key the control's one value.
 const held = new Map();
-const KEY_START = 0.06, KEY_RAMP = 1.2;
-function holdKey(m, k, ct, dir) {
+const KEY_START = 0.06, KEY_RAMP = 1.2, DRIVE_START = 0.3, DRIVE_RAMP = 0.5;
+function holdKey(m, k, ct, dir, axis = 'u') {
     if (held.has(k)) return;
-    held.set(k, { id: ct.id, dir, t: 0 });
-    m.set(ct.id, dir * KEY_START);
+    const drive = ct.kind === 'drive';
+    held.set(k, { id: ct.id, dir, t: 0, axis, start: drive ? DRIVE_START : KEY_START, ramp: drive ? DRIVE_RAMP : KEY_RAMP });
+    m.set(ct.id, dir * held.get(k).start, axis);
 }
 function rampKeys(m, dt) {
-    for (const hk of held.values()) { hk.t += dt; m.set(hk.id, hk.dir * Math.min(1, KEY_START + hk.t / KEY_RAMP)); }
+    for (const hk of held.values()) { hk.t += dt; m.set(hk.id, hk.dir * Math.min(1, hk.start + hk.t / hk.ramp), hk.axis); }
 }
+/** A key pressed on control `ct`: which way, and on which axis (the drive's arrows are two). */
+function keyOn(ct, k) {
+    if (ct.kind === 'drive') return { dir: k === ct.keys[0] || k === ct.keys[3] ? 1 : -1, axis: k === ct.keys[0] || k === ct.keys[1] ? 'u' : 'v' };
+    return { dir: ct.keys[0] === k ? 1 : -1, axis: 'u' };
+}
+const holds = (ct) => ct.kind === 'lever' || ct.kind === 'dial' || ct.kind === 'drive';
 
 function setOperating(on) {
     if (on === !!machine) return;
@@ -683,7 +693,7 @@ function buildMachine() {
     view.show(c, { frame: false });
     view.setOperate(true);
     showMachine();
-    renderDeck($('deck'), machine, (id, u) => machine.set(id, u));
+    renderDeck($("deck"), machine, (id, u, axis) => machine.set(id, u, axis));
     const mount = (c.mounts || [])[0];
     const max = mount && isFinite(mount.payloadKg) ? mount.payloadKg : 0;
     $('opLoadRow').hidden = !(max > 0);
@@ -811,10 +821,15 @@ function drive(m) {
         frameDriven(null);
         return;
     }
-    renderDeck(el, m, (id, u) => m.set(id, u));
+    renderDeck(el, m, (id, u, axis) => m.set(id, u, axis));
     const row = el.querySelector('.f-dk-row');
     if (!m.hook) {
-        if (row) row.append(h('div', { class: 'f-hook' }, h('div', { class: 'f-dk-name' }, 'No hook'), h('div', { class: 'f-dk-read' }, h('span', { class: 'st' }, 'it carries no winch'))));
+        // A machine on wheels carries on its deck what a crane sets there; anything else just has no hook.
+        if (row && m.bedWorld()) row.append(h('div', { class: 'f-hook' },
+            h('div', { class: 'f-dk-head' }, h('span', { class: 'f-dk-name' }, 'Deck')),
+            h('div', { class: 'f-dk-read' }, h('span', { class: 'st', id: 'deckSt' })),
+            h('div', { class: 'f-yard-about' }, 'Drive it under a crane\'s hook to be loaded, and to where the load goes.')));
+        else if (row) row.append(h('div', { class: 'f-hook' }, h('div', { class: 'f-dk-name' }, 'No hook'), h('div', { class: 'f-dk-read' }, h('span', { class: 'st' }, 'it carries no winch'))));
         renderYardLists();
         frameDriven(m);
         return;
@@ -877,7 +892,8 @@ function updateYardLists() {
         el.querySelector('.d').textContent = doing;
     }
     if (yard.driven && $('hookSt')) {
-        const m = yard.driven, cr = m.reachable(), ov = cr ? null : m.over(), pad = m.hook.crate ? m.overPad() : null;
+        const m = yard.driven, cr = m.reachable(), ov = cr ? null : m.over();
+        const deck = m.hook.crate ? m.overDeck() : null, pad = m.hook.crate ? (deck ? { name: `${deck.name}'s deck` } : m.overPad()) : null;
         const down = m.hook.control.keys ? m.hook.control.keys[1].toUpperCase() : '';
         const c = m.hook.crate;
         $('hookSt').textContent = m.hook.stalled ? `too heavy: ${c.name} is more than the winch pulls`
@@ -887,6 +903,14 @@ function updateYardLists() {
         $('hookSt').className = 'st ' + (m.hook.stalled ? 'bad' : c || cr ? 'ok' : ov ? 'warn' : '');
         $('hookVal').textContent = `${m.hook.line.toFixed(2)} m`;
         $('hookTake').textContent = m.hook.crate ? 'Let go (Space)' : 'Take (Space)';
+    }
+    if (yard.driven && $('deckSt')) {
+        // What stands on its deck now, and whether a crane still holds it.
+        const m = yard.driven, s = yard.site;
+        const on = s.crates.filter((cr) => { const P = s.poseOf(cr); return s.under(P[0], P[2], P[1], cr).machine === m; });
+        const held = (cr) => s.machines.find((o) => o.hook && o.hook.crate === cr);
+        $('deckSt').textContent = !on.length ? 'empty' : on.map((cr) => held(cr) ? `${cr.name}, still on ${held(cr).name}'s hook` : cr.name).join(', ');
+        $('deckSt').className = 'st ' + (on.length ? (on.some(held) ? 'warn' : 'ok') : '');
     }
 }
 
@@ -924,16 +948,15 @@ $('yardSpeed').addEventListener('change', () => { if (yard) yard.site.timeScale 
 
 window.addEventListener('keyup', (e) => {
     if (yard && yard.driven) {
-        const k = e.key.toLowerCase();
-        const id = held.has(k) ? held.get(k).id : null;
-        if (id) { held.delete(k); yard.driven.set(id, 0); }
+        const k = e.key.toLowerCase(), hk = held.get(k);
+        if (hk) { held.delete(k); yard.driven.set(hk.id, 0, hk.axis); }
         return;
     }
-    const id = held.has(e.key.toLowerCase()) ? held.get(e.key.toLowerCase()).id : null;
-    if (!id || !machine) return;
-    held.delete(e.key.toLowerCase());
-    const ct = machine.controls.find((x) => x.id === id);
-    if (ct && (ct.kind === 'lever' || ct.kind === 'dial')) machine.set(id, 0);
+    const k = e.key.toLowerCase(), hk = held.get(k);
+    if (!hk || !machine) return;
+    held.delete(k);
+    const ct = machine.controls.find((x) => x.id === hk.id);
+    if (ct && holds(ct)) machine.set(hk.id, 0, hk.axis);
 });
 
 window.addEventListener('keydown', (e) => {
@@ -953,8 +976,8 @@ window.addEventListener('keydown', (e) => {
         if (k === ' ') { if (!e.repeat) hookToggle(m); e.preventDefault(); return; }
         const ct = m.controls.find((x) => x.keys && x.keys.includes(k));
         if (ct && !ct.dark) {
-            const dir = ct.keys[0] === k ? 1 : -1;
-            if (ct.kind === 'lever' || ct.kind === 'dial') holdKey(m, k, ct, dir); else m.set(ct.id, ct.u + dir * 0.1);
+            const { dir, axis } = keyOn(ct, k);
+            if (holds(ct)) holdKey(m, k, ct, dir, axis); else m.set(ct.id, ct.u + dir * 0.1);
             e.preventDefault();
         }
         return;
@@ -964,8 +987,8 @@ window.addEventListener('keydown', (e) => {
         const k = e.key.toLowerCase();
         const ct = machine.controls.find((x) => x.keys && x.keys.includes(k));
         if (ct && !ct.dark) {
-            const dir = ct.keys[0] === k ? 1 : -1;
-            if (ct.kind === 'lever' || ct.kind === 'dial') holdKey(machine, k, ct, dir);
+            const { dir, axis } = keyOn(ct, k);
+            if (holds(ct)) holdKey(machine, k, ct, dir, axis);
             else machine.set(ct.id, ct.u + dir * 0.1);
             e.preventDefault();
             return;
