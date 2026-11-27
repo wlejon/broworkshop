@@ -289,9 +289,29 @@ test('a machine built from nothing by clicks, aimed at a goal, and built on', ()
     mt.value = 'back'; mt.dispatchEvent(new Event('change', { bubbles: true })); frames(1);
     f.addPart('boom'); f.useDesign('armSegment'); frames(1);
     const crane = f.contract(f.current), slew = crane.joints.find((J) => J.upright);
-    check(slew && slew.load === 0 && slew.hold > slew.cont, `the turntable carries no weight though it could not hold the arm level (${slew && slew.hold.toFixed(0)} N·m)`);
+    check(slew && slew.carry > slew.hold && slew.hold > slew.cont, `the turntable's drive carries no weight, though it could not hold the arm level (${slew && slew.hold.toFixed(0)} N·m): its boom does`);
     check(crane.ok && !crane.warnings.length && crane.mounts[0].payloadKg > 100, `the crane lifts ${crane.mounts[0].payloadKg.toFixed(0)} kg, the arm segment's own`);
     check(f.contract('jointActuator').joints.every((J) => !J.upright), 'a joint on a base that does not face its axis still carries its weight');
+    // A slewing ring takes a drive on every pinion, and their torques add.
+    const ringWith = (pods, pinions = pods) => {
+        f.reset(); frames(1);
+        clickOn('#newDesign'); frames(1);
+        f.addPart('slewRing'); f.select('slew1'); frames(1);
+        const pn = q('#inspector [data-param="pinions"]').parentNode.querySelector('input[type=number]');
+        pn.value = String(pinions); pn.dispatchEvent(new Event('change', { bubbles: true })); frames(1);
+        for (let i = 0; i < pods; i++) f.useDesign('drivePod');
+        f.addPart('boom'); frames(1);
+        return f.contract(f.current);
+    };
+    const r4 = ringWith(4);
+    const pinned = f.lib[f.current].links.filter((l) => /^slew1\.in\d$/.test(l.b)).length;
+    check(pinned === 4 && r4.ok, `each pod wired to a pinion of its own (${pinned})`);
+    check(q('#flow').textContent.includes('turntable'), 'the flow shows the ring as a turntable');
+    const rMix = ringWith(1, 4);
+    check(rMix.errors.some((e) => /not driven|partly/.test(e)), `pinions without a drive of their own are an error (${rMix.errors.join('; ')})`);
+    const r1 = ringWith(1);
+    const one = r1.joints[0].cont, four = r4.joints[0].cont;
+    check(Math.abs(four / one - 4) < 0.01 || four >= r4.joints[0].bend * 0.999, `four drives turn it four times as hard as one (${one.toFixed(0)} → ${four.toFixed(0)} N·m)`);
     f.reset();
 });
 

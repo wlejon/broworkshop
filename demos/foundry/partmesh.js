@@ -160,6 +160,39 @@ const BUILD = {
         };
     },
 
+    slewRing(s, paint) {
+        const { zr, zp, n, m, b, R, rp, rc, Ro, hz, deck, stub: st, hub, hubR } = s;
+        const g = new Geo();
+        // Two decks, the ring gear between them, tied by bolted posts around the rim.
+        g.cyl(Ro, -hz - deck, -hz, { color: paint, mat: M.PAINT });
+        g.cyl(Ro, hz, hz + deck, { color: paint, mat: M.PAINT });
+        g.boltCircle(Ro * 0.94, Math.max(8, n * 3), hz + deck, Ro * 0.012, { axis: 'z' });
+        g.boltCircle(Ro * 0.94, Math.max(8, n * 3), -hz - deck, Ro * 0.012, { axis: '-z' });
+        const posts = Math.max(6, n * 2), pr = Math.max(0.003, (Ro - rc - rp) * 0.3);
+        for (let k = 0; k < posts; k++) {
+            const a = (k / posts) * TAU;
+            g.cyl(pr, -hz, hz, { at: [Math.cos(a) * (Ro - pr * 1.6), Math.sin(a) * (Ro - pr * 1.6), 0], color: DARK, mat: M.CAST });
+        }
+        // The ring turns with the hub that stands up through the top deck.
+        const ring = gearRotor(zr, m, b, R * 0.2, hubR, { color: lin([0.6, 0.62, 0.66]) });
+        ring.cyl(hubR, hz - 0.0001, hz + deck + hub * 0.8, { color: STEEL, mat: M.STEEL });
+        ring.cyl(hubR * 1.5, hz + deck + hub * 0.8, hz + deck + hub, { color: mix(paint, DARK, 0.2), mat: M.PAINT });
+        ring.boltCircle(hubR * 1.22, 8, hz + deck + hub, hubR * 0.06, { axis: 'z' });
+        const movers = [{ geo: ring, pivot: [0, 0, 0], axis: 'z', port: 'out', sign: 1 }];
+        const shaftR = { out: hubR };
+        const rs = Math.max(0.002, rp * 0.4);
+        for (let i = 0; i < n; i++) {
+            const a = (i / n) * TAU + Math.PI / n;
+            const pin = gearRotor(zp, m, b, rs * 0.9, rs * 1.8, { phase: Math.PI / zp });
+            pin.cyl(rs, -hz, hz + deck, { color: STEEL, mat: M.STEEL });
+            stub(pin, rs, hz + deck, hz + deck + st, {});
+            boss(g, rs * 1.05, rs * 2.2, hz + deck, hz + deck + st * 0.2, { at: [Math.cos(a) * rc, Math.sin(a) * rc, 0] }, paint);
+            movers.push({ geo: pin, pivot: [Math.cos(a) * rc, Math.sin(a) * rc, 0], axis: 'z', port: `in${i + 1}`, sign: -1 });
+            shaftR[`in${i + 1}`] = rs;
+        }
+        return { body: g, movers, shaftR };
+    },
+
     worm(s, paint) {
         const { m, b, rw, rq, cd, half, hz, stub: st, top, pad, zw } = s;
         const g = new Geo();

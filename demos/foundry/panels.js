@@ -55,7 +55,7 @@ function liftChain(c, outId) {
 }
 
 /** What a payload of `kg` at the tip asks of joint J, as a fraction of what it holds. */
-function jointLoad(J, kg, tipS) { return J.upright ? 0 : J.cont > 0 ? (J.hold + kg * G * (tipS - J.s)) / J.cont : Infinity; }
+function jointLoad(J, kg, tipS) { const cap = J.carry ?? J.cont; return cap > 0 ? (J.hold + kg * G * (tipS - J.s)) / cap : Infinity; }
 
 export function fmtKg(v) { return !isFinite(v) ? '∞' : v >= 1000 ? `${(v / 1000).toFixed(v >= 1e4 ? 0 : 1)} t` : `${v.toFixed(v >= 10 ? 0 : 1)} kg`; }
 export function fmtM(v) { return v >= 10 ? `${v.toFixed(0)} m` : v >= 1 ? `${v.toFixed(2)} m` : `${(v * 100).toFixed(0)} cm`; }
@@ -163,7 +163,7 @@ export function renderFlow(el, c, outId, opEffort) {
             const load = Math.min(1, jointLoad(J, opEffort || 0, lc.tipS));
             el.append(h('div', { class: 'f-stage-chip' + (weak ? ' weak' : ''), 'data-child': J.child || null, title: `${J.label}: ${J.limit} ${J.mode} past ${fmtEffort('rot', J.cont)}${J.lock != null ? `; locks at ${fmtEffort('rot', J.lock)} with the power off` : ''}` },
                 h('div', { class: 't' }, (dup.has(shortLabel(J.label)) && J.child ? `${J.child} · ` : '') + shortLabel(J.label) + (J.lock != null ? ' 🔒' : '')),
-                h('div', { class: 's' }, J.upright ? `drives ${fmtEffort('rot', J.cont)} · turns it all round level, carrying no weight` : `drives ${fmtEffort('rot', J.cont)} · carries ${fmtEffort('rot', J.hold)} · ${fmtM(lc.tipS - J.s)} out`),
+                h('div', { class: 's' }, J.upright ? `turntable · drives ${fmtEffort('rot', J.cont)} · the boom carries ${fmtEffort('rot', J.hold)} · ${fmtM(lc.tipS - J.s)} out` : `drives ${fmtEffort('rot', J.cont)} · carries ${fmtEffort('rot', J.hold)} · ${fmtM(lc.tipS - J.s)} out`),
                 h('div', { class: 'bar' }, h('i', { style: `width:${(load * 100).toFixed(1)}%` })),
             ));
         }
@@ -179,17 +179,20 @@ export function renderFlow(el, c, outId, opEffort) {
     const dom = out.domain;
     const tr = c.traces[outId];
     if (src) {
-        const root = c.children.find((ch) => ch.id === tr.root.child);
-        const rl = root.el.kind === 'contract' ? root.el.name : root.el.label;
+        // Drives side by side on a summing input show as one chip: how many, and what they give together.
+        const P = tr.root.parallel, first = P ? P[0].root : tr.root;
+        const root = c.children.find((ch) => ch.id === first.child);
+        const name = root.el.kind === 'contract' ? root.el.name : root.el.label;
+        const rl = P ? `${P.filter((b) => !b.dark).length}× ${name}` : name;
         const rp = root.el.ports.find((p) => p.id === tr.root.src.port);
         const rd = rp ? rp.domain : dom;
-        el.append(h('div', { class: 'f-stage-chip src', 'data-child': tr.root.child },
+        el.append(h('div', { class: 'f-stage-chip src', 'data-child': first.child },
             h('div', { class: 't' }, rl),
-            h('div', { class: 's' }, root.el.summary || `${fmtEffort(rd, tr.root.src.cont)} cont · ${fmtFlow(rd, tr.root.src.noLoad)}`),
+            h('div', { class: 's' }, P ? `${fmtEffort(rd, tr.root.src.cont)} together · ${fmtFlow(rd, tr.root.src.noLoad)}` : root.el.summary || `${fmtEffort(rd, tr.root.src.cont)} cont · ${fmtFlow(rd, tr.root.src.noLoad)}`),
         ));
     } else {
-        const inp = c.ports.find((p) => p.id === path.from);
-        el.append(h('div', { class: 'f-stage-chip io' }, h('div', { class: 't' }, inp ? inp.label : path.from), h('div', { class: 's' }, 'input')));
+        const froms = [].concat(path.from), inp = c.ports.find((p) => p.id === froms[0]);
+        el.append(h('div', { class: 'f-stage-chip io' }, h('div', { class: 't' }, (inp ? inp.label.replace(/ \(\w+\)$/, '') : froms[0]) + (froms.length > 1 ? ` ×${froms.length}` : '')), h('div', { class: 's' }, 'input')));
     }
     for (const s of chain.stages) {
         el.append(arrow());
@@ -455,7 +458,7 @@ function drawLiftCurve(ctx, c, outId, op, { L, T, pw, ph }) {
     if (!lc || !lc.joints.length) return;
     const last = lc.joints[lc.joints.length - 1].s;
     const r0 = last + (lc.tipS - last) * 0.35, r1 = lc.tipS * 1.6;
-    const lift = (r) => Math.min(...lc.joints.filter((J) => !J.upright).map((J) => Math.max(0, J.cont - J.hold) / (G * Math.max(1e-6, r - J.s))));
+    const lift = (r) => Math.min(...lc.joints.map((J) => Math.max(0, (J.carry ?? J.cont) - J.hold) / (G * Math.max(1e-6, r - J.s))));
     const want = c.goal && c.goal.lift;
     const l0 = lift(lc.tipS), maxKg = Math.max(Number.isFinite(l0) ? l0 * 2.2 : 0, want ? want.payloadKg * 1.3 : 0) || 1;
     const X = (r) => L + ((r - r0) / (r1 - r0)) * pw, Y = (kg) => T + ph - (Math.min(kg, maxKg) / maxKg) * ph;
