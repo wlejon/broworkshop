@@ -510,6 +510,30 @@ test('a carrier drives a crate between two cranes too far apart to hand it over,
     f.yard(false); frames(1);
 });
 
+test('up a ramp: the carrier finds the way onto a bench round a wall it cannot climb, with the crate riding', () => {
+    const q = (s) => document.querySelector(s), f = window.foundry;
+    f.yard(true, 'grade'); frames(2);
+    const s = f.site, v = s.machines.find((m) => m.name === 'Carrier'), cr = s.crates[0];
+    check(Math.abs(s.groundAt(20, 0) - 1) < 1e-6 && s.groundAt(0, 0) === 0, 'the site crane stands on a bench a metre up');
+    check(Math.abs(s.machines.find((m) => m.name === 'Site Crane').ground - 1) < 0.01, 'and stands on it');
+    f.runCrew(true); frames(1);
+    let t = 0, ramp = false, fell = false, shotTaken = false;
+    while (f.crew && t < 200) {
+        f.crew.step(0.25); t += 0.25;
+        const P = s.poseOf(cr);
+        // Up the ramp lane (z = -8.5), not over the wall (x = 14.5 to 15).
+        if (v.mid[0] > 9 && v.mid[0] < 14 && Math.abs(v.mid[1] + 8.5) < 0.6) ramp = true;
+        if (v.mid[0] > 6 && v.mid[0] < 16 && !s.machines.some((m) => m.hook && m.hook.crate === cr) && s.under(P[0], P[2], P[1], cr).machine !== v && P[0] > 4 && P[0] < 16) fell = true;
+        if (ramp && !shotTaken && v.mid[0] > 11) { frames(1); shot('yard-grade'); shotTaken = true; }
+        if (Math.round(t * 4) % 40 === 0) frames(1);
+    }
+    frames(2);
+    check(ramp, 'the carrier drives up the ramp');
+    check(!fell, 'the crate stays on its deck the whole way');
+    check(s.tasks[0].done && /Every task is done/.test(q('#status').textContent), `the crate stands on the pad up on the bench (${t} s; ${f.crew ? [...f.crew.pilots.values()].map((p) => p.doing).join(' | ') : q('#status').textContent})`);
+    f.yard(false); frames(1);
+});
+
 test('the player drives the carrier in the crew: told their part, the spot marked, the cranes working with them', () => {
     const q = (s) => document.querySelector(s), f = window.foundry;
     f.yard(true, 'haul'); frames(1);

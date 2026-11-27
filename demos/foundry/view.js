@@ -50,7 +50,7 @@ export function createFoundryView(vp) {
     // drawn by every node that shows one: a long chain of the same assembly
     // uploads each of its parts once.
     const meshCache = new Map();
-    let root = null, floor = null;
+    let root = null, floor = null, terrain = null, floorParams = null;
     let movers = [];         // { node, axis, speed, angle, slide, s, dir, base }
     let selectNodes = new Map();
     let shown = null;
@@ -214,7 +214,9 @@ export function createFoundryView(vp) {
         floor.name = 'floor';
         floor.position = [0, floorY, 0];
         const step = Math.pow(10, Math.floor(Math.log10(size * 0.6)));
-        floor.setShader({ module: FLOOR_BK, file: 'shaders/floor.bk', uniforms: { step, radius, fadeStart: size * 1.6, fadeEnd: size * 7 } });
+        floorParams = { step, radius, fadeStart: size * 1.6, fadeEnd: size * 7 };
+        floor.setShader({ module: FLOOR_BK, file: 'shaders/floor.bk', uniforms: floorParams });
+        if (terrain) { terrain.destroy(); terrain = null; }
         scene.setFog({ enabled: false });
         scene.setSSAO({ enabled: true, radius: Math.max(0.01, size * 0.06), intensity: 1.1, bias: size * 0.001 });
         key.shadowDistance = size * 8;
@@ -465,7 +467,7 @@ export function createFoundryView(vp) {
                     y.mark.name = 'drop';
                 }
                 // Green over a free crate (to take) or over a pad (to set it down on).
-                let floor = seen.ground, on = false;
+                let floor = seen.groundAt ? seen.groundAt(p.pose[0], p.pose[2]) : seen.ground, on = false;
                 for (const c of props) {
                     if ((c.kind !== 'crate' && c.kind !== 'pad') || c.held) continue;
                     const q = [c.pose[3], c.pose[4], c.pose[5], c.pose[6]], rel = qRot(qConj(q), [p.pose[0] - c.pose[0], 0, p.pose[2] - c.pose[2]]);
@@ -533,8 +535,15 @@ export function createFoundryView(vp) {
             lo[0] = Math.min(lo[0], p.at[0] - 0.5); hi[0] = Math.max(hi[0], p.at[0] + 0.5);
             lo[2] = Math.min(lo[2], p.at[2] - 0.5); hi[2] = Math.max(hi[2], p.at[2] + 0.5);
         }
-        seen = { box: { min: lo, max: hi }, size: hi.map((v, i) => v - lo[i]), ground: site.ground };
+        seen = { box: { min: lo, max: hi }, size: hi.map((v, i) => v - lo[i]), ground: site.ground, groundAt: site.groundAt };
         stage({ size: [seen.size[0] * 0.25, seen.size[1], seen.size[2] * 0.25], box: { min: [0, site.ground, 0] } });
+        // Ground that rises: the site's height field, gridded like the floor it rises from.
+        const tm = site.terrainMesh && site.terrainMesh();
+        if (tm) {
+            terrain = scene.createMesh({ positions: tm.positions, indices: tm.indices, color: [1, 1, 1], castsShadow: true, receivesShadow: true });
+            terrain.name = 'terrain';
+            terrain.setShader({ module: FLOOR_BK, file: 'shaders/floor.bk', uniforms: floorParams });
+        }
         const span = Math.hypot(seen.size[0], seen.size[2]);
         vp.cam.near = span * 0.005;
         vp.cam.far = span * 40;
