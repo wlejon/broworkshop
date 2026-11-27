@@ -386,7 +386,7 @@ test('a machine runs from a deck compiled from what it is made of', () => {
     check(a.controls.map((x) => x.label).join() === 'Shoulder,Elbow' && a.layout.kids.length === 1 && a.layout.kids[0].kids[0].control.label === 'Elbow',
         `the elbow is carried by the shoulder (${a.controls.map((x) => x.label)})`);
     a.set('c1', -1); a.set('c0', -1); run(4);
-    check(a.tip()[1] > a.floorY - 0.02 && a.status.includes('stalled'), `driven down, it comes to rest on the ground (tip ${a.tip()[1].toFixed(2)} over ${a.floorY.toFixed(2)}: ${a.status})`);
+    check(a.tip()[1] > a.floorY - 0.02 && a.status.includes('blocked'), `driven down, it comes to rest on the ground (tip ${a.tip()[1].toFixed(2)} over ${a.floorY.toFixed(2)}: ${a.status})`);
     // At city scale the same numbers hold: the Road Boom lifts 100 t off the ground; 300 t is more than
     // its boom bears, and its load-moment limit lets the boom down rather than break it.
     f.open('roadBoom'); frames(2);

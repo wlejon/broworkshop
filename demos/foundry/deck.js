@@ -17,8 +17,8 @@
 import { h, clear } from "/lib/kit/dom.js";
 
 const STATUS = {
-    still: ['still', ''], moving: ['moving', 'ok'], holding: ['holding', ''], locked: ['locked off', ''],
-    straining: ['straining', 'warn'], stalled: ['stalled: too heavy', 'bad'], falling: ['slipping back', 'bad'],
+    still: ['still', ''], moving: ['moving', 'ok'], stopping: ['stopping', ''], holding: ['holding', ''], locked: ['locked off', ''],
+    straining: ['straining', 'warn'], stalled: ['stalled: too heavy', 'bad'], blocked: ['blocked: something is in its way', 'bad'], falling: ['slipping back', 'bad'],
     overloaded: ['its boom is overloaded', 'bad'], 'at its stop': ['at its stop', 'warn'], broken: ['broken: its boom gave way', 'bad'], 'at its limit': ['at its load limit', 'warn'],
 };
 
@@ -82,7 +82,7 @@ export function updateDeck(el, m) {
         const st = box.querySelector('.st'), val = box.querySelector('.val'), bar = box.querySelector('.f-dk-bar i');
         if (ct.joints.length) {
             // The worst of its joints says how it is going.
-            const order = ['broken', 'at its limit', 'stalled', 'falling', 'straining', 'at its stop', 'moving', 'holding', 'locked', 'still'];
+            const order = ['broken', 'at its limit', 'stalled', 'blocked', 'falling', 'straining', 'at its stop', 'moving', 'stopping', 'holding', 'locked', 'still'];
             const s = ct.joints.map((j) => m.status[j]).sort((a, b) => order.indexOf(a) - order.indexOf(b))[0];
             const [text, cls] = STATUS[s] || [s, ''];
             st.textContent = text; st.className = 'st ' + cls;

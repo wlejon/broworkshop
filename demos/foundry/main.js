@@ -808,6 +808,7 @@ function drive(m) {
     if (!m) {
         el.append(h('div', { class: 'f-dk-empty' }, 'Click a machine (or press Tab) to drive it: its deck is compiled from what it is made of, its winch\'s Hoist with the rest. Let the hook down onto a crate and press Space to take it; Space again lets it go.'));
         renderYardLists();
+        frameDriven(null);
         return;
     }
     renderDeck(el, m, (id, u) => m.set(id, u));
@@ -815,6 +816,7 @@ function drive(m) {
     if (!m.hook) {
         if (row) row.append(h('div', { class: 'f-hook' }, h('div', { class: 'f-dk-name' }, 'No hook'), h('div', { class: 'f-dk-read' }, h('span', { class: 'st' }, 'it carries no winch'))));
         renderYardLists();
+        frameDriven(m);
         return;
     }
     const take = h('button', { class: 'small', id: 'hookTake' }, 'Take (Space)');
@@ -826,6 +828,14 @@ function drive(m) {
         h('div', { class: 'f-dk-read' }, h('span', { class: 'st', id: 'hookSt' }), h('span', { class: 'val', id: 'hookVal' })),
         h('div', { class: 'f-yard-about' }, `Hoist (${hoistKeys}) takes the line in and pays it out.`)));
     renderYardLists();
+    frameDriven(m);
+}
+
+/** Bring machine `m` (null: the whole yard) into the part of the view the deck leaves open. */
+function frameDriven(m) {
+    const c = $('stage3d').getBoundingClientRect(), d = $('deck').getBoundingClientRect();
+    const edge = d.width ? d.right - c.left + 8 : 0;
+    view.frameYard(m, null, m && edge > 0 && edge < c.width * 0.6 ? { left: edge, top: 0, width: c.width - edge, height: c.height } : null);
 }
 
 function hookToggle(m) {
@@ -867,9 +877,14 @@ function updateYardLists() {
         el.querySelector('.d').textContent = doing;
     }
     if (yard.driven && $('hookSt')) {
-        const m = yard.driven, cr = m.reachable();
-        $('hookSt').textContent = m.hook.stalled ? `too heavy: ${m.hook.crate.name} is more than the winch pulls` : m.hook.crate ? (m.carrying() ? `lifting ${m.hook.crate.name}` : `on ${m.hook.crate.name}`) : cr ? `over ${cr.name}: Space takes it` : 'empty';
-        $('hookSt').className = 'st ' + (m.hook.stalled ? 'bad' : m.hook.crate ? 'ok' : cr ? 'warn' : '');
+        const m = yard.driven, cr = m.reachable(), ov = cr ? null : m.over(), pad = m.hook.crate ? m.overPad() : null;
+        const down = m.hook.control.keys ? m.hook.control.keys[1].toUpperCase() : '';
+        const c = m.hook.crate;
+        $('hookSt').textContent = m.hook.stalled ? `too heavy: ${c.name} is more than the winch pulls`
+            : c ? (m.carrying() ? `lifting ${c.name}${pad ? `, over ${pad.name}: let it down (${down})` : ''}`
+                : `on ${c.name}${pad ? `, down on ${pad.name}` : ''}: Space lets go`)
+            : cr ? `at ${cr.name}: Space takes it` : ov ? `over ${ov.name}: let the line down (${down})` : 'empty';
+        $('hookSt').className = 'st ' + (m.hook.stalled ? 'bad' : c || cr ? 'ok' : ov ? 'warn' : '');
         $('hookVal').textContent = `${m.hook.line.toFixed(2)} m`;
         $('hookTake').textContent = m.hook.crate ? 'Let go (Space)' : 'Take (Space)';
     }

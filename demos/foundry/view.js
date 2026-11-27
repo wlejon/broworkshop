@@ -10,6 +10,7 @@ import { skyEnvironment } from "/lib/kit/sky.js";
 import { rotQuat, rotApply } from "/lib/foundry/rot.js";
 import { flowsFor } from "/lib/foundry/compile.js";
 import { standOf, frameApply, frameMul, frameInv } from "/lib/foundry/operate.js";
+import { tipAt, varsOf } from "/lib/foundry/pilot.js";
 
 const IDENT = { q: [0, 0, 0, 1], t: [0, 0, 0] };
 import { Geo, M, lin } from "/app/geom.js";
@@ -406,7 +407,7 @@ export function createFoundryView(vp) {
             for (const rec of drawn.byChild.values()) if (rec.inner) hide(rec.inner);
         };
         if (drawnTop) hide(drawnTop);
-        for (const y of yard) { y.node.destroy(); if (y.rope) y.rope.destroy(); }
+        for (const y of yard) { y.node.destroy(); if (y.rope) y.rope.destroy(); if (y.mark) y.mark.destroy(); }
         yard = [];
         if (!on || !seen) return;
         // Frame the ground it can sweep, not the pose it was built in: what it carries swings
@@ -421,7 +422,7 @@ export function createFoundryView(vp) {
 
     const COLORS = {
         crate: [0.45, 0.33, 0.2], person: [0.95, 0.42, 0.08], load: [0.3, 0.32, 0.36],
-        pad: [0.16, 0.42, 0.3], padDone: [0.25, 0.75, 0.42], spot: [0.7, 0.55, 0.15], hook: [0.85, 0.65, 0.1], hooked: [0.95, 0.3, 0.15],
+        pad: [0.16, 0.42, 0.3], padDone: [0.25, 0.75, 0.42], spot: [0.7, 0.55, 0.15], hook: [0.85, 0.65, 0.1], hooked: [0.95, 0.3, 0.15], drop: [0.15, 0.95, 0.35], reach: [0.45, 0.5, 0.58], reachOn: [0.95, 0.55, 0.15],
     };
     /**
      * Draw the world's other bodies where they are: `props` from the site
@@ -434,7 +435,7 @@ export function createFoundryView(vp) {
         if (!operating) return;
         const key = (p) => p.id || (p.kind === 'hook' ? `hook:${p.machine.name}` : `${p.kind}:${p.body ?? 'load'}:${p.half ? p.half[0].toFixed(4) : ''}`);
         const want = new Set(props.map(key));
-        yard = yard.filter((y) => { if (want.has(y.key)) return true; y.node.destroy(); if (y.rope) y.rope.destroy(); return false; });
+        yard = yard.filter((y) => { if (want.has(y.key)) return true; y.node.destroy(); if (y.rope) y.rope.destroy(); if (y.mark) y.mark.destroy(); return false; });
         for (const p of props) {
             let y = yard.find((x) => x.key === key(p));
             if (!y) {
@@ -456,6 +457,26 @@ export function createFoundryView(vp) {
             y.node.quaternion = [p.pose[3], p.pose[4], p.pose[5], p.pose[6]];
             if (p.kind === 'pad' && y.lit !== !!p.done) { y.lit = !!p.done; y.node.color = y.lit ? COLORS.padDone : COLORS.pad; }
             if (p.kind === 'hook' && y.lit !== !!p.hooked) { y.lit = !!p.hooked; y.node.color = y.lit ? COLORS.hooked : COLORS.hook; }
+            if (p.kind === 'hook') {
+                // Where the hook would come down: a disc on whatever is under it, a crate's top
+                // or the ground, so an operator sees over what the hook hangs from any angle.
+                if (!y.mark) {
+                    y.mark = scene.createMesh({ mesh: 'cylinder', radius: p.radius * 2.2, halfHeight: 0.002, color: COLORS.hook, castsShadow: false, receivesShadow: false });
+                    y.mark.name = 'drop';
+                }
+                // Green over a free crate (to take) or over a pad (to set it down on).
+                let floor = seen.ground, on = false;
+                for (const c of props) {
+                    if ((c.kind !== 'crate' && c.kind !== 'pad') || c.held) continue;
+                    const q = [c.pose[3], c.pose[4], c.pose[5], c.pose[6]], rel = qRot(qConj(q), [p.pose[0] - c.pose[0], 0, p.pose[2] - c.pose[2]]);
+                    if (Math.abs(rel[0]) < c.half[0] && Math.abs(rel[2]) < c.half[2] && c.pose[1] < p.pose[1] && c.pose[1] + c.half[1] >= floor) {
+                        floor = c.pose[1] + c.half[1];
+                        on = c.kind === 'crate' ? !p.hooked : !!p.hooked;
+                    }
+                }
+                y.mark.position = [p.pose[0], floor + 0.003, p.pose[2]];
+                y.mark.color = on ? COLORS.drop : COLORS.hook;
+            }
             if (y.rope && p.from) {
                 // From the tip to the hook, or to the middle of a block's top face.
                 const top = p.kind === 'hook' ? p.pose.slice(0, 3) : qRot([p.pose[3], p.pose[4], p.pose[5], p.pose[6]], [0, p.half[1], 0]).map((v, i) => v + p.pose[i]);
@@ -477,9 +498,9 @@ export function createFoundryView(vp) {
      */
     function showYard(site) {
         clear();
-        for (const y of yardMachines) y.node.destroy();
+        for (const y of yardMachines) { y.node.destroy(); y.label.destroy(); if (y.ring) y.ring.destroy(); }
         yardMachines = [];
-        for (const y of yard) { y.node.destroy(); if (y.rope) y.rope.destroy(); }
+        for (const y of yard) { y.node.destroy(); if (y.rope) y.rope.destroy(); if (y.mark) y.mark.destroy(); }
         yard = [];
         shown = null; drawnTop = null; rings = [];
         operating = true;
@@ -492,7 +513,14 @@ export function createFoundryView(vp) {
             const hide = (d) => { for (const n of d.lines) n.visible = false; for (const rec of d.byChild.values()) if (rec.inner) hide(rec.inner); };
             hide(drawn);
             const shaded = [...drawn.byChild.values()].flatMap((r) => r.shaded);
-            yardMachines.push({ m, node, drawn, shaded });
+            // Its name over it, so the yard says which machine is which.
+            const label = scene.createHtmlNode({ width: 240, height: 56, pxPerUnit: 240 / (m.size * 0.45), billboard: "full", worldAnchor: [m.mid[0], m.ground + m.size * 0.42, m.mid[1]], html: "" });
+            // How far out its hook goes, as a ring on the ground: where two rings overlap, both reach.
+            const vars = varsOf(m), far = tipAt(m, vars, vars.map(() => 0)), R = Math.hypot(far[0] - m.mid[0], far[2] - m.mid[1]);
+            const ring = R > 0.05 ? scene.createMesh({ mesh: "torus", majorRadius: R, minorRadius: Math.max(0.01, m.size * 0.006), majorSegments: 128, minorSegments: 6, color: COLORS.reach, castsShadow: false, receivesShadow: false }) : null;
+            if (ring) { ring.position = [m.mid[0], m.ground + 0.004, m.mid[1]]; ring.scale = [1, 0.2, 1]; }
+            yardMachines.push({ m, node, drawn, shaded, label, ring });
+            tag(yardMachines.at(-1), false);
             const r = m.size * 0.9;
             lo[0] = Math.min(lo[0], m.mid[0] - r); hi[0] = Math.max(hi[0], m.mid[0] + r);
             lo[2] = Math.min(lo[2], m.mid[1] - r); hi[2] = Math.max(hi[2], m.mid[1] + r);
@@ -502,13 +530,46 @@ export function createFoundryView(vp) {
             lo[0] = Math.min(lo[0], p.at[0] - 0.5); hi[0] = Math.max(hi[0], p.at[0] + 0.5);
             lo[2] = Math.min(lo[2], p.at[2] - 0.5); hi[2] = Math.max(hi[2], p.at[2] + 0.5);
         }
-        seen = { box: { min: lo, max: hi }, size: hi.map((v, i) => v - lo[i]) };
+        seen = { box: { min: lo, max: hi }, size: hi.map((v, i) => v - lo[i]), ground: site.ground };
         stage({ size: [seen.size[0] * 0.25, seen.size[1], seen.size[2] * 0.25], box: { min: [0, site.ground, 0] } });
-        const c = lo.map((v, i) => (v + hi[i]) / 2), span = Math.hypot(seen.size[0], seen.size[2]);
-        vp.reframe([c[0], site.ground + span * 0.05, c[2]], span * 1.15, { yaw: 0.35, pitch: -0.62 });
+        const span = Math.hypot(seen.size[0], seen.size[2]);
         vp.cam.near = span * 0.005;
         vp.cam.far = span * 40;
+        frameYard(null, { yaw: 0.35, pitch: -0.62 });
         poseYard(site);
+    }
+
+    /**
+     * Frame the yard, or with `m` the machine being driven and its reach round it, inside
+     * `free` ({ left, top, width, height } in canvas CSS px: the part of the view no panel
+     * covers; default all of it). Looked at from where the camera is, unless `angles` says.
+     */
+    function frameYard(m, angles, free) {
+        const R = vp.canvas.getBoundingClientRect();
+        if (!R.width || !R.height) return;
+        const f = free || { left: 0, top: 0, width: R.width, height: R.height };
+        let pivot, r;
+        if (m) {
+            r = m.size * 1.1; pivot = [m.mid[0], m.ground + m.size * 0.1, m.mid[1]];
+            // Driving, look down steeply from the same heading: over what the hook hangs
+            // reads straight off the ground, not guessed through the perspective.
+            if (!angles) { const f = qRot(vp.cam.rot, [0, 0, -1]); angles = { yaw: Math.atan2(-f[0], -f[2]), pitch: -1.0 }; }
+        }
+        else {
+            if (!angles) { const f = qRot(vp.cam.rot, [0, 0, -1]); angles = { yaw: Math.atan2(-f[0], -f[2]), pitch: -0.62 }; }
+            const lo = seen.box.min, hi = seen.box.max;
+            r = 0.5 * Math.hypot(seen.size[0], seen.size[2]);
+            pivot = [(lo[0] + hi[0]) / 2, seen.ground + r * 0.1, (lo[2] + hi[2]) / 2];
+        }
+        // Far enough that a circle of radius r fits the free part's height and width.
+        const t = Math.tan((vp.cam.fov * Math.PI) / 360);
+        const dist = 1.1 * Math.max(r / (t * f.height / R.height), r / (t * f.width / R.height));
+        vp.reframe(pivot, dist, angles);
+        // Slide the camera across so the pivot sits in the middle of the free part.
+        const wpp = (2 * dist * t) / R.height;
+        const dx = f.left + f.width / 2 - R.width / 2, dy = f.top + f.height / 2 - R.height / 2;
+        const right = qRot(vp.cam.rot, [1, 0, 0]), up = qRot(vp.cam.rot, [0, 1, 0]);
+        vp.cam.pos = vp.cam.pos.map((v, i) => v - right[i] * dx * wpp + up[i] * dy * wpp);
     }
 
     /** Pose every machine of the yard where its world has it, and the yard's things. */
@@ -533,21 +594,33 @@ export function createFoundryView(vp) {
 
     /** Light machine `m` of the yard as the one being driven (null: none). */
     function selectMachine(m) {
-        for (const y of yardMachines) for (const n of y.shaded) n.setShaderUniform('selected', y.m === m ? 1 : 0);
+        for (const y of yardMachines) {
+            for (const n of y.shaded) n.setShaderUniform('selected', y.m === m ? 1 : 0);
+            tag(y, y.m === m);
+        }
+    }
+
+    /** A yard machine's name tag: outlined in orange while it is the one being driven. */
+    function tag(y, driven) {
+        if (y.ring) y.ring.color = driven ? COLORS.reachOn : COLORS.reach;
+        const name = y.m.name.replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' })[c]);
+        y.label.setHtml(`<div style="display:inline-block;padding:4px 14px;border-radius:8px;pointer-events:none;`
+            + `background:rgba(18,20,26,0.78);border:2px solid ${driven ? '#f08a24' : 'rgba(255,255,255,0.25)'};`
+            + `color:#fff;font:600 30px sans-serif;white-space:nowrap">${name}</div>`);
     }
 
     /** Leave the yard: its machines and things are taken down. */
     function closeYard() {
-        for (const y of yardMachines) y.node.destroy();
+        for (const y of yardMachines) { y.node.destroy(); y.label.destroy(); if (y.ring) y.ring.destroy(); }
         yardMachines = [];
-        for (const y of yard) { y.node.destroy(); if (y.rope) y.rope.destroy(); }
+        for (const y of yard) { y.node.destroy(); if (y.rope) y.rope.destroy(); if (y.mark) y.mark.destroy(); }
         yard = [];
         operating = false;
     }
 
     return {
         show, frame, setFlows, tick, select, pick, pose, setOperate, setProps,
-        showYard, poseYard, pickMachine, selectMachine, closeYard,
+        showYard, poseYard, frameYard, pickMachine, selectMachine, closeYard,
         get contract() { return shown; }, get movers() { return movers; },
     };
 }

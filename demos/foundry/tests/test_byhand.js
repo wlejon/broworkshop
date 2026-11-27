@@ -120,10 +120,13 @@ test('by hand, one operator gets the crate across with both cranes', () => {
     tap(' ');
     check(lift(keys), 'taken and lifted');
     check(hookOver(B, keys, [pad.at[0], pad.at[2]], 0.12), `carried over the pad (${hookOver.miss})`);
+    frames(60);  // a look before letting it down: the load hangs where it is
+    shot('byhand-over-pad');
+    check(new RegExp(`over ${pad.name}`).test(hookText()), `the hook panel says it is over the pad (${hookText()})`);
     check(setDown(keys), 'set down on the pad and let go');
     frames(30);
     shot('byhand-done');
-    check(f.site.tasks[0].done && /done/.test(q('#yardTasks .d').textContent), `the task list says the crate is on the pad (${q('#yardTasks .d').textContent})`);
+    check(f.site.tasks[0].done && /done/.test(q("#yardTasks .d").textContent), `the task list says the crate is on the pad (${q("#yardTasks .d").textContent}; crate at ${at().map((v) => v.toFixed(2))}, pad at ${pad.at[0]},${pad.at[2]})`);
     f.yard(false); frames(1);
 });
 
