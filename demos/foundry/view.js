@@ -29,7 +29,10 @@ function splitRef(ref) { const i = ref.lastIndexOf('.'); return [ref.slice(0, i)
 
 export function createFoundryView(vp) {
     const scene = vp.scene;
+    // The sky lights and is reflected, but the backdrop is the canvas's own
+    // (foundry.css): a studio, not a place.
     skyEnvironment(scene, { hdri: 'kloppenheim_06_puresky', intensity: 0.8, rotation: 2.2 });
+    scene.setEnvironment({ background: false });
     scene.setAmbient([0.05, 0.055, 0.065]);
     scene.setToneMap({ mode: 'aces' });
     scene.setExposure({ mode: 'fixed', ev: 0.15 });
@@ -40,7 +43,7 @@ export function createFoundryView(vp) {
     scene.createLight({ type: 'directional', direction: [0.1, -0.2, -1.0], color: [1.0, 0.8, 0.6], intensity: 0.8, castsShadow: false });
 
     const meshCache = new Map();
-    let root = null, floor = null, backdrop = null;
+    let root = null, floor = null;
     let movers = [];         // { node, axis, speed, angle, slide, s, dir, base }
     let pickBoxes = [];      // { child, min, max }
     let selectNodes = new Map();
@@ -62,14 +65,14 @@ export function createFoundryView(vp) {
         const group = scene.createNode({ name: 'part' });
         const shaded = [];
         if (built.body) {
-            const n = meshNode(built.body, detail);
+            const n = meshNode(built.body, detail, `${el.type}:body`);
             group.add(n); shaded.push(n);
         }
         const mv = [];
         for (const m of built.movers) {
             const pivot = scene.createNode({ name: 'pivot' });
             pivot.position = m.pivot.slice();
-            const n = meshNode(m.mesh, detail);
+            const n = meshNode(m.mesh, detail, `${el.type}:${m.port}`);
             pivot.add(n);
             group.add(pivot);
             shaded.push(n);
@@ -78,8 +81,9 @@ export function createFoundryView(vp) {
         return { group, shaded, movers: mv, shaftR: built.shaftR };
     }
 
-    function meshNode(mesh, detail) {
+    function meshNode(mesh, detail, name) {
         const n = scene.createMesh({ mesh, color: [1, 1, 1], vertexColorTint: true, castsShadow: true, receivesShadow: true });
+        if (name) n.name = name;
         n.setShader({ module: PART_BK, file: 'shaders/part.bk', uniforms: { detail, selected: 0, time: 0, pad0: 0 } });
         return n;
     }
@@ -133,7 +137,7 @@ export function createFoundryView(vp) {
                 const pivot = scene.createNode({ name: 'coupling' });
                 pivot.position = A.pos;
                 pivot.quaternion = quatZTo(A.axis);
-                const n = meshNode(g.finish({ ao: 0 }), 1 / Math.max(0.01, R * 6));
+                const n = meshNode(g.finish({ ao: 0 }), 1 / Math.max(0.01, R * 6), `coupling ${l.out}`);
                 pivot.add(n);
                 parent.add(pivot);
                 out.movers.push({ node: pivot, base: pivot.quaternion, axis: 'z', ref: l.out, sign: 1, slide: 0, angle: 0, coupling: true });
@@ -153,7 +157,7 @@ export function createFoundryView(vp) {
                 for (const E of [A, B]) {
                     g.lathe([[0, 0], [r * 1.5, 0], [r * 1.5, r * 3], [r * 1.1, r * 3.6]], { at: E.pos, axis: axisName(E.axis), color: l.domain === 'hyd' ? lin([0.86, 0.7, 0.36]) : lin([0.08, 0.08, 0.09]), mat: l.domain === 'hyd' ? M.BRASS : M.RUBBER, segs: 6 });
                 }
-                const n = meshNode(g.finish({ ao: 0 }), 1 / Math.max(0.01, size));
+                const n = meshNode(g.finish({ ao: 0 }), 1 / Math.max(0.01, size), `line ${l.out}`);
                 parent.add(n);
             }
         }
@@ -183,17 +187,12 @@ export function createFoundryView(vp) {
         const floorY = c.box.min[1] - size * 0.002;
         const radius = Math.max(2, size * 14);
         if (floor) floor.destroy();
-        if (backdrop) backdrop.destroy();
-        floor = scene.createMesh({ mesh: 'plane', halfW: radius, halfD: radius, color: [1, 1, 1], castsShadow: false, receivesShadow: true });
+        floor = scene.createMesh({ mesh: 'plane', halfW: radius, halfD: radius, color: [1, 1, 1], alphaToCoverage: true, castsShadow: false, receivesShadow: true });
+        floor.name = 'floor';
         floor.position = [0, floorY, 0];
         const step = Math.pow(10, Math.floor(Math.log10(size * 0.6)));
         floor.setShader({ module: FLOOR_BK, file: 'shaders/floor.bk', uniforms: { step, radius, fadeStart: size * 1.6, fadeEnd: size * 7 } });
-        backdrop = scene.createMesh({
-            mesh: 'sphere', radius: radius * 1.1, segments: 32, rings: 16,
-            color: [0.018, 0.02, 0.026], roughness: 1, metallic: 0, emissive: 1, emissiveColor: [0.018, 0.02, 0.026],
-            twoSided: true, castsShadow: false, receivesShadow: false,
-        });
-        scene.setFog({ enabled: true, start: size * 4, end: size * 12, color: [0.018, 0.02, 0.026] });
+        scene.setFog({ enabled: false });
         scene.setSSAO({ enabled: true, radius: Math.max(0.01, size * 0.06), intensity: 1.1, bias: size * 0.001 });
         key.shadowDistance = size * 8;
     }
@@ -215,7 +214,7 @@ export function createFoundryView(vp) {
             const size = Math.max(...c.size);
             const r = Math.max(0.006, size * 0.03);
             g.lathe([[r * 0.78, 0], [r, 0], [r, r * 0.18], [r * 0.78, r * 0.18]], { color: lin(DOMAIN_COLOR[p.domain] || [1, 1, 1]), mat: M.GLOW, segs: 40 });
-            const n = meshNode(g.finish({ ao: 0 }), 1 / size);
+            const n = meshNode(g.finish({ ao: 0 }), 1 / size, `port ${p.id}`);
             n.position = p.pos.slice();
             n.quaternion = quatZTo(p.axis);
             root.add(n);

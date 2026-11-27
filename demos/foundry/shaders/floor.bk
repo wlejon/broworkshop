@@ -1,6 +1,7 @@
 // demos/foundry/shaders/floor.bk — the bench the foundry's machines stand on:
 // a dark steel deck with a measuring grid (minor lines every `step`, major
-// every ten), fading into the backdrop between fadeStart and fadeEnd.
+// every ten), fading out between fadeStart and fadeEnd into the canvas's CSS
+// backdrop (the environment lights the scene but draws no sky).
 
 module hook;
 import mesh;
@@ -43,11 +44,13 @@ pub fn fragment(v: mesh::Vertex, s: mesh::Surface) -> mesh::Surface {
     col = col + vec3<f32>(0.020, 0.028, 0.036) * minor + vec3<f32>(0.05, 0.075, 0.10) * major + vec3<f32>(0.10, 0.07, 0.03) * axis;
     let r = length(p);
     let fade = smoothstep(params.fadeStart, params.fadeEnd, r);
-    col = mix(col, vec3<f32>(0.018, 0.02, 0.026), fade);
     out.base_color = col;
-    out.roughness = mix(0.38 + 0.2 * grain, 1.0, fade);
+    // A matte deck: the sky lights the machines, not a sheen across the floor.
+    out.roughness = 0.82 + 0.12 * grain;
+    out.sky_visibility = 0.3;
     out.metallic = 0.0;
     out.emissive = vec3<f32>(0.0);
-    out.alpha = 1.0;
+    // Fades out into the canvas's backdrop.
+    out.alpha = 1.0 - fade;
     return out;
 }
