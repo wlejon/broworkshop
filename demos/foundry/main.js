@@ -13,6 +13,7 @@ import { starterLibrary } from "/lib/foundry/designs.js";
 import { createFoundryView } from "/app/view.js";
 import * as P from "/app/panels.js";
 
+const fs = require('fs');
 const { status } = boot({
     status: '#status',
     menu: {
@@ -99,7 +100,7 @@ function renderAll(opts) {
     view.select(selected);
     P.renderInspector($('inspector'), $('inspTitle'), d, c, selected, inspectorApi());
     renderBench();
-    $('stats').textContent = `${Object.keys(lib).length} designs · ${c.partCount} parts in ${P.fmtBox(c.size)}`;
+    $('stats').textContent = saveError ? `not saved: ${saveError}` : `${Object.keys(lib).length} designs · ${c.partCount} parts in ${P.fmtBox(c.size)}`;
 }
 
 /** Select a child (null for none): highlighted in the view and the flow, open in the inspector. */
@@ -108,6 +109,7 @@ function selectChild(id) {
     view.select(selected);
     markFlow();
     P.renderInspector($('inspector'), $('inspTitle'), lib[currentId], contract(currentId), selected, inspectorApi());
+    if (selected) $('inspector').parentNode.scrollIntoView({ block: 'nearest' });
 }
 
 function markFlow() {
@@ -148,7 +150,10 @@ function renderCrumbs() {
 
 // --- navigation ---------------------------------------------------------------------
 
+let cameFrom = null;   // the design open before this one, where deleting this one goes back to
+
 function open(id) {
+    if (id !== currentId) cameFrom = currentId;
     currentId = id;
     trail = [id];
     selected = null;
@@ -179,13 +184,20 @@ function edit(label, fn) {
         save();
     };
     history.record(label, apply(after), apply(before));
+    // What the designs built on this one made of their goals, before and after.
+    const above = Object.keys(lib).filter((k) => k !== id && contains(k, id));
+    const was = new Map(above.map((k) => [k, cache.get(k) ? P.statusOf(cache.get(k)) : null]));
     invalidate(id, lib, cache);
     compileLibrary(lib, cache);
     renderAll({ keepCamera: true });
     save();
     const c = contract(id);
+    const lost = above.filter((k) => was.get(k) === 'pass' && P.statusOf(contract(k)) !== 'pass').map((k) => lib[k].name);
+    const won = above.filter((k) => was.get(k) && was.get(k) !== 'pass' && P.statusOf(contract(k)) === 'pass').map((k) => lib[k].name);
+    const ripple = [lost.length ? `${lost.join(', ')} now ${lost.length > 1 ? 'miss their goals' : 'misses its goal'}` : '', won.length ? `${won.join(', ')} now ${won.length > 1 ? 'meet their goals' : 'meets its goal'}` : ''].filter(Boolean).join('; ');
     if (!c.ok) status.warn(`${label}: ${c.errors[0]}`);
-    else status.set(`${label}.`);
+    else if (lost.length) status.warn(`${label}. ${ripple}.`);
+    else status.set(`${label}.${ripple ? ` ${ripple}.` : ''}`);
 }
 
 function freshId(d, base) {
@@ -407,7 +419,7 @@ function deleteDesign() {
     const users = usersOf(id);
     if (users.length) { status.warn(`${lib[id].name} is used in ${users.map((d) => d.name).join(', ')}; remove it there first.`); return; }
     if (Object.keys(lib).length < 2) return;
-    const next = Object.keys(lib).find((k) => k !== id);
+    const next = cameFrom && cameFrom !== id && lib[cameFrom] ? cameFrom : Object.keys(lib).find((k) => k !== id);
     libEdit(`Delete ${lib[id].name}`, () => { delete lib[id]; }, next);
 }
 
@@ -456,17 +468,21 @@ function setGoal(goal) {
     edit(goal ? 'Set the goal' : 'Clear the goal', (d) => { if (goal) d.goal = goal; else delete d.goal; });
 }
 
-// --- saving: the library lives in local storage, every change written through ---------------------
+// --- saving: the library is a file in the app's data dir, every change written through ----------
 
-const STORE = 'foundry.library.v1';
+const STORE = `${bro.app.dataDir}/library.json`;
+let saveError = null;   // why the last save failed, shown in the footer until one works
 
 function save() {
-    try { localStorage.setItem(STORE, JSON.stringify(lib)); } catch (e) { /* storage full or absent: the session still works */ }
+    // Written beside and renamed over, so a crash mid-write leaves the last good library.
+    try { fs.writeFileSync(STORE + '.tmp', JSON.stringify({ version: 1, designs: lib })); fs.renameSync(STORE + '.tmp', STORE); }
+    catch (e) { saveError = e.message; console.error(`foundry: could not save the library: ${e.message}`); $("stats").textContent = `not saved: ${e.message}`; return; }
+    saveError = null;
 }
 
 function loadSaved() {
     let saved = null;
-    try { saved = JSON.parse(localStorage.getItem(STORE) || 'null'); } catch (e) { saved = null; }
+    try { saved = fs.existsSync(STORE) ? JSON.parse(fs.readFileSync(STORE, 'utf8')).designs : null; } catch (e) { saved = null; }
     if (!saved || typeof saved !== 'object' || !Object.keys(saved).length) return;
     for (const k of Object.keys(lib)) delete lib[k];
     Object.assign(lib, saved);
@@ -520,7 +536,7 @@ status.set('Click a part to change it; double-click a design inside to open it.'
 
 // For tests and agents.
 window.foundry = {
-    lib, cache, view, vp, history,
+    lib, cache, view, vp, history, store: STORE,
     get current() { return currentId; },
     get selected() { return selected; },
     open, drillInto, addPart, useDesign, newDesign, copyDesign, deleteDesign, restoreStarter, setGoal,
@@ -531,7 +547,7 @@ window.foundry = {
         cache.clear();
         compileLibrary(lib, cache);
         history.clear();
-        try { localStorage.removeItem(STORE); } catch (e) { /* none */ }
+        try { if (fs.existsSync(STORE)) fs.unlinkSync(STORE); } catch (e) { /* nothing saved */ }
         open('drivePod');
     },
     select: selectChild,

@@ -196,7 +196,7 @@ export function renderFlow(el, c, outId, opEffort) {
         const weak = chain.weakest && s.label === chain.weakest.label;
         const guard = chain.guarded && s.label === chain.guarded.label;
         const load = opEffort > 0 && isFinite(s.peak) ? Math.min(1, opEffort / s.peak) : 0;
-        const ratio = s.k !== 1 ? `×${s.k >= 10 ? s.k.toFixed(0) : s.k.toFixed(2)}` : '';
+        const ratio = s.convert ? s.convert.split('>').map((x) => DOMAIN_NAME[x]).join(' → ') : s.k !== 1 ? `×${s.k >= 10 ? s.k.toFixed(0) : s.k.toFixed(2)}` : '';
         el.append(h('div', { class: 'f-stage-chip' + (weak ? ' weak' : '') + (guard ? ' guard' : ''), 'data-child': s.child, title: `${s.label}: ${s.mode} at ${fmtEffort(dom, s.peak)} at the output` },
             h('div', { class: 't' }, shortLabel(s.label) + (s.locks ? ' 🔒' : '')),
             h('div', { class: 's' }, [ratio, `${Math.round(s.eff * 100)}%`, `${s.role === 'limiter' ? 'slips' : s.role === 'fuse' ? 'breaks' : 'holds'} ${fmtEffort(dom, s.peak)}`].filter(Boolean).join(' · ')),
@@ -241,7 +241,9 @@ function goalForm(c, g, api) {
         field('Lifts', g.lift.payloadKg, 'kg', (v) => put((n) => { n.lift.payloadKg = v || 0; }), { key: 'payload' });
         field('Reach', g.lift.reachM, 'm', (v) => put((n) => { n.lift.reachM = v || 0; }), { key: 'reach' });
     } else {
-        const [eu, es] = EFFORT_UNIT[dom] || EFFORT_UNIT.rot, [fu, fs] = FLOW_UNIT[dom] || FLOW_UNIT.rot;
+        // Torque and force read in kilo- once they pass a thousand.
+        const kilo = (dom === 'rot' || dom === 'lin') && g.need.effort >= 1000;
+        const [eu, es] = kilo ? ['k' + EFFORT_UNIT[dom][0], 1e3] : EFFORT_UNIT[dom] || EFFORT_UNIT.rot, [fu, fs] = FLOW_UNIT[dom] || FLOW_UNIT.rot;
         if (g.given) {
             field('Given', g.given.effort, 'N·m in', (v) => put((n) => { n.given.effort = v || 0; }), { key: 'givenEffort' });
             field('at', g.given.flow / RPM, 'rpm in', (v) => put((n) => { n.given.flow = (v || 0) * RPM; }), { key: 'givenFlow' });

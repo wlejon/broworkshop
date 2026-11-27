@@ -1,4 +1,6 @@
 {
+    "id": "foundry",
+    "name": "Foundry",
     "title": "Foundry — compile mechanisms into assemblies",
     "width": 1600,
     "height": 960,

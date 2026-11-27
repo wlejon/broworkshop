@@ -208,6 +208,8 @@ test('a machine built from nothing by clicks, aimed at a goal, and built on', ()
     const pod = f.contract(f.current);
     check(pod.ok && !pod.warnings.length, `the pod builds clean: ${pod.errors.concat(pod.warnings).join('; ')}`);
     check(pod.ports.length === 1 && pod.sources.length === 1 && pod.sources[0].supply, 'the battery feeds the motor, and only the output is left exposed');
+    const saved = JSON.parse(require('fs').readFileSync(f.store, 'utf8')).designs;
+    check(Object.values(saved).some((d) => d.name === 'Test Pod' && d.children.length === 4), 'every edit is saved to the library file');
     // A goal from what it does, then asked for more than it has.
     clickOn('#setGoal'); frames(1);
     check(f.contract(f.current).goal.pass, 'a drafted goal is met');
