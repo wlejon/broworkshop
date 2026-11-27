@@ -621,6 +621,15 @@ export function createFoundryView(vp) {
     return {
         show, frame, setFlows, tick, select, pick, pose, setOperate, setProps,
         showYard, poseYard, frameYard, pickMachine, selectMachine, closeYard,
+        /**
+         * Which way the ground direction [dx, dz] points on screen, as a CSS rotation in
+         * degrees (0 up, clockwise): a dial drawn this way turns as the view shows it.
+         */
+        screenHeading(dx, dz) {
+            const r = qRot(vp.cam.rot, [1, 0, 0]), f = qRot(vp.cam.rot, [0, 0, -1]);
+            const fl = Math.hypot(f[0], f[2]) || 1, sx = dx * r[0] + dz * r[2], sy = (dx * f[0] + dz * f[2]) / fl;
+            return (Math.atan2(sx, sy * Math.max(0.2, Math.abs(f[1]))) * 180) / Math.PI;
+        },
         get contract() { return shown; }, get movers() { return movers; },
     };
 }

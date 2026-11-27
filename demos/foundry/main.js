@@ -890,6 +890,13 @@ function updateYardLists() {
     }
 }
 
+/** Which way m reaches on screen: from where it stands out to its boom head. */
+function boomHeading(m) {
+    const t = m.tipWorld(), dx = t[0] - m.mid[0], dz = t[2] - m.mid[1];
+    if (Math.hypot(dx, dz) < m.size * 0.05) return boomHeading.last ?? 0;
+    return (boomHeading.last = view.screenHeading(dx, dz));
+}
+
 vp.onFrame((dt) => {
     if (!yard) return;
     const d = Math.min(dt, 0.1);
@@ -904,7 +911,7 @@ vp.onFrame((dt) => {
         }
     } else { if (yard.driven) rampKeys(yard.driven, d); yard.site.step(d); }
     view.poseYard(yard.site);
-    if (yard.driven) updateDeck($('deck'), yard.driven);
+    if (yard.driven) updateDeck($('deck'), yard.driven, boomHeading);
     updateYardLists();
 });
 

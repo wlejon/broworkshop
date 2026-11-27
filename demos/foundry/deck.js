@@ -70,8 +70,11 @@ function widget(ct, m, onSet) {
 
 const DEG = 180 / Math.PI;
 
-/** Bring the deck's knobs, needles and readouts up to the machine's state. */
-export function updateDeck(el, m) {
+/**
+ * Bring the deck's knobs, needles and readouts up to the machine's state. `heading(m)`,
+ * when given, is the on-screen direction of m's reach (CSS degrees) for a dial's needle.
+ */
+export function updateDeck(el, m, heading) {
     if (!m) return;
     for (const ct of m.controls) {
         const box = el.querySelector(`[data-ctl="${ct.id}"]`);
@@ -88,7 +91,9 @@ export function updateDeck(el, m) {
             st.textContent = text; st.className = 'st ' + cls;
             const j = ct.joints[0], a = m.angles[j] * DEG;
             val.textContent = kind === 'dial' ? `${(((a % 360) + 540) % 360 - 180).toFixed(0)}°` : `${(a * m.joints[j].raise).toFixed(0)}°`;
-            if (kind === 'dial') box.querySelector('.needle').style.transform = `rotate(${a.toFixed(1)}deg)`;
+            // The needle points the way the boom does on screen when the view can say, so a
+            // tap of either key shows which way it turns things there.
+            if (kind === 'dial') box.querySelector('.needle').style.transform = `rotate(${(heading ? heading(m) : a).toFixed(1)}deg)`;
             const J = m.joints[j], load = Math.abs(m.torque[j]) / Math.max(1e-9, J.limit || J.cont || 1);
             bar.style.width = `${Math.min(100, load * 100).toFixed(1)}%`;
             bar.className = load > 1 ? 'bad' : load > 0.85 ? 'warn' : '';
