@@ -66,6 +66,57 @@ test('the UI shows every design and edits undo', () => {
     shot('ui');
 });
 
+test('clicks in the view pick and open what is under them', () => {
+    const f = window.foundry;
+    f.open('drivePod');
+    frames(4);
+    const c = f.contract('drivePod');
+    const rect = q('#stage3d').getBoundingClientRect();
+    // A pixel where the child shows: scan its projected box for one the view's pick names it at.
+    const at = (cid) => {
+        const s = c.shapes.filter((x) => x.child === cid);
+        let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+        for (const b of s) for (let k = 0; k < 8; k++) {
+            const p = f.vp.toScreen([k & 1 ? b.max[0] : b.min[0], k & 2 ? b.max[1] : b.min[1], k & 4 ? b.max[2] : b.min[2]]);
+            x0 = Math.min(x0, p.x); x1 = Math.max(x1, p.x); y0 = Math.min(y0, p.y); y1 = Math.max(y1, p.y);
+        }
+        for (let j = 1; j < 16; j++) for (let i = 1; i < 16; i++) {
+            const x = x0 + (x1 - x0) * (i / 16), y = y0 + (y1 - y0) * (j / 16);
+            if (f.view.pick(x, y) === cid) return { x: rect.left + x, y: rect.top + y };
+        }
+        throw new Error(`no pixel shows ${cid}`);
+    };
+    for (const cid of ['mtr', 'clu']) {
+        const p = at(cid);
+        click(p.x, p.y, 0);
+        frames(2);
+        check(f.selected === cid, `a click on ${cid} selects it (got ${f.selected})`);
+    }
+    check(q('#inspTitle').textContent.startsWith('clu'), 'the inspector follows the click');
+    const p = at('red');
+    click(p.x, p.y, 0);
+    frames(1);
+    click(p.x, p.y, 0);
+    frames(3);
+    check(f.current === 'reducer9', `a double click on the reducer opens it (at ${f.current})`);
+});
+
+test('gears turn at their ratios', () => {
+    const f = window.foundry;
+    f.open('reducer9');
+    frames(30);
+    const mv = f.view.movers.filter((m) => m.kind === 'part');
+    const ang = (cid, port) => Math.abs(mv.find((m) => m.path[0] === cid && m.port === port).angle);
+    const a1 = ang('s1', 'in'), a2 = ang('s1', 'out'), a3 = ang('s2', 'in'), a4 = ang('s2', 'out');
+    check(a1 > 0.5, `the input turns (${a1.toFixed(2)} rad)`);
+    check(Math.abs(a1 / a2 - 3) < 0.01, `first stage 3:1 (${(a1 / a2).toFixed(3)})`);
+    check(Math.abs(a2 - a3) < 1e-6, 'the coupled shafts turn together');
+    check(Math.abs(a3 / a4 - 3) < 0.01, `second stage 3:1 (${(a3 / a4).toFixed(3)})`);
+    // In mesh, a pinion and its gear turn opposite ways.
+    const s = (cid, port) => Math.sign(mv.find((m) => m.path[0] === cid && m.port === port).angle);
+    check(s('s1', 'in') === -s('s1', 'out'), 'meshing gears counter-rotate');
+});
+
 test('every part draws on its own', () => {
     const f = window.foundry;
     for (const type of Object.keys(PARTS)) {

@@ -287,7 +287,7 @@ status.set('Click a part to change it; double-click a design inside to open it.'
 
 // For tests and agents.
 window.foundry = {
-    lib, cache, view, history,
+    lib, cache, view, vp, history,
     get current() { return currentId; },
     get selected() { return selected; },
     open, drillInto, addPart, useDesign,

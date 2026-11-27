@@ -45,7 +45,6 @@ export function createFoundryView(vp) {
     const meshCache = new Map();
     let root = null, floor = null;
     let movers = [];         // { node, axis, speed, angle, slide, s, dir, base }
-    let pickBoxes = [];      // { child, min, max }
     let selectNodes = new Map();
     let shown = null;
     let visScale = 1;
@@ -179,7 +178,7 @@ export function createFoundryView(vp) {
     function clear() {
         if (root) root.destroy();
         root = null;
-        movers = []; pickBoxes = []; selectNodes = new Map();
+        movers = []; selectNodes = new Map();
     }
 
     function stage(c) {
@@ -207,7 +206,6 @@ export function createFoundryView(vp) {
         collectMovers(drawn, (ref) => ref);
         for (const [cid, rec] of drawn.byChild) selectNodes.set(cid, rec.shaded);
         const placed = new Map(c.children.map((ch) => [ch.id, ch]));
-        for (const s of c.shapes) pickBoxes.push({ child: s.child, min: s.min, max: s.max });
         // Exposed ports: a ring in the domain's colour.
         for (const p of c.ports) {
             const g = new Geo();
@@ -297,23 +295,17 @@ export function createFoundryView(vp) {
 
     /** The child under canvas pixel (px, py), or null. */
     function pick(px, py) {
+        // The mesh actually under the pointer, then up to the child of the
+        // shown contract that holds it.
         const r = vp.ray(px, py);
-        if (!r) return null;
-        let best = null, bestT = Infinity;
-        for (const b of pickBoxes) {
-            let t0 = -Infinity, t1 = Infinity;
-            for (let a = 0; a < 3; a++) {
-                if (Math.abs(r.dir[a]) < 1e-9) { if (r.origin[a] < b.min[a] || r.origin[a] > b.max[a]) { t0 = Infinity; break; } continue; }
-                let ta = (b.min[a] - r.origin[a]) / r.dir[a], tb = (b.max[a] - r.origin[a]) / r.dir[a];
-                if (ta > tb) { const t = ta; ta = tb; tb = t; }
-                t0 = Math.max(t0, ta); t1 = Math.min(t1, tb);
-            }
-            if (t0 <= t1 && t1 > 0 && t0 < bestT) { bestT = t0; best = b.child; }
-        }
-        return best;
+        if (!r || !root) return null;
+        const hit = scene.raycast(r.origin, r.dir, 1e4);
+        let n = hit && hit.hit ? hit.node : null;
+        while (n && n.parent && n.parent.id !== root.id) n = n.parent;
+        return n && n.parent && shown.children.some((c) => c.id === n.name) ? n.name : null;
     }
 
-    return { show, frame, setFlows, tick, select, pick, get contract() { return shown; } };
+    return { show, frame, setFlows, tick, select, pick, get contract() { return shown; }, get movers() { return movers; } };
 }
 
 function qMul(a, b) {
