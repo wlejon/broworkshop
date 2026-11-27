@@ -38,6 +38,15 @@ test('the starter ladder compiles, places cleanly and meets its goals', () => {
     const [sh, el] = arm.joints.slice().sort((a, b) => a.s - b.s);
     check(sh.hold > el.hold * 5, `the shoulder carries the elbow (${sh.hold.toFixed(0)} against ${el.hold.toFixed(0)} N·m)`);
     check(armTip.weakest === sh.label, 'the shoulder runs out first');
+    // The actuator's worm is under its friction angle: it holds the joint with the power off,
+    // to what its wheel carries, more than the motor can lift through it.
+    const wormPath = cache.get('jointActuator').sources[0];
+    check(wormPath.lock > wormPath.cont, `the worm locks (${wormPath.lock && wormPath.lock.toFixed(0)} against ${wormPath.cont.toFixed(0)} N·m driven)`);
+    check(segTip.holdKg > segTip.payloadKg, 'so the segment holds more unpowered than it lifts');
+    const lib2 = starterLibrary();
+    lib2.jointActuator.children[1].params.quotient = 8;
+    const free = compileLibrary(lib2).get('armSegment').mounts[0];
+    check(free.holdKg === 0, 'a steep worm does not lock, and the arm holds nothing unpowered');
     check(arm.warnings.length === 0 && seg.warnings.length === 0, `arms have no warnings: ${arm.warnings.concat(seg.warnings).join('; ')}`);
 });
 

@@ -133,13 +133,15 @@ export function renderFlow(el, c, outId, opEffort) {
             el.append(arrow());
             const weak = lc.mount.weakest === J.label;
             const load = Math.min(1, jointLoad(J, opEffort || 0, lc.tipS));
-            el.append(h('div', { class: 'f-stage-chip' + (weak ? ' weak' : ''), title: `${J.label}: ${J.limit} ${J.mode} past ${fmtEffort('rot', J.cont)}` },
-                h('div', { class: 't' }, shortLabel(J.label)),
-                h('div', { class: 's' }, `holds ${fmtEffort('rot', J.cont)} · carries ${fmtEffort('rot', J.hold)} · ${fmtM(lc.tipS - J.s)} out`),
+            el.append(h('div', { class: 'f-stage-chip' + (weak ? ' weak' : ''), title: `${J.label}: ${J.limit} ${J.mode} past ${fmtEffort('rot', J.cont)}${J.lock != null ? `; locks at ${fmtEffort('rot', J.lock)} with the power off` : ''}` },
+                h('div', { class: 't' }, shortLabel(J.label) + (J.lock != null ? ' 🔒' : '')),
+                h('div', { class: 's' }, `drives ${fmtEffort('rot', J.cont)} · carries ${fmtEffort('rot', J.hold)} · ${fmtM(lc.tipS - J.s)} out`),
                 h('div', { class: 'bar' }, h('i', { style: `width:${(load * 100).toFixed(1)}%` })),
             ));
         }
-        el.append(arrow(), h('div', { class: 'f-stage-chip io' }, h('div', { class: 't' }, out.label), h('div', { class: 's' }, `lifts ${fmtKg(lc.mount.payloadKg)} at ${fmtM(lc.mount.reach)}`)));
+        el.append(arrow(), h('div', { class: 'f-stage-chip io' }, h('div', { class: 't' }, out.label),
+            h('div', { class: 's' }, `lifts ${fmtKg(lc.mount.payloadKg)} at ${fmtM(lc.mount.reach)}`),
+            lc.mount.holdKg > 0 ? h('div', { class: 's' }, `holds ${fmtKg(lc.mount.holdKg)} with the power off`) : null));
         return;
     }
     const src = c.sources.find((s) => s.port === outId);
@@ -248,7 +250,7 @@ export function renderContract(el, c) {
         else if (sup) spec = `${si(sup.power, 'W')} · ${sup.energyWh} Wh`;
         else if (p.domain === 'mnt') {
             const m = (c.mounts || []).find((x) => x.port === p.id);
-            spec = m ? `lifts ${fmtKg(m.payloadKg)} at ${fmtM(m.reach)}` : 'mount';
+            spec = m ? `${fmtKg(m.payloadKg)} at ${fmtM(m.reach)}${m.holdKg > 0 ? ` · 🔒 ${fmtKg(m.holdKg)}` : ''}` : 'mount';
         }
         else if (p.dir === 'in') {
             const user = c.sources.find((s) => s.draw && s.draw.port === p.id);
