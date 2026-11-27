@@ -170,7 +170,7 @@ export function renderFlow(el, c, outId, opEffort) {
         const load = opEffort > 0 && isFinite(s.peak) ? Math.min(1, opEffort / s.peak) : 0;
         const ratio = s.k !== 1 ? `×${s.k >= 10 ? s.k.toFixed(0) : s.k.toFixed(2)}` : '';
         el.append(h('div', { class: 'f-stage-chip' + (weak ? ' weak' : '') + (guard ? ' guard' : ''), title: `${s.label}: ${s.mode} at ${fmtEffort(dom, s.peak)} at the output` },
-            h('div', { class: 't' }, shortLabel(s.label)),
+            h('div', { class: 't' }, shortLabel(s.label) + (s.locks ? ' 🔒' : '')),
             h('div', { class: 's' }, [ratio, `${Math.round(s.eff * 100)}%`, `${s.role === 'limiter' ? 'slips' : s.role === 'fuse' ? 'breaks' : 'holds'} ${fmtEffort(dom, s.peak)}`].filter(Boolean).join(' · ')),
             h('div', { class: 'bar' }, h('i', { style: `width:${(load * 100).toFixed(1)}%` })),
         ));
@@ -272,7 +272,7 @@ export function drawCurve(canvas, c, outId, op) {
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, w, hgt);
     const out = c.ports.find((p) => p.id === outId);
-    const L = 46, R = 10, T = 10, B = 22;
+    const L = 62, R = 10, T = 10, B = 22;
     const pw = w - L - R, ph = hgt - T - B;
     if (out && out.domain === 'mnt') { drawLiftCurve(ctx, c, outId, op, { L, T, pw, ph }); return; }
     const src = c.sources.find((s) => s.port === outId);

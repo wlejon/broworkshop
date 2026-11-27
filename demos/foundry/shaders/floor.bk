@@ -44,13 +44,18 @@ pub fn fragment(v: mesh::Vertex, s: mesh::Surface) -> mesh::Surface {
     col = col + vec3<f32>(0.020, 0.028, 0.036) * minor + vec3<f32>(0.05, 0.075, 0.10) * major + vec3<f32>(0.10, 0.07, 0.03) * axis;
     let r = length(p);
     let fade = smoothstep(params.fadeStart, params.fadeEnd, r);
-    out.base_color = col;
+    // Toward its edge the deck dims to about the backdrop's brightness and
+    // loses what sheen it had at grazing angles, before its alpha (coverage,
+    // so a dither) runs out: a stipple between two near-equal colours.
+    let dim = mix(1.0, 0.4, smoothstep(0.0, 0.6, fade));
+    out.base_color = col * dim;
     // A matte deck: the sky lights the machines, not a sheen across the floor.
-    out.roughness = 0.82 + 0.12 * grain;
-    out.sky_visibility = 0.3;
+    out.roughness = mix(0.82 + 0.12 * grain, 1.0, fade);
+    out.sky_visibility = 0.3 * dim;
+    out.sun_visibility = s.sun_visibility * dim;
     out.metallic = 0.0;
     out.emissive = vec3<f32>(0.0);
     // Fades out into the canvas's backdrop.
-    out.alpha = 1.0 - fade;
+    out.alpha = 1.0 - smoothstep(0.35, 1.0, fade);
     return out;
 }

@@ -185,9 +185,11 @@ const BUILD = {
         g.cbox([-half * 0.5, top - 0.0001, -hz * 0.6], [half * 0.5, top + wall * 0.9, hz * 0.6], { color: mix(paint, DARK, 0.15), mat: M.PAINT, bevel: wall * 0.35 });
         for (const x of [-half * 0.4, half * 0.4]) for (const z of [-hz * 0.48, hz * 0.48]) g.bolt([x, top + wall * 0.9, z], 'y', wall * 0.55);
         // Worm bearing caps on ±X and the output cap on +Z.
-        const rIn = Math.max(0.003, rq * 0.5), rOut = Math.max(rIn * 1.6, rw * 0.22);
+        const rIn = Math.max(0.003, Math.min(rq * 0.5, m * 4)), rOut = Math.max(rIn * 1.6, rw * 0.22);
         for (const sx of [1, -1]) {
-            g.lathe([[0, half], [rq * 1.6, half], [rq * 1.6, half + wall * 1.4], [rq * 1.3, half + wall * 1.9], [rIn * 1.15, half + wall * 1.9]], { at: [0, cd, 0], axis: sx > 0 ? 'x' : '-x', color: paint, mat: M.PAINT, segs: 32 });
+            // The input shaft leaves through the -X cap; the +X cap is closed.
+            const inner = sx > 0 ? 0 : rIn * 1.15;
+            g.lathe([[0, half], [rq * 1.6, half], [rq * 1.6, half + wall * 1.4], [rq * 1.3, half + wall * 1.9], [inner, half + wall * 1.9]], { at: [0, cd, 0], axis: sx > 0 ? 'x' : '-x', color: paint, mat: M.PAINT, segs: 32 });
             g.boltCircle(rq * 1.35, 4, half + wall * 1.4, wall * 0.45, { at: [0, cd, 0], axis: sx > 0 ? 'x' : '-x' });
         }
         g.lathe([[0, hz], [rOut * 2.3, hz], [rOut * 2.3, hz + wall * 1.6], [rOut * 1.9, hz + wall * 2.2], [rOut * 1.1, hz + wall * 2.2]], { color: paint, mat: M.PAINT, segs: 48 });
@@ -288,7 +290,7 @@ const BUILD = {
         }
         for (let k = 0; k < 6; k++) {
             const a = (k / 6) * TAU, x = Math.cos(a) * r * 0.72, y = Math.sin(a) * r * 0.72;
-            rot.cyl(r * 0.07, -len / 2 - hub * 0.15, len / 2 + hub * 0.15, { at: [x, y, 0], color: lin([0.85, 0.75, 0.2]), mat: M.BRASS });
+            rot.fine(() => rot.cyl(r * 0.07, -len / 2 - hub * 0.15, len / 2 + hub * 0.15, { at: [x, y, 0], color: lin([0.85, 0.75, 0.2]), mat: M.BRASS }));
         }
         stub(rot, rs, -len / 2, -len / 2 - st, {});
         stub(rot, rs, len / 2, len / 2 + st, {});

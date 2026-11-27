@@ -46,7 +46,7 @@ function framer(f) {
 }
 
 export class Geo {
-    constructor() { this.p = []; this.n = []; this.c = []; this.u = []; this.i = []; }
+    constructor() { this.p = []; this.n = []; this.c = []; this.u = []; this.i = []; this.fineTris = []; }
 
     get count() { return this.p.length / 3; }
 
@@ -94,14 +94,30 @@ export class Geo {
         const flip = !!o.inside !== (area < 0);
         // Long segments are cut into near-square quads, so the baked
         // occlusion is sampled across a face and not smeared along slivers.
+        // A quad's width is the circumference where it sits over `segs`, so
+        // rings close in toward the axis: a disc's centre (often buried under
+        // a shaft, and dark) reaches no further than its first small ring.
         const rMax = Math.max(...profile.map((q) => q[0]), 1e-6);
-        const cell = (TAU * rMax) / segs;
         const pts = [profile[0]];
         for (let s = 0; s + 1 < profile.length; s++) {
             const [r0, w0] = profile[s], [r1, w1] = profile[s + 1];
-            const n = Math.min(12, Math.max(1, Math.ceil(Math.hypot(r1 - r0, w1 - w0) / (cell * 1.5))));
             const len = Math.hypot(r1 - r0, w1 - w0);
-            for (let k = 1; k <= n; k++) pts.push([r0 + (r1 - r0) * (k / n), w0 + (w1 - w0) * (k / n), len]);
+            // Breakpoints from the end nearer the axis outward, as fractions of the segment.
+            const a = Math.min(r0, r1), b = Math.max(r0, r1);
+            const radial = b - a > Math.abs(w1 - w0);
+            const minStep = radial ? len / 48 : len / 12;
+            const cap = radial ? 47 : 11;
+            const ts = [];
+            for (let u = 0; ;) {
+                const r = a + (b - a) * (len > 0 ? u / len : 0);
+                u += Math.max(minStep, (1.5 * TAU * Math.max(r, rMax * 0.02)) / segs);
+                if (u >= len * 0.999 || ts.length >= cap) break;
+                ts.push(u / len);
+            }
+            ts.push(1);
+            const fromInner = r0 <= r1;
+            const ks = fromInner ? ts : ts.slice(0, -1).map((t) => 1 - t).reverse().concat(1);
+            for (const t of ks) pts.push([r0 + (r1 - r0) * t, w0 + (w1 - w0) * t, len]);
         }
         for (let s = 0; s + 1 < pts.length; s++) {
             const [r0, w0] = pts[s], [r1, w1, segLen] = pts[s + 1];
@@ -244,8 +260,19 @@ export class Geo {
     bolt(at, axis, size, opts) {
         const o = opts || {};
         const s = size;
-        this.lathe([[0, 0], [s * 1.25, 0], [s * 1.25, s * 0.12], [s * 0.95, s * 0.12], [s * 0.95, s * 0.62], [s * 0.8, s * 0.72], [0, s * 0.72]],
-            { at, axis, segs: 6, phase: Math.PI / 6, color: o.color || lin([0.55, 0.57, 0.6]), mat: o.mat ?? M.CAST, chamfer: s * 0.2 });
+        return this.fine(() => this.lathe([[0, 0], [s * 1.25, 0], [s * 1.25, s * 0.12], [s * 0.95, s * 0.12], [s * 0.95, s * 0.62], [s * 0.8, s * 0.72], [0, s * 0.72]],
+            { at, axis, segs: 6, phase: Math.PI / 6, color: o.color || lin([0.55, 0.57, 0.6]), mat: o.mat ?? M.CAST, chamfer: s * 0.2 }));
+    }
+
+    /**
+     * Draw `fn`'s geometry as fine detail: it is baked like the rest but
+     * casts no occlusion. A bolt is smaller than a cell of the face it sits
+     * on, and per-vertex occlusion from it would smear into streaks.
+     */
+    fine(fn) {
+        const i0 = this.i.length;
+        fn();
+        this.fineTris.push([i0, this.i.length]);
         return this;
     }
 
@@ -294,9 +321,10 @@ export class Geo {
 
     /** Add another Geo's triangles. */
     append(g) {
-        const base = this.count;
+        const base = this.count, i0 = this.i.length;
         this.p.push(...g.p); this.n.push(...g.n); this.c.push(...g.c); this.u.push(...g.u);
         for (const k of g.i) this.i.push(k + base);
+        for (const [a, b] of g.fineTris || []) this.fineTris.push([a + i0, b + i0]);
         return this;
     }
 
@@ -314,7 +342,16 @@ export class Geo {
             indices: new Uint32Array(this.i),
         });
         if (o.ao && this.count > 0) {
-            const probe = mesh.clone();
+            // The occluders: everything but fine detail (same vertices, so the
+            // baked values line up with the mesh's).
+            let probe = mesh.clone();
+            if (this.fineTris.length) {
+                const keep = [];
+                let at = 0;
+                for (const [a, b] of this.fineTris) { for (let k = at; k < a; k++) keep.push(this.i[k]); at = b; }
+                for (let k = at; k < this.i.length; k++) keep.push(this.i[k]);
+                probe = new bro.mesh.Mesh({ positions: mesh.positions, normals: mesh.normals, colors: mesh.colors, indices: new Uint32Array(keep) });
+            }
             probe.bakeAmbientOcclusion(o.ao, o.aoDist || 0);
             const ao = probe.colors;
             const cols = mesh.colors;
