@@ -1,0 +1,191 @@
+// demos/foundry/shaders/foundry_part.bk — Precision machined mechanical PBR shader
+// with live GPU stress, thermal blackbody glow, galling/wear scoring, and clutch slip.
+//
+// Material IDs (v_in.uv.x):
+//   0 STEEL     satin CNC / lathe-turned alloy & tool steel
+//   1 CAST      sand-cast iron / anodized dark housing
+//   2 BRASS     machined C360 brass / SAE 660 bearing bronze
+//   3 COPPER    wound copper motor stator coils
+//   4 RUBBER    moulded elastomer chevron-tread tyres
+//   5 ARMOR     AR500 Hardox plate / industrial enamel with chipped bare-steel bevels
+//   6 GLOW      status LEDs / telemetry bars / sparks
+//   7 CONCRETE  weathered aggregate concrete with formwork seams (BattleBox barriers)
+
+module hook;
+import mesh;
+import scene;
+
+struct PartParams {
+    stress: f32,      // 0..2+ (load / continuous rating)
+    wear: f32,        // 0..1  (accumulated mechanical wear)
+    heat: f32,        // 0..1  (normalized tempC from ambient to maxTempC)
+    slip: f32,        // 0..1  (clutch slip intensity)
+    failed: f32,      // 0 or 1
+    selected: f32,    // 0 or 1
+    time: f32,        // seconds
+    scroll: f32,      // tread / groove scroll
+}
+
+@binding(4, 0) var params: uniform<PartParams>;
+
+fn grain3(p: vec3<f32>, f1: f32, f2: f32) -> f32 {
+    let a = sin(dot(p * f1, vec3<f32>(1.7, 2.3, 1.9))) * cos(dot(p * f1, vec3<f32>(2.1, -1.3, 2.7)));
+    let b = sin(dot(p * f2, vec3<f32>(3.1, 4.7, -2.9)));
+    return 0.65 * a + 0.35 * b;
+}
+
+fn blackbody(h: f32) -> vec3<f32> {
+    let t = clamp(h, 0.0, 1.0);
+    let r = smoothstep(0.0, 0.45, t) * 2.8;
+    let g = smoothstep(0.32, 0.85, t) * 1.75;
+    let b = smoothstep(0.72, 1.0, t) * 1.05;
+    return vec3<f32>(r, g, b);
+}
+
+pub fn vertex(v_in: mesh::Vertex) -> mesh::Vertex {
+    var v = v_in;
+    v.v0 = vec4<f32>(v_in.pos, v_in.color.w);
+    v.v1 = vec4<f32>(v_in.uv.x, v_in.uv.y, 0.0, 0.0);
+    v.vi = vec4<i32>(floor(v_in.uv.x + 0.5) as i32, 0, 0, 0);
+    v.color = vec4<f32>(v_in.color.xyz, 1.0);
+    return v;
+}
+
+pub fn fragment(v: mesh::Vertex, s: mesh::Surface) -> mesh::Surface {
+    var out = s;
+    let pos = v.v0.xyz;
+    let ao = clamp(v.v0.w, 0.0, 1.0);
+    let param = v.v1.y;
+    let mat = v.vi.x;
+
+    let edge = max(0.0, ao - 0.5) * 2.0;
+    let crevice = max(0.0, 0.5 - ao) * 2.0;
+
+    var col = v.color.xyz;
+    var rough = 0.46;
+    var metal = 0.85;
+    var emis = vec3<f32>(0.0);
+
+    let r_xy = length(vec2<f32>(pos.x, pos.y));
+
+    if (mat == 0) {
+        // SATIN MACHINED STEEL: radial lathe rings + directional CNC brush micro-grain
+        let lathe = sin(r_xy * 280.0) * 0.5 + 0.5;
+        let brush = grain3(pos, 54.0, 145.0);
+        col = col * (0.91 + 0.075 * lathe + 0.055 * brush);
+        rough = clamp(0.36 - 0.055 * lathe + 0.05 * brush, 0.24, 0.58);
+        metal = 0.90;
+    } else if (mat == 1) {
+        // SAND-CAST IRON / ANODIZED HOUSING: rich granular matte texture
+        let stipple = grain3(pos, 95.0, 230.0);
+        col = col * (0.92 + 0.09 * stipple);
+        rough = clamp(0.66 + 0.08 * stipple, 0.50, 0.88);
+        metal = 0.58;
+    } else if (mat == 2) {
+        // MACHINED BRASS / BRONZE: warm turned metallic luster
+        let turn = sin(r_xy * 310.0 + pos.z * 95.0);
+        col = col * (0.94 + 0.06 * turn);
+        rough = clamp(0.30 + 0.045 * turn, 0.20, 0.46);
+        metal = 0.93;
+    } else if (mat == 3) {
+        // WOUND COPPER COILS: tight parallel wire striations
+        let wire = sin(pos.z * 390.0 + atan2(pos.y, pos.x) * 24.0) * 0.5 + 0.5;
+        col = col * (0.74 + 0.36 * wire);
+        rough = 0.32 + 0.14 * (1.0 - wire);
+        metal = 0.92;
+    } else if (mat == 4) {
+        // RUBBER TYRE: moulded dark elastomer with scrolling chevron tread ribs
+        let ang = atan2(pos.y, pos.z) + params.scroll;
+        let rib = smoothstep(-0.18, 0.22, sin(ang * 24.0 + abs(pos.x) * 42.0));
+        col = col * (0.72 + 0.32 * rib);
+        rough = 0.90 - 0.08 * rib;
+        metal = 0.02;
+    } else if (mat == 5) {
+        // HARDOX ARMOR / INDUSTRIAL ENAMEL: mill-scale grain + bare steel bevel chips
+        let scale = grain3(pos, 22.0, 68.0);
+        col = col * (0.92 + 0.07 * scale);
+        let bare_steel = vec3<f32>(0.50, 0.54, 0.60);
+        let chip = smoothstep(0.45, 0.95, edge);
+        col = mix(col, bare_steel, chip * 0.42);
+        rough = mix(0.52 + 0.06 * scale, 0.30, chip);
+        metal = mix(0.62, 0.88, chip);
+    } else if (mat == 6) {
+        // GLOW / TELEMETRY LED / HDR SPARKS
+        rough = 0.22;
+        metal = 0.02;
+        emis = col * max(0.85, param * 2.2);
+    } else {
+        // CONCRETE: weathered poured aggregate + horizontal formwork seams + base grime
+        let agg = grain3(v.world_pos, 18.0, 58.0);
+        let fine = grain3(v.world_pos, 85.0, 175.0);
+        let seam = 1.0 - smoothstep(0.008, 0.022, abs(fract(v.world_pos.y * 3.5) - 0.5) / 3.5);
+        let grime = smoothstep(0.42, 0.0, v.world_pos.y);
+        col = col * (0.86 + 0.12 * agg + 0.06 * fine) * (1.0 - 0.26 * seam) * (1.0 - 0.28 * grime);
+        rough = clamp(0.88 + 0.07 * fine, 0.78, 0.98);
+        metal = 0.02;
+    }
+
+    // Baked crevice AO & subtle machined chamfer highlights
+    if (mat != 6) {
+        col = col * (1.0 - 0.48 * crevice);
+        let rim = min(vec3<f32>(0.92), col * 1.18 + vec3<f32>(0.018));
+        col = mix(col, rim, clamp(edge * 0.38, 0.0, 0.58));
+        rough = clamp(rough - 0.05 * edge + 0.12 * crevice, 0.14, 0.98);
+        out.sky_visibility = clamp(1.0 - 0.44 * crevice, 0.22, 1.0);
+    }
+
+    // --- LIVE PHYSICAL WEAR (fine concentric scoring & oil-darkened galling) ---
+    let w = clamp(params.wear, 0.0, 1.0);
+    if (w > 0.02 && mat != 6) {
+        let scratch = smoothstep(0.72, 0.96, abs(sin(r_xy * 460.0 + grain3(pos, 140.0, 280.0) * 1.6)));
+        let gall = smoothstep(0.25, 0.82, grain3(pos, 45.0, 115.0) * 0.5 + 0.5);
+        col = mix(col, col * vec3<f32>(0.38, 0.28, 0.20), w * gall * 0.58);
+        col = mix(col, vec3<f32>(0.68, 0.70, 0.74), w * scratch * 0.24);
+        rough = clamp(rough + w * 0.22 * gall - w * 0.08 * scratch, 0.18, 0.96);
+    }
+
+    // --- LIVE THERMAL BLACKBODY GLOW ---
+    let h = clamp(params.heat, 0.0, 1.0);
+    if (h > 0.28) {
+        let glow_k = smoothstep(0.28, 1.0, h);
+        emis += blackbody(glow_k) * (0.28 + 1.45 * glow_k);
+    }
+
+    // --- LIVE STRESS / OVER-SPEC PULSE ---
+    if (params.stress > 0.85 && params.failed < 0.5) {
+        let over = clamp((params.stress - 0.85) / 0.45, 0.0, 1.0);
+        let pulse = 0.65 + 0.35 * sin(params.time * 9.0 + r_xy * 25.0);
+        let warn_col = mix(vec3<f32>(1.0, 0.65, 0.08), vec3<f32>(1.0, 0.16, 0.08), over);
+        let mask = 0.20 + 0.65 * edge + 0.25 * pulse;
+        emis += warn_col * over * mask * 0.90;
+    }
+
+    // --- LIVE CLUTCH SLIP ---
+    if (params.slip > 0.05) {
+        let band = 0.5 + 0.5 * sin(r_xy * 120.0 - params.time * 24.0);
+        let slip_col = mix(vec3<f32>(1.0, 0.22, 0.78), vec3<f32>(1.0, 0.58, 0.12), band);
+        emis += slip_col * params.slip * (0.7 + 0.8 * band);
+    }
+
+    // --- FAILED PART (charred metal + crimson fault rim) ---
+    if (params.failed > 0.5) {
+        let char_n = 0.5 + 0.5 * grain3(pos, 42.0, 110.0);
+        col = mix(col * 0.20, vec3<f32>(0.09, 0.04, 0.04), 0.68 * char_n);
+        rough = 0.84;
+        metal = 0.22;
+        let pulse = 0.55 + 0.45 * sin(params.time * 7.5);
+        emis = vec3<f32>(1.55, 0.15, 0.08) * (0.45 + 0.95 * edge) * pulse;
+    }
+
+    // --- SELECTION HIGHLIGHT ---
+    if (params.selected > 0.5) {
+        emis += vec3<f32>(0.14, 0.58, 0.98) * (0.16 + 0.72 * edge);
+    }
+
+    out.base_color = col;
+    out.roughness = rough;
+    out.metallic = metal;
+    out.emissive = emis;
+    out.alpha = 1.0;
+    return out;
+}

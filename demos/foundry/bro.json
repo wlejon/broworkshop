@@ -1,7 +1,6 @@
 {
-    "title": "Foundry",
-    "width": 1680,
-    "height": 1000,
-    "lib": "../../lib",
-    "permissions": ["files"]
+    "title": "Foundry — Mechanical Compiler & Combat Arena",
+    "width": 1600,
+    "height": 960,
+    "lib": "../../lib"
 }
