@@ -293,12 +293,14 @@ test('a machine built from nothing by clicks, aimed at a goal, and built on', ()
     check(crane.ok && !crane.warnings.length && crane.mounts[0].payloadKg > 100, `the crane lifts ${crane.mounts[0].payloadKg.toFixed(0)} kg, the arm segment's own`);
     check(f.contract('jointActuator').joints.every((J) => !J.upright), 'a joint on a base that does not face its axis still carries its weight');
     // A slewing ring takes a drive on every pinion, and their torques add.
-    const ringWith = (pods, pinions = pods) => {
+    const ringWith = (pods, pinions = pods, mount = 'under') => {
         f.reset(); frames(1);
         clickOn('#newDesign'); frames(1);
         f.addPart('slewRing'); f.select('slew1'); frames(1);
         const pn = q('#inspector [data-param="pinions"]').parentNode.querySelector('input[type=number]');
         pn.value = String(pinions); pn.dispatchEvent(new Event('change', { bubbles: true })); frames(1);
+        const mo = q('#inspector [data-param="mount"]');
+        mo.value = mount; mo.dispatchEvent(new Event('change', { bubbles: true })); frames(1);
         for (let i = 0; i < pods; i++) f.useDesign('drivePod');
         f.addPart('boom'); frames(1);
         return f.contract(f.current);
@@ -312,6 +314,9 @@ test('a machine built from nothing by clicks, aimed at a goal, and built on', ()
     const r1 = ringWith(1);
     const one = r1.joints[0].cont, four = r4.joints[0].cont;
     check(Math.abs(four / one - 4) < 0.01 || four >= r4.joints[0].bend * 0.999, `four drives turn it four times as hard as one (${one.toFixed(0)} → ${four.toFixed(0)} N·m)`);
+    // On a foot at its rim the ring lifts: twelve drives hang under it, side by side and not touching, and carry the weight.
+    const lift = ringWith(12, 12, 'side'), LJ = lift.joints[0];
+    check(lift.ok && !LJ.upright && LJ.carry === LJ.cont && LJ.cont > four * 2.9, `twelve drives on a ring on its foot lift with all their torque (${LJ.cont.toFixed(0)} N·m, ${lift.errors.join('; ')})`);
     f.reset();
 });
 

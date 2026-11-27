@@ -161,8 +161,14 @@ const BUILD = {
     },
 
     slewRing(s, paint) {
-        const { zr, zp, n, m, b, R, rp, rc, Ro, hz, deck, stub: st, hub, hubR } = s;
+        const { zr, zp, n, m, b, R, rp, rc, Ro, hz, deck, stub: st, hub, hubR, side, foot, footTop, angs } = s;
         const g = new Geo();
+        // On a foot: a pedestal under the rim, up between the decks to just below the ring's teeth, bolted down.
+        if (side) {
+            const fx = Ro * 0.3, y0 = -Ro - foot, y1 = -footTop, fz = hz + deck;
+            g.cbox([-fx, y0, -fz], [fx, y1, fz], { color: mix(paint, DARK, 0.3), mat: M.PAINT, bevel: foot * 0.15 });
+            for (const x of [-fx * 0.75, fx * 0.75]) for (const z of [-fz * 0.6, fz * 0.6]) g.bolt([x, y0, z], '-y', foot * 0.18);
+        }
         // Two decks, the ring gear between them, tied by bolted posts around the rim.
         g.cyl(Ro, -hz - deck, -hz, { color: paint, mat: M.PAINT });
         g.cyl(Ro, hz, hz + deck, { color: paint, mat: M.PAINT });
@@ -182,11 +188,11 @@ const BUILD = {
         const shaftR = { out: hubR };
         const rs = Math.max(0.002, rp * 0.4);
         for (let i = 0; i < n; i++) {
-            const a = (i / n) * TAU + Math.PI / n;
+            const a = angs[i];
             const pin = gearRotor(zp, m, b, rs * 0.9, rs * 1.8, { phase: Math.PI / zp });
-            pin.cyl(rs, -hz, hz + deck, { color: STEEL, mat: M.STEEL });
-            stub(pin, rs, hz + deck, hz + deck + st, {});
-            boss(g, rs * 1.05, rs * 2.2, hz + deck, hz + deck + st * 0.2, { at: [Math.cos(a) * rc, Math.sin(a) * rc, 0] }, paint);
+            pin.cyl(rs, -hz - deck, hz, { color: STEEL, mat: M.STEEL });
+            stub(pin, rs, -hz - deck, -hz - deck - st, {});
+            boss(g, rs * 1.05, rs * 2.2, -hz - deck, -hz - deck - st * 0.2, { at: [Math.cos(a) * rc, Math.sin(a) * rc, 0] }, paint);
             movers.push({ geo: pin, pivot: [Math.cos(a) * rc, Math.sin(a) * rc, 0], axis: 'z', port: `in${i + 1}`, sign: -1 });
             shaftR[`in${i + 1}`] = rs;
         }
