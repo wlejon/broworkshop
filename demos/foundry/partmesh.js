@@ -612,6 +612,31 @@ BUILD.boom = function boom(s, paint) {
     return { body: g, movers: [{ geo: pin, pivot: [0, 0, 0], axis: 'z', port: 'in', sign: 1 }], shaftR: { in: rs } };
 };
 
+BUILD.winch = function winch(s, paint) {
+    const { D, Lw, d, r, flange, plate, zl, base, x0, x1 } = s;
+    const g = new Geo();
+    // The frame: a base plate bolted to the tip, two cheeks holding the drum, and a sheave out front.
+    g.cbox([x0, -flange, -zl], [x0 + base, flange, zl], { color: paint, mat: M.PAINT, bevel: base * 0.2 });
+    for (const [a, b] of [[-zl, -zl + plate], [zl - plate, zl]]) {
+        g.cbox([x0 + base, -flange * 0.9, a], [flange * 0.95, flange * 0.9, b], { color: paint, mat: M.PAINT, bevel: plate * 0.3 });
+    }
+    for (const y of [-flange * 0.6, flange * 0.6]) for (const z of [-zl * 0.6, zl * 0.6]) g.bolt([x0, y, z], '-x', base * 0.6);
+    g.cbox([flange * 0.9, -D * 0.12, -D * 0.12], [x1 - D * 0.1, D * 0.12, D * 0.12], { color: paint, mat: M.PAINT, bevel: D * 0.03 });
+    g.lathe([[0, -D * 0.08], [D * 0.18, -D * 0.08], [D * 0.14, 0], [D * 0.18, D * 0.08], [0, D * 0.08]], { at: [x1 - D * 0.1, 0, 0], color: lin([0.25, 0.26, 0.28]), mat: M.CAST, segs: 24 });
+    // The drum: its flanges, and the rope wound on it in ridges.
+    const drum = new Geo();
+    const prof = [[0, -Lw / 2], [flange * 0.92, -Lw / 2], [flange * 0.92, -Lw / 2 + plate * 0.6], [r, -Lw / 2 + plate * 0.6]];
+    const n = Math.max(4, Math.min(60, Math.round((Lw - plate * 1.2) / d)));
+    for (let k = 1; k < n; k++) {
+        const w = -Lw / 2 + plate * 0.6 + ((Lw - plate * 1.2) * k) / n;
+        prof.push([r - d * 0.25, w - (Lw - plate * 1.2) / n / 2], [r, w]);
+    }
+    prof.push([r, Lw / 2 - plate * 0.6], [flange * 0.92, Lw / 2 - plate * 0.6], [flange * 0.92, Lw / 2], [0, Lw / 2]);
+    drum.lathe(prof, { color: lin([0.32, 0.33, 0.35]), mat: M.STEEL, segs: 32, edges: false });
+    stub(drum, D * 0.12, -Lw / 2, -zl, {});
+    return { body: g, movers: [{ geo: drum, pivot: [0, 0, 0], axis: 'z', port: 'in', sign: 1 }], shaftR: { in: D * 0.12 } };
+};
+
 export function meshPart(el, paint) {
     const f = BUILD[el.shape.kind];
     if (!f) throw new Error('foundry: no mesh for ' + el.shape.kind);

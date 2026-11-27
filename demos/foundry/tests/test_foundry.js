@@ -348,33 +348,36 @@ test('a machine runs from a deck compiled from what it is made of', () => {
     f.operate(true); frames(2);
     check(document.body.classList.contains('f-operating') && !q('#deck').hidden, 'Operate opens the deck');
     check(deck().map((d) => d.dataset.kind).join() === 'throttle', `a pod is a throttle (${deck().map((d) => d.dataset.kind)})`);
-    // The crane: a dial for the turntable, and the arm's lever carried under it.
+    // The crane: a dial for the turntable, the arm's lever carried under it, and under that the hoist of the winch the arm carries.
     f.open('slewingCrane'); frames(2);
     const m = f.machine;
-    check(m.controls.length === 2 && m.controls[0].kind === 'dial' && m.layout.kids.length === 1 && m.layout.kids[0].kids[0].control.kind === 'lever',
-        `the crane is a dial over a lever (${m.controls.map((x) => x.kind)})`);
+    check(m.controls.length === 3 && m.controls[0].kind === 'dial' && m.layout.kids.length === 1 && m.layout.kids[0].kids[0].control.kind === 'lever' && m.layout.kids[0].kids[0].kids[0].control.winch,
+        `the crane is a dial over a lever over its winch's hoist (${m.controls.map((x) => x.kind)})`);
     check(q('#deck .f-dk-carried [data-kind=lever]'), 'the lever hangs under the dial on the deck');
     check(m.controls[0].joints.length === 1 && m.controls[0].lines.length === 4, 'four slew drives are one control');
     // Held keys move a joint; the lever raises the arm and the tip goes up.
     const tip0 = m.tip()[2];
     window.dispatchEvent(new KeyboardEvent('keydown', { key: 'w' }));
-    run(1);
+    frames(90);
     window.dispatchEvent(new KeyboardEvent('keyup', { key: 'w' }));
+    frames(1);
     check(m.tip()[2] > tip0 + 0.3 && m.controls[1].u === 0, `W raises the arm and letting go stops it (${tip0.toFixed(2)} → ${m.tip()[2].toFixed(2)} m)`);
     // The dial swings the boom round, and it is the drive's holding torque that brings it to rest.
-    m.set('c0', 1); run(1); m.set('c0', 0); run(1.5);
+    m.set('c0', 1); run(2.5); m.set('c0', 0); run(1.5);
     check(Math.abs(m.angles[0]) > 1 && Math.abs(m.rates[0]) < 0.05, `the dial swings the boom round and it stops (${(m.angles[0] * 57.3).toFixed(0)}°)`);
-    // In the world the load hangs on a rope from the tip, and the arm's motor holds it.
-    m.reset(); run(0.5);
-    const empty = Math.abs(m.torque[1]);
+    // In the world the load hangs on a rope from the tip, and the arm's motor holds it. The arm
+    // is raised first, so the load hangs clear of the winch at its end.
+    m.reset(); m.set('c1', 1); run(0.5); m.set('c1', 0); run(0.5);
+    const a1 = m.angles[1], empty = Math.abs(m.torque[1]);
     m.setPayload(100); run(1);
     check(Math.abs(m.torque[1]) > empty + 100 * 9.81 * 1.0, `the load hangs on the arm (${empty.toFixed(0)} → ${Math.abs(m.torque[1]).toFixed(0)} N·m)`);
     // Within what the worm locks at, it holds with the power off.
     m.powered = false; run(1);
-    check(m.status[1] === 'locked' && Math.abs(m.angles[1]) < 0.01, `power off, the worm holds 100 kg (${m.status[1]})`);
+    check(m.status[1] === 'locked' && Math.abs(m.angles[1] - a1) < 0.01, `power off, the worm holds 100 kg (${m.status[1]})`);
     // Past what the drive stalls at, it cannot raise it.
-    m.powered = true; m.setPayload(400); m.set('c1', 1); run(1);
-    check(m.status[1] === 'stalled' && Math.abs(m.angles[1]) < 0.1, `too heavy to lift, it stalls (${m.status[1]} at ${m.angles[1].toFixed(3)} rad)`);
+    m.powered = true; m.setPayload(400); m.set('c1', 1); run(2);
+    const heavy = m.props().find((p) => p.kind === 'load'), bottom = heavy.pose[1] - Math.cbrt(400 / 7850) / 2;
+    check(m.status[1] === 'stalled' && bottom < m.floorY + 0.03, `too heavy to lift, it stalls with the load on the ground (${m.status[1]}, ${(bottom - m.floorY).toFixed(3)} m up)`);
     m.set('c1', 0);
     // A chain of arms: the elbow's lever under the shoulder's; driven down, the ground stops it.
     f.open('twoLinkArm'); frames(2);
@@ -433,7 +436,7 @@ test('machines in a yard deliver crates together, and any of them can be driven 
     f.yard(true, 'handover'); frames(1);
     q('#yardMachines .machine').click(); frames(1);
     const m = f.site.machines[0];
-    check(q('#deck').querySelectorAll('[data-ctl]').length === 2 && q('#hookTake'), 'Crane A\'s deck: a dial, a lever, and its hook');
+    check(q('#deck').querySelectorAll('[data-ctl]').length === 3 && q('#hookTake'), 'Crane A\'s deck: a dial, a lever, the hoist, and its hook');
     // Over the crate (the controls as the pilot would set them), line down, take it, lift it.
     const p = pilotOf(f.site, m);
     p.reach([-2.3, 0.8]);

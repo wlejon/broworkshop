@@ -208,6 +208,9 @@
 .f-hook { display: flex; flex-direction: column; gap: 6px; width: 132px; background: var(--f-panel2); border: 1px solid var(--f-line2); border-radius: 8px; padding: 7px 8px; margin-left: 10px; align-self: flex-start; }
 .f-hook .row { display: flex; gap: 4px; }
 .f-hook button { flex: 1; }
+.f-hook .f-dk-read { flex-direction: column; align-items: flex-start; }
+.f-hook .f-dk-read .st { white-space: normal; }
+.f-hook .f-yard-about { font-size: 11px; color: var(--f-dim); }
 .f-op-row { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin-bottom: 8px; }
 .f-op-row label { display: flex; gap: 5px; align-items: center; color: var(--f-dim); }
 .f-op-joints { display: flex; flex-direction: column; gap: 4px; margin-top: 6px; }

@@ -93,7 +93,7 @@ export function updateDeck(el, m) {
             bar.style.width = `${Math.min(100, load * 100).toFixed(1)}%`;
             bar.className = load > 1 ? 'bad' : load > 0.85 ? 'warn' : '';
         } else {
-            st.textContent = ct.u === 0 ? 'stopped' : ct.u > 0 ? 'running' : 'reversed';
+            st.textContent = ct.winch ? (ct.u === 0 ? 'holding' : ct.u > 0 ? 'taking in' : 'paying out') : ct.u === 0 ? 'stopped' : ct.u > 0 ? 'running' : 'reversed';
             st.className = 'st ' + (ct.u ? 'ok' : '');
             val.textContent = `${Math.round(ct.u * 100)}%`;
             bar.style.width = `${Math.abs(ct.u) * 100}%`;

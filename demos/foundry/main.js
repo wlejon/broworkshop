@@ -642,7 +642,19 @@ $('load').addEventListener('input', renderBench);
 // --- operating: the open design run as a machine ---------------------------------------------
 
 let machine = null;             // operate.js machine of the open design, while operating
-const held = new Map();         // key → control id it is driving
+// Keys held on a lever or dial: key → { id, dir, t }. A held key starts its control slow and
+// brings it up to full over KEY_RAMP seconds, so a tap nudges and a hold runs: a hanging
+// load can be brought over a spot by hand without flinging it.
+const held = new Map();
+const KEY_START = 0.06, KEY_RAMP = 1.2;
+function holdKey(m, k, ct, dir) {
+    if (held.has(k)) return;
+    held.set(k, { id: ct.id, dir, t: 0 });
+    m.set(ct.id, dir * KEY_START);
+}
+function rampKeys(m, dt) {
+    for (const hk of held.values()) { hk.t += dt; m.set(hk.id, hk.dir * Math.min(1, KEY_START + hk.t / KEY_RAMP)); }
+}
 
 function setOperating(on) {
     if (on === !!machine) return;
@@ -720,6 +732,7 @@ function showMachine() {
 
 vp.onFrame((dt) => {
     if (!machine) return;
+    rampKeys(machine, Math.min(dt, 0.1));
     machine.step(Math.min(dt, 0.1));
     showMachine();
     for (const ct of machine.controls) if (ct.output) view.setFlows({ [ct.output]: ct.flow || 0 });
@@ -793,28 +806,30 @@ function drive(m) {
     const el = $('deck');
     clear(el);
     if (!m) {
-        el.append(h('div', { class: 'f-dk-empty' }, 'Click a machine to drive it: its deck is compiled from what it is made of. Space takes or lets go a crate under its hook; Z and X take the line in and pay it out.'));
+        el.append(h('div', { class: 'f-dk-empty' }, 'Click a machine (or press Tab) to drive it: its deck is compiled from what it is made of, its winch\'s Hoist with the rest. Let the hook down onto a crate and press Space to take it; Space again lets it go.'));
         renderYardLists();
         return;
     }
     renderDeck(el, m, (id, u) => m.set(id, u));
     const row = el.querySelector('.f-dk-row');
-    const hold = (btn, u) => {
-        btn.addEventListener('pointerdown', (ev) => { m.hoist(u); ev.preventDefault(); });
-        for (const t of ['pointerup', 'pointerleave', 'pointercancel']) btn.addEventListener(t, () => m.hoist(0));
-        return btn;
-    };
+    if (!m.hook) {
+        if (row) row.append(h('div', { class: 'f-hook' }, h('div', { class: 'f-dk-name' }, 'No hook'), h('div', { class: 'f-dk-read' }, h('span', { class: 'st' }, 'it carries no winch'))));
+        renderYardLists();
+        return;
+    }
     const take = h('button', { class: 'small', id: 'hookTake' }, 'Take (Space)');
     take.addEventListener('click', () => hookToggle(m));
+    const hoistKeys = m.hook.control.keys ? `${m.hook.control.keys[0].toUpperCase()} / ${m.hook.control.keys[1].toUpperCase()}` : '';
     if (row) row.append(h('div', { class: 'f-hook' },
-        h('div', { class: 'f-dk-head' }, h('span', { class: 'f-dk-name' }, `${m.name}: hook`)),
+        h('div', { class: 'f-dk-head' }, h('span', { class: 'f-dk-name' }, 'Hook'), h('span', { class: 'f-dk-keys' }, 'Space')),
         take,
-        h('div', { class: 'row' }, hold(h('button', { class: 'small' }, 'In (Z)'), 1), hold(h('button', { class: 'small' }, 'Out (X)'), -1)),
-        h('div', { class: 'f-dk-read' }, h('span', { class: 'st', id: 'hookSt' }), h('span', { class: 'val', id: 'hookVal' }))));
+        h('div', { class: 'f-dk-read' }, h('span', { class: 'st', id: 'hookSt' }), h('span', { class: 'val', id: 'hookVal' })),
+        h('div', { class: 'f-yard-about' }, `Hoist (${hoistKeys}) takes the line in and pays it out.`)));
     renderYardLists();
 }
 
 function hookToggle(m) {
+    if (!m.hook) { status.set(`${m.name} carries no winch, so it has no hook.`); return; }
     if (m.hook.crate) { m.release(); return; }
     if (!m.grab()) status.set(`${m.name}: no crate under the hook. Put the tip over one and let the line down onto it.`);
 }
@@ -837,7 +852,7 @@ function updateYardLists() {
         const el = $('yardTasks').querySelector(`[data-task="${t.id}"]`);
         if (!el) continue;
         const job = yard.crew && yard.crew.jobs.find((j) => j.task === t);
-        const carrier = yard.site.machines.find((m) => m.hook.crate === t.crate);
+        const carrier = yard.site.machines.find((m) => m.hook && m.hook.crate === t.crate);
         const text = t.done ? `done: on ${t.pad.name}` : job && job.failed ? job.failed : carrier ? `on ${carrier.name}'s hook` : job ? 'the crew has it' : 'open';
         el.className = 'f-yard-item' + (t.done ? ' done' : job && job.failed ? ' bad' : carrier || job ? ' busy' : '');
         el.querySelector('.d').textContent = text;
@@ -847,14 +862,14 @@ function updateYardLists() {
         if (!el) continue;
         const p = yard.crew && yard.crew.pilots.get(m);
         const broken = m.status.includes('broken');
-        const doing = broken ? 'broken' : p && p.busy ? p.doing : yard.driven === m ? 'yours to drive' : m.hook.crate ? `holding ${m.hook.crate.name}` : 'standing by';
+        const doing = broken ? 'broken' : p && p.busy ? p.doing : yard.driven === m ? 'yours to drive' : m.hook && m.hook.crate ? `holding ${m.hook.crate.name}` : 'standing by';
         el.className = 'f-yard-item machine' + (yard.driven === m ? ' sel' : '') + (broken ? ' bad' : p && p.busy ? ' busy' : '');
         el.querySelector('.d').textContent = doing;
     }
     if (yard.driven && $('hookSt')) {
         const m = yard.driven, cr = m.reachable();
-        $('hookSt').textContent = m.hook.crate ? (m.carrying() ? `lifting ${m.hook.crate.name}` : `on ${m.hook.crate.name}`) : cr ? `over ${cr.name}` : 'empty';
-        $('hookSt').className = 'st ' + (m.hook.crate ? 'ok' : cr ? 'warn' : '');
+        $('hookSt').textContent = m.hook.stalled ? `too heavy: ${m.hook.crate.name} is more than the winch pulls` : m.hook.crate ? (m.carrying() ? `lifting ${m.hook.crate.name}` : `on ${m.hook.crate.name}`) : cr ? `over ${cr.name}: Space takes it` : 'empty';
+        $('hookSt').className = 'st ' + (m.hook.stalled ? 'bad' : m.hook.crate ? 'ok' : cr ? 'warn' : '');
         $('hookVal').textContent = `${m.hook.line.toFixed(2)} m`;
         $('hookTake').textContent = m.hook.crate ? 'Let go (Space)' : 'Take (Space)';
     }
@@ -872,7 +887,7 @@ vp.onFrame((dt) => {
             $('yardRun').classList.remove('on');
             $('yardRun').textContent = 'Run the crew';
         }
-    } else yard.site.step(d);
+    } else { if (yard.driven) rampKeys(yard.driven, d); yard.site.step(d); }
     view.poseYard(yard.site);
     if (yard.driven) updateDeck($('deck'), yard.driven);
     updateYardLists();
@@ -888,12 +903,11 @@ $('yardSpeed').addEventListener('change', () => { if (yard) yard.site.timeScale 
 window.addEventListener('keyup', (e) => {
     if (yard && yard.driven) {
         const k = e.key.toLowerCase();
-        if (k === 'z' || k === 'x') yard.driven.hoist(0);
-        const id = held.get(k);
+        const id = held.has(k) ? held.get(k).id : null;
         if (id) { held.delete(k); yard.driven.set(id, 0); }
         return;
     }
-    const id = held.get(e.key.toLowerCase());
+    const id = held.has(e.key.toLowerCase()) ? held.get(e.key.toLowerCase()).id : null;
     if (!id || !machine) return;
     held.delete(e.key.toLowerCase());
     const ct = machine.controls.find((x) => x.id === id);
@@ -915,11 +929,10 @@ window.addEventListener('keydown', (e) => {
         if (e.key === 'Escape') { drive(null); return; }
         if (!m) return;
         if (k === ' ') { if (!e.repeat) hookToggle(m); e.preventDefault(); return; }
-        if (k === 'z' || k === 'x') { m.hoist(k === 'z' ? 1 : -1); e.preventDefault(); return; }
         const ct = m.controls.find((x) => x.keys && x.keys.includes(k));
         if (ct && !ct.dark) {
             const dir = ct.keys[0] === k ? 1 : -1;
-            if (ct.kind === 'lever' || ct.kind === 'dial') { m.set(ct.id, dir); held.set(k, ct.id); } else m.set(ct.id, ct.u + dir * 0.1);
+            if (ct.kind === 'lever' || ct.kind === 'dial') holdKey(m, k, ct, dir); else m.set(ct.id, ct.u + dir * 0.1);
             e.preventDefault();
         }
         return;
@@ -930,7 +943,7 @@ window.addEventListener('keydown', (e) => {
         const ct = machine.controls.find((x) => x.keys && x.keys.includes(k));
         if (ct && !ct.dark) {
             const dir = ct.keys[0] === k ? 1 : -1;
-            if (ct.kind === 'lever' || ct.kind === 'dial') { machine.set(ct.id, dir); held.set(k, ct.id); }
+            if (ct.kind === 'lever' || ct.kind === 'dial') holdKey(machine, k, ct, dir);
             else machine.set(ct.id, ct.u + dir * 0.1);
             e.preventDefault();
             return;
