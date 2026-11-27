@@ -86,6 +86,7 @@ function renderAll(opts) {
     $('delDesign').disabled = usersOf(currentId).length > 0;
     $('delDesign').title = usersOf(currentId).length ? `Used in ${usersOf(currentId).map((x) => x.name).join(', ')}` : `Delete ${d.name}`;
     P.renderContract($('contract'), c);
+    $('emptyStage').hidden = d.children.length > 0;
     P.renderProblems($('problems'), c, selectChild);
     $('problemsCard').hidden = false;
     if (!opts || opts.view !== false) {
@@ -123,6 +124,9 @@ function renderBench() {
     const out = c.ports.find((p) => p.id === outId);
     P.renderFlow($('flow'), c, outId, op ? (op.payloadKg ?? op.effort) : 0);
     markFlow();
+    $('outEmpty').hidden = !!op;
+    $('curve').hidden = !op;
+    $('loadRow').hidden = !op;
     P.drawCurve($('curve'), c, outId, op);
     if (out && op && op.payloadKg != null) {
         $('loadVal').textContent = `${P.fmtKg(op.payloadKg)} at the ${out.label.toLowerCase()}`;

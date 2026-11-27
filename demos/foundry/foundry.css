@@ -109,6 +109,11 @@
 
 .f-flow { position: absolute; left: 12px; right: 12px; bottom: 12px; display: flex; align-items: stretch; gap: 0; overflow-x: auto; padding: 8px; background: #0d1014e6; border: 1px solid var(--f-line); border-radius: 9px; }
 .f-flow:empty { display: none; }
+.f-empty-stage { position: absolute; left: 50%; top: 46%; transform: translate(-50%, -50%); width: 440px; padding: 18px 22px; background: #0d1014e6; border: 1px solid var(--f-line2); border-radius: 10px; color: #c4cbd5; font-size: 13px; line-height: 1.5; }
+.f-empty-stage .t { font-weight: 700; font-size: 15px; color: #e8edf2; margin-bottom: 6px; }
+.f-empty-stage ol { margin: 0; padding-left: 20px; }
+.f-empty-stage li { margin: 4px 0; }
+.f-empty-stage b { color: #ffb066; font-weight: 600; }
 .f-stage-chip { flex: none; min-width: 118px; padding: 7px 10px; border-radius: 7px; background: var(--f-panel2); border: 1px solid var(--f-line2); }
 .f-stage-chip .t { font-weight: 600; font-size: 12px; white-space: nowrap; }
 .f-stage-chip .s { color: var(--f-dim); font-size: 11px; white-space: nowrap; }

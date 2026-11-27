@@ -38,6 +38,15 @@
     <canvas id="stage3d" class="f-stage"></canvas>
     <div class="f-title" id="title"></div>
     <div class="f-flow" id="flow"></div>
+    <div class="f-empty-stage" id="emptyStage" hidden>
+      <div class="t">An empty design</div>
+      <ol>
+        <li>Add parts from <b>Add to this design</b>, or <b>+ use</b> a design from the library. Each one wires itself onto what is there.</li>
+        <li>Whatever is left loose becomes this design's ports: the contract the level above builds with.</li>
+        <li><b>Set a goal</b> on the right, then ask for more than it does.</li>
+        <li>Use it in a new design, or <b>Chain more</b> of it, and the level climbs.</li>
+      </ol>
+    </div>
   </main>
 
   <aside class="f-right">
@@ -51,8 +60,9 @@
     </section>
     <section class="f-card">
       <h2>Output <span class="f-hint" id="outHint"></span></h2>
+      <div id="outEmpty" class="f-empty" hidden>Nothing comes out yet. Once the design gives out a shaft, a push or a tip, its curve shows here.</div>
       <canvas id="curve" class="f-curve"></canvas>
-      <label class="f-slider">Load <input type="range" id="load" min="0" max="1" step="0.01" value="0.45"><span id="loadVal"></span></label>
+      <label class="f-slider" id="loadRow">Load <input type="range" id="load" min="0" max="1" step="0.01" value="0.45"><span id="loadVal"></span></label>
     </section>
     <section class="f-card" id="problemsCard">
       <h2>Problems</h2>
