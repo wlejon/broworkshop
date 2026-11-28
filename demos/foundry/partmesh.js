@@ -710,6 +710,16 @@ BUILD.chassis = function chassis(s, paint) {
     return { body: g, movers: [], shaftR: {} };
 };
 
+// A foot: a rubber-soled pad, a cast boss on its top where the leg bolts on.
+BUILD.foot = function foot(s, paint) {
+    const { s: S, d } = s;
+    const g = new Geo();
+    g.cbox([-S / 2, -d, -S / 2], [S / 2, -d * 0.7, S / 2], { color: DARK, mat: M.RUBBER, bevel: d * 0.12 });
+    g.cbox([-S * 0.46, -d * 0.7, -S * 0.46], [S * 0.46, -d * 0.35, S * 0.46], { color: paint, mat: M.PAINT, bevel: d * 0.1 });
+    g.cbox([-S * 0.2, -d * 0.35, -S * 0.2], [S * 0.2, 0, S * 0.2], { color: STEEL, mat: M.CAST, bevel: d * 0.06 });
+    return { body: g, movers: [], shaftR: {} };
+};
+
 export function meshPart(el, paint) {
     const f = BUILD[el.shape.kind];
     if (!f) throw new Error('foundry: no mesh for ' + el.shape.kind);

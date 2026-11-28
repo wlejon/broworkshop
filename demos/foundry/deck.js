@@ -106,6 +106,18 @@ export function updateDeck(el, m, heading) {
         const box = el.querySelector(`[data-ctl="${ct.id}"]`);
         if (!box || ct.dark) continue;
         const knob = box.querySelector('.knob'), kind = ct.kind;
+        if (kind === 'drive' && ct.walk) {
+            // On feet: which foot is stepping, and how fast the body goes.
+            knob.style.left = `${(50 + ct.v * 42).toFixed(1)}%`; knob.style.top = `${(50 - ct.u * 42).toFixed(1)}%`;
+            const g = m.gait, leg = g ? g.stepping : null, names = ['front left', 'front right', 'hind left', 'hind right'];
+            const st = box.querySelector('.st');
+            st.textContent = !g || g.doing === 'standing' ? 'standing' : leg != null ? `stepping ${names[leg] || `leg ${leg + 1}`}` : 'shifting its weight';
+            st.className = 'st';
+            const v = m.groundSpeed ? m.groundSpeed() : 0;
+            box.querySelector('.val').textContent = `${v.toFixed(2)} m/s`;
+            box.querySelector('.f-dk-bar i').style.width = `${Math.min(100, Math.abs(v) / 0.1 * 100).toFixed(1)}%`;
+            continue;
+        }
         if (kind === 'drive') {
             // The pad's dot where the drive is set; how fast it goes, and how its wheels are doing.
             knob.style.left = `${(50 + ct.v * 42).toFixed(1)}%`; knob.style.top = `${(50 - ct.u * 42).toFixed(1)}%`;

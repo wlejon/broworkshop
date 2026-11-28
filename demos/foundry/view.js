@@ -563,8 +563,8 @@ export function createFoundryView(vp) {
         follow = m ? { m, at: [m.mid[0], m.mid[1]] } : null;
         let pivot, r;
         if (m) {
-            // A machine on wheels goes places: take in the ground round it, not just itself.
-            r = m.contract.vehicle ? Math.max(m.size * 2.5, 6) : m.size * 1.1;
+            // A machine on wheels or feet goes places: take in the ground round it, not just itself.
+            r = m.contract.vehicle || m.contract.walker ? Math.max(m.size * 2.5, 6) : m.size * 1.1;
             pivot = [m.mid[0], m.ground + m.size * 0.1, m.mid[1]];
             // Driving, look down steeply from the same heading: over what the hook hangs
             // reads straight off the ground, not guessed through the perspective.
@@ -591,8 +591,8 @@ export function createFoundryView(vp) {
     function poseYard(site) {
         for (const y of yardMachines) {
             const m = y.m;
-            // A machine on wheels goes where they take it: its node, its name and its ring with it.
-            if (m.contract.vehicle) {
+            // A machine on wheels or feet goes where they take it: its node, its name and its ring with it.
+            if (m.contract.vehicle || m.contract.walker) {
                 y.node.position = m.place.t.slice();
                 y.node.quaternion = m.place.q.slice();
                 y.label.worldAnchor = [m.mid[0], m.ground + m.size * 0.42, m.mid[1]];

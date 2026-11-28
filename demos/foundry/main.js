@@ -857,6 +857,13 @@ function frameDriven(m) {
 }
 
 function hookToggle(m) {
+    // On feet, Space kneels it to be loaded or unloaded, and stands it up again.
+    if (m.gait) {
+        const on = !m.gait.kneeling;
+        m.gait.kneel(on);
+        status.set(on ? `${m.name} kneels: its deck comes down where a crane reaches over its legs. Space stands it up.` : `${m.name} stands up to walk.`);
+        return;
+    }
     if (!m.hook) { status.set(`${m.name} carries no winch, so it has no hook.`); return; }
     if (m.hook.crate) { m.release(); return; }
     if (!m.grab()) status.set(`${m.name}: no crate under the hook. Put the tip over one and let the line down onto it.`);

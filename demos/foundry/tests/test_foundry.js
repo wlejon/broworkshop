@@ -375,10 +375,12 @@ test('a machine runs from a deck compiled from what it is made of', () => {
     // Within what the worm locks at, it holds with the power off.
     m.powered = false; run(1);
     check(m.status[1] === 'locked' && Math.abs(m.angles[1] - a1) < 0.01, `power off, the worm holds 100 kg (${m.status[1]})`);
-    // Past what the drive stalls at, it cannot raise it.
-    m.powered = true; m.setPayload(400); m.set('c1', 1); run(2);
-    const heavy = m.props().find((p) => p.kind === 'load'), bottom = heavy.pose[1] - Math.cbrt(400 / 7850) / 2;
-    check(m.status[1] === 'stalled' && bottom < m.floorY + 0.03, `too heavy to lift, it stalls with the load on the ground (${m.status[1]}, ${(bottom - m.floorY).toFixed(3)} m up)`);
+    // Past what the drive stalls at, it cannot raise it: driven up, it stalls, and its worm holds the
+    // load no higher than it hung.
+    m.powered = true; m.setPayload(400); run(0.05);
+    const heavyY = () => m.props().find((p) => p.kind === 'load').pose[1], y400 = heavyY();
+    m.set('c1', 1); run(2);
+    check(m.status[1] === 'stalled' && heavyY() <= y400 + 0.01, `too heavy to lift, it stalls and the load comes no higher (${m.status[1]}, ${(heavyY() - y400).toFixed(3)} m)`);
     m.set('c1', 0);
     // A chain of arms: the elbow's lever under the shoulder's; driven down, the ground stops it.
     f.open('twoLinkArm'); frames(2);
@@ -534,6 +536,31 @@ test('up a ramp: the carrier finds the way onto a bench round a wall it cannot c
     f.yard(false); frames(1);
 });
 
+test('over the berm: the walker kneels to be loaded, carries the crate over ledges no wheel climbs, and kneels to be unloaded', () => {
+    const q = (s) => document.querySelector(s), f = window.foundry;
+    f.yard(true, 'berm'); frames(2);
+    const s = f.site, v = s.machines.find((m) => m.name === 'Walker'), cr = s.crates[0];
+    check(Math.abs(s.groundAt(11.3, 0) - 0.6) < 1e-3 && s.groundAt(4, 0) === 0, 'the berm stands two 30 cm ledges up across the way');
+    f.runCrew(true); frames(1);
+    let t = 0, top = 0, knelt = 0, fell = false, shotTaken = false;
+    while (f.crew && t < 1000) {
+        f.crew.step(0.25); t += 0.25;
+        const P = s.poseOf(cr), on = s.under(P[0], P[2], P[1], cr).machine === v;
+        if (v.gait.doing === 'kneeling') knelt |= v.mid[0] > 10 ? 2 : 1;
+        if (on) top = Math.max(top, s.groundAt(v.mid[0], v.mid[1]));
+        // Off the deck between the cranes, and on no hook: dropped.
+        if (P[0] > 6 && P[0] < 15 && !on && !s.machines.some((m) => m.hook && m.hook.crate === cr)) fell = true;
+        if (on && !shotTaken && v.mid[0] > 10.5 && v.mid[0] < 12) { frames(1); shot('yard-berm'); shotTaken = true; }
+        if (Math.round(t * 4) % 40 === 0) frames(1);
+    }
+    frames(2);
+    check(knelt === 3, 'the walker kneels at both cranes');
+    check(top > 0.55, `it carries the crate up on top of the berm (${top.toFixed(2)} m)`);
+    check(!fell, 'the crate stays on its deck the whole way over');
+    check(s.tasks[0].done && /Every task is done/.test(q('#status').textContent), `the crate stands on the pad past the berm (${t} s; ${f.crew ? [...f.crew.pilots.values()].map((p) => p.doing).join(' | ') : q('#status').textContent})`);
+    f.yard(false); frames(1);
+});
+
 test('the player drives the carrier in the crew: told their part, the spot marked, the cranes working with them', () => {
     const q = (s) => document.querySelector(s), f = window.foundry;
     f.yard(true, 'haul'); frames(1);
@@ -551,7 +578,9 @@ test('the player drives the carrier in the crew: told their part, the spot marke
         if (g && /^Drive Crate into/.test(g.text) && !shotTaken) { frames(1); shot('yard-player'); shotTaken = true; }
         const mark = f.site.marks.find((m) => m.kind === 'goal');
         if (g && g.at && mark && Math.hypot(mark.at[0] - g.at[0], mark.at[2] - g.at[1]) < 1e-6) marked++;
-        // A player drives into the box the way it points, and eases along when told the crane does not reach.
+        // A player drives into the box the way it points, eases along when told the crane does not
+        // reach, and stops when told to hold still.
+        if (g && /^Hold still/.test(g.text) && hands.busy) hands.stop();
         const e = g && /ease (forward|back) about ([\d.]+) m/.exec(g.text);
         const key = e ? g.text : g && g.heading ? g.at.join() : "";
         if (key && key !== target && !hands.busy) {
